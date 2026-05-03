@@ -22,3 +22,4 @@ jobs:
           context: .
           push: true
           tags: wayneshaw349/kasvillage-townhall:latest
+          no-cache: true
