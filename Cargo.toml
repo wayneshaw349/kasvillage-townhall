@@ -1,9 +1,9 @@
 ﻿[package]
 name = "kasvillage-townhall"
 version = "4.0.0"
-edition = "2021"
+edition = "2021" 
 authors = ["KasVillage"]
-description = "Complete Town Hall with real Halo2 SNARK"
+description = "Complete Town Hall with  real Halo2 SNARK"
 
 [dependencies]
 # Halo2 - PSE fork with IPA
