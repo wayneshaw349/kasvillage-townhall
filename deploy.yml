@@ -1,0 +1,45 @@
+---
+# ============================================================================
+# KASVILLAGE TOWNHALL - AKASH SDL
+# Deploy to Akash Network decentralized cloud
+# ============================================================================
+version: "2.0"
+
+services:
+  townhall:
+    image: wayneshaw349/kasvillage-townhall:latest
+    env:
+      - PORT=8080
+      - KV_MODE=townhall
+      - RUST_LOG=info
+    expose:
+      - port: 8080
+        as: 80
+        to:
+          - global: true
+        accept:
+          - "townhall.kasvillage.dev"
+          - "townhall.kasvillage.app"
+
+profiles:
+  compute:
+    townhall:
+      resources:
+        cpu:
+          units: 2
+        memory:
+          size: 2Gi
+        storage:
+          size: 5Gi
+  placement:
+    dcloud:
+      pricing:
+        townhall:
+          denom: uakt
+          amount: 1000
+
+deployment:
+  townhall:
+    dcloud:
+      profile: townhall
+      count: 1
