@@ -1,0 +1,12 @@
+name = "kasvillage-frost-relay"
+main = "frost_relay_worker.js"
+compatibility_date = "2024-09-23"
+
+# KV Namespace — create with:
+#   wrangler kv namespace create FROST_KV
+#   wrangler kv namespace create FROST_KV --preview
+# Then paste the IDs below:
+[[kv_namespaces]]
+binding = "FROST_KV"
+id = "YOUR_KV_NAMESPACE_ID"
+preview_id = "YOUR_PREVIEW_KV_NAMESPACE_ID"

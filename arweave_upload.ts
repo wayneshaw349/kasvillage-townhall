@@ -1,0 +1,310 @@
+// ============================================================================
+// KASVILLAGE - ARWEAVE UPLOAD (Compatibility Shim)
+// ============================================================================
+// Re-exports from avatar_arweave_upload.ts + legacy API compatibility
+// ============================================================================
+
+import { secp256k1 } from '@noble/curves/secp256k1';
+import { sha256 } from '@noble/hashes/sha256';
+import * as SecureStore from 'expo-secure-store';
+import {
+  ArweaveTag,
+  ArweaveUploadResult,
+  buildAns104DataItem,
+  uploadToIrys as uploadToIrysRaw,
+  ARWEAVE_GATEWAY,
+  IRYS_UPLOAD_URL,
+  lamportAttest,
+} from './avatar_arweave_upload';
+
+// =============================================================================
+// LEGACY CONSTANTS (for backward compatibility)
+// =============================================================================
+
+export const IRYS_NODE_MAINNET = 'https://node1.irys.xyz';
+export const IRYS_NODE_DEVNET = 'https://devnet.irys.xyz';
+export const IRYS_CURRENCY_ETH = 'ethereum';
+export const IRYS_CURRENCY_MATIC = 'matic';
+export const IRYS_CURRENCY_SOL = 'solana';
+export const TURBO_UPLOAD_URL = 'https://upload.ardrive.io/v1/tx';
+
+export { ARWEAVE_GATEWAY };
+
+// =============================================================================
+// LEGACY TYPES
+// =============================================================================
+
+export interface IrysUploadResult {
+  success: boolean;
+  txId?: string;
+  arweaveUrl?: string;
+  error?: string;
+}
+
+export interface IrysBalance {
+  balance: string;
+  currency: string;
+}
+
+export interface DataItem {
+  data: Uint8Array;
+  tags: ArweaveTag[];
+}
+
+export interface SignedDataItem extends DataItem {
+  signature: Uint8Array;
+  id: string;
+}
+
+export type { ArweaveTag };
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// =============================================================================
+// LEGACY UPLOAD FUNCTIONS
+// =============================================================================
+
+// ============================================================================
+// UPLOAD COOLDOWN — prevents spam/DDoS on Turbo free tier
+// ============================================================================
+const UPLOAD_COOLDOWN_MS = 120_000; // 2 minutes between uploads
+let _lastUploadTime = 0;
+let _uploadCount = 0;
+const MAX_UPLOADS_PER_HOUR = 30;
+let _hourWindowStart = Date.now();
+
+function checkCooldown(tags: ArweaveTag[]): { allowed: boolean; reason?: string } {
+  const now = Date.now();
+  // Critical uploads bypass cooldown: collateral proofs, agreement inscriptions
+  const isCritical = tags.some(t => 
+    (t.name === 'KV-TxType' && (t.value === 'collateral' || t.value === 'release')) ||
+    (t.name === 'KV-Type' && t.value === 'frost-agreement')
+  );
+  if (isCritical) return { allowed: true };
+  
+  // Reset hourly counter
+  if (now - _hourWindowStart > 3_600_000) {
+    _uploadCount = 0;
+    _hourWindowStart = now;
+  }
+  
+  // Hourly limit
+  if (_uploadCount >= MAX_UPLOADS_PER_HOUR) {
+    return { allowed: false, reason: 'Hourly upload limit reached (' + MAX_UPLOADS_PER_HOUR + ')' };
+  }
+  
+  // Cooldown between non-critical uploads
+  const elapsed = now - _lastUploadTime;
+  if (elapsed < UPLOAD_COOLDOWN_MS) {
+    const waitSec = Math.ceil((UPLOAD_COOLDOWN_MS - elapsed) / 1000);
+    return { allowed: false, reason: 'Cooldown: wait ' + waitSec + 's' };
+  }
+  
+  return { allowed: true };
+}
+
+/**
+ * Upload data to Turbo (ArDrive)
+ * Legacy API - wraps ANS-104 upload
+ */
+export async function uploadToTurbo(
+  data: string | Uint8Array,
+  tags: ArweaveTag[],
+): Promise<IrysUploadResult> {
+  // Load wallet to get decrypted private key
+  const { loadMainWallet } = await import('./kasvillage_cold_wallet');
+  const wallet = await loadMainWallet();
+  if (!wallet?.privKeyHex) {
+    return { success: false, error: 'No private key found' };
+  }
+  const privKeyHex = wallet.privKeyHex;
+  
+  const dataBytes = typeof data === 'string' 
+    ? new TextEncoder().encode(data) 
+    : data;
+  
+  // Cooldown check — throttled uploads go to queue
+  const cooldown = checkCooldown(tags);
+  if (!cooldown.allowed) {
+    const { enqueueUpload } = await import('./upload_queue');
+    const qResult = await enqueueUpload(dataBytes, tags);
+    console.log('[Arweave] Queued (poison:', qResult.poisonLevel, 'pos:', qResult.position, ')');
+    return { success: false, error: 'Queued: ' + cooldown.reason };
+  }
+  
+  try {
+    const dataItem = await buildAns104DataItem(dataBytes, tags, privKeyHex);
+    const result = await uploadToIrysRaw(dataItem);
+    if (result.success) {
+      _lastUploadTime = Date.now();
+      _uploadCount++;
+    }
+    // Quantum-resistant Lamport attestation (fire-and-forget)
+    if (result.success && result.txId) {
+      const { sha256: sha256Hash } = await import('@noble/hashes/sha256');
+      const payloadHash = sha256Hash(dataBytes);
+      lamportAttest({ arweaveTxId: result.txId, payloadHash, privateKeyHex: privKeyHex })
+        .then(r => { if (r.success) console.log('[Lamport] Attestation:', r.txId); })
+        .catch(() => {});
+    }
+    return result;
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+/**
+ * Upload data to Irys
+ * Legacy API - wraps ANS-104 upload  
+ */
+export async function uploadToIrys(
+  data: string | Uint8Array,
+  tags: ArweaveTag[],
+): Promise<IrysUploadResult> {
+  return uploadToTurbo(data, tags);
+}
+
+/**
+ * Upload verification proof to Arweave
+ */
+export async function uploadVerificationProof(
+  proofType: string,
+  proofData: Record<string, unknown>,
+  identity: string,
+): Promise<IrysUploadResult> {
+  const tags: ArweaveTag[] = [
+    { name: 'App-Name', value: 'KasVillage' },
+    { name: 'Content-Type', value: 'application/json' },
+    { name: 'KV-Type', value: 'proof' },
+    { name: 'KV-ProofType', value: proofType },
+    { name: 'KV-Identity', value: identity },
+    { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
+  ];
+  
+  return uploadToTurbo(JSON.stringify(proofData), tags);
+}
+
+/**
+ * Upload store listing to Arweave
+ */
+export async function uploadStoreListing(
+  storeId: string,
+  listing: Record<string, unknown>,
+  ownerIdentity: string,
+): Promise<IrysUploadResult> {
+  const tags: ArweaveTag[] = [
+    { name: 'App-Name', value: 'KasVillage' },
+    { name: 'Content-Type', value: 'application/json' },
+    { name: 'KV-Type', value: 'store' },
+    { name: 'KV-StoreId', value: storeId },
+    { name: 'KV-Owner', value: ownerIdentity },
+    { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
+  ];
+  
+  return uploadToTurbo(JSON.stringify(listing), tags);
+}
+
+/**
+ * Upload profile update to Arweave
+ */
+export async function uploadProfileUpdate(
+  identity: string,
+  profile: Record<string, unknown>,
+): Promise<IrysUploadResult> {
+  const tags: ArweaveTag[] = [
+    { name: 'App-Name', value: 'KasVillage' },
+    { name: 'Content-Type', value: 'application/json' },
+    { name: 'KV-Type', value: 'profile' },
+    { name: 'KV-Identity', value: identity },
+    { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
+  ];
+  
+  return uploadToTurbo(JSON.stringify(profile), tags);
+}
+
+/**
+ * Upload academic abstract to Arweave
+ */
+export async function uploadAcademicAbstract(
+  identity: string,
+  abstract: Record<string, unknown>,
+): Promise<IrysUploadResult> {
+  const tags: ArweaveTag[] = [
+    { name: 'App-Name', value: 'KasVillage' },
+    { name: 'Content-Type', value: 'application/json' },
+    { name: 'KV-Type', value: 'academic' },
+    { name: 'KV-Identity', value: identity },
+    { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
+  ];
+  
+  return uploadToTurbo(JSON.stringify(abstract), tags);
+}
+
+/**
+ * Upload with dual redundancy (Turbo + Irys fallback)
+ */
+export async function uploadWithDualRedundancy(
+  data: string | Uint8Array,
+  tags: ArweaveTag[],
+): Promise<IrysUploadResult> {
+  const result = await uploadToTurbo(data, tags);
+  if (result.success) return result;
+  return uploadToIrys(data, tags);
+}
+
+// =============================================================================
+// BALANCE / PRICE STUBS
+// =============================================================================
+
+/**
+ * Get Irys balance (stub - returns 0)
+ */
+export async function getIrysBalance(_address: string): Promise<IrysBalance> {
+  return { balance: '0', currency: 'AR' };
+}
+
+/**
+ * Get upload price (stub - returns 0)
+ */
+export async function getUploadPrice(_bytes: number): Promise<string> {
+  return '0';
+}
+
+/**
+ * Prepare KV tags helper
+ */
+export function prepareKVTags(
+  type: string,
+  identity: string,
+  extra?: Record<string, string>,
+): ArweaveTag[] {
+  const tags: ArweaveTag[] = [
+    { name: 'App-Name', value: 'KasVillage' },
+    { name: 'Content-Type', value: 'application/json' },
+    { name: 'KV-Type', value: type },
+    { name: 'KV-Identity', value: identity },
+    { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
+  ];
+  
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      tags.push({ name: k, value: v });
+    }
+  }
+  
+  return tags;
+}

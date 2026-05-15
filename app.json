@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "KasVillage",
+    "slug": "kasvillage-mobile",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "platforms": ["ios", "android"],
+    "orientation": "portrait",
+    "scheme": "kasvillage",
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      "expo-asset",
+      ["expo-local-authentication", { "faceIDPermission": "KasVillage uses Face ID to secure your wallet." }]
+    ],
+    "ios": {
+      "bundleIdentifier": "com.kasvillage.mobile",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "KasVillage uses Face ID to secure your wallet.",
+        "NSBluetoothAlwaysUsageDescription": "KasVillage uses Bluetooth to send KAS to nearby users.",
+        "NSBluetoothPeripheralUsageDescription": "KasVillage uses Bluetooth to receive KAS from nearby users."
+      }
+    },
+    "android": {
+      "package": "com.kasvillage.mobile",
+      "permissions": [
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_ADVERTISE",
+        "ACCESS_FINE_LOCATION",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "0c21bfdb-4a6b-4ffb-823d-052c0182cfd4"
+      }
+    }
+  }
+}

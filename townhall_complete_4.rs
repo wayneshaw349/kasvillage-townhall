@@ -1,12 +1,11 @@
-// ============================================================================
-// KASVILLAGE TOWN HALL - MERGED v5.0
+﻿// ============================================================================
+// KASVILLAGE TOWN HALL - COMPLETE v4.0
 // ============================================================================
 //
 // MERGED FROM:
-// - townhall_stateless_v5.rs  (ArweaveStateReader, stateless Arweave persistence)
-// - Townhall_Complete4.rs     (full verification logic, Halo2, DKIM, NLP, Ingress)
-// - townhall_production.rs    (TaxLot, Provenance, Drainage, Agreements, XP Slash)
-// - halo2_snark_module.rs     (Real Poseidon, SparseMerkleTree, Circuits)
+// - townhall_production.rs (TaxLot, Provenance, Drainage, Agreements, XP Slash)
+// - townhall_merged.rs (CodeScanner, Verification types, Link whitelist)
+// - halo2_snark_module.rs (Real Poseidon, SparseMerkleTree, Circuits)
 //
 // DEV MODE: K=12, TREE_DEPTH=8 (fast compilation, runnable tests)
 // RELEASE MODE: K=17, TREE_DEPTH=32 (production security)
@@ -40,7 +39,7 @@
 use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, Responder, middleware::Logger};
 use actix_cors::Cors;
 use serde::{Serialize, Deserialize};
-use serde_json::{json, Value as JsonValue};
+use serde_json::json;
 use sha2::{Sha256, Digest as Sha2Digest};
 use blake2::{Blake2b512, Digest as Blake2Digest};
 use std::collections::{HashMap, HashSet};
@@ -106,13 +105,6 @@ const ARWEAVE_GRAPHQL: &str = "https://arweave.net/graphql";
 const BUNDLR_NODE: &str = "https://node2.irys.xyz";
 const KASPA_REST: &str = "https://api.kaspa.org";
 const SOMPI_PER_KAS: u64 = 100_000_000;
-
-// Arweave state query tags (v5 stateless persistence)
-const TAG_USER_STATS: &str = "KV-UserStats";
-const TAG_VERIFIED_IDENTITY: &str = "KV-VerifiedIdentity";
-const TAG_XP_LEDGER: &str = "KV-XPLedger";
-const TAG_AVATAR_SNAPSHOT: &str = "KV-AvatarSnapshot";
-const TAG_HOST_NODE: &str = "KV-HostNode";
 
 // L1 Inscription markers
 const KV2U_MARKER: &[u8; 4] = b"KV2U";
@@ -332,16 +324,7 @@ pub struct UserCompletionStats {
     pub deadlocks: u64,
     pub xp: u64,
     pub total_samples: u64,
-    // Arweave-serializable fields (v5 stateless persistence)
-    #[serde(default)]
-    pub pubkey: String,
-    #[serde(default = "default_guest_tier")]
-    pub citadel_tier: String,
-    #[serde(default)]
-    pub last_updated_ms: u64,
 }
-
-fn default_guest_tier() -> String { "Guest".to_string() }
 
 impl UserCompletionStats {
     pub fn new() -> Self {
@@ -350,32 +333,7 @@ impl UserCompletionStats {
             deadlocks: 0,
             xp: DEFAULT_STARTING_XP,
             total_samples: 0,
-            pubkey: String::new(),
-            citadel_tier: "Guest".to_string(),
-            last_updated_ms: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
         }
-    }
-
-    pub fn with_pubkey(mut self, pubkey: &str) -> Self {
-        self.pubkey = pubkey.to_string();
-        self
-    }
-
-    pub fn sync_tier(&mut self) {
-        self.citadel_tier = if self.xp >= XP_ELITE {
-            "Passport".to_string()
-        } else if self.xp >= XP_INCUBATOR {
-            "Resident".to_string()
-        } else {
-            "Guest".to_string()
-        };
-        self.last_updated_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
     }
 
     /// Bayesian: p_complete = (1 + S) / (2 + S + F)
@@ -431,9 +389,9 @@ impl UserCompletionStats {
 
     pub fn trust_badge(&self) -> (&'static str, &'static str) {
         match self.risk_rating() {
-            RiskRating::HighlyTrusted => ("✓✓", "Highly Trusted"),
-            RiskRating::Reliable => ("✓", "Reliable"),
-            RiskRating::HighRisk => ("⚠", "High Risk"),
+            RiskRating::HighlyTrusted => ("âœ“âœ“", "Highly Trusted"),
+            RiskRating::Reliable => ("âœ“", "Reliable"),
+            RiskRating::HighRisk => ("âš ", "High Risk"),
             RiskRating::MediumRisk => ("~", "Medium Risk"),
         }
     }
@@ -497,9 +455,12 @@ impl SnailModeStatus {
         
         let delay = stats.creation_delay_ms();
         let message = if active {
+            let min_sec = delay / 1000;
             Some(format!(
-                "⏳ App slow due to low trust score. ~{}s delay.",
-                delay / 1000
+                "â³ Reputation Cooldown: ~{}â€“{} minutes. Why: {} Â· Build trust by completing agreements on time.",
+                (min_sec / 60).max(1),
+                ((min_sec + 59) / 60).min(5),
+                reason.to_lowercase()
             ))
         } else {
             None
@@ -533,9 +494,12 @@ impl SnailModeStatus {
         
         let delay = stats.creation_delay_ms();
         let message = if active {
+            let min_sec = delay / 1000;
             Some(format!(
-                "⏳ App slow due to low trust score. ~{}s delay.",
-                delay / 1000
+                "â³ Reputation Cooldown: ~{}â€“{} minutes. Why: {} Â· Build trust by completing agreements on time.",
+                (min_sec / 60).max(1),
+                ((min_sec + 59) / 60).min(5),
+                reason.to_lowercase()
             ))
         } else {
             None
@@ -592,270 +556,6 @@ pub fn slash_xp(stats: &mut UserCompletionStats, reason: XpSlashReason, custom_a
 }
 
 // ============================================================================
-// ARWEAVE STATE RECORDS (v5 stateless persistence)
-// ============================================================================
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct VerifiedIdentityRecord {
-    pub pubkey: String,
-    pub identity_hash: String,
-    pub traits_count: u8,
-    pub tier: String,
-    pub verified_at_block: u64,
-    pub verified_at_timestamp: u64,
-    pub proof_tx_id: String,
-    pub signature: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct XPLedgerEntry {
-    pub pubkey: String,
-    pub event_type: String,
-    pub xp_delta: i64,
-    pub xp_after: u64,
-    pub reason: String,
-    pub timestamp_ms: u64,
-    pub arweave_block: u64,
-    pub signature: String,
-}
-
-// ============================================================================
-// ARWEAVE STATE READER (v5 stateless - replaces Arc<RwLock<HashMap>>)
-// ============================================================================
-
-#[derive(Clone)]
-pub struct ArweaveStateReader {
-    http_client: reqwest::Client,
-}
-
-impl ArweaveStateReader {
-    pub fn new() -> Self {
-        Self {
-            http_client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("Failed to create HTTP client"),
-        }
-    }
-
-    pub async fn get_user_stats(&self, pubkey: &str) -> Result<UserCompletionStats, String> {
-        // Count completed agreements (Accepted) where pubkey is party A or counterparty
-        let q_accepted = format!(
-            r#"query {{
-                asPartyA: transactions(first: 100, tags: [
-                    {{ name: "KV-Type", values: ["frost-agreement"] }},
-                    {{ name: "KV-Status", values: ["Accepted"] }},
-                    {{ name: "KV-Pubkey", values: ["{}"] }}
-                ]) {{
-                    edges {{ node {{ id, tags {{ name, value }} }} }}
-                }}
-                asCounterparty: transactions(first: 100, tags: [
-                    {{ name: "KV-Type", values: ["frost-agreement"] }},
-                    {{ name: "KV-Status", values: ["Accepted"] }},
-                    {{ name: "KV-Counterparty", values: ["{}"] }}
-                ]) {{
-                    edges {{ node {{ id, tags {{ name, value }} }} }}
-                }}
-            }}"#,
-            pubkey, pubkey
-        );
-
-        let resp = self.http_client
-            .post(ARWEAVE_GRAPHQL)
-            .json(&serde_json::json!({ "query": q_accepted }))
-            .send().await
-            .map_err(|e| format!("GraphQL failed: {}", e))?;
-        let gql: JsonValue = resp.json().await.map_err(|e| format!("Parse failed: {}", e))?;
-
-        // Deduplicate by agreement ID from tags
-        let mut agreement_ids = std::collections::HashSet::new();
-        for path in &["asPartyA", "asCounterparty"] {
-            if let Some(edges) = gql.pointer(&format!("/data/{}/edges", path)).and_then(|v| v.as_array()) {
-                for edge in edges {
-                    // Extract KV-AgreementId from tags, or use TX id as fallback
-                    let agr_id = edge.pointer("/node/tags")
-                        .and_then(|tags| tags.as_array())
-                        .and_then(|tags| tags.iter().find(|t| t["name"].as_str() == Some("KV-AgreementId")))
-                        .and_then(|t| t["value"].as_str())
-                        .unwrap_or_else(|| edge.pointer("/node/id").and_then(|v| v.as_str()).unwrap_or(""));
-                    if !agr_id.is_empty() {
-                        agreement_ids.insert(agr_id.to_string());
-                    }
-                }
-            }
-        }
-        let successes = agreement_ids.len() as u64;
-
-        // Count deadlocked agreements
-        let q_deadlocked = format!(
-            r#"query {{
-                asPartyA: transactions(first: 100, tags: [
-                    {{ name: "KV-Type", values: ["frost-agreement"] }},
-                    {{ name: "KV-Status", values: ["Deadlocked"] }},
-                    {{ name: "KV-Pubkey", values: ["{}"] }}
-                ]) {{
-                    edges {{ node {{ id }} }}
-                }}
-                asCounterparty: transactions(first: 100, tags: [
-                    {{ name: "KV-Type", values: ["frost-agreement"] }},
-                    {{ name: "KV-Status", values: ["Deadlocked"] }},
-                    {{ name: "KV-Counterparty", values: ["{}"] }}
-                ]) {{
-                    edges {{ node {{ id }} }}
-                }}
-            }}"#,
-            pubkey, pubkey
-        );
-        let mut deadlocks = 0u64;
-        if let Ok(resp2) = self.http_client
-            .post(ARWEAVE_GRAPHQL)
-            .json(&serde_json::json!({ "query": q_deadlocked }))
-            .send().await
-        {
-            if let Ok(gql2) = resp2.json::<JsonValue>().await {
-                let mut dl_ids = std::collections::HashSet::new();
-                for path in &["asPartyA", "asCounterparty"] {
-                    if let Some(edges) = gql2.pointer(&format!("/data/{}/edges", path)).and_then(|v| v.as_array()) {
-                        for edge in edges {
-                            if let Some(id) = edge.pointer("/node/id").and_then(|v| v.as_str()) {
-                                dl_ids.insert(id.to_string());
-                            }
-                        }
-                    }
-                }
-                deadlocks = dl_ids.len() as u64;
-            }
-        }
-
-        // Compute XP on the fly: base + completions - deadlock penalties
-        let xp = (DEFAULT_STARTING_XP as u64)
-            .saturating_add(successes * 10)
-            .saturating_sub(deadlocks * 50);
-
-        // Count lamport attestations + UTXO proofs by KV-PubKeyHash
-        use sha2::Digest;
-        let pubkey_hash = format!("{:x}", sha2::Sha256::new().chain_update(pubkey.as_bytes()).finalize());
-        let q_proofs = format!(
-            r#"query {{
-                lamports: transactions(first: 100, tags: [
-                    {{ name: "KV-Type", values: ["lamport-attestation"] }},
-                    {{ name: "KV-PubKeyHash", values: ["{}"] }}
-                ]) {{
-                    edges {{ node {{ id }} }}
-                }}
-                utxoProofs: transactions(first: 100, tags: [
-                    {{ name: "KV-Type", values: ["utxo-proof-v1"] }},
-                    {{ name: "App-Name", values: ["KasVillage"] }}
-                ]) {{
-                    edges {{ node {{ id }} }}
-                }}
-            }}"#,
-            pubkey_hash
-        );
-        let mut lamport_count = 0u64;
-        let mut utxo_proof_count = 0u64;
-        if let Ok(resp3) = self.http_client
-            .post(ARWEAVE_GRAPHQL)
-            .json(&serde_json::json!({ "query": q_proofs }))
-            .send().await
-        {
-            if let Ok(gql3) = resp3.json::<JsonValue>().await {
-                lamport_count = gql3.pointer("/data/lamports/edges")
-                    .and_then(|v| v.as_array())
-                    .map(|a| a.len() as u64)
-                    .unwrap_or(0);
-                utxo_proof_count = gql3.pointer("/data/utxoProofs/edges")
-                    .and_then(|v| v.as_array())
-                    .map(|a| a.len() as u64)
-                    .unwrap_or(0);
-            }
-        }
-
-        // XP: base + completions + lamport bonus + proof bonus - deadlock penalty
-        let xp = (DEFAULT_STARTING_XP as u64)
-            .saturating_add(successes * 10)
-            .saturating_add(lamport_count * 2)
-            .saturating_add(utxo_proof_count * 1)
-            .saturating_sub(deadlocks * 50);
-
-        Ok(UserCompletionStats {
-            successes,
-            deadlocks,
-            xp,
-            total_samples: successes + deadlocks,
-            pubkey: pubkey.to_string(),
-            citadel_tier: if successes >= 10 { "Citizen".to_string() } else if successes >= 3 { "Resident".to_string() } else { "Guest".to_string() },
-            last_updated_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
-        })
-    }
-
-    pub async fn get_verified_identity(&self, pubkey: &str) -> Result<Option<VerifiedIdentityRecord>, String> {
-        let query = format!(
-            r#"query {{
-                transactions(first: 1, tags: [
-                    {{ name: "{}", values: ["{}"] }}
-                ], sort: HEIGHT_DESC) {{
-                    edges {{ node {{ id }} }}
-                }}
-            }}"#,
-            TAG_VERIFIED_IDENTITY, pubkey
-        );
-        let resp = self.http_client
-            .post(ARWEAVE_GRAPHQL)
-            .json(&serde_json::json!({ "query": query }))
-            .send().await
-            .map_err(|e| format!("GraphQL failed: {}", e))?;
-        let gql: JsonValue = resp.json().await.map_err(|e| format!("Parse failed: {}", e))?;
-        if let Some(tx_id) = gql
-            .pointer("/data/transactions/edges/0/node/id")
-            .and_then(|v| v.as_str())
-        {
-            let url = format!("{}/{}", ARWEAVE_GATEWAY, tx_id);
-            let record: VerifiedIdentityRecord = self.http_client.get(&url).send().await
-                .map_err(|e| format!("Fetch failed: {}", e))?
-                .json().await
-                .map_err(|e| format!("Parse failed: {}", e))?;
-            return Ok(Some(record));
-        }
-        Ok(None)
-    }
-
-    pub async fn get_xp_ledger_entry(&self, pubkey: &str) -> Result<Option<XPLedgerEntry>, String> {
-        let query = format!(
-            r#"query {{
-                transactions(first: 1, tags: [
-                    {{ name: "{}", values: ["{}"] }}
-                ], sort: HEIGHT_DESC) {{
-                    edges {{ node {{ id }} }}
-                }}
-            }}"#,
-            TAG_XP_LEDGER, pubkey
-        );
-        let resp = self.http_client
-            .post(ARWEAVE_GRAPHQL)
-            .json(&serde_json::json!({ "query": query }))
-            .send().await
-            .map_err(|e| format!("GraphQL failed: {}", e))?;
-        let gql: JsonValue = resp.json().await.map_err(|e| format!("Parse failed: {}", e))?;
-        if let Some(tx_id) = gql
-            .pointer("/data/transactions/edges/0/node/id")
-            .and_then(|v| v.as_str())
-        {
-            let url = format!("{}/{}", ARWEAVE_GATEWAY, tx_id);
-            let entry: XPLedgerEntry = self.http_client.get(&url).send().await
-                .map_err(|e| format!("Fetch failed: {}", e))?
-                .json().await
-                .map_err(|e| format!("Parse failed: {}", e))?;
-            return Ok(Some(entry));
-        }
-        Ok(None)
-    }
-}
-
-// ============================================================================
 // XP TIERS
 // ============================================================================
 
@@ -903,9 +603,9 @@ const MIN_XP_VERIFIED: u64 = 100;
 const MIN_P_COMPLETE: f64 = 0.5;
 const SNAIL_MODE_XP_THRESHOLD: u64 = 150;
 const SNAIL_MODE_MIN_SAMPLES: u64 = 3;
-const SNAIL_MODE_BASE_DELAY_MS: u64 = 5000;
-const SNAIL_MODE_DELAY_PER_DEADLOCK: u64 = 2000;
-const SNAIL_MODE_MAX_DELAY_MS: u64 = 30000;
+const SNAIL_MODE_BASE_DELAY_MS: u64 = 180_000;  // 3 minutes base
+const SNAIL_MODE_DELAY_PER_DEADLOCK: u64 = 30_000;  // +30 sec per deadlock
+const SNAIL_MODE_MAX_DELAY_MS: u64 = 240_000;  // 4 minute cap
 
 // XP Board thresholds
 const XP_INCUBATOR: u64 = 500;
@@ -1045,7 +745,7 @@ pub fn poseidon_leaf_hash(data: Fq) -> Fq {
 // POSEIDON CHIP (In-Circuit Hashing - Real Poseidon)
 // ============================================================================
 // Official Poseidon parameters for Pallas scalar field (Fq)
-// Spec: t=3 (width), α=5 (S-box), R_F=8 (full rounds), R_P=56 (partial rounds)
+// Spec: t=3 (width), Î±=5 (S-box), R_F=8 (full rounds), R_P=56 (partial rounds)
 // Constants generated per Poseidon paper using Grain LFSR with:
 //   - Field: Pallas scalar (0x40000000000000000000000000000000224698fc0994a8dd8c46eb2100000001)
 //   - Security: 128-bit
@@ -1082,7 +782,7 @@ impl Default for PoseidonConstantsFq {
         let mds_matrix = generate_mds_matrix();
         
         // Round constants generated via Grain LFSR per Poseidon specification
-        // For t=3, R_F=8, R_P=56 we need 64 rounds × 3 constants = 192 constants
+        // For t=3, R_F=8, R_P=56 we need 64 rounds Ã— 3 constants = 192 constants
         let round_constants = generate_round_constants();
         
         Self { round_constants, mds_matrix }
@@ -1095,7 +795,7 @@ fn generate_mds_matrix() -> [[Fq; 3]; 3] {
     let mut mds = [[Fq::zero(); 3]; 3];
     
     // x_i values: 0, 1, 2
-    // y_j values: 3, 4, 5  (offset by t=3 to ensure x_i + y_j ≠ 0)
+    // y_j values: 3, 4, 5  (offset by t=3 to ensure x_i + y_j â‰  0)
     for i in 0..3 {
         for j in 0..3 {
             let x_i = Fq::from(i as u64);
@@ -1141,7 +841,7 @@ impl GrainLfsr {
         let mut state = [false; 80];
         
         // Initialize with parameters (Section 4.2 of Poseidon paper)
-        // Bits 0-1: binary representation of s_box type (for x^5, this is 00 since α=5)
+        // Bits 0-1: binary representation of s_box type (for x^5, this is 00 since Î±=5)
         // Actually encode full parameters into initial state
         
         // Field size in bits (255 for Pallas Fq)
@@ -1652,11 +1352,11 @@ pub type ProdMerkleCircuit = SparseMerkleCircuit<32>;
 // It decides PASS/FAIL locally - the raw jitter data NEVER leaves the device.
 // 
 // Flow:
-// 1. Phone: Analyzes jitter → decides pass_flag (1 or 0)
+// 1. Phone: Analyzes jitter â†’ decides pass_flag (1 or 0)
 // 2. Phone: Generates random salt, computes C = Poseidon(pass_flag, salt)
 // 3. Phone: Sends C (commitment) to TownHall
 // 4. TownHall: Generates ZK proof that pass_flag == 1 without knowing salt
-// 5. TownHall: Anchors C to Merkle tree → L1
+// 5. TownHall: Anchors C to Merkle tree â†’ L1
 //
 // Privacy: Server only sees C (looks random). Cannot reverse-engineer rhythm.
 // Security: Server cannot fake - needs valid (pass_flag=1, salt) to match C.
@@ -1873,18 +1573,19 @@ pub fn verify_and_prove_jitter(
         commitment: Value::known(commitment_fq),
     };
     
-    // Generate proof bytes and verify
-    let proof_result = proof_system.prove_with_bytes(circuit, vec![vec![commitment_fq]]);
-    
+    // Generate proof
+    let (pk, vk) = proof_system.generate_keys(&circuit).map_err(|e| format!("keygen: {}", e)).unwrap();
+    let proof_bytes = proof_system.prove(&pk, circuit, vec![vec![commitment_fq]]).map_err(|e| format!("prove: {}", e)).unwrap();
+    let proof_result = proof_system.verify(&vk, &proof_bytes, vec![vec![commitment_fq]]);
     match proof_result {
-        Ok((proof_bytes, true)) => JitterVerificationResult {
+        Ok(true) => JitterVerificationResult {
             valid: true,
             commitment: request.commitment.clone(),
             proof_hex: Some(hex::encode(&proof_bytes)),
             merkle_index: None, // Set after Merkle tree insertion
             error: None,
         },
-        Ok((_, false)) => JitterVerificationResult {
+        Ok(false) => JitterVerificationResult {
             valid: false, commitment: request.commitment.clone(),
             proof_hex: None, merkle_index: None,
             error: Some("Proof verification failed".into()),
@@ -1969,14 +1670,6 @@ impl ProofSystem {
         let proof = self.prove(&pk, circuit, instances.clone())?;
         self.verify(&vk, &proof, instances)
     }
-
-    /// Generate proof bytes and verify, returning (proof_bytes, verified)
-    pub fn prove_with_bytes<C: Circuit<Fq> + Clone>(&self, circuit: C, instances: Vec<Vec<Fq>>) -> Result<(Vec<u8>, bool), Box<dyn std::error::Error>> {
-        let (pk, vk) = self.generate_keys(&circuit)?;
-        let proof = self.prove(&pk, circuit, instances.clone())?;
-        let verified = self.verify(&vk, &proof, instances)?;
-        Ok((proof, verified))
-    }
 }
 
 // ============================================================================
@@ -1986,17 +1679,6 @@ impl ProofSystem {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity { Critical, High, Medium, Low }
-
-impl std::fmt::Display for Severity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Severity::Critical => write!(f, "critical"),
-            Severity::High => write!(f, "high"),
-            Severity::Medium => write!(f, "medium"),
-            Severity::Low => write!(f, "low"),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -2333,104 +2015,6 @@ impl AgreementStore {
 }
 
 // ============================================================================
-
-// ============================================================================
-// FROST AGREEMENT RELAY (in-memory store for agreement signing flow)
-// ============================================================================
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub enum FrostAgreementStatus { Proposed, Accepted, Confirming, BothConfirmed, Funding, Collateralized, Active, Releasing, Released, Expired }
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FrostParty {
-    pub pubkey: String, pub amount_sompi: u64, pub signature: String,
-    pub confirmed: bool, pub confirm_signature: Option<String>, pub collateral_tx_id: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FrostAgreementData {
-    pub agreement_id: String, pub status: FrostAgreementStatus, pub description: String,
-    pub stipulations: String, pub network: String, pub party_a: FrostParty,
-    pub party_b: Option<FrostParty>, pub frost_address: Option<String>,
-    pub release_recipient: Option<String>,
-    pub partial_sig_a: Option<String>,
-    pub partial_sig_b: Option<String>,
-    pub release_tx_id: Option<String>,
-    pub created_at: u64, pub updated_at: u64,
-}
-
-pub struct FrostRelayStore { agreements: RwLock<HashMap<String, FrostAgreementData>> }
-impl FrostRelayStore {
-    pub fn new() -> Self { Self { agreements: RwLock::new(HashMap::new()) } }
-    pub fn propose(&self, agr: FrostAgreementData) -> Result<String, String> {
-        let id = agr.agreement_id.clone();
-        let mut s = self.agreements.write().unwrap();
-        if s.contains_key(&id) { return Err("Agreement ID already exists".into()); }
-        s.insert(id.clone(), agr); Ok(id)
-    }
-    pub fn get(&self, id: &str) -> Option<FrostAgreementData> { self.agreements.read().unwrap().get(id).cloned() }
-    pub fn accept(&self, id: &str, pb: FrostParty) -> Result<(), String> {
-        let mut s = self.agreements.write().unwrap();
-        let a = s.get_mut(id).ok_or("Not found")?;
-        if a.status != FrostAgreementStatus::Proposed { return Err(format!("Cannot accept: {:?}", a.status)); }
-        if a.party_a.pubkey == pb.pubkey { return Err("Cannot accept own agreement".into()); }
-        a.party_b = Some(pb); a.status = FrostAgreementStatus::Accepted; a.updated_at = now_ms(); Ok(())
-    }
-    pub fn confirm(&self, id: &str, pk: &str, sig: &str) -> Result<FrostAgreementStatus, String> {
-        let mut s = self.agreements.write().unwrap();
-        let a = s.get_mut(id).ok_or("Not found")?;
-        if a.party_a.pubkey == pk { a.party_a.confirmed = true; a.party_a.confirm_signature = Some(sig.into()); }
-        else if let Some(ref mut b) = a.party_b { if b.pubkey == pk { b.confirmed = true; b.confirm_signature = Some(sig.into()); } else { return Err("Not a party".into()); } }
-        else { return Err("No party B".into()); }
-        let both = a.party_a.confirmed && a.party_b.as_ref().map_or(false, |b| b.confirmed);
-        a.status = if both { FrostAgreementStatus::BothConfirmed } else { FrostAgreementStatus::Confirming };
-        a.updated_at = now_ms(); Ok(a.status.clone())
-    }
-    pub fn record_collateral(&self, id: &str, pk: &str, tx: &str, addr: Option<&str>) -> Result<FrostAgreementStatus, String> {
-        let mut s = self.agreements.write().unwrap();
-        let a = s.get_mut(id).ok_or("Not found")?;
-        if a.party_a.pubkey == pk { a.party_a.collateral_tx_id = Some(tx.into()); }
-        else if let Some(ref mut b) = a.party_b { if b.pubkey == pk { b.collateral_tx_id = Some(tx.into()); } }
-        if let Some(ad) = addr { a.frost_address = Some(ad.into()); }
-        let both = a.party_a.collateral_tx_id.is_some() && a.party_b.as_ref().map_or(false, |b| b.collateral_tx_id.is_some());
-        a.status = if both { FrostAgreementStatus::Collateralized } else { FrostAgreementStatus::Funding };
-        a.updated_at = now_ms(); Ok(a.status.clone())
-    }
-    pub fn submit_partial_sig(&self, id: &str, pk: &str, sig: &str, recipient: &str) -> Result<(bool, Option<String>, Option<String>), String> {
-        let mut s = self.agreements.write().unwrap();
-        let a = s.get_mut(id).ok_or("Not found")?;
-        a.release_recipient = Some(recipient.into());
-        if a.party_a.pubkey == pk {
-            a.partial_sig_a = Some(sig.into());
-        } else if let Some(ref b) = a.party_b {
-            if b.pubkey == pk { a.partial_sig_b = Some(sig.into()); }
-            else { return Err("Not a party".into()); }
-        } else { return Err("No party B".into()); }
-        let both = a.partial_sig_a.is_some() && a.partial_sig_b.is_some();
-        if both { a.status = FrostAgreementStatus::Releasing; }
-        a.updated_at = now_ms();
-        Ok((both, a.partial_sig_a.clone(), a.partial_sig_b.clone()))
-    }
-    pub fn record_release_tx(&self, id: &str, tx_id: &str) -> Result<(), String> {
-        let mut s = self.agreements.write().unwrap();
-        let a = s.get_mut(id).ok_or("Not found")?;
-        a.release_tx_id = Some(tx_id.into());
-        a.status = FrostAgreementStatus::Released;
-        a.updated_at = now_ms();
-        Ok(())
-    }
-            pub fn list_by_pubkey(&self, pk: &str) -> Vec<FrostAgreementData> {
-        self.agreements.read().unwrap().values().filter(|a| a.party_a.pubkey == pk || a.party_b.as_ref().map_or(false, |b| b.pubkey == pk)).cloned().collect()
-    }
-
-    pub fn list_proposed(&self) -> Vec<FrostAgreementData> {
-        self.agreements.read().unwrap().values()
-            .filter(|a| a.status == FrostAgreementStatus::Proposed)
-            .cloned().collect()
-    }
-
-}
-fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64 }
-
 // GLOBAL BAYESIAN STATS
 // ============================================================================
 
@@ -2832,7 +2416,7 @@ mod tests {
         assert_eq!(a + Fq::zero(), a, "Additive identity failed");
         assert_eq!(a * Fq::one(), a, "Multiplicative identity failed");
         
-        // Inverse: a + (-a) = 0, a * a^(-1) = 1 (for a ≠ 0)
+        // Inverse: a + (-a) = 0, a * a^(-1) = 1 (for a â‰  0)
         assert_eq!(a + (-a), Fq::zero(), "Additive inverse failed");
         assert_eq!(a * a.invert().unwrap(), Fq::one(), "Multiplicative inverse failed");
         
@@ -2882,13 +2466,13 @@ mod tests {
 
     #[test]
     fn test_fq_from_uniform_bytes() {
-        // Same input → same output
+        // Same input â†’ same output
         let input = [0xABu8; 64];
         let a = Fq::from_uniform_bytes(&input);
         let b = Fq::from_uniform_bytes(&input);
         assert_eq!(a, b, "from_uniform_bytes not deterministic");
         
-        // Different input → different output (with high probability)
+        // Different input â†’ different output (with high probability)
         let input2 = [0xCDu8; 64];
         let c = Fq::from_uniform_bytes(&input2);
         assert_ne!(a, c, "Different inputs should produce different outputs");
@@ -2928,7 +2512,7 @@ mod tests {
 
     #[test]
     fn test_poseidon_avalanche() {
-        // Small input change → large output change
+        // Small input change â†’ large output change
         let base = poseidon_internal_hash(Fq::from(1000u64), Fq::from(2000u64));
         let changed = poseidon_internal_hash(Fq::from(1001u64), Fq::from(2000u64));
         
@@ -3241,16 +2825,16 @@ mod tests {
         assert!(!commitment.commitment.is_empty(), "Commitment should not be empty");
         assert_eq!(commitment.commitment.len(), 64, "Commitment should be 64 hex chars (32 bytes)");
         
-        // Same inputs → same commitment (deterministic)
+        // Same inputs â†’ same commitment (deterministic)
         let commitment2 = generate_jitter_commitment(true, &salt);
         assert_eq!(commitment.commitment, commitment2.commitment, "Commitment should be deterministic");
         
-        // Different salt → different commitment
+        // Different salt â†’ different commitment
         let salt2 = [0xCDu8; 32];
         let commitment3 = generate_jitter_commitment(true, &salt2);
         assert_ne!(commitment.commitment, commitment3.commitment, "Different salt should produce different commitment");
         
-        // FAIL flag → different commitment
+        // FAIL flag â†’ different commitment
         let commitment_fail = generate_jitter_commitment(false, &salt);
         assert_ne!(commitment.commitment, commitment_fail.commitment, "FAIL should produce different commitment");
     }
@@ -3342,7 +2926,7 @@ mod tests {
 
     #[test]
     fn test_jitter_proof_full_flow() {
-        // Full integration test: phone → server → proof
+        // Full integration test: phone â†’ server â†’ proof
         
         // 1. Phone analyzes jitter, decides PASS
         let pass_flag = true;
@@ -4163,7 +3747,6 @@ pub struct AppStateV2 {
     pub apt_registry: Arc<AptRegistry>,
     pub kaspa: Arc<KaspaL1Client>,
     pub arweave: Arc<ArweaveClient>,
-    pub verification_store: Arc<VerificationStore>,
 }
 
 impl AppStateV2 {
@@ -4178,7 +3761,6 @@ impl AppStateV2 {
             apt_registry: Arc::new(AptRegistry::new()),
             kaspa: Arc::new(KaspaL1Client::default()),
             arweave: Arc::new(ArweaveClient::new()),
-            verification_store: Arc::new(VerificationStore::new()),
         }
     }
 }
@@ -4263,9 +3845,6 @@ async fn verify_dapp(
         timestamp: current_timestamp(),
     };
     
-    // Store for later queries
-    state.verification_store.add_dapp(verification.clone());
-    
     HttpResponse::Ok().json(verification)
 }
 
@@ -4337,254 +3916,6 @@ async fn query_proofs(
 }
 
 // ============================================================================
-// DAPP QUERY & RISK ASSESSMENT
-// ============================================================================
-
-#[derive(Debug, Deserialize)]
-pub struct DAppQueryRequest {
-    pub dapp_id: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DAppQueryResponse {
-    pub found: bool,
-    pub dapp_id: String,
-    pub verification: Option<DAppVerification>,
-    pub risk_assessment: Option<DAppRiskAssessment>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DAppRiskAssessment {
-    pub dapp_id: String,
-    pub risk_level: CodeRiskLevel,
-    pub risk_score: f64,           // 0.0 (safe) - 1.0 (critical)
-    pub code_issues: Vec<String>,
-    pub permission_flags: Vec<String>,
-    pub owner_xp: u64,
-    pub pledge_kas: u64,
-    pub runway_remaining_pct: f64,
-    pub verified: bool,
-    pub last_scan_timestamp: u64,
-    pub recommendation: String,
-}
-
-/// Query DApp by ID - returns verification status and risk
-async fn query_dapp(
-    state: web::Data<AppStateV2>,
-    body: web::Json<DAppQueryRequest>,
-) -> impl Responder {
-    // Look up in verification store
-    let verification = state.verification_store.get_dapp(&body.dapp_id);
-    
-    let risk_assessment = verification.as_ref().map(|v| {
-        let risk_score = match v.code_scan.passed {
-            true if v.code_scan.critical_matches.is_empty() => 0.1,
-            true => 0.3 + (v.code_scan.high_matches.len() as f64 * 0.1),
-            false => 0.7 + (v.code_scan.critical_matches.len() as f64 * 0.1),
-        }.min(1.0);
-        
-        let risk_level = if risk_score < 0.2 { CodeRiskLevel::Safe }
-            else if risk_score < 0.5 { CodeRiskLevel::Low }
-            else if risk_score < 0.7 { CodeRiskLevel::Medium }
-            else if risk_score < 0.9 { CodeRiskLevel::Critical }
-            else { CodeRiskLevel::Critical };
-        
-        let recommendation = match risk_level {
-            CodeRiskLevel::Safe => "✅ Safe to use",
-            CodeRiskLevel::Low => "⚠️ Minor concerns - review before use",
-            CodeRiskLevel::Medium => "⚠️ Moderate risk - use with caution",
-            CodeRiskLevel::Critical => "🚨 High risk - not recommended",
-            CodeRiskLevel::Critical => "🛑 Critical issues - DO NOT USE",
-        }.to_string();
-        
-        DAppRiskAssessment {
-            dapp_id: v.dapp_id.clone(),
-            risk_level,
-            risk_score,
-            code_issues: v.code_scan.critical_matches.iter()
-                .chain(v.code_scan.high_matches.iter())
-                .map(|m| m.pattern_name.clone())
-                .collect(),
-            permission_flags: Vec::new(), // TODO: extract from code scan
-            owner_xp: MIN_XP_VERIFIED, // TODO: fetch from L1
-            pledge_kas: v.pledge_kas,
-            runway_remaining_pct: (v.runway_days as f64 / 365.0 * 100.0).min(100.0),
-            verified: v.verified,
-            last_scan_timestamp: v.timestamp,
-            recommendation,
-        }
-    });
-    
-    HttpResponse::Ok().json(DAppQueryResponse {
-        found: verification.is_some(),
-        dapp_id: body.dapp_id.clone(),
-        verification,
-        risk_assessment,
-    })
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DAppRiskRequest {
-    pub dapp_id: Option<String>,
-    pub code: Option<String>,  // For on-the-fly scanning
-}
-
-/// Quick risk check - can scan code directly or lookup by ID
-async fn query_dapp_risk(
-    state: web::Data<AppStateV2>,
-    body: web::Json<DAppRiskRequest>,
-) -> impl Responder {
-    // If code provided, scan it directly
-    if let Some(code) = &body.code {
-        let scan = scan_code(code, EntityType::DApp);
-        let risk_score = if scan.passed && scan.critical_matches.is_empty() { 0.1 }
-            else if scan.passed { 0.4 }
-            else { 0.8 };
-        
-        let risk_level = if risk_score < 0.3 { CodeRiskLevel::Safe }
-            else if risk_score < 0.6 { CodeRiskLevel::Medium }
-            else { CodeRiskLevel::Critical };
-        
-        return HttpResponse::Ok().json(DAppRiskAssessment {
-            dapp_id: body.dapp_id.clone().unwrap_or_else(|| "anonymous".into()),
-            risk_level,
-            risk_score,
-            code_issues: scan.critical_matches.iter()
-                .chain(scan.high_matches.iter())
-                .map(|m| format!("{}: {}", m.severity.to_string(), m.pattern_name))
-                .collect(),
-            permission_flags: Vec::new(),
-            owner_xp: 0,
-            pledge_kas: 0,
-            runway_remaining_pct: 0.0,
-            verified: false,
-            last_scan_timestamp: current_timestamp(),
-            recommendation: if scan.passed { "Code scan passed".into() } else { "Code scan failed - issues found".into() },
-        });
-    }
-    
-    // Otherwise lookup by ID
-    if let Some(dapp_id) = &body.dapp_id {
-        let verification = state.verification_store.get_dapp(dapp_id);
-        
-        if let Some(v) = verification {
-            let risk_score = if v.code_scan.passed { 0.2 } else { 0.8 };
-            return HttpResponse::Ok().json(DAppRiskAssessment {
-                dapp_id: v.dapp_id,
-                risk_level: if v.code_scan.passed { CodeRiskLevel::Safe } else { CodeRiskLevel::Critical },
-                risk_score,
-                code_issues: v.code_scan.critical_matches.iter().map(|m| m.pattern_name.clone()).collect(),
-                permission_flags: Vec::new(),
-                owner_xp: MIN_XP_VERIFIED,
-                pledge_kas: v.pledge_kas,
-                runway_remaining_pct: (v.runway_days as f64 / 365.0 * 100.0).min(100.0),
-                verified: v.verified,
-                last_scan_timestamp: v.timestamp,
-                recommendation: if v.verified { "✅ Verified DApp".into() } else { "⚠️ Unverified".into() },
-            });
-        }
-    }
-    
-    HttpResponse::NotFound().json(json!({ "error": "Provide dapp_id or code" }))
-}
-
-// ============================================================================
-
-// ============================================================================
-// FROST AGREEMENT RELAY HANDLERS
-// ============================================================================
-async fn frost_propose(state: web::Data<AppStateV3>, body: web::Json<serde_json::Value>) -> impl Responder {
-    let aid = body.get("agreementId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let pk = body.get("pubkey").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let amt = body.get("amount_sompi").and_then(|v| v.as_u64()).unwrap_or(0);
-    let sig = body.get("signature").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let desc = body.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let stip = body.get("stipulations").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let net = body.get("network").and_then(|v| v.as_str()).unwrap_or("testnet-10").to_string();
-    if aid.is_empty() || pk.is_empty() || sig.is_empty() {
-        return HttpResponse::BadRequest().json(json!({"error": "Missing required fields"}));
-    }
-    let agr = FrostAgreementData {
-        agreement_id: aid.clone(), status: FrostAgreementStatus::Proposed,
-        description: desc, stipulations: stip, network: net,
-        party_a: FrostParty { pubkey: pk, amount_sompi: amt, signature: sig, confirmed: false, confirm_signature: None, collateral_tx_id: None },
-        party_b: None, frost_address: None, release_recipient: None, partial_sig_a: None, partial_sig_b: None, release_tx_id: None, created_at: now_ms(), updated_at: now_ms(),
-    };
-    match state.frost_relay.propose(agr) {
-        Ok(id) => HttpResponse::Ok().json(json!({"success": true, "agreementId": id, "status": "proposed"})),
-        Err(e) => HttpResponse::Conflict().json(json!({"error": e})),
-    }
-}
-
-async fn frost_accept(state: web::Data<AppStateV3>, body: web::Json<serde_json::Value>) -> impl Responder {
-    let aid = body.get("agreementId").and_then(|v| v.as_str()).unwrap_or("");
-    let pk = body.get("pubkey").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let amt = body.get("amount_sompi").and_then(|v| v.as_u64()).unwrap_or(0);
-    let sig = body.get("signature").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    if aid.is_empty() || pk.is_empty() || sig.is_empty() {
-        return HttpResponse::BadRequest().json(json!({"error": "Missing required fields"}));
-    }
-    let pb = FrostParty { pubkey: pk, amount_sompi: amt, signature: sig, confirmed: false, confirm_signature: None, collateral_tx_id: None };
-    match state.frost_relay.accept(aid, pb) {
-        Ok(()) => HttpResponse::Ok().json(json!({"success": true, "agreementId": aid, "status": "accepted"})),
-        Err(e) => HttpResponse::BadRequest().json(json!({"error": e})),
-    }
-}
-
-async fn frost_confirm(state: web::Data<AppStateV3>, body: web::Json<serde_json::Value>) -> impl Responder {
-    let aid = body.get("agreementId").and_then(|v| v.as_str()).unwrap_or("");
-    let pk = body.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
-    let sig = body.get("signature").and_then(|v| v.as_str()).unwrap_or("");
-    if aid.is_empty() || pk.is_empty() || sig.is_empty() {
-        return HttpResponse::BadRequest().json(json!({"error": "Missing required fields"}));
-    }
-    match state.frost_relay.confirm(aid, pk, sig) {
-        Ok(status) => HttpResponse::Ok().json(json!({"success": true, "agreementId": aid, "status": format!("{:?}", status)})),
-        Err(e) => HttpResponse::BadRequest().json(json!({"error": e})),
-    }
-}
-
-async fn frost_get_agreement(state: web::Data<AppStateV3>, path: web::Path<String>) -> impl Responder {
-    let aid = path.into_inner();
-    match state.frost_relay.get(&aid) {
-        Some(a) => {
-            let pb_json = a.party_b.as_ref().map(|b| json!({"pubkey": b.pubkey, "amount_sompi": b.amount_sompi, "confirmed": b.confirmed, "collateralTxId": b.collateral_tx_id}));
-            HttpResponse::Ok().json(json!({
-                "agreementId": a.agreement_id, "status": format!("{:?}", a.status),
-                "description": a.description, "network": a.network, "frostAddress": a.frost_address,
-                "partyA": {"pubkey": a.party_a.pubkey, "amount_sompi": a.party_a.amount_sompi, "confirmed": a.party_a.confirmed, "collateralTxId": a.party_a.collateral_tx_id},
-                "partyB": pb_json, "createdAt": a.created_at, "updatedAt": a.updated_at, "partialSigA": a.partial_sig_a, "partialSigB": a.partial_sig_b, "releaseRecipient": a.release_recipient, "releaseTxId": a.release_tx_id, "partialSigA": a.partial_sig_a, "partialSigB": a.partial_sig_b, "releaseRecipient": a.release_recipient, "releaseTxId": a.release_tx_id,
-            }))
-        }
-        None => HttpResponse::NotFound().json(json!({"error": "Agreement not found"})),
-    }
-}
-
-async fn frost_collateral(state: web::Data<AppStateV3>, body: web::Json<serde_json::Value>) -> impl Responder {
-    let aid = body.get("agreementId").and_then(|v| v.as_str()).unwrap_or("");
-    let pk = body.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
-    let tx = body.get("txId").and_then(|v| v.as_str()).unwrap_or("");
-    let addr = body.get("frostAddress").and_then(|v| v.as_str());
-    match state.frost_relay.record_collateral(aid, pk, tx, addr) {
-        Ok(status) => HttpResponse::Ok().json(json!({"success": true, "status": format!("{:?}", status)})),
-        Err(e) => HttpResponse::BadRequest().json(json!({"error": e})),
-    }
-}
-
-async fn frost_list_agreements(state: web::Data<AppStateV3>, query: web::Query<HashMap<String, String>>) -> impl Responder {
-    let pk = query.get("pubkey").map(|s| s.as_str()).unwrap_or("");
-    if pk.is_empty() { return HttpResponse::BadRequest().json(json!({"error": "Missing pubkey"})); }
-    let results: Vec<_> = state.frost_relay.list_by_pubkey(pk).iter().map(|a| json!({
-        "agreementId": a.agreement_id, "status": format!("{:?}", a.status),
-        "description": a.description, "frostAddress": a.frost_address,
-        "myRole": if a.party_a.pubkey == pk { "A" } else { "B" },
-        "myAmount": if a.party_a.pubkey == pk { a.party_a.amount_sompi } else { a.party_b.as_ref().map_or(0, |b| b.amount_sompi) },
-        "createdAt": a.created_at,
-    })).collect();
-    HttpResponse::Ok().json(json!({"agreements": results}))
-}
-
-
 // COMPLETE SERVER WITH ALL ROUTES
 // ============================================================================
 
@@ -4598,9 +3929,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/verify/user/full", web::post().to(verify_user_full_api))
         .route("/api/apt/register", web::post().to(register_apt))
         .route("/api/apt/conflict", web::post().to(check_apt_conflict))
-        .route("/api/proofs/query", web::post().to(query_proofs))
-        .route("/api/query/dapp", web::post().to(query_dapp))
-        .route("/api/query/dapp/risk", web::post().to(query_dapp_risk));
+        .route("/api/proofs/query", web::post().to(query_proofs));
 }
 
 // ============================================================================
@@ -5362,7 +4691,7 @@ pub async fn verify_app_integrity(
                 local_matches_ebook: true,
                 ebook_matches_chain: true,
                 fully_verified: true,
-                message: "✅ AUTHENTICATED BY KASPA NETWORK. Safe to install.".into(),
+                message: "âœ… AUTHENTICATED BY KASPA NETWORK. Safe to install.".into(),
                 anchor_timestamp: Some(anchor_data.timestamp),
                 publisher_apt: Some(anchor_data.publisher),
             }
@@ -5485,44 +4814,6 @@ async fn register_app_anchor(
     }))
 }
 
-// ============================================================================
-// VERIFICATION STORE (DApp, Store, Game verifications)
-// ============================================================================
-
-pub struct VerificationStore {
-    dapps: RwLock<HashMap<String, DAppVerification>>,
-    stores: RwLock<HashMap<String, StoreVerification>>,
-}
-
-impl VerificationStore {
-    pub fn new() -> Self {
-        Self {
-            dapps: RwLock::new(HashMap::new()),
-            stores: RwLock::new(HashMap::new()),
-        }
-    }
-    
-    pub fn add_dapp(&self, v: DAppVerification) {
-        self.dapps.write().unwrap().insert(v.dapp_id.clone(), v);
-    }
-    
-    pub fn get_dapp(&self, id: &str) -> Option<DAppVerification> {
-        self.dapps.read().unwrap().get(id).cloned()
-    }
-    
-    pub fn add_store(&self, v: StoreVerification) {
-        self.stores.write().unwrap().insert(v.store_id.clone(), v);
-    }
-    
-    pub fn get_store(&self, id: &str) -> Option<StoreVerification> {
-        self.stores.read().unwrap().get(id).cloned()
-    }
-    
-    pub fn list_dapps(&self) -> Vec<DAppVerification> {
-        self.dapps.read().unwrap().values().cloned().collect()
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LibraryEntry {
     pub entry_id: String,
@@ -5606,7 +4897,7 @@ impl Library {
 // 1. User enters their 13 traits + 4 backstory fields on NEW clean device
 // 2. Town Hall computes identity hash from the avatar
 // 3. Town Hall checks if identity hash matches L1 registration
-// 4. If match, user proves ownership → wallet can be recovered
+// 4. If match, user proves ownership â†’ wallet can be recovered
 //
 // This is more secure than seed phrases because:
 // - Attackers can't guess 13+ complex narrative fields
@@ -5655,9 +4946,9 @@ pub async fn verify_device_recovery(
         };
     }
     
-    // Step 2: Check trait count (need 13 for Passport)
+    // Step 2: Check trait count (need minimum 9 for recovery - buyers can recover)
     let trait_count = req.avatar.count_seller_traits();
-    if trait_count < TRAITS_TO_SELL {
+    if trait_count < TRAITS_TO_BUY {
         return DeviceRecoveryResult {
             success: false,
             identity_match: false,
@@ -5666,7 +4957,11 @@ pub async fn verify_device_recovery(
             sandbox_ok: true,
             registered_hash: None,
             provided_hash: String::new(),
-            message: format!("Need {} traits for recovery, you provided {}", TRAITS_TO_SELL, trait_count),
+            message: format!(
+                "âŒ Recovery requires at least {} traits (you have {}). Recovery is NOT possible with fewer traits. Please ensure you completed all required avatar fields.",
+                TRAITS_TO_BUY,
+                trait_count
+            ),
             recovery_token: None,
         };
     }
@@ -5709,7 +5004,7 @@ pub async fn verify_device_recovery(
             sandbox_ok: true,
             registered_hash: Some(provided_hash.clone()),
             provided_hash,
-            message: "⚠️ SECURITY ALERT: Identity data conflict between Kaspa and Arweave. Please contact support.".into(),
+            message: "âš ï¸ SECURITY ALERT: Identity data conflict between Kaspa and Arweave. Please contact support.".into(),
             recovery_token: None,
         };
     }
@@ -5740,7 +5035,7 @@ pub async fn verify_device_recovery(
     
     // Log successful recovery
     log::info!(
-        "[Recovery] ✅ Identity verified: hash={}, kaspa={}, arweave={}",
+        "[Recovery] âœ… Identity verified: hash={}, kaspa={}, arweave={}",
         &provided_hash[..16],
         dual_result.kaspa_found,
         dual_result.arweave_found
@@ -5754,7 +5049,7 @@ pub async fn verify_device_recovery(
         sandbox_ok: true,
         registered_hash: Some(provided_hash.clone()),
         provided_hash,
-        message: format!("✅ Identity verified via {}! You may now bind your wallet to this new device.",
+        message: format!("âœ… Identity verified via {}! You may now bind your wallet to this new device.",
             if dual_result.kaspa_found && dual_result.arweave_found {
                 "Kaspa L1 + Arweave"
             } else if dual_result.kaspa_found {
@@ -5893,10 +5188,10 @@ pub async fn anchor_identity(
     // Determine success
     let success = kaspa_txid.is_some() || arweave_txid.is_some();
     let message = match (&kaspa_txid, &arweave_txid) {
-        (Some(_), Some(_)) => "✅ Identity anchored to BOTH Kaspa L1 and Arweave".into(),
-        (Some(_), None) => "⚠️ Identity anchored to Kaspa L1 only (Arweave pending)".into(),
-        (None, Some(_)) => "⚠️ Identity anchored to Arweave only (Kaspa pending)".into(),
-        (None, None) => "❌ Failed to anchor identity to either chain".into(),
+        (Some(_), Some(_)) => "âœ… Identity anchored to BOTH Kaspa L1 and Arweave".into(),
+        (Some(_), None) => "âš ï¸ Identity anchored to Kaspa L1 only (Arweave pending)".into(),
+        (None, Some(_)) => "âš ï¸ Identity anchored to Arweave only (Kaspa pending)".into(),
+        (None, None) => "âŒ Failed to anchor identity to either chain".into(),
     };
     
     AnchorIdentityResult {
@@ -5982,11 +5277,11 @@ pub async fn verify_identity_redundant(
     let verified = kaspa_found || arweave_found;
     
     let message = match (kaspa_found, arweave_found, conflict) {
-        (true, true, false) => "✅ Identity verified on BOTH Kaspa L1 and Arweave".into(),
-        (true, true, true) => "⚠️ CONFLICT: Identity found on both chains but trait counts differ".into(),
-        (true, false, _) => "✅ Identity verified on Kaspa L1 (Arweave sync pending)".into(),
-        (false, true, _) => "✅ Identity verified on Arweave (Kaspa reorg or sync issue)".into(),
-        (false, false, _) => "❌ Identity not found on either chain".into(),
+        (true, true, false) => "âœ… Identity verified on BOTH Kaspa L1 and Arweave".into(),
+        (true, true, true) => "âš ï¸ CONFLICT: Identity found on both chains but trait counts differ".into(),
+        (true, false, _) => "âœ… Identity verified on Kaspa L1 (Arweave sync pending)".into(),
+        (false, true, _) => "âœ… Identity verified on Arweave (Kaspa reorg or sync issue)".into(),
+        (false, false, _) => "âŒ Identity not found on either chain".into(),
     };
     
     DualVerificationResult {
@@ -6061,107 +5356,6 @@ async fn verify_identity_api(
     
     let result = verify_identity_redundant(&state.kaspa, &state.arweave, identity_hash).await;
     HttpResponse::Ok().json(result)
-}
-
-// ============================================================================
-// HOST NODES — query Arweave for registered Akash host announcements
-// ============================================================================
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct HostNodeRecord {
-    pubkey: String,
-    endpoint: String,
-    region: Option<String>,
-    capacity: Option<u32>,
-    registered_at: Option<u64>,
-    arweave_tx: String,
-}
-
-async fn get_host_nodes(
-    state: web::Data<TownHallState>,
-) -> impl Responder {
-    let query = format!(
-        r#"query {{
-            transactions(first: 50, tags: [
-                {{ name: "KV-App", values: ["KasVillage"] }},
-                {{ name: "KV-Type", values: ["{}"] }}
-            ], sort: HEIGHT_DESC) {{
-                edges {{ node {{ id tags {{ name value }} }} }}
-            }}
-        }}"#,
-        TAG_HOST_NODE
-    );
-
-    let resp = match state.arweave.http
-        .post(ARWEAVE_GRAPHQL)
-        .json(&serde_json::json!({ "query": query }))
-        .send().await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            return HttpResponse::ServiceUnavailable().json(json!({
-                "error": format!("Arweave GraphQL unreachable: {}", e)
-            }));
-        }
-    };
-
-    let gql: serde_json::Value = match resp.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            return HttpResponse::InternalServerError().json(json!({
-                "error": format!("GraphQL parse error: {}", e)
-            }));
-        }
-    };
-
-    let edges = match gql.pointer("/data/transactions/edges") {
-        Some(serde_json::Value::Array(arr)) => arr.clone(),
-        _ => vec![],
-    };
-
-    let mut nodes: Vec<HostNodeRecord> = Vec::new();
-
-    for edge in &edges {
-        let tx_id = match edge.pointer("/node/id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => continue,
-        };
-
-        // Fetch the JSON payload from Arweave gateway
-        let url = format!("{}/{}", ARWEAVE_GATEWAY, tx_id);
-        let payload: serde_json::Value = match state.arweave.http
-            .get(&url)
-            .send().await
-            .and_then(|r| r.error_for_status())
-        {
-            Ok(r) => match r.json().await {
-                Ok(v) => v,
-                Err(_) => continue,
-            },
-            Err(_) => continue,
-        };
-
-        let pubkey   = payload["pubkey"].as_str().unwrap_or("").to_string();
-        let endpoint = payload["endpoint"].as_str().unwrap_or("").to_string();
-
-        if pubkey.is_empty() || endpoint.is_empty() {
-            continue;
-        }
-
-        nodes.push(HostNodeRecord {
-            pubkey,
-            endpoint,
-            region:        payload["region"].as_str().map(|s| s.to_string()),
-            capacity:      payload["capacity"].as_u64().map(|n| n as u32),
-            registered_at: payload["registered_at"].as_u64(),
-            arweave_tx:    tx_id,
-        });
-    }
-
-    HttpResponse::Ok().json(json!({
-        "nodes": nodes,
-        "count": nodes.len()
-    }))
 }
 
 // ============================================================================
@@ -6355,8 +5549,8 @@ async fn recover_device_api(
 //   4. Verify APK signature (v1/v2/v3 schemes)
 //
 // Flow:
-//   First Launch: Compute baseline hash → store in SecureStore + send to Town Hall
-//   Every Launch: Recompute hash → compare to baseline → if mismatch, LOCK
+//   First Launch: Compute baseline hash â†’ store in SecureStore + send to Town Hall
+//   Every Launch: Recompute hash â†’ compare to baseline â†’ if mismatch, LOCK
 //
 // ============================================================================
 
@@ -6708,10 +5902,10 @@ pub fn verify_code_signature(report: &CodeSignatureReport) -> CodeVerificationRe
     };
     
     let message = match risk_level {
-        CodeRiskLevel::Safe => "✅ Code signature verified - all checks passed".into(),
-        CodeRiskLevel::Low => "⚠️ Minor issues detected - proceed with caution".into(),
-        CodeRiskLevel::Medium => "⚠️ Suspicious code signature - sensitive operations restricted".into(),
-        CodeRiskLevel::Critical => "🚨 CRITICAL: Code tampering detected - wallet locked".into(),
+        CodeRiskLevel::Safe => "âœ… Code signature verified - all checks passed".into(),
+        CodeRiskLevel::Low => "âš ï¸ Minor issues detected - proceed with caution".into(),
+        CodeRiskLevel::Medium => "âš ï¸ Suspicious code signature - sensitive operations restricted".into(),
+        CodeRiskLevel::Critical => "ðŸš¨ CRITICAL: Code tampering detected - wallet locked".into(),
     };
     
     let all_passed = checks.iter().all(|c| c.passed);
@@ -7104,8 +6298,6 @@ pub struct AppStateV3 {
     pub economics: Arc<EconomicTracker>,
     pub library: Arc<Library>,
     pub prover: Arc<Halo2Prover>,
-    pub arweave_reader: Arc<ArweaveStateReader>,
-    pub frost_relay: Arc<FrostRelayStore>,
 }
 
 impl AppStateV3 {
@@ -7123,113 +6315,7 @@ impl AppStateV3 {
             economics: Arc::new(EconomicTracker::new()),
             library: Arc::new(Library::new()),
             prover: Arc::new(Halo2Prover::default_dev()),
-            arweave_reader: Arc::new(ArweaveStateReader::new()),
-            frost_relay: Arc::new(FrostRelayStore::new()),
         }
-    }
-}
-
-// ============================================================================
-// STATELESS ARWEAVE ENDPOINTS (v5)
-// ============================================================================
-
-#[derive(Deserialize)]
-pub struct StatelessVerifyRequest {
-    pub pubkey: String,
-    pub avatar: CanonicalAvatar,
-    pub signature: String,
-}
-
-#[derive(Serialize)]
-pub struct StatelessVerifyResponse {
-    pub success: bool,
-    pub tier: String,
-    pub traits: u8,
-    pub can_buy: bool,
-    pub can_sell: bool,
-    pub xp: u64,
-    pub p_complete: f64,
-    pub snail_mode: bool,
-    pub arweave_tx_id: Option<String>,
-    pub error: Option<String>,
-}
-
-async fn stateless_verify_identity(
-    req: web::Json<StatelessVerifyRequest>,
-    state: web::Data<AppStateV3>,
-) -> impl Responder {
-    let pubkey = &req.pubkey;
-    let avatar = &req.avatar;
-    let traits = avatar.count_traits();
-    let tier = avatar.citadel_tier();
-
-    let stats = match state.arweave_reader.get_user_stats(pubkey).await {
-        Ok(s) => s,
-        Err(e) => return HttpResponse::InternalServerError().json(StatelessVerifyResponse {
-            success: false,
-            tier: "Guest".to_string(),
-            traits: 0,
-            can_buy: false,
-            can_sell: false,
-            xp: 0,
-            p_complete: 0.5,
-            snail_mode: false,
-            arweave_tx_id: None,
-            error: Some(format!("Stats fetch failed: {}", e)),
-        }),
-    };
-
-    HttpResponse::Ok().json(StatelessVerifyResponse {
-        success: true,
-        tier: tier.as_str().to_string(),
-        traits,
-        can_buy: avatar.can_buy(),
-        can_sell: avatar.can_sell(),
-        xp: stats.xp,
-        p_complete: stats.p_complete(),
-        snail_mode: stats.should_snail_mode(),
-        arweave_tx_id: None,
-        error: None,
-    })
-}
-
-#[derive(Deserialize)]
-pub struct GetStatsRequest {
-    pub pubkey: String,
-}
-
-async fn stateless_get_user_stats(
-    req: web::Json<GetStatsRequest>,
-    state: web::Data<AppStateV3>,
-) -> impl Responder {
-    match state.arweave_reader.get_user_stats(&req.pubkey).await {
-        Ok(stats) => HttpResponse::Ok().json(stats),
-        Err(e) => HttpResponse::InternalServerError().json(json!({
-            "error": e,
-            "pubkey": &req.pubkey
-        })),
-    }
-}
-
-#[derive(Deserialize)]
-pub struct GetXPLedgerRequest {
-    pub pubkey: String,
-}
-
-async fn stateless_get_xp_ledger(
-    req: web::Json<GetXPLedgerRequest>,
-    state: web::Data<AppStateV3>,
-) -> impl Responder {
-    match state.arweave_reader.get_xp_ledger_entry(&req.pubkey).await {
-        Ok(Some(entry)) => HttpResponse::Ok().json(entry),
-        Ok(None) => HttpResponse::NotFound().json(json!({
-            "error": "No XP ledger entries found",
-            "pubkey": &req.pubkey
-        })),
-        Err(e) => HttpResponse::InternalServerError().json(json!({
-            "error": e,
-            "pubkey": &req.pubkey
-        })),
     }
 }
 
@@ -7237,52 +6323,9 @@ async fn stateless_get_xp_ledger(
 // COMPLETE ROUTES V3
 // ============================================================================
 
-
-async fn frost_submit_partial_sig(state: web::Data<AppStateV3>, body: web::Json<serde_json::Value>) -> impl Responder {
-    let aid = body.get("agreementId").and_then(|v| v.as_str()).unwrap_or("");
-    let pk = body.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
-    let sig = body.get("partialSig").and_then(|v| v.as_str()).unwrap_or("");
-    let recipient = body.get("recipientAddress").and_then(|v| v.as_str()).unwrap_or("");
-    if aid.is_empty() || pk.is_empty() || sig.is_empty() || recipient.is_empty() {
-        return HttpResponse::BadRequest().json(json!({"error": "Missing required fields"}));
-    }
-    match state.frost_relay.submit_partial_sig(aid, pk, sig, recipient) {
-        Ok((both_ready, sig_a, sig_b)) => HttpResponse::Ok().json(json!({
-            "success": true, "bothReady": both_ready,
-            "partialSigA": sig_a, "partialSigB": sig_b,
-        })),
-        Err(e) => HttpResponse::BadRequest().json(json!({"error": e})),
-    }
-}
-
-async fn frost_release_complete(state: web::Data<AppStateV3>, body: web::Json<serde_json::Value>) -> impl Responder {
-    let aid = body.get("agreementId").and_then(|v| v.as_str()).unwrap_or("");
-    let tx_id = body.get("txId").and_then(|v| v.as_str()).unwrap_or("");
-    if aid.is_empty() || tx_id.is_empty() {
-        return HttpResponse::BadRequest().json(json!({"error": "Missing fields"}));
-    }
-    match state.frost_relay.record_release_tx(aid, tx_id) {
-        Ok(()) => HttpResponse::Ok().json(json!({"success": true, "status": "Released"})),
-        Err(e) => HttpResponse::BadRequest().json(json!({"error": e})),
-    }
-}
-
-
-
-
-
-async fn frost_list_proposed(state: web::Data<AppStateV3>) -> impl Responder {
-    let agreements = state.frost_relay.list_proposed();
-    HttpResponse::Ok().json(agreements)
-}
-
 pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
     cfg
         .route("/health", web::get().to(health))
-        // --- Stateless Arweave endpoints (v5) ---
-        .route("/verify-identity", web::post().to(stateless_verify_identity))
-        .route("/user-stats", web::post().to(stateless_get_user_stats))
-        .route("/xp-ledger", web::post().to(stateless_get_xp_ledger))
         .route("/api/scan", web::post().to(scan_code_api))
         .route("/api/scan/game", web::post().to(verify_game))
         .route("/api/stats/global", web::get().to(get_global_stats))
@@ -7307,19 +6350,7 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/identity/verify", web::post().to(verify_identity_api))
         // Code Signature Verification
         .route("/api/code/verify", web::post().to(verify_code_signature_api))
-        .route("/api/code/register", web::post().to(register_signature_api))
-        // Host Nodes (Arweave-backed)
-        .route("/api/host-nodes", web::get().to(get_host_nodes))
-        // FROST Agreement Relay
-        .route("/api/agreement/propose", web::post().to(frost_propose))
-        .route("/api/agreement/accept", web::post().to(frost_accept))
-        .route("/api/agreement/confirm", web::post().to(frost_confirm))
-        .route("/api/agreement/{id}", web::get().to(frost_get_agreement))
-        .route("/api/agreement/collateral", web::post().to(frost_collateral))
-        .route("/api/agreements", web::get().to(frost_list_agreements))
-        .route("/api/agreements/proposed", web::get().to(frost_list_proposed))
-        .route("/api/agreement/partial-sig", web::post().to(frost_submit_partial_sig))
-        .route("/api/agreement/release", web::post().to(frost_release_complete));
+        .route("/api/code/register", web::post().to(register_signature_api));
 }
 
 // ============================================================================
@@ -7594,7 +6625,7 @@ async fn main() -> std::io::Result<()> {
     
     match mode.as_str() {
         "ingress" => {
-            println!("🚀 KasVillage Ingress Proxy");
+            println!("ðŸš€ KasVillage Ingress Proxy");
             println!("   Mode: INGRESS (validates reentry codes)");
             println!("   Listening on: {}", addr);
             
@@ -7618,7 +6649,7 @@ async fn main() -> std::io::Result<()> {
             .await
         }
         _ => {
-            println!("🏛️ KasVillage Town Hall v5.0 - Stateless Merged Edition");
+            println!("ðŸ›ï¸ KasVillage Town Hall v4.0");
             println!("   Mode: TOWN HALL (autonomous verification)");
             println!("   Listening on: {}", addr);
             println!("   Halo2 K={}, Tree Depth={}", HALO2_K, TREE_DEPTH);
@@ -8008,7 +7039,7 @@ mod tests_remaining {
         assert!((stats.p_complete() - 0.5).abs() < 0.01);
         assert!(stats.is_new_user());
         
-        // After 1 success: p = 2/3 ≈ 0.67
+        // After 1 success: p = 2/3 â‰ˆ 0.67
         stats.record_success();
         assert!((stats.p_complete() - 0.67).abs() < 0.01);
         
@@ -8074,3 +7105,4 @@ mod tests_remaining {
         assert_eq!(XPTier::from_xp(9999), XPTier::Archon);
     }
 }
+

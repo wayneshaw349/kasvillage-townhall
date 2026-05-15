@@ -1,0 +1,1164 @@
+// ============================================================================
+// KASVILLAGE EXPO - DASHBOARD COMPONENT
+// ============================================================================
+// Migrated from frontend.jsx with identical UI/UX
+// Sims-inspired pixel backgrounds, chessboard header, warm earth tones
+// ============================================================================
+
+import React, { useState, useEffect, useContext, useCallback, useMemo, memo } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  Dimensions,
+  PixelRatio,
+  Animated,
+  Modal,
+  ActivityIndicator,
+  RefreshControl,
+  Alert,
+} from 'react-native';
+import Svg, { Rect, Defs, LinearGradient, Stop, Pattern, Line } from 'react-native-svg';
+import { 
+  MapPin, Wallet, Mail, Store, Scale, User, 
+  ShieldCheck, Zap, Activity 
+} from 'lucide-react-native';
+import { useKaspaPrice } from './useKaspaPrice';
+import ProceduralBackground from './expo_procedural_backgrounds';
+import { SlothPoisonBar } from './SlothPoisonMeter';
+import * as SecureStore from 'expo-secure-store';
+
+// ============================================================================
+// RESPONSIVE SCALER (Same as expo_phone_)
+// ============================================================================
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const BASE_WIDTH = 393;
+const BASE_HEIGHT = 852;
+const widthScale = SCREEN_WIDTH / BASE_WIDTH;
+const heightScale = SCREEN_HEIGHT / BASE_HEIGHT;
+const scale = Math.min(widthScale, heightScale);
+
+const rs = {
+  s: (size: number) => Math.round(size * scale),
+  w: (size: number) => Math.round(size * widthScale),
+  h: (size: number) => Math.round(size * heightScale),
+  font: (size: number) => Math.round(size * scale * (PixelRatio.getFontScale() > 1 ? 0.9 : 1)),
+  fullWidth: (padding = 20) => SCREEN_WIDTH - (padding * 2 * widthScale),
+  screenWidth: SCREEN_WIDTH,
+  screenHeight: SCREEN_HEIGHT,
+  isSmallDevice: SCREEN_WIDTH < 375,
+};
+
+// ============================================================================
+// COLORS (Exact match from frontend.jsx)
+// ============================================================================
+const COLORS = {
+  // Base warm tones
+  warmWall: '#C5B8A8',
+  darkWood: '#4A3728',
+  medWood: '#3D2E22',
+  lightWood: '#C4A77D',
+  cream: '#E8DDD0',
+  pink: '#D4A5A5',
+  
+  // Stone palette (Tailwind stone)
+  stone50: '#fafaf9',
+  stone100: '#f5f5f4',
+  stone200: '#e7e5e4',
+  stone300: '#d6d3d1',
+  stone400: '#a8a29e',
+  stone500: '#78716c',
+  stone600: '#57534e',
+  stone700: '#44403c',
+  stone800: '#292524',
+  stone900: '#1c1917',
+  
+  // Amber palette
+  amber50: '#fffbeb',
+  amber100: '#fef3c7',
+  amber200: '#fde68a',
+  amber600: '#d97706',
+  amber700: '#b45309',
+  amber800: '#92400e',
+  amber900: '#78350f',
+  
+  // Green palette
+  green400: '#4ade80',
+  green500: '#22c55e',
+  green600: '#16a34a',
+  
+  // Red palette
+  red600: '#dc2626',
+  red800: '#991b1b',
+  
+  // Purple/Indigo
+  purple600: '#9333ea',
+  indigo600: '#4f46e5',
+  
+  // UI
+  cardBg: '#FFF8F0',
+  headerBg: '#C4A77D',
+  chessLight: '#C4A77D',
+  chessDark: '#6B4423',
+};
+
+// ============================================================================
+// PIXEL BACKGROUNDS (SVG-based, matching frontend.jsx)
+// ============================================================================
+
+// Bedroom Background (Dashboard default)
+const BedroomBackground: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  return (
+    <View style={bgStyles.container}>
+      {/* Base warm gray walls */}
+      <View style={[bgStyles.layer, { backgroundColor: COLORS.warmWall }]} />
+      
+      {/* Dark wood floor (bottom 1/3) */}
+      <View style={bgStyles.floor}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <Pattern id="woodPattern" width={50} height={100} patternUnits="userSpaceOnUse">
+              <Rect width={48} height={100} fill={COLORS.darkWood} />
+              <Rect x={48} width={2} height={100} fill={COLORS.medWood} />
+            </Pattern>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#woodPattern)" />
+        </Svg>
+      </View>
+      
+      {/* Grass strip at top */}
+      <View style={bgStyles.grassStrip}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <LinearGradient id="grassGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#7CB342" />
+              <Stop offset="0.5" stopColor="#8BC34A" />
+              <Stop offset="1" stopColor="#9CCC65" />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#grassGrad)" />
+        </Svg>
+      </View>
+      
+      {/* Pixel grid overlay */}
+      <View style={bgStyles.pixelOverlay}>
+        <Svg width="100%" height="100%" opacity={0.08}>
+          <Defs>
+            <Pattern id="pixelGrid" width={16} height={16} patternUnits="userSpaceOnUse">
+              <Line x1={0} y1={0} x2={16} y2={0} stroke="#5D4E37" strokeWidth={1} />
+              <Line x1={0} y1={0} x2={0} y2={16} stroke="#5D4E37" strokeWidth={1} />
+            </Pattern>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#pixelGrid)" />
+        </Svg>
+      </View>
+      
+      {/* Decorative elements */}
+      <View style={bgStyles.decorContainer}>
+        <Text style={[bgStyles.plantEmoji, { bottom: '35%', left: '5%' }]}>🌿</Text>
+        <Text style={[bgStyles.plantEmoji, { bottom: '40%', left: '25%' }]}>🪴</Text>
+        <Text style={[bgStyles.plantEmoji, { bottom: '38%', right: '35%' }]}>🌱</Text>
+        <Text style={[bgStyles.starEmoji, { top: '8%', left: '10%' }]}>⭐</Text>
+      </View>
+      
+      {/* Content */}
+      <View style={bgStyles.content}>{children}</View>
+    </View>
+  );
+};
+
+// Dynamic Background Switcher
+const DynamicBackground: React.FC<{
+  activeTab: string;
+  avatarConfig?: { race: string; class: string; occupation: string; name: string };
+  children: React.ReactNode
+}> = ({ activeTab, avatarConfig, children }) => {
+  if (avatarConfig && avatarConfig.race) {
+    const section = activeTab === "workspace" ? "workspace" : activeTab === "bathroom" ? "tradfi_ed" : "dashboard";
+    return (
+      <View style={{ flex: 1 }}>
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: -1 }}>
+          <ProceduralBackground avatar={avatarConfig} section={section} />
+        </View>
+        <View style={{ flex: 1 }}>{children}</View>
+      </View>
+    );
+  }
+  return <BedroomBackground>{children}</BedroomBackground>;
+};
+
+const bgStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    position: 'relative',
+  },
+  layer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: -10,
+  },
+  floor: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '33%',
+    zIndex: -9,
+  },
+  grassStrip: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: rs.h(60),
+    zIndex: -9,
+  },
+  pixelOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: -8,
+  },
+  decorContainer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: -7,
+    opacity: 0.6,
+  },
+  plantEmoji: {
+    position: 'absolute',
+    fontSize: rs.font(32),
+    color: '#2D5A27',
+  },
+  starEmoji: {
+    position: 'absolute',
+    fontSize: rs.font(40),
+    color: '#FFD700',
+    opacity: 0.4,
+  },
+  content: {
+    flex: 1,
+    zIndex: 1,
+  },
+});
+
+// ============================================================================
+// CHESSBOARD HEADER
+// ============================================================================
+const ChessboardHeader: React.FC<{
+  apartment: string;
+  isSnailMode?: boolean;
+  isEliteMode?: boolean;
+  network?: string;
+  activeMode?: 'tutorial' | 'real';
+  onSwitchMode?: (mode: 'tutorial' | 'real') => void;
+}> = ({ apartment, isSnailMode, isEliteMode, network, activeMode, onSwitchMode }) => {
+  const topOffset = isSnailMode ? rs.h(56) : isEliteMode ? rs.h(40) : 0;
+  
+  return (
+    <View style={[headerStyles.container, { marginTop: topOffset }]}>
+      {/* Chessboard pattern background */}
+      <Svg style={StyleSheet.absoluteFill}>
+        <Defs>
+          <Pattern id="chess" width={40} height={40} patternUnits="userSpaceOnUse">
+            <Rect width={20} height={20} fill={COLORS.chessDark} />
+            <Rect x={20} y={20} width={20} height={20} fill={COLORS.chessDark} />
+            <Rect x={20} width={20} height={20} fill={COLORS.chessLight} />
+            <Rect y={20} width={20} height={20} fill={COLORS.chessLight} />
+          </Pattern>
+        </Defs>
+        <Rect width="100%" height="100%" fill="url(#chess)" />
+      </Svg>
+      
+      {/* Chess pieces silhouettes */}
+      <View style={headerStyles.chessPieces}>
+        <Text style={headerStyles.pieceText}>♔</Text>
+        <Text style={headerStyles.pieceText}>♞</Text>
+        <Text style={headerStyles.pieceText}>♕</Text>
+        <Text style={headerStyles.pieceText}>♜</Text>
+        <Text style={headerStyles.pieceText}>♗</Text>
+      </View>
+      <TouchableOpacity
+        onPress={() => {
+          console.log('[Toggle] onSwitchMode exists:', !!onSwitchMode);
+        if (!onSwitchMode) { console.log('[Toggle] onSwitchMode is undefined!'); return; }
+          const next = activeMode === "tutorial" ? "real" : "tutorial";
+          Alert.alert(
+            next === "real" ? "Switch to Real KAS?" : "Switch to Tutorial?",
+            next === "real" ? "You will use REAL Kaspa (mainnet). Transactions cost real money." : "Switch to Tutorial mode (testnet). Free tKAS for testing.",
+            [{ text: "Cancel", style: "cancel" }, { text: next === "real" ? "Go Real" : "Go Tutorial", onPress: () => onSwitchMode(next) }]
+          );
+        }}
+        style={{ backgroundColor: activeMode === "real" ? "#10B981" : "#F59E0B", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, position: "absolute", top: 8, right: 12 }}
+      >
+        <Text style={{ color: "#000", fontSize: 10, fontWeight: "bold" }}>{activeMode === "real" ? "REAL KAS ($)" : "TUTORIAL (free)"}</Text>
+      </TouchableOpacity>
+      
+      {/* Warm overlay for readability */}
+      <View style={headerStyles.overlay} />
+      
+      {/* Header content */}
+      <View style={headerStyles.content}>
+        <View style={headerStyles.leftSection}>
+          <View style={headerStyles.titleRow}>
+            <MapPin size={rs.s(20)} color={COLORS.amber700} />
+            <Text style={headerStyles.title}>{apartment} Apartment</Text>
+          </View>
+          <Text style={headerStyles.subtitle}>Identity Protocol</Text>
+        </View>
+        
+        <View style={headerStyles.rightSection}>
+          <View style={headerStyles.statusDot} />
+          <View style={headerStyles.avatar}>
+            <User size={rs.s(20)} color={COLORS.amber800} />
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const headerStyles = StyleSheet.create({
+  container: {
+    paddingHorizontal: rs.s(24),
+    paddingTop: rs.s(24),
+    paddingBottom: rs.s(16),
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(180, 83, 9, 0.5)',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  chessPieces: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: 'row',
+    alignItems: 'center',
+    opacity: 0.15,
+  },
+  pieceText: {
+    fontSize: rs.font(48),
+    color: '#1a1a1a',
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 251, 235, 0.6)',
+  },
+  content: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  leftSection: {},
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: rs.s(8),
+  },
+  title: {
+    fontSize: rs.font(20),
+    fontWeight: '900',
+    color: COLORS.stone900,
+  },
+  subtitle: {
+    fontSize: rs.font(10),
+    fontWeight: 'bold',
+    color: COLORS.amber800,
+    textTransform: 'uppercase',
+    letterSpacing: -0.5,
+    marginTop: rs.s(2),
+  },
+  rightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: rs.s(8),
+  },
+  statusDot: {
+    width: rs.s(8),
+    height: rs.s(8),
+    borderRadius: rs.s(4),
+    backgroundColor: COLORS.green500,
+  },
+  avatar: {
+    width: rs.s(40),
+    height: rs.s(40),
+    backgroundColor: COLORS.amber100,
+    borderWidth: 2,
+    borderColor: COLORS.amber600,
+    borderRadius: rs.s(20),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
+
+// ============================================================================
+// SNAIL POISON BANNER
+// ============================================================================
+const SnailModeBanner: React.FC<{ threshold: number }> = ({ threshold }) => {
+  const pulseAnim = React.useRef(new Animated.Value(1)).current;
+  
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.7, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  
+  return (
+    <Animated.View style={[bannerStyles.snailBanner, { opacity: pulseAnim }]}>
+      <View style={bannerStyles.bannerContent}>
+        <Text style={bannerStyles.bannerEmoji}>🐌</Text>
+        <View>
+          <Text style={bannerStyles.bannerTitle}>SNAIL POISON ACTIVE</Text>
+          <Text style={bannerStyles.bannerText}>
+            Your XP is below {threshold}. App is throttled. Complete successful transactions to recover.
+          </Text>
+        </View>
+        <Text style={bannerStyles.bannerEmoji}>🐌</Text>
+      </View>
+    </Animated.View>
+  );
+};
+
+// Elite Mode Banner
+const EliteModeBanner: React.FC = () => (
+  <View style={bannerStyles.eliteBanner}>
+    <View style={bannerStyles.bannerContent}>
+      <Text style={bannerStyles.eliteEmoji}>⚡</Text>
+      <Text style={bannerStyles.eliteTitle}>ELITE STATUS ACTIVE</Text>
+      <Text style={bannerStyles.eliteText}>Priority access • 120 req/min • Gold features</Text>
+      <Text style={bannerStyles.eliteEmoji}>⚡</Text>
+    </View>
+  </View>
+);
+
+const bannerStyles = StyleSheet.create({
+  snailBanner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    paddingVertical: rs.s(12),
+    paddingHorizontal: rs.s(16),
+  },
+  snailBannerGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  bannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: rs.s(8),
+  },
+  bannerEmoji: {
+    fontSize: rs.font(24),
+  },
+  bannerTitle: {
+    fontWeight: '900',
+    fontSize: rs.font(12),
+    color: '#fff',
+    textAlign: 'center',
+  },
+  bannerText: {
+    fontSize: rs.font(10),
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center',
+  },
+  eliteBanner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    backgroundColor: COLORS.purple600,
+    paddingVertical: rs.s(8),
+    paddingHorizontal: rs.s(16),
+  },
+  eliteEmoji: {
+    fontSize: rs.font(16),
+  },
+  eliteTitle: {
+    fontWeight: '900',
+    fontSize: rs.font(12),
+    color: '#fff',
+  },
+  eliteText: {
+    fontSize: rs.font(10),
+    color: 'rgba(255,255,255,0.9)',
+  },
+});
+
+// ============================================================================
+// NAV BUTTON (Bottom Tab)
+// ============================================================================
+interface NavButtonProps {
+  active: boolean;
+  icon: any;
+  label: string;
+  onPress: () => void;
+}
+
+const NavButton: React.FC<NavButtonProps> = ({ active, icon: Icon, label, onPress }) => (
+  <TouchableOpacity 
+    style={[navStyles.button, active && navStyles.buttonActive]} 
+    onPress={onPress}
+    activeOpacity={0.7}
+  >
+    {typeof Icon === 'string' ? (
+      <Text style={navStyles.iconEmoji}>{Icon}</Text>
+    ) : (
+      <Icon 
+        size={rs.s(20)} 
+        color={active ? COLORS.amber700 : COLORS.stone400} 
+      />
+    )}
+    <Text style={[navStyles.label, active && navStyles.labelActive]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
+
+const navStyles = StyleSheet.create({
+  button: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: rs.s(8),
+    paddingHorizontal: rs.s(16),
+    borderRadius: rs.s(12),
+  },
+  buttonActive: {
+    backgroundColor: COLORS.amber100,
+  },
+  iconEmoji: {
+    fontSize: rs.font(20),
+  },
+  label: {
+    fontSize: rs.font(10),
+    fontWeight: 'bold',
+    color: COLORS.stone400,
+    marginTop: rs.s(4),
+  },
+  labelActive: {
+    color: COLORS.amber700,
+  },
+});
+
+// ============================================================================
+// CARD COMPONENT
+// ============================================================================
+const Card: React.FC<{
+  children: React.ReactNode;
+  style?: any;
+  variant?: 'default' | 'amber' | 'green' | 'blue';
+}> = ({ children, style, variant = 'default' }) => {
+  const variantStyles = {
+    default: { backgroundColor: COLORS.cardBg, borderColor: COLORS.stone200 },
+    amber: { backgroundColor: COLORS.amber50, borderColor: COLORS.amber200 },
+    green: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' },
+    blue: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' },
+  };
+  
+  return (
+    <View style={[cardStyles.card, variantStyles[variant], style]}>
+      {children}
+    </View>
+  );
+};
+
+const cardStyles = StyleSheet.create({
+  card: {
+    borderRadius: rs.s(16),
+    padding: rs.s(16),
+    borderWidth: 1,
+  },
+});
+
+// ============================================================================
+// WALLET OVERVIEW PLACEHOLDER
+// ============================================================================
+const WalletOverview: React.FC<{
+  balance: number;
+  xp: number;
+  onDeposit: () => void;
+  onWithdraw: () => void;
+  onSend: () => void;
+  onPayNearby: () => void;
+  onNavigateProfile?: () => void;
+  onNavigateNeighbor?: () => void;
+  onNavigateTxHistory?: () => void;
+  onNavigateTxHistory?: () => void;
+  onNavigatePOBox?: () => void;
+  onSwitchMode?: (mode: 'tutorial' | 'real') => void;
+  balanceSompi?: bigint;
+  inAgreementsSompi?: bigint;
+  iousOwedSompi?: bigint;
+  iousOwedToYouSompi?: bigint;
+  agreementReturnsSompi?: bigint;
+}> = ({ balance, xp, onDeposit, onWithdraw, onSend, onPayNearby, onNavigateProfile, onNavigateNeighbor, onNavigateTxHistory, onNavigatePOBox, activeMode, onSwitchMode, balanceSompi = 0n, inAgreementsSompi = 0n, iousOwedSompi = 0n, iousOwedToYouSompi = 0n, agreementReturnsSompi = 0n }) => {
+  const { formattedPrice, usdPerKas, loading: priceLoading, isStale } = useKaspaPrice({ autoStart: true });
+  const kasBalance = Number(balanceSompi) / 100_000_000;
+  const usdValue = kasBalance * usdPerKas;
+
+  return (
+    <View style={walletStyles.container}>
+      {/* Sloth Poison Meter */}
+      <SlothPoisonBar />
+      {/* Price Card */}
+      <Card style={walletStyles.priceCard}>
+        <View style={walletStyles.priceRow}>
+          <Text style={walletStyles.priceLabel}>Kaspa Price</Text>
+          {isStale && <Text style={walletStyles.staleText}>⚠️</Text>}
+        </View>
+        <Text style={walletStyles.priceValue}>
+          {priceLoading ? '...' : formattedPrice}
+        </Text>
+      </Card>
+
+      {/* Balance Card */}
+      <Card style={walletStyles.balanceCard}>
+        <Text style={walletStyles.balanceLabel}>Balance</Text>
+        <Text style={walletStyles.balanceValue}>
+          {kasBalance.toFixed(4)} KASPA
+        </Text>
+        {usdPerKas > 0 && (
+          <Text style={walletStyles.usdValue}>≈ ${usdValue.toFixed(2)} USD</Text>
+        )}
+        <View style={walletStyles.xpRow}>
+          <Zap size={rs.s(14)} color={COLORS.amber600} />
+          <Text style={walletStyles.xpText}>{xp} XP</Text>
+        </View>
+      </Card>
+    
+    {/* Action Buttons */}
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 4 }}>
+    <View style={[walletStyles.actions, { paddingHorizontal: 4 }]}>
+      <TouchableOpacity style={[walletStyles.actionBtn, { backgroundColor: activeMode === 'real' ? '#10B981' : '#F59E0B', borderRadius: 8 }]} onPress={() => {
+        console.log('[Toggle] onSwitchMode exists:', !!onSwitchMode);
+        if (!onSwitchMode) { console.log('[Toggle] onSwitchMode is undefined!'); return; }
+        const next = activeMode === 'tutorial' ? 'real' : 'tutorial';
+        Alert.alert(
+          next === 'real' ? 'Switch to Real Kaspa?' : 'Switch to Tutorial?',
+          next === 'real' ? 'Transactions will use REAL Kaspa (mainnet).' : 'Switch to Tutorial mode (testnet). Free tKAS.',
+          [{ text: 'Cancel', style: 'cancel' }, { text: next === 'real' ? 'Go Real' : 'Go Tutorial', onPress: () => onSwitchMode(next) }]
+        );
+      }}>
+        <Text style={walletStyles.actionIcon}>{' '}</Text>
+        <Text style={[walletStyles.actionLabel, { color: '#000' }]}>{activeMode === 'real' ? 'Real Kaspa' : 'Tutorial'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={onDeposit}>
+        <Text style={walletStyles.actionIcon}>⬇️</Text>
+        <Text style={walletStyles.actionLabel}>Receive</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={onSend}>
+        <Text style={walletStyles.actionIcon}>📤</Text>
+        <Text style={walletStyles.actionLabel}>Send</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={onPayNearby}>
+        <Text style={walletStyles.actionIcon}>📡</Text>
+        <Text style={walletStyles.actionLabel}>Pay Nearby</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={onNavigateProfile}>
+        <Text style={walletStyles.actionIcon}>{' '}</Text>
+        <Text style={walletStyles.actionLabel}>Profile</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={() => onNavigateTxHistory?.()}>
+        <Text style={walletStyles.actionIcon}>{' '}</Text>
+        <Text style={walletStyles.actionLabel}>History</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={() => onNavigatePOBox?.()}>
+        <Text style={walletStyles.actionIcon}>{' '}</Text>
+        <Text style={walletStyles.actionLabel}>P.O. Box</Text>
+      </TouchableOpacity>
+      
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={() => {
+        require('react-native').Linking.openURL('https://www.kraken.com/prices/kaspa');
+      }}>
+        <Text style={walletStyles.actionIcon}>{' '}</Text>
+        <Text style={walletStyles.actionLabel}>Buy Kaspa</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={() => {
+        require('react-native').Alert.alert(
+          'Cash Out to USD',
+          '1. Send KAS to your Kraken account\n2. Sell KAS for USD on Kraken\n3. Withdraw USD to your bank\n\nDa Village never holds your funds.',
+          [
+            { text: 'Open Kraken', onPress: () => require('react-native').Linking.openURL('https://www.kraken.com/prices/kaspa') },
+            { text: 'Send KAS', onPress: () => onSend?.() },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+      }}>
+        <Text style={walletStyles.actionIcon}>{' '}</Text>
+        <Text style={walletStyles.actionLabel}>Cash Out</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={onNavigateNeighbor}>
+        <Text style={walletStyles.actionIcon}>{' '}</Text>
+        <Text style={walletStyles.actionLabel}>Agreement</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={onNavigateNeighbor}>
+        <Text style={walletStyles.actionIcon}>{' '}</Text>
+        <Text style={walletStyles.actionLabel}>Balance Sheet</Text>
+      </TouchableOpacity>
+    </View>
+    </ScrollView>
+    
+
+
+    {/* Financial Summary */}
+    <Card variant="green" style={walletStyles.statsCard}>
+      <Text style={walletStyles.statsTitle}>Financial Summary</Text>
+      <View style={{ marginTop: 8 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>Wallet Balance</Text>
+          <Text style={{ color: "#D4AF37", fontSize: 13, fontWeight: "bold" }}>{(Number(balanceSompi) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>In Agreements</Text>
+          <Text style={{ color: "#E67E22", fontSize: 13 }}>{(Number(inAgreementsSompi) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>IOUs Owed by You</Text>
+          <Text style={{ color: "#E74C3C", fontSize: 13 }}>{(Number(iousOwedSompi) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+        <View style={{ height: 1, backgroundColor: "#333", marginVertical: 8 }} />
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 14, fontWeight: "bold" }}>Spendable</Text>
+          <Text style={{ color: "#27AE60", fontSize: 14, fontWeight: "bold" }}>{(Math.max(0, Number(balanceSompi) - Number(inAgreementsSompi) - Number(iousOwedSompi)) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+        <View style={{ height: 1, backgroundColor: "#333", marginVertical: 8 }} />
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>IOUs Owed to You</Text>
+          <Text style={{ color: "#27AE60", fontSize: 13 }}>+{(Number(iousOwedToYouSompi) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>Agreement Returns</Text>
+          <Text style={{ color: "#27AE60", fontSize: 13 }}>+{(Number(agreementReturnsSompi) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+        <View style={{ height: 1, backgroundColor: "#333", marginVertical: 8 }} />
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#D4AF37", fontSize: 14, fontWeight: "bold" }}>Potential Balance</Text>
+          <Text style={{ color: "#D4AF37", fontSize: 14, fontWeight: "bold" }}>{((Number(balanceSompi) + Number(iousOwedToYouSompi) + Number(agreementReturnsSompi)) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+      </View>
+    </Card>
+
+    {/* Village Stats */}
+    <Card variant="green" style={walletStyles.statsCard}>
+      <Text style={walletStyles.statsTitle}>Your Stats</Text>
+      <View style={walletStyles.statsRow}>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>{xp >= 2000 ? "Archon" : xp >= 1000 ? "Sentinel" : xp >= 500 ? "Custodian" : xp >= 200 ? "Verified" : "Base"}</Text>
+          <Text style={walletStyles.statLabel}>Tier</Text>
+        </View>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>{xp}</Text>
+          <Text style={walletStyles.statLabel}>XP</Text>
+        </View>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>Unknown</Text>
+          <Text style={walletStyles.statLabel}>Risk Rating</Text>
+        </View>
+      </View>
+      <View style={[walletStyles.statsRow, { marginTop: 8 }]}>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>0</Text>
+          <Text style={walletStyles.statLabel}>Completed</Text>
+        </View>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>0</Text>
+          <Text style={walletStyles.statLabel}>Deadlocks</Text>
+        </View>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>N/A</Text>
+          <Text style={walletStyles.statLabel}>P(Complete)</Text>
+        </View>
+      </View>
+      <View style={[walletStyles.statsRow, { marginTop: 8 }]}>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>0</Text>
+          <Text style={walletStyles.statLabel}>Storefronts</Text>
+        </View>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>0</Text>
+          <Text style={walletStyles.statLabel}>DApps</Text>
+        </View>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>{"No"}</Text>
+          <Text style={walletStyles.statLabel}>Snail Poison</Text>
+        </View>
+      </View>
+    </Card>
+    </View>
+  );
+};
+
+const walletStyles = StyleSheet.create({
+  container: {
+    padding: rs.s(16),
+    gap: rs.s(16),
+  },
+  priceCard: {
+    alignItems: 'center',
+    backgroundColor: COLORS.amber50,
+    borderColor: COLORS.amber200,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: rs.s(4),
+  },
+  priceLabel: {
+    fontSize: rs.font(10),
+    color: COLORS.amber700,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  priceValue: {
+    fontSize: rs.font(20),
+    fontWeight: '900',
+    color: COLORS.amber800,
+    marginTop: rs.s(4),
+  },
+  staleText: {
+    fontSize: rs.font(12),
+  },
+  usdValue: {
+    fontSize: rs.font(12),
+    color: COLORS.stone400,
+    marginTop: rs.s(2),
+  },
+  balanceCard: {
+    alignItems: 'center',
+    backgroundColor: COLORS.stone800,
+    borderColor: COLORS.stone700,
+  },
+  balanceLabel: {
+    fontSize: rs.font(12),
+    color: COLORS.stone400,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  balanceValue: {
+    fontSize: rs.font(32),
+    fontWeight: '900',
+    color: '#fff',
+    marginVertical: rs.s(8),
+  },
+  xpRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: rs.s(4),
+  },
+  xpText: {
+    fontSize: rs.font(14),
+    color: COLORS.amber600,
+    fontWeight: 'bold',
+  },
+  actions: {
+    flexDirection: 'row',
+  },
+  actionBtn: {
+    alignItems: 'center',
+    backgroundColor: COLORS.cardBg,
+    paddingVertical: rs.s(16),
+    paddingHorizontal: rs.s(24),
+    borderRadius: rs.s(16),
+    borderWidth: 1,
+    borderColor: COLORS.stone200,
+  },
+  actionIcon: {
+    fontSize: rs.font(24),
+  },
+  actionLabel: {
+    fontSize: rs.font(12),
+    fontWeight: 'bold',
+    color: COLORS.stone700,
+    marginTop: rs.s(4),
+  },
+  statsCard: {
+    marginTop: rs.s(8),
+  },
+  statsTitle: {
+    fontSize: rs.font(12),
+    fontWeight: '900',
+    color: COLORS.green600,
+    textTransform: 'uppercase',
+    marginBottom: rs.s(12),
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: rs.font(18),
+    fontWeight: '900',
+    color: COLORS.stone800,
+  },
+  statLabel: {
+    fontSize: rs.font(10),
+    color: COLORS.stone500,
+    marginTop: rs.s(2),
+  },
+});
+
+// ============================================================================
+// MAIN DASHBOARD COMPONENT
+// ============================================================================
+interface DashboardProps {
+  user: {
+    apartment: string;
+    xp: number;
+    pubkey?: string;
+  };
+  balance: number;
+  isSnailMode?: boolean;
+  isEliteMode?: boolean;
+  snailThreshold?: number;
+  navigation?: any;
+  onNavigateMailbox?: () => void;
+  onNavigateWorkspace?: () => void;
+  onNavigateEntertainment?: () => void;
+  onNavigateProfile?: () => void;
+  onNavigateNeighbor?: () => void;
+
+  onNavigateSendKas?: () => void;
+  onNavigateTownHall?: () => void;
+  onNavigatePayNearby?: () => void;
+  onNavigateBathroom?: () => void;
+  onNavigateReceive?: () => void;
+  onNavigateTxHistory?: () => void;
+  onNavigateTxHistory?: () => void;
+  onNavigatePOBox?: () => void;
+}
+
+
+export const Dashboard: React.FC<DashboardProps> = ({
+  user,
+  balance,
+  isSnailMode = false,
+  isEliteMode = false,
+  snailThreshold = 150,
+  navigation,
+  onNavigateMailbox,
+  onNavigateWorkspace,
+  onNavigateEntertainment,
+  onNavigateProfile,
+  onNavigateNeighbor,
+  onNavigateSendKas,
+  onNavigateTownHall,
+  onNavigatePayNearby,
+  onNavigateBathroom,
+  onNavigateReceive,
+  onNavigateTxHistory,
+  onNavigatePOBox,
+  activeMode = 'tutorial',
+  onSwitchMode,
+  balanceSompi = 0n,
+}) => {
+
+  const [activeTab, setActiveTab] = useState<'wallet' | 'mailbox' | 'workspace' | 'bathroom'>('wallet');
+  const [avatarConfig, setAvatarConfig] = useState<{ race: string; class: string; occupation: string; name: string } | null>(null);
+  const [kaspaAddress, setKaspaAddress] = useState<string>('');
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const str = await SecureStore.getItemAsync("kv_avatar_recipe");
+        if (str) {
+          const r = JSON.parse(str);
+          setAvatarConfig({ race: r.race || "human", class: r.class || "Warrior", occupation: r.occupation || "", name: r.name || "", gender: r.gender || "" });
+        }
+        const addr = await SecureStore.getItemAsync("kaspa_address");
+        if (addr) setKaspaAddress(addr);
+      } catch {}
+    };
+    loadConfig();
+  }, []);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    // Refresh data from Arweave/API
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setRefreshing(false);
+  }, []);
+  
+  const handleSend = useCallback(() => {
+    onNavigateSendKas?.();
+  }, [onNavigateSendKas]);
+  
+  const handleTownHall = useCallback(() => {
+    onNavigateTownHall?.();
+  }, [onNavigateTownHall]);
+  
+  return (
+    <DynamicBackground activeTab={activeTab} avatarConfig={avatarConfig || undefined}>
+      <View style={dashStyles.container}>
+        {/* Status Banners */}
+        {isSnailMode && <SnailModeBanner threshold={snailThreshold} />}
+        {isEliteMode && <EliteModeBanner />}
+        
+        {/* Header */}
+        <ChessboardHeader 
+          apartment={user.apartment}
+          isSnailMode={isSnailMode}
+          isEliteMode={isEliteMode}
+          network={activeMode === 'real' ? 'mainnet' : 'testnet-10'}
+          activeMode={activeMode}
+          onSwitchMode={onSwitchMode}
+        />
+        
+        {/* Main Content */}
+        <ScrollView
+          style={dashStyles.scrollView}
+          contentContainerStyle={dashStyles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={COLORS.amber600}
+            />
+          }
+        >
+          {activeTab === 'wallet' && (
+            <WalletOverview
+              balance={balance}
+              balanceSompi={balanceSompi}
+              xp={user.xp}
+              onDeposit={() => onNavigateReceive?.()}
+              onWithdraw={() => onNavigateSendKas?.()}
+              onSend={handleSend}
+              onNavigateProfile={onNavigateProfile}
+              activeMode={activeMode}
+              onSwitchMode={onSwitchMode}
+              onNavigateNeighbor={onNavigateNeighbor}
+              onNavigateTxHistory={onNavigateTxHistory}
+              onNavigatePOBox={onNavigatePOBox}
+              onPayNearby={() => onNavigatePayNearby?.()}
+            />
+          )}
+          
+          {activeTab === 'mailbox' && (
+            <TouchableOpacity style={dashStyles.placeholder} onPress={onNavigateMailbox} activeOpacity={0.7}>
+              <Text style={dashStyles.placeholderText}>📬 Village / Mailbox</Text>
+              <Text style={dashStyles.placeholderSub}>Browse storefronts, coupons, DApps</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                <TouchableOpacity
+                  style={{ backgroundColor: '#D4AF37', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20 }}
+                  onPress={onNavigateMailbox}
+                >
+                  <Text style={{ color: '#1A1A1A', fontWeight: 'bold' }}>Browse Storefronts</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ backgroundColor: '#4A90D9', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20 }}
+                  onPress={onNavigateEntertainment}
+                >
+                  <Text style={{ color: '#FFF', fontWeight: 'bold' }}>DApps</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={{ backgroundColor: '#4CAF50', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, marginTop: 8 }}
+                onPress={onNavigateNeighbor}
+              >
+                <Text style={{ color: '#FFF', fontWeight: 'bold' }}>🤝 New Trade Agreement</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          )}
+          
+          {activeTab === 'workspace' && (
+            <TouchableOpacity style={dashStyles.placeholder} onPress={onNavigateWorkspace} activeOpacity={0.7}>
+              <Text style={dashStyles.placeholderText}>🔧 Workspace</Text>
+              <Text style={dashStyles.placeholderSub}>Build your storefront, manage listings</Text>
+              <TouchableOpacity
+                style={{ backgroundColor: '#D4AF37', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, marginTop: 12 }}
+                onPress={onNavigateWorkspace}
+              >
+                <Text style={{ color: '#1A1A1A', fontWeight: 'bold' }}>Open Workspace</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          )}
+          
+          {activeTab === 'bathroom' && (
+            <TouchableOpacity style={dashStyles.placeholder} onPress={onNavigateProfile} activeOpacity={0.7}>
+              <Text style={dashStyles.placeholderText}>🪞 Bathroom Mirror</Text>
+              <Text style={dashStyles.placeholderSub}>View your avatar, trade history, reputation</Text>
+              <TouchableOpacity
+                style={{ backgroundColor: '#9932CC', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, marginTop: 12 }}
+                onPress={onNavigateProfile}
+              >
+                <Text style={{ color: '#FFF', fontWeight: 'bold' }}>View Profile</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+        
+        {/* Bottom Navigation */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: COLORS.cardBg, borderTopWidth: 2, borderTopColor: COLORS.amber100 }} contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingVertical: rs.s(16), paddingBottom: rs.s(32), paddingHorizontal: 8 }}>
+          <NavButton 
+            active={activeTab === 'wallet'} 
+            icon={Wallet} 
+            label="Wallet" 
+            onPress={() => setActiveTab('wallet')} 
+          />
+          <NavButton 
+            active={activeTab === 'mailbox'} 
+            icon={Mail} 
+            label="Village" 
+            onPress={() => onNavigateMailbox?.()} 
+          />
+          <NavButton 
+            active={activeTab === 'workspace'} 
+            icon={Store} 
+            label="🔧 Workspace" 
+            onPress={() => onNavigateWorkspace?.()} 
+          />
+          <NavButton 
+            active={activeTab === 'bathroom'} 
+            icon={Scale} 
+            label="🪞 Mirror" 
+            onPress={() => onNavigateBathroom?.()} 
+          />
+          <NavButton 
+            active={false} 
+            icon={ShieldCheck} 
+            label="🏛️ Town Hall" 
+            onPress={handleTownHall} 
+          />
+        </ScrollView>
+      </View>
+    </DynamicBackground>
+  );
+};
+
+const dashStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    paddingBottom: rs.h(100), // Space for bottom nav
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: rs.s(24),
+  },
+  bottomNav: {},
+  placeholder: {
+    margin: rs.s(16),
+    alignItems: 'center',
+    paddingVertical: rs.s(48),
+  },
+  placeholderText: {
+    fontSize: rs.font(24),
+    fontWeight: '900',
+    color: COLORS.stone800,
+  },
+  placeholderSub: {
+    fontSize: rs.font(14),
+    color: COLORS.stone500,
+    marginTop: rs.s(8),
+  },
+});
+
+export default memo(Dashboard);
