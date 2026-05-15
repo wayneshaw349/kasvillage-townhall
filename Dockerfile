@@ -24,7 +24,7 @@ RUN cargo build --release 2>/dev/null || true
 RUN rm -rf src
 
 # Copy actual source
-COPY townhall_merged.rs src/main.rs
+COPY src/main.rs src/main.rs
 
 # Build release
 RUN cargo build --release
