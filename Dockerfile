@@ -21,7 +21,7 @@ COPY Cargo.toml Cargo.lock* ./
 # Create dummy main for dependency pre-build
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release 2>/dev/null || true
-RUN rm -rf src target/release
+RUN rm -rf src target
 
 # Copy actual source
 COPY src/main.rs src/main.rs
