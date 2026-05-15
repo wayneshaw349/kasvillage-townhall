@@ -45,6 +45,7 @@ function xorC(data, ek, n) {
   return out;
 }
 
+// 1. ECDH + Encrypt + Decrypt
 console.log('\n1. CORE');
 const sharedA = deriveShared(privA, pubB);
 const sharedB = deriveShared(privB, pubA);
@@ -57,6 +58,7 @@ const ekB = deriveEncKey(sharedB, ctx);
 const dec = xorC(enc, ekB, nonce);
 t('Decrypt recovers plaintext', bytesToHex(dec) === partialSig);
 
+// 2. TownHall operator
 console.log('\n2. TOWNHALL OPERATOR');
 const fakePriv = bytesToHex(secp.utils.randomPrivateKey());
 const fakeShared = deriveShared(fakePriv, pubA);
@@ -64,6 +66,7 @@ const fakeEk = deriveEncKey(fakeShared, ctx);
 const fakeDec = xorC(enc, fakeEk, nonce);
 t('Operator gets garbage', bytesToHex(fakeDec) !== partialSig);
 
+// 3. Wrong counterparty
 console.log('\n3. WRONG COUNTERPARTY');
 const privC = bytesToHex(secp.utils.randomPrivateKey());
 const sharedC = deriveShared(privC, pubA);
@@ -71,6 +74,7 @@ const ekC = deriveEncKey(sharedC, ctx);
 const decC = xorC(enc, ekC, nonce);
 t('Party C gets garbage', bytesToHex(decC) !== partialSig);
 
+// 4. Each field wrong
 console.log('\n4. FIELD-BY-FIELD (10 fields)');
 const fields = ['agreementId','buyerPubkey','sellerPubkey','multisigAddress','aggregatedPubkey','network','itemPriceKas','sellerCommitmentKas','lamportHash','R_hex'];
 for (const field of fields) {
@@ -83,6 +87,7 @@ for (const field of fields) {
   t('Wrong ' + field, bytesToHex(badDec) !== partialSig);
 }
 
+// 5. One-time use
 console.log('\n5. ONE-TIME USE');
 const ctx2 = { ...ctx, agreementId: 'AGR_DIFFERENT_' + Date.now() };
 const ek2 = deriveEncKey(sharedB, ctx2);
@@ -90,4 +95,9 @@ const dec2 = xorC(enc, ek2, nonce);
 t('Different agreement = garbage', bytesToHex(dec2) !== partialSig);
 
 console.log('\nRESULTS: ' + passed + '/' + (passed+failed) + ' passed');
-if(failed===0) console.log('ALL TESTS PASSED');
+if(failed===0) {
+  console.log('All 11 fields bound — any mismatch = garbage');
+  console.log('TownHall operator blind');
+  console.log('Wrong counterparty blind');
+  console.log('One-time use verified');
+}

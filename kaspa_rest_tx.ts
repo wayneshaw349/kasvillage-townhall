@@ -513,3 +513,190 @@ export async function getBalanceRest(address: string, network: KaspaNetwork): Pr
   const data = await resp.json();
   return BigInt(data.balance);
 }
+
+// ============================================================================
+// FROST Release: Send from FROST address using pre-computed aggregate signature
+// Instead of signing with a private key, uses the aggregate Schnorr sig
+// from the FROST partial sig exchange
+// ============================================================================
+export async function sendKaspaWithSignature(params: {
+  senderAddress: string;
+  recipientAddress: string;
+  amountSompi: bigint;
+  aggregateSignature: string;  // 64-byte hex Schnorr sig (aggregated from both parties)
+  aggregatePubkey: string;     // 33-byte compressed pubkey of the FROST address
+  network: string;
+  recipients?: Array<{ address: string; amount: bigint }>;
+}): Promise<{ success: boolean; txId?: string; error?: string }> {
+  const { senderAddress, recipientAddress, amountSompi, aggregateSignature, aggregatePubkey, network } = params;
+
+  try {
+    // 1. Fetch UTXOs for the FROST address
+    const apiBase = network === 'mainnet' ? 'https://api.kaspa.org' : 'https://api-tn.kaspa.org';
+    const utxoResp = await fetch(apiBase + '/addresses/' + senderAddress + '/utxos');
+    if (!utxoResp.ok) return { success: false, error: 'Failed to fetch FROST UTXOs' };
+    const utxos = await utxoResp.json();
+    
+    if (!utxos || utxos.length === 0) {
+      return { success: false, error: 'No UTXOs in FROST address' };
+    }
+
+    // 2. Select UTXOs to cover amount + fee
+    const FEE = 10000n; // 0.0001 KAS
+    const needed = amountSompi + FEE;
+    let total = 0n;
+    const selectedUtxos: any[] = [];
+    for (const u of utxos) {
+      selectedUtxos.push(u);
+      total += BigInt(u.utxoEntry.amount);
+      if (total >= needed) break;
+    }
+    if (total < needed) return { success: false, error: 'Insufficient FROST balance' };
+
+    // 3. Build outputs
+    const outputs: any[] = [];
+    if (params.recipients && params.recipients.length > 0) {
+      // Multi-output (simple collateral return)
+      for (const r of params.recipients) {
+        outputs.push({
+          amount: r.amount.toString(),
+          scriptPublicKey: { scriptPublicKey: addressToScriptPubKey(r.address), version: 0 },
+        });
+      }
+    } else {
+      outputs.push({
+        amount: amountSompi.toString(),
+        scriptPublicKey: { scriptPublicKey: addressToScriptPubKey(recipientAddress), version: 0 },
+      });
+    }
+    
+    // Change output
+    const outputTotal = outputs.reduce((s, o) => s + BigInt(o.amount), 0n);
+    const change = total - outputTotal - FEE;
+    if (change > 0n) {
+      outputs.push({
+        amount: change.toString(),
+        scriptPublicKey: { scriptPublicKey: addressToScriptPubKey(senderAddress), version: 0 },
+      });
+    }
+
+    // 4. Build inputs with the AGGREGATE signature
+    // The aggregate Schnorr sig is valid for ALL inputs from this FROST address
+    // because they all share the same scriptPubKey (same aggregate pubkey)
+    const SIG_HASH_ALL = 0x01;
+    const sigBytes = hexToBytes(aggregateSignature);
+    const sigWithType = new Uint8Array(sigBytes.length + 1);
+    sigWithType.set(sigBytes);
+    sigWithType[sigBytes.length] = SIG_HASH_ALL;
+    
+    const sigScript = new Uint8Array(1 + sigWithType.length);
+    sigScript[0] = sigWithType.length;
+    sigScript.set(sigWithType, 1);
+    const sigScriptHex = bytesToHex(sigScript);
+
+    // BUT: each input needs its OWN sighash signed
+    // The aggregate sig was computed for a specific sighash
+    // For multiple UTXOs, we need per-input sighashes
+    // For simplicity: if there's only 1 UTXO, use the aggregate sig directly
+    // For multiple UTXOs: the FROST protocol needs to produce a sig per input
+    
+    // IMPORTANT: For the initial implementation, we handle single-UTXO FROST addresses
+    // Most FROST addresses will have exactly 1 UTXO (the collateral deposit)
+    // Multi-UTXO FROST will be handled in a future update
+    
+    if (selectedUtxos.length > 1) {
+      console.warn('[FROST] Multiple UTXOs in FROST address — using first UTXO only');
+      // Recalculate with single UTXO
+      const singleUtxo = selectedUtxos[0];
+      const singleAmount = BigInt(singleUtxo.utxoEntry.amount);
+      if (singleAmount < needed) {
+        return { success: false, error: 'Single UTXO insufficient. Multi-UTXO FROST not yet supported.' };
+      }
+      selectedUtxos.length = 1;
+      // Recalculate change
+      const newChange = singleAmount - outputTotal - FEE;
+      if (newChange > 0n) {
+        // Update or add change output
+        const changeOut = outputs.find(o => o.scriptPublicKey.scriptPublicKey === addressToScriptPubKey(senderAddress));
+        if (changeOut) changeOut.amount = newChange.toString();
+        else outputs.push({
+          amount: newChange.toString(),
+          scriptPublicKey: { scriptPublicKey: addressToScriptPubKey(senderAddress), version: 0 },
+        });
+      }
+    }
+
+    const signedInputs = selectedUtxos.map(u => ({
+      previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+      signatureScript: sigScriptHex,
+      sequence: '0',
+      sigOpCount: 1,
+    }));
+
+    // 5. Submit transaction
+    const txBody = {
+      transaction: {
+        version: 0,
+        inputs: signedInputs,
+        outputs,
+        lockTime: '0',
+        subnetworkId: '0000000000000000000000000000000000000000',
+        gas: '0',
+        payload: '',
+      },
+    };
+
+    const submitResp = await fetch(apiBase + '/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(txBody),
+    });
+
+    if (!submitResp.ok) {
+      const errText = await submitResp.text();
+      return { success: false, error: 'L1 rejected: ' + errText };
+    }
+
+    const result = await submitResp.json();
+    return { success: true, txId: result.transactionId || result.txId || '' };
+
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// Helper: convert address to scriptPubKey (reuse existing if available)
+function addressToScriptPubKey(address: string): string {
+  // Kaspa P2PK scriptPubKey: OP_DATA_32 <32-byte-pubkey> OP_CHECKSIG
+  // Decode bech32 address to get the pubkey hash
+  // The address payload (after prefix:) is the x-only pubkey in bech32
+  const parts = address.split(':');
+  if (parts.length !== 2) throw new Error('Invalid address format');
+  const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+  const data: number[] = [];
+  for (const c of parts[1]) {
+    const idx = CHARSET.indexOf(c);
+    if (idx === -1) throw new Error('Invalid bech32 char: ' + c);
+    data.push(idx);
+  }
+  // Remove checksum (last 8 chars = 8 * 5 bits)
+  const dataWithoutChecksum = data.slice(0, data.length - 8);
+  // Version byte
+  const version = dataWithoutChecksum[0];
+  // Convert 5-bit groups to 8-bit bytes
+  const payload5bit = dataWithoutChecksum.slice(1);
+  const payload: number[] = [];
+  let acc = 0, bits = 0;
+  for (const v of payload5bit) {
+    acc = (acc << 5) | v;
+    bits += 5;
+    while (bits >= 8) {
+      bits -= 8;
+      payload.push((acc >> bits) & 0xff);
+    }
+  }
+  // payload should be 32 bytes (x-only pubkey) or 33 bytes
+  const pubkeyHex = payload.map(b => b.toString(16).padStart(2, '0')).join('');
+  // P2PK: 20 <32-bytes> ac (OP_DATA_32 <pubkey> OP_CHECKSIG)
+  return '20' + pubkeyHex.slice(0, 64) + 'ac';
+}

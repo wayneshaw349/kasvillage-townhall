@@ -1098,15 +1098,18 @@ export async function completeFrostAndBroadcast(params: {
     if (!theirSig) return { success: false, error: 'Counterparty signature not available yet' };
 
     const aggregateSig = aggregatePartialSigs(myResult.partialSig, theirSig);
-    // Build and submit real L1 transaction to spend from FROST address
+    // Build and submit FROST release TX using aggregate Schnorr signature
+    // No private key needed — the aggregate sig IS the authorization
     try {
-      const { sendKaspaViaRest } = await import('./kaspa_rest_tx');
-      const result = await sendKaspaViaRest({
+      const { sendKaspaWithSignature } = await import('./kaspa_rest_tx');
+      const result = await sendKaspaWithSignature({
         senderAddress: frostAddress.address,
-        recipientAddress,
+        recipientAddress: recipientAddress || '',
         amountSompi,
-        privateKeyHex: myPrivateKeyHex, // aggregate key holder signs
+        aggregateSignature: aggregateSig,
+        aggregatePubkey: frostAddress.aggregatedPubkey,
         network: frostAddress.network,
+        recipients: params.recipients,
       });
       if (!result.success) return { success: false, error: result.error || 'L1 broadcast failed' };
       const txId = result.txId || '';
