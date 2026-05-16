@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/
 WORKDIR /app
 COPY --from=builder /app/target/release/kasvillage-townhall /app/townhall
 RUN ldd /app/townhall || echo "Static or missing libs"
-ENV PORT=33807
+# PORT set by Flux env
 ENV KV_MODE=townhall
 ENV RUST_LOG=info
-EXPOSE 33807
+EXPOSE 35816
 CMD ["/app/townhall"]
