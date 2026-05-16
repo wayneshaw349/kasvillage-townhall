@@ -596,7 +596,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
       }
       
       // Call Town Hall API
-      const response = await fetch(`http://10.0.0.186:8080/api/scan`, {
+      const response = await fetch(`https://kasvillage.app.runonflux.io/api/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: query }),
@@ -672,7 +672,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         payload.stats_hash = await generateStatsHash(myStats);
       }
       
-      const response = await fetch('http://10.0.0.186:8080/api/verify/store', {
+      const response = await fetch('https://kasvillage.app.runonflux.io/api/verify/store', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -730,7 +730,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     setIsLoadingProofs(true);
     
     try {
-      const response = await fetch(`http://10.0.0.186:8080/api/proofs/query`, {
+      const response = await fetch(`https://kasvillage.app.runonflux.io/api/proofs/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subject_id: myAddress || myApt, proof_type: null }),
@@ -791,7 +791,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
   // Handle APT conflict resolution
   const handleChangeApt = async (newApt: string) => {
     try {
-      const response = await fetch('http://10.0.0.186:8080/api/apt/register', {
+      const response = await fetch('https://kasvillage.app.runonflux.io/api/apt/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -829,7 +829,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     setIsVerifying(true);
     
     try {
-      const response = await fetch('http://10.0.0.186:8080/verify-identity', {
+      const response = await fetch('https://kasvillage.app.runonflux.io/verify-identity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

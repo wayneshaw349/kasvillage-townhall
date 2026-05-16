@@ -755,6 +755,7 @@ export async function inscribeAgreementToArweave(agreement: {
   signature: string;
   counterpartyPubkey?: string;
   frostAddress?: string;
+  daaScore?: number;
 }): Promise<IrysUploadResult> {
   const tags: ArweaveTag[] = [
     { name: 'App-Name', value: 'KasVillage' },
@@ -766,6 +767,7 @@ export async function inscribeAgreementToArweave(agreement: {
     { name: 'KV-Network', value: agreement.network },
     { name: 'KV-Amount', value: String(agreement.amount_sompi) },
     { name: 'KV-Description', value: (agreement.description || '').slice(0, 100) },
+    { name: 'KV-DAAScore', value: String(agreement.daaScore || 0) },
     { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
   ];
   if (agreement.frostAddress) {

@@ -636,7 +636,7 @@ export const AppNavigator: React.FC = () => {
           try {
             const pubkey = await SecureStore.getItemAsync('kv_l1_pubkey');
             if (pubkey) {
-              const agResp = await fetch('http://10.0.0.186:8080/api/agreements/proposed');
+              const agResp = await fetch('https://kasvillage.app.runonflux.io/api/agreements/proposed');
               if (agResp.ok) {
                 const agreements = await agResp.json();
                 let inAg = 0n;

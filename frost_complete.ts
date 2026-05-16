@@ -459,35 +459,6 @@ export function createPartialSigLocal(params: {
     messageHash,
     publicKey: myPubkey,
   };
-}): FrostPartialSig {
-  const { frostAddress, recipientAddress, amountSompi, privateKeyHex, recipients } = params;
-
-  const message = JSON.stringify({
-    frost: frostAddress.address,
-    to: recipientAddress || (recipients ? recipients.map(r => r.address).join(',') : ''),
-    amount: amountSompi.toString(),
-    recipients: recipients ? recipients.map(r => ({ address: r.address, amount: r.amount.toString() })) : undefined,
-    ts: Math.floor(Date.now() / 1000),
-  });
-
-  const messageHash = bytesToHex(sha256(new TextEncoder().encode(message)));
-  const privKey = hexToBytes(privateKeyHex);
-
-  // @noble/secp256k1 v2: sign returns DER object; use toCompactRawBytes()
-  const sig = (secp as any).sign(hexToBytes(messageHash), privKey) as {
-    toCompactRawBytes: () => Uint8Array;
-  };
-  const partialSig = bytesToHex(sig.toCompactRawBytes());
-  const signerPubkey = bytesToHex((secp as any).getPublicKey(privKey, true) as Uint8Array);
-
-  return {
-    partialSig,
-    messageHash,
-    signerPubkey,
-    recipientAddress,
-    amountSompi,
-    timestamp: Date.now(),
-  };
 }
 
 export function aggregatePartialSigs(sigA: string, sigB: string): string {

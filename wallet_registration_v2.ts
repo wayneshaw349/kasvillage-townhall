@@ -943,7 +943,7 @@ export async function getUserStats(): Promise<UserStats> {
     const pubkey = await SecureStore.getItemAsync('kv_public_key');
     console.log('[getUserStats] pubkey:', pubkey?.slice(0, 16));
     if (pubkey) {
-      const resp = await fetch('http://10.0.0.186:8080' + '/user-stats', {
+      const resp = await fetch('https://kasvillage.app.runonflux.io' + '/user-stats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pubkey }),

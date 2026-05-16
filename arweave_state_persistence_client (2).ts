@@ -22,7 +22,7 @@ const SK = {
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ARWEAVE_GATEWAY   = 'https://arweave.net';
 const TURBO_URL         = 'https://upload.ardrive.io/v1/tx';
-const TOWN_HALL_URL     = process.env.EXPO_PUBLIC_TOWN_HALL_URL ?? 'http://localhost:8080';
+const TOWN_HALL_URL     = process.env.EXPO_PUBLIC_TOWN_HALL_URL ?? 'https://kasvillage.app.runonflux.io';
 const OFFLINE_QUEUE_KEY = 'kv_arweave_queue';
 
 // ── Types ────────────────────────────────────────────────────────────────────

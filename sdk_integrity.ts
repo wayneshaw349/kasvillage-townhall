@@ -150,7 +150,7 @@ export async function publishSDKToArweave(params: {
 // ============================================================================
 
 const TOWNHALL_BASE = __DEV__
-  ? 'http://10.0.0.186:8080'
+  ? 'https://kasvillage.app.runonflux.io'
   : 'https://townhall.kasvillage.dev';
 
 export async function registerDApp(params: {

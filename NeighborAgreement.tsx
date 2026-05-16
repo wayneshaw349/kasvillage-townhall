@@ -1174,7 +1174,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
 
         // Triple-check: TownHall + L1 address + DAA
       try {
-        const thResp = await fetch('http://10.0.0.186:8080/api/agreement/' + (contract.agreementId || ''));
+        const thResp = await fetch('https://kasvillage.app.runonflux.io/api/agreement/' + (contract.agreementId || ''));
         const thData = await thResp.json();
         const frostAddr = contract.multisigAddress || '';
         const l1UtxoResp = await fetch('https://api.kaspa.org/addresses/' + frostAddr + '/utxos');
@@ -1863,7 +1863,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         } catch (e) { console.warn('[Neighbor] Arweave partial sig failed:', e); }
         // Also post to local TownHall relay (instant delivery)
         try {
-          const townhallUrl = 'http://10.0.0.186:8080/api/agreement/partial-sig';
+          const townhallUrl = 'https://kasvillage.app.runonflux.io/api/agreement/partial-sig';
           await fetch(townhallUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
