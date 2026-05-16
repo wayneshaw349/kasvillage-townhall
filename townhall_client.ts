@@ -45,7 +45,7 @@ import {
 // ============================================================================
 
 const TOWN_HALL_BASE_URL = __DEV__ 
-  ? 'http://10.0.0.186:8080'
+  ? 'https://kasvillage.app.runonflux.io'
   : 'https://townhall.kasvillage.dev';
 
 const REQUEST_TIMEOUT_MS = 30_000;
