@@ -115,6 +115,7 @@ import { sendKaspaViaRest } from './kaspa_rest_tx';
 import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
+import { encryptPartialSig, decryptPartialSig } from './frost_encrypted_relay';
 import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave } from './townhall_client';
 import { getUserStats } from './wallet_registration_v2';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -1281,7 +1282,30 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               myPrivateKeyHex: wallet.privKeyHex,
               recipientAddress: wallet.address, // seller receives
               amountSompi: totalAmount,
-              counterpartyPartialSig: match.signature,
+              counterpartyPartialSig: (() => {
+                try {
+                  const dCtx = {
+                    agreementId: contract.agreementId || '',
+                    buyerPubkey: contract.buyerPubkey || '',
+                    sellerPubkey: contract.sellerPubkey || '',
+                    multisigAddress: contract.multisigAddress || '',
+                    aggregatedPubkey: contract.frostData?.aggregatedPubkey || '',
+                    network: contract.frostData?.network || 'testnet-10',
+                    itemPriceKas: contract.itemPriceKas,
+                    sellerCommitmentKas: contract.sellerCommitmentKas,
+                    R_hex: '',
+                  };
+                  const decrypted = decryptPartialSig({
+                    encrypted: match.signature,
+                    myPrivKeyHex: wallet.privKeyHex,
+                    counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''),
+                    ctx: dCtx,
+                    nonce: match.nonce || '',
+                  });
+                  console.log('[FROST] Decrypted counterparty partial sig');
+                  return decrypted;
+                } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; }
+              })(),
             });
             if (result.success && result.txId) {
               console.log('[PartialSig-Poll] Release TX broadcast:', result.txId);
@@ -1311,7 +1335,22 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       myPrivateKeyHex: w2.privKeyHex,
                       recipientAddress: w2.address,
                       amountSompi: total2,
-                      counterpartyPartialSig: partialSig,
+                      counterpartyPartialSig: (() => {
+                try {
+                  const dCtx2 = {
+                    agreementId: contract.agreementId || '',
+                    buyerPubkey: contract.buyerPubkey || '',
+                    sellerPubkey: contract.sellerPubkey || '',
+                    multisigAddress: contract.multisigAddress || '',
+                    aggregatedPubkey: contract.frostData?.aggregatedPubkey || '',
+                    network: contract.frostData?.network || 'testnet-10',
+                    itemPriceKas: contract.itemPriceKas,
+                    sellerCommitmentKas: contract.sellerCommitmentKas,
+                    R_hex: '',
+                  };
+                  return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: dCtx2, nonce: '' });
+                } catch { return partialSig; }
+              })(),
                     });
                     if (res2.success && res2.txId) {
                       console.log('[PartialSig-Poll] Release TX:', res2.txId);
@@ -1427,7 +1466,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           try {
             const { confirmAgreement } = await import('./townhall_client');
             await confirmAgreement({
-              agreementId: agrId || contract.agreementId || '',
+              agreementId: agreementId || contract.agreementId || '',
               pubkey: myPubkey,
               signature: 'confirm_proposer_' + Date.now(),
             });
@@ -1831,9 +1870,29 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         const myPubkey = await SecureStore.getItemAsync('kaspa_pubkey') || '';
         const counterpartyPubkey = role === 'buyer' ? contract.sellerPubkey : contract.buyerPubkey;
         
+        // ENCRYPT partial sig before relay
+        const encCtx = {
+          agreementId: contract.agreementId || '',
+          buyerPubkey: contract.buyerPubkey || '',
+          sellerPubkey: contract.sellerPubkey || '',
+          multisigAddress: contract.multisigAddress || '',
+          aggregatedPubkey: contract.frostData?.aggregatedPubkey || '',
+          network: contract.frostData?.network || 'testnet-10',
+          itemPriceKas: contract.itemPriceKas,
+          sellerCommitmentKas: contract.sellerCommitmentKas,
+          R_hex: '',
+        };
+        const encrypted = encryptPartialSig({
+          partialSig: result.partialSig,
+          myPrivKeyHex: privKeyHex,
+          counterpartyPubKeyHex: counterpartyPubkey || '',
+          ctx: encCtx,
+        });
+        console.log('[Neighbor] Partial sig ENCRYPTED for relay');
+
         const relayPayload: PartialTxPayload = {
           agreementId: contract.agreementId || `AGR_${Date.now()}`,
-          partialTx: result.partialSig,
+          partialTx: encrypted.encrypted,
           senderPubkey: myPubkey,
           recipientPubkey: counterpartyPubkey || '',
           timestamp: Date.now(),
@@ -1855,7 +1914,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             description: 'partial-sig',
             network: 'testnet-10',
             status: 'PartialSig',
-            signature: result.partialSig || '',
+            signature: encrypted.encrypted || '', // ENCRYPTED — only counterparty can decrypt
             counterpartyPubkey: counterpartyPubkey || '',
             frostAddress: contract.multisigAddress || '',
           });
@@ -1870,7 +1929,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             body: JSON.stringify({
               agreement_id: contract.agreementId || '',
               pubkey: myPubkey,
-              partial_sig: result.partialSig || '',
+              partial_sig: encrypted.encrypted // ENCRYPTED || '',
               recipient: recipientAddress,
             }),
           });
