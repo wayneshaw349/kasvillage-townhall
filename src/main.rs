@@ -625,7 +625,7 @@ pub struct XPLedgerEntry {
 
 #[derive(Clone)]
 pub struct ArweaveStateReader {
-    http_client: reqwest::Client,
+    pub http_client: reqwest::Client,
 }
 
 impl ArweaveStateReader {
@@ -2429,6 +2429,19 @@ impl FrostRelayStore {
     }
 
 }
+    /// Rehydrate agreements from Arweave on startup
+    /// Queries for all active (non-Released) FROST agreements and loads into memory
+    pub fn load_agreement(&self, agr: FrostAgreementData) -> Result<(), String> {
+        let id = agr.agreement_id.clone();
+        let mut s = self.agreements.write().unwrap();
+        s.insert(id, agr);
+        Ok(())
+    }
+
+    pub fn count(&self) -> usize {
+        self.agreements.read().unwrap().len()
+    }
+
 fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64 }
 
 // GLOBAL BAYESIAN STATS
@@ -7584,6 +7597,171 @@ async fn ingress_forward(
 }
 
 /// Main entry point - can run as Town Hall or Ingress
+
+// ============================================================================
+// ARWEAVE REHYDRATION — Load active agreements on startup
+// ============================================================================
+
+/// Query Arweave for active FROST agreements and load into FrostRelayStore
+async fn rehydrate_agreements_from_arweave(
+    frost_relay: &FrostRelayStore,
+    http_client: &reqwest::Client,
+) -> Result<usize, String> {
+    println!("   Rehydrating agreements from Arweave...");
+    
+    // Query for all non-Released agreements
+    // We look for recent frost-agreement inscriptions
+    let statuses = ["Proposed", "Accepted", "Agreed", "Agreed-Send", "Confirming", "BothConfirmed", "Collateralized", "PartialSig"];
+    
+    let mut total_loaded = 0usize;
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    
+    for status in &statuses {
+        let query = format!(
+            r#"query {{
+                transactions(first: 50, tags: [
+                    {{ name: "App-Name", values: ["KasVillage"] }},
+                    {{ name: "KV-Type", values: ["frost-agreement"] }},
+                    {{ name: "KV-Status", values: ["{}"] }}
+                ], sort: HEIGHT_DESC) {{
+                    edges {{ node {{ id, tags {{ name, value }} }} }}
+                }}
+            }}"#,
+            status
+        );
+        
+        let resp = match http_client
+            .post(ARWEAVE_GRAPHQL)
+            .json(&serde_json::json!({ "query": query }))
+            .timeout(std::time::Duration::from_secs(15))
+            .send().await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                println!("   ⚠ Arweave query failed for status {}: {}", status, e);
+                continue;
+            }
+        };
+        
+        let gql: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("   ⚠ Parse failed for status {}: {}", status, e);
+                continue;
+            }
+        };
+        
+        let edges = match gql.pointer("/data/transactions/edges").and_then(|v| v.as_array()) {
+            Some(e) => e.clone(),
+            None => continue,
+        };
+        
+        for edge in &edges {
+            let tags = match edge.pointer("/node/tags").and_then(|v| v.as_array()) {
+                Some(t) => t,
+                None => continue,
+            };
+            
+            // Helper to extract tag value
+            let get_tag = |name: &str| -> String {
+                tags.iter()
+                    .find(|t| t["name"].as_str() == Some(name))
+                    .and_then(|t| t["value"].as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            
+            let agreement_id = get_tag("KV-AgreementId");
+            if agreement_id.is_empty() || seen_ids.contains(&agreement_id) {
+                continue;
+            }
+            seen_ids.insert(agreement_id.clone());
+            
+            let pubkey = get_tag("KV-Pubkey");
+            let amount_str = get_tag("KV-Amount");
+            let amount: u64 = amount_str.parse().unwrap_or(0);
+            let description = get_tag("KV-Description");
+            let network = get_tag("KV-Network");
+            let frost_address = get_tag("KV-FrostAddress");
+            let counterparty = get_tag("KV-Counterparty");
+            let daa_score_str = get_tag("KV-DAAScore");
+            let daa_score: u64 = daa_score_str.parse().unwrap_or(0);
+            let kv_status = get_tag("KV-Status");
+            
+            if pubkey.is_empty() {
+                continue;
+            }
+            
+            // Map Arweave status to FrostAgreementStatus
+            let frost_status = match kv_status.as_str() {
+                "Proposed" => FrostAgreementStatus::Proposed,
+                "Accepted" => FrostAgreementStatus::Accepted,
+                "Agreed" | "Agreed-Send" | "Confirming" => FrostAgreementStatus::Confirming,
+                "BothConfirmed" => FrostAgreementStatus::BothConfirmed,
+                "Collateralized" => FrostAgreementStatus::Collateralized,
+                "PartialSig" => FrostAgreementStatus::Active,
+                _ => FrostAgreementStatus::Proposed,
+            };
+            
+            // Build party A
+            let party_a = FrostParty {
+                pubkey: pubkey.clone(),
+                amount_sompi: amount,
+                signature: format!("arweave_rehydrated_{}", &agreement_id),
+                confirmed: matches!(frost_status, 
+                    FrostAgreementStatus::Confirming | 
+                    FrostAgreementStatus::BothConfirmed | 
+                    FrostAgreementStatus::Collateralized |
+                    FrostAgreementStatus::Active),
+                confirm_signature: None,
+                collateral_tx_id: None,
+            };
+            
+            // Build party B (if counterparty exists)
+            let party_b = if !counterparty.is_empty() {
+                Some(FrostParty {
+                    pubkey: counterparty.clone(),
+                    amount_sompi: amount,
+                    signature: format!("arweave_rehydrated_b_{}", &agreement_id),
+                    confirmed: matches!(frost_status, 
+                        FrostAgreementStatus::BothConfirmed | 
+                        FrostAgreementStatus::Collateralized |
+                        FrostAgreementStatus::Active),
+                    confirm_signature: None,
+                    collateral_tx_id: None,
+                })
+            } else {
+                None
+            };
+            
+            let agr = FrostAgreementData {
+                agreement_id: agreement_id.clone(),
+                status: frost_status,
+                description,
+                stipulations: String::new(),
+                network: if network.is_empty() { "testnet-10".into() } else { network },
+                party_a,
+                party_b,
+                frost_address: if frost_address.is_empty() { None } else { Some(frost_address) },
+                release_recipient: None,
+                partial_sig_a: None,
+                partial_sig_b: None,
+                release_tx_id: None,
+                created_at: daa_score, // Use DAA score as creation timestamp
+                updated_at: now_ms(),
+            };
+            
+            match frost_relay.load_agreement(agr) {
+                Ok(()) => total_loaded += 1,
+                Err(e) => println!("   ⚠ Failed to load {}: {}", &agreement_id, e),
+            }
+        }
+    }
+    
+    println!("   ✅ Rehydrated {} active agreements from Arweave", total_loaded);
+    Ok(total_loaded)
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
@@ -7624,6 +7802,15 @@ async fn main() -> std::io::Result<()> {
             println!("   Halo2 K={}, Tree Depth={}", HALO2_K, TREE_DEPTH);
             
             let state = AppStateV3::new();
+
+            // Rehydrate agreements from Arweave (survives container restarts)
+            let rehydrate_relay = state.frost_relay.clone();
+            let rehydrate_client = state.arweave_reader.http_client.clone();
+            match rehydrate_agreements_from_arweave(&rehydrate_relay, &rehydrate_client).await {
+                Ok(count) => println!("   Agreements loaded: {}", count),
+                Err(e) => println!("   ⚠ Rehydration failed (non-fatal): {}", e),
+            }
+
             
             HttpServer::new(move || {
                 App::new()
