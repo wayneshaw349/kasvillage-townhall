@@ -1929,7 +1929,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             body: JSON.stringify({
               agreement_id: contract.agreementId || '',
               pubkey: myPubkey,
-              partial_sig: encrypted.encrypted // ENCRYPTED || '',
+              partial_sig: encrypted.encrypted, // ENCRYPTED
               recipient: recipientAddress,
             }),
           });
