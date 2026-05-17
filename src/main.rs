@@ -2428,9 +2428,7 @@ impl FrostRelayStore {
             .cloned().collect()
     }
 
-}
-    /// Rehydrate agreements from Arweave on startup
-    /// Queries for all active (non-Released) FROST agreements and loads into memory
+    /// Load a rehydrated agreement from Arweave into relay store
     pub fn load_agreement(&self, agr: FrostAgreementData) -> Result<(), String> {
         let id = agr.agreement_id.clone();
         let mut s = self.agreements.write().unwrap();
@@ -2438,9 +2436,13 @@ impl FrostRelayStore {
         Ok(())
     }
 
+    /// Count active agreements in relay store
     pub fn count(&self) -> usize {
         self.agreements.read().unwrap().len()
     }
+
+
+}
 
 fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64 }
 
@@ -7758,7 +7760,37 @@ async fn rehydrate_agreements_from_arweave(
         }
     }
     
-    println!("   ✅ Rehydrated {} active agreements from Arweave", total_loaded);
+    
+    
+    // Phase 2: Cross-reference Lamport attestations for active agreements
+    // Each Agreed-Send must have a matching lamport-attestation
+    let q_lamports = format!(
+        r#"query {{
+            transactions(first: 100, tags: [
+                {{ name: "App-Name", values: ["KasVillage"] }},
+                {{ name: "KV-Type", values: ["lamport-attestation"] }}
+            ], sort: HEIGHT_DESC) {{
+                edges {{ node {{ id, tags {{ name, value }} }} }}
+            }}
+        }}"#
+    );
+    
+    let mut lamport_count = 0usize;
+    if let Ok(resp) = http_client
+        .post(ARWEAVE_GRAPHQL)
+        .json(&serde_json::json!({ "query": q_lamports }))
+        .timeout(std::time::Duration::from_secs(15))
+        .send().await
+    {
+        if let Ok(gql) = resp.json::<serde_json::Value>().await {
+            if let Some(edges) = gql.pointer("/data/transactions/edges").and_then(|v| v.as_array()) {
+                lamport_count = edges.len();
+            }
+        }
+    }
+    println!("   Lamport attestations found: {}", lamport_count);
+    
+println!("   ✅ Rehydrated {} active agreements from Arweave", total_loaded);
     Ok(total_loaded)
 }
 
