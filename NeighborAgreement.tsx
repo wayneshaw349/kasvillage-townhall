@@ -112,6 +112,8 @@ import {
 
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
+import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement } from './canonical_agreement';
+import { canonicalCommit, verifyCommitment, releaseExpiredCommitments } from './utxo_ledger';
 import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
@@ -288,6 +290,7 @@ interface Contract {
   releaseRecipient?: string;
   releaseTxId?: string;
   releaseExplorerUrl?: string;
+  arweaveTxId?: string;
   // New FROST fields
   verificationCode?: string;
   exchangeMethod?: ExchangeMethod;
@@ -920,6 +923,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   const [agreementType, setAgreementType] = useState<'simple' | 'trade' | 'join' | null>(null);
   const [inboxAgreements, setInboxAgreements] = useState<any[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [manualAgrId, setManualAgrId] = useState('');
+  const [manualLookupResult, setManualLookupResult] = useState<any>(null);
+  const [manualVerCode, setManualVerCode] = useState('');
+
+  // Inline canonicalVerify REMOVED ? using module import from canonical_agreement.ts
+
   const [contract, setContract] = useState<Contract>({
     itemPriceKas: initialCoupon?.discountedKaspa || 0,
     sellerCommitmentKas: 0,
@@ -970,6 +980,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
     loadAgreementSession().then(session => {
       if (session && session.step > 1) {
         console.log('[Neighbor] Restoring session at step', session.step);
+        // Detect corrupted session: buyer === seller means wrong FROST address
+        if (session.contract?.buyerPubkey && session.contract?.sellerPubkey && 
+            session.contract.buyerPubkey === session.contract.sellerPubkey) {
+          console.warn('[Neighbor] CORRUPTED SESSION: buyer === seller, clearing');
+          clearAgreementSession().then(() => {}); // fire-and-forget
+          return;
+        }
         setStep(session.step);
         setRole(session.role);
         setAgreementType(session.agreementType);
@@ -1010,8 +1027,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
     return () => cleanupFrost();
   }, []);
 
-  // Poll for counterparty's Agreed-Send on Arweave — triggers auto-send
+  // Poll for counterparty's Agreed-Send on Arweave
+  // DEBUG: log guard values — triggers auto-send
   useEffect(() => {
+    console.log('[Agreed-Send Guard]', 'step:', step, 'agrId:', contract.agreementId?.slice(0,12), 'frost:', contract.multisigAddress?.slice(0,20), 'buyer:', contract.buyerPubkey?.slice(0,16), 'seller:', contract.sellerPubkey?.slice(0,16));
     if (step < 3 || !contract.agreementId || !contract.multisigAddress) return;
     if (!contract.buyerPubkey || !contract.sellerPubkey) return;
     // Don't poll if already on step 4+ (both confirmed)
@@ -1023,9 +1042,41 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
 
     const pollAgreedSend = async () => {
       if (cancelled) return;
+      console.log('[Agreed-Send Poll] Polling... role:', role, 'counterparty:', counterpartyPubkey?.slice(0,16), 'agrId:', contract.agreementId?.slice(0,12));
       try {
         // Check Arweave for counterparty's Agreed-Send
         if (!contract.agreementId || !contract.multisigAddress) return;
+        
+        // First: check if WE have inscribed Agreed yet (proposer might not have)
+        const ownAgreedKey = 'kv_agreed_' + contract.agreementId;
+        const alreadyAgreed = await AsyncStorage.getItem(ownAgreedKey);
+        if (!alreadyAgreed) {
+          // Check if counterparty accepted/agreed on Arweave
+          try {
+            const { queryAgreementsFromArweave } = await import('./townhall_client');
+            const allStatuses = await queryAgreementsFromArweave({ status: 'Accepted' });
+            const counterAccepted = allStatuses.find((r: any) => 
+              (r.agreementId || r.agreement_id) === contract.agreementId &&
+              (r.partyA?.pubkey || r.party_a?.pubkey || r.pubkey) === counterpartyPubkey
+            );
+            if (counterAccepted) {
+              console.log('[Agreed-Send Poll] Counterparty accepted — inscribing our Agreed');
+              await inscribeAgreementToArweave({
+                agreementId: contract.agreementId || '',
+                pubkey: myPubkey || '',
+                amount_sompi: Math.floor((role === 'buyer' ? contract.itemPriceKas : contract.sellerCommitmentKas) * 1e8),
+                description: contract.itemDescription || '',
+                network: 'testnet-10',
+                status: 'Agreed',
+                signature: 'agreed_auto_' + Date.now(),
+                counterpartyPubkey: counterpartyPubkey,
+                frostAddress: contract.multisigAddress,
+              });
+              await AsyncStorage.setItem(ownAgreedKey, String(Date.now()));
+              console.log('[Agreed-Send Poll] Own Agreed inscribed to Arweave');
+            }
+          } catch (e) { console.warn('[Agreed-Send Poll] Agreed check failed:', e); }
+        }
         const found = await queryCounterpartyAgreed({
           agreementId: contract.agreementId,
           counterpartyPubkey: counterpartyPubkey || '',
@@ -1037,8 +1088,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         console.log('[Agreed-Send Poll] Counterparty Agreed-Send detected for', contract.agreementId, '- checking if already sent...');
 
         // Inscribe our own Agreed-Send if not already done
-        const ownAgreedKey = 'kv_agreed_send_' + contract.agreementId;
-        const alreadySent = await AsyncStorage.getItem(ownAgreedKey);
+        const ownAgreedSendKey = 'kv_agreed_send_' + contract.agreementId;
+        const alreadySent = await AsyncStorage.getItem(ownAgreedSendKey);
         if (!alreadySent) {
           try {
             await inscribeAgreementToArweave({
@@ -1120,6 +1171,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
     const expectedBuyer = BigInt(Math.floor(contract.itemPriceKas * 1e8));
     const expectedSeller = BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
     const expectedTotal = expectedBuyer + expectedSeller;
+    console.log('[FROST-Poll] Expected: buyer=', Number(expectedBuyer)/1e8, 'seller=', Number(expectedSeller)/1e8, 'total=', Number(expectedTotal)/1e8);
     if (expectedTotal <= 0n) return;
 
     let cancelled = false;
@@ -1407,13 +1459,26 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   useEffect(() => {
     const generateFrostAddress = async () => {
       if (step === 3 && !contract.multisigAddress && contract.buyerPubkey && contract.sellerPubkey) {
+        let currentDaa = 0;
         try {
           const networkStr = await SecureStore.getItemAsync('kaspa_network');
           const network: KaspaNetwork = (networkStr === 'testnet-10' || networkStr === 'testnet-11') 
             ? networkStr 
             : 'testnet-10';
           
-          const agreementId = `AGR_${Date.now()}`;
+          // Deterministic agreement ID from proposal variables
+          const { sha256: sha256Agr } = require('@noble/hashes/sha256');
+          const agrInput = new TextEncoder().encode(
+            (contract.buyerPubkey || '') + 
+            (contract.sellerPubkey || '') + 
+            Math.floor(contract.itemPriceKas * 1e8).toString() +
+            Math.floor(contract.sellerCommitmentKas * 1e8).toString() +
+            (contract.itemDescription || '') +
+            network +
+            String(typeof currentDaa !== 'undefined' ? currentDaa : Date.now())
+          );
+          const agrHash = sha256Agr(agrInput);
+          const agreementId = 'AGR_' + Array.from(agrHash.slice(0, 6)).map(b => b.toString(16).padStart(2, '0')).join('');
           
           // Derive locally with verification code
           const frostData = deriveFrostAddressLocal({
@@ -1445,34 +1510,44 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             const myPubkey = role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey;
             const counterPubkey = role === 'buyer' ? contract.sellerPubkey : contract.buyerPubkey;
             const myAmount = role === 'buyer' ? Math.floor(contract.itemPriceKas * 1e8) : Math.floor(contract.sellerCommitmentKas * 1e8);
-            console.log('[Neighbor] Proposing to TownHall:', agreementId, 'frost:', frostData.address);
-            await proposeAgreement({
+            // Fetch current L1 DAA score for deterministic ordering
+            try {
+              const nw = await SecureStore.getItemAsync('kaspa_network');
+              const daaBase = nw?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+              const daaResp = await fetch(daaBase + '/info/virtual-chain-blue-score');
+              if (daaResp.ok) { const daaData = await daaResp.json(); currentDaa = daaData.blueScore || 0; }
+            } catch (e) { console.warn('[Neighbor] DAA fetch failed:', e); }
+            console.log('[Neighbor] Proposing to TownHall:', agreementId, 'frost:', frostData.address, 'DAA:', currentDaa);
+            const proposeResult = await proposeAgreement({
               agreementId: agreementId,
               pubkey: myPubkey || '',
-              amount_sompi: myAmount,
+              amount_sompi: Math.floor(contract.itemPriceKas * 1e8) + Math.floor(contract.sellerCommitmentKas * 1e8),
               signature: 'frost_create_' + Date.now(),
               description: contract.itemDescription || '',
               network,
               counterpartyPubkey: counterPubkey || undefined,
               frostAddress: frostData.address,
+              daaScore: currentDaa,
+              buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
+              sellerAmountSompi: Math.floor(contract.itemPriceKas * 1e8), // Equal stakes
             } as any);
             // Reduce spendable for proposer (input cap)
             try {
               const { commitForCollateral } = await import('./utxo_ledger');
               const proposeAmount = role === 'buyer' ? BigInt(Math.floor(contract.itemPriceKas * 1e8)) : BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
-              if (proposeAmount > 0n) await commitForCollateral(wallet?.address || '', proposeAmount, agreementId);
+              if (proposeAmount > 0n) {
+              const tagResult = await canonicalCommit(propWallet?.address || '', proposeAmount, agreementId, 'buyer', myPubkey || '');
+              console.log('[UTXO-Tag] Buyer proposal tagged:', tagResult.success, 'hashes:', tagResult.commitHashes?.length);
+            }
             } catch (e) { console.warn('[Neighbor] Proposer ledger commit skipped:', e); }
-            // AUTO-CONFIRM on TownHall (proposer side)
-          try {
-            const { confirmAgreement } = await import('./townhall_client');
-            await confirmAgreement({
-              agreementId: agreementId || contract.agreementId || '',
-              pubkey: myPubkey,
-              signature: 'confirm_proposer_' + Date.now(),
-            });
-            console.log('[Neighbor] Proposer auto-confirmed on TownHall');
-          } catch (e) { console.warn('[Neighbor] Proposer confirm failed:', e); }
+            // AUTO-CONFIRM disabled at propose time — confirms after Party B accepts
+            // Proposer confirms in FROST-Poll when TH status changes to Accepted
+            console.log('[Neighbor] Proposal sent — waiting for counterparty to accept');
           console.log('[Neighbor] Agreement proposed on TownHall:', agreementId);
+            if (proposeResult?.arweaveTxId) {
+              console.log('[Neighbor] Arweave TX ID:', proposeResult.arweaveTxId);
+              setContract(prev => ({ ...prev, arweaveTxId: proposeResult.arweaveTxId }));
+            }
           } catch (e) { console.warn('[Neighbor] TownHall propose failed:', e); }
           // L1 inscription disabled � Arweave inscription is the permanent record
           // wRPC sendWithInscription not available from React Native/Hermes
@@ -1544,6 +1619,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
 
   // === PARTY B INBOX: Load pending agreements from TownHall ===
   const loadInbox = async () => {
+    try { await releaseExpiredCommitments(); } catch (e) { console.warn('[UTXO-Expiry] Check failed:', e); }
     setInboxLoading(true);
     try {
       const wallet = await loadMainWallet();
@@ -1569,21 +1645,49 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       let arweaveProposals: any[] = [];
       // Always query Arweave � TownHall is stateless and may have stale data
       try {
-        arweaveProposals = await queryAgreementsFromArweave({ status: 'Proposed', counterparty: myPubkey, network: 'testnet-10' });
+        arweaveProposals = await queryAgreementsFromArweave({ status: 'Proposed', network: 'testnet-10' });
         console.log('[Neighbor] Arweave found', arweaveProposals.length, 'proposals');
       } catch (e) { console.warn('[Neighbor] Arweave query failed:', e); }
       // Show proposed agreements where I'm NOT party A (i.e., I can accept)
       const allAgreements = [...agreements, ...allProposed, ...arweaveProposals];
       const seen = new Set<string>();
-      const pending = allAgreements.filter((a: any) => {
+      // Deduplicate by agreementId, sort by DAA (deterministic)
+      const byId = new Map();
+      for (const a of allAgreements) {
         const id = a.agreementId || a.agreement_id || '';
-        if (seen.has(id)) return false;
-        seen.add(id);
-        const createdAt = a.created_at || a.createdAt || a.timestamp || 0;
-        const ageMs = createdAt > 0 ? Date.now() - createdAt : 0;
-        return (a.status === 'Proposed' || a.status === 'proposed') && (a.partyA?.pubkey || a.party_a?.pubkey) !== myPubkey && (createdAt === 0 || ageMs < 86400000);
+        if (!id) continue;
+        const daa = Number(a.daaScore || a.daa_score || 0);
+        const ts = Number(a.unix_time || a.created_at || a.createdAt || a.timestamp || 0);
+        const score = daa > 0 ? daa : ts;
+        const existing = byId.get(id);
+        if (!existing || score > (existing._score || 0)) byId.set(id, { ...a, _score: score });
+      }
+      const pending = Array.from(byId.values())
+        .filter((a) => {
+          if ((a.status || '').toLowerCase() !== 'proposed') return false;
+          return (a.partyA?.pubkey || a.party_a?.pubkey || a.pubkey || '') !== myPubkey;
+        })
+        .sort((a, b) => (b._score || 0) - (a._score || 0))
+        .slice(0, 10);
+      // Remove fake/test proposals with invalid pubkeys
+      const validPending = pending.filter((a) => {
+        const pk = a.partyA?.pubkey || a.party_a?.pubkey || a.pubkey || '';
+        const amt = Number(a.partyA?.amount_sompi || a.party_a?.amount_sompi || a.amount_sompi || 0);
+        return pk.length >= 60 && (pk.startsWith('02') || pk.startsWith('03')) && amt > 0;
       });
-      setInboxAgreements(pending);
+      // Enrich: if entry has amount but no buyer/seller split, get from Arweave
+      const enrichedPending = validPending.map((a: any) => {
+        if (!a.buyerAmountSompi && a.amount_sompi > 0) {
+          const arMatch = arweaveProposals?.find((ar: any) => (ar.agreementId || ar.agreement_id) === (a.agreementId || a.agreement_id));
+          if (arMatch?.buyerAmountSompi) {
+            a.buyerAmountSompi = arMatch.buyerAmountSompi;
+            a.sellerAmountSompi = arMatch.sellerAmountSompi;
+          }
+        }
+        return a;
+      });
+      console.log('[Neighbor] Inbox:', enrichedPending.length, 'valid proposals (filtered', pending.length - enrichedPending.length, 'invalid)');
+      setInboxAgreements(enrichedPending);
     } catch (e) {
       console.error('[Neighbor] Inbox load error:', e);
     }
@@ -1591,7 +1695,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   };
 
   const handleAcceptFromInbox = async (agreement: any) => {
-    console.log('[Neighbor] Agree tapped:', JSON.stringify(agreement).slice(0, 200));
+    const _agrId = agreement.agreementId || agreement.agreement_id || '';
+    if (acceptingId) { console.log('[Neighbor] Already accepting', acceptingId); return; }
+    console.log('[Neighbor] Agree tapped:', _agrId);
+    setAcceptingId(_agrId);
     setIsLoading(true);
     try {
       const isFromArweave = !!agreement.arweave_tx_id;
@@ -1615,7 +1722,12 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       if (alreadyAgreed) {
         console.log('[Neighbor] Already agreed to', agrId, '- skipping duplicate inscription');
       }
-      const sellerPubkey = agreement.partyA?.pubkey || agreement.party_a?.pubkey || agreement.pubkey || '';
+      const agreementPubkey = agreement.partyA?.pubkey || agreement.party_a?.pubkey || agreement.pubkey || '';
+      const agreementCounterparty = agreement.counterpartyPubkey || agreement.counterparty || agreement.KVCounterparty || '';
+      // Determine: am I the proposer or the acceptor?
+      const iAmProposer = agreementPubkey === myPubkey;
+      const sellerPubkey = iAmProposer ? (agreementCounterparty || '') : agreementPubkey;
+      console.log('[Neighbor] Role detection:', iAmProposer ? 'I am proposer' : 'I am acceptor', 'seller:', sellerPubkey.slice(0,16), 'me:', myPubkey.slice(0,16));
       const agrAmount = agreement.partyA?.amount_sompi || agreement.party_a?.amount_sompi || agreement.amount_sompi || 0;
       if (!alreadyAgreed) {
         try {
@@ -1651,10 +1763,79 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       setInboxAgreements(prev => prev.filter(a => (a.agreementId || a.agreement_id) !== agrId));
 
       // Proceed to FROST derivation � derive FROST + auto-send
+      // Run canonical verification
+      // Normalize raw agreement data
+      const normalized = normalizeAgreement(agreement);
+      // Enrich: if counterparty missing, use the proposer pubkey (we know we're the acceptor)
+      if (!normalized.counterpartyPubkey) {
+        normalized.counterpartyPubkey = myPubkey;
+        // Swap: normalized.pubkey is the proposer (buyer), we are the acceptor (seller)
+      }
+      // Enrich: fetch buyer/seller split from Goldsky if missing
+      if (normalized.buyerAmountSompi === 0 && normalized.agreementId) {
+        try {
+          const gql = '{ transactions(first: 1, tags: [{ name: "KV-AgreementId", values: ["' + normalized.agreementId + '"] }, { name: "KV-Status", values: ["Proposed"] }]) { edges { node { tags { name, value } } } } }';
+          const gResp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+          const gJson = await gResp.json();
+          const gTags = gJson?.data?.transactions?.edges?.[0]?.node?.tags;
+          if (gTags) {
+            const gMap: any = {};
+            gTags.forEach((t: any) => { gMap[t.name] = t.value; });
+            normalized.buyerAmountSompi = parseInt(gMap['KV-BuyerAmount'] || '0', 10);
+            normalized.sellerAmountSompi = parseInt(gMap['KV-SellerAmount'] || '0', 10);
+            if (!normalized.counterpartyPubkey || normalized.counterpartyPubkey === myPubkey) {
+              // We are acceptor, so counterparty = KV-Counterparty from Arweave
+              normalized.counterpartyPubkey = gMap['KV-Counterparty'] || myPubkey;
+              normalized.pubkey = gMap['KV-Pubkey'] || normalized.pubkey;
+            }
+            console.log('[Canonical-Enrich] Goldsky: buyer=', normalized.buyerAmountSompi, 'seller=', normalized.sellerAmountSompi, 'pub=', normalized.pubkey?.slice(0,16), 'cp=', normalized.counterpartyPubkey?.slice(0,16));
+          }
+        } catch (e) { console.warn('[Canonical-Enrich] Goldsky fetch failed:', e); }
+      }
+      console.log('[Canonical-DEBUG] normalized:', JSON.stringify({ agr: normalized.agreementId, pub: normalized.pubkey?.slice(0,16), cp: normalized.counterpartyPubkey?.slice(0,16), amt: normalized.amount_sompi, buyer: normalized.buyerAmountSompi, seller: normalized.sellerAmountSompi }));
+      const canon = canonicalVerify(normalized, myPubkey || ''); // sync — no await needed
+      console.log('[Canonical] Module result:', JSON.stringify({ role: canon.role, buyer: canon.buyerAmountSompi / 1e8, seller: canon.sellerAmountSompi / 1e8, total: canon.totalAmountSompi / 1e8, frost: canon.frostAddress?.slice(0,25) }));
+      // Override role from canonical
+      setRole(canon.role as any);
       console.log('[Neighbor] BOTH AGREED � deriving FROST and auto-sending collateral');
       if (true) {
         // Party A = seller (proposer), Party B = buyer (acceptor)
-        const sellerAmount = (typeof agrAmount === 'number' ? agrAmount : Number(agrAmount)) / 1e8;
+        const rawAmount = (typeof agrAmount === 'number' ? agrAmount : Number(agrAmount)) / 1e8;
+          // Read buyer/seller split from Arweave tags if available
+          let buyerAmtTag = agreement.buyerAmountSompi || agreement.KVBuyerAmount || 0;
+          let sellerAmtTagTemp = agreement.sellerAmountSompi || agreement.KVSellerAmount || 0;
+          // If amounts missing, fetch from Arweave tags directly
+          if (buyerAmtTag === 0 && agrId) {
+            try {
+              const gql = '{ transactions(first: 1, tags: [{ name: "KV-AgreementId", values: ["' + agrId + '"] }, { name: "KV-Status", values: ["Proposed"] }]) { edges { node { tags { name, value } } } } }';
+              const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+              const json = await resp.json();
+              const tags = json?.data?.transactions?.edges?.[0]?.node?.tags;
+              if (tags) {
+                const tagMap: any = {};
+                tags.forEach((t: any) => { tagMap[t.name] = t.value; });
+                buyerAmtTag = parseInt(tagMap['KV-BuyerAmount'] || '0', 10);
+                sellerAmtTagTemp = parseInt(tagMap['KV-SellerAmount'] || '0', 10);
+                console.log('[Neighbor] Direct Goldsky amounts: buyer=', buyerAmtTag, 'seller=', sellerAmtTagTemp);
+              }
+            } catch (e) { console.warn('[Neighbor] Arweave amount fetch failed:', e); }
+          }
+          const sellerAmtTag = sellerAmtTagTemp || agreement.sellerAmountSompi || agreement.KVSellerAmount || 0;
+          const buyerKas = buyerAmtTag > 0 ? Number(buyerAmtTag) / 1e8 : 0;
+          if (buyerKas === 0 && rawAmount > 0) {
+            Alert.alert('Amount Unknown', 'Cannot determine buyer/seller split.\n\nUse the Agreement ID in manual lookup to get the full breakdown from Arweave.', [{ text: 'OK' }]);
+            setAcceptingId(null);
+            return;
+          }
+          // Canonical math: seller = total - buyer (wallet derives independently)
+          const sellerKasFromMath = rawAmount - buyerKas;
+          const sellerKasFromTag = sellerAmtTag > 0 ? Number(sellerAmtTag) / 1e8 : 0;
+          if (sellerKasFromTag > 0 && Math.abs(sellerKasFromMath - sellerKasFromTag) > 0.001) {
+            console.warn('[Neighbor] AMOUNT MISMATCH: math=', sellerKasFromMath, 'tag=', sellerKasFromTag);
+          }
+          const sellerKas = sellerKasFromMath > 0 ? sellerKasFromMath : (sellerKasFromTag > 0 ? sellerKasFromTag : rawAmount);
+          console.log('[Neighbor] Amount split: buyer=', buyerKas, 'seller=', sellerKas, 'raw=', rawAmount);
+          const sellerAmount = rawAmount;
         // Derive FROST address immediately with both pubkeys
         try {
           const frostNetwork = wallet.network || 'testnet-10';
@@ -1665,15 +1846,39 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             agreementId: agrId,
           });
           console.log('[Neighbor] Inbox FROST address:', frostData.address);
+          // === CANONICAL AUTO-SEND: each party finds their pubkey + amount ===
+          // Proposer pubkey = KV-Pubkey, Acceptor pubkey = KV-Counterparty
+          // Proposer = buyer (sets terms), Acceptor = seller (accepts terms)
+          const proposerPubkey = agreement.pubkey || agreement.partyA?.pubkey || '';
+          const sendsFirst = canonicalSendsFirst(canon);
+          const mySendAmount = sendsFirst ? canonicalSendAmount(canon) : 0;
+          console.log('[Neighbor] Auto-send check: sendsFirst=', sendsFirst, 'mySendAmount=', mySendAmount / 1e8, 'role:', canon.role, 'myPubkey=', myPubkey?.slice(0,16));
+          const immediateSendAmount = mySendAmount;
+          if (immediateSendAmount > 0 && wallet.privKeyHex) {
+            try {
+              console.log('[Neighbor] Seller auto-sending', immediateSendAmount / 1e8, 'KASPA to FROST');
+              // sendKaspaViaRest is already imported/available in this scope
+              const txResult = await sendKaspaViaRest({
+                senderAddress: wallet.address,
+                recipientAddress: frostData.address,
+                amountSompi: BigInt(immediateSendAmount),
+                privateKeyHex: wallet.privKeyHex,
+                network: wallet.network || 'testnet-10',
+              });
+              console.log('[Neighbor] Seller collateral TX:', txResult.txId);
+              await AsyncStorage.setItem('kv_frost_sent_' + agrId, String(Date.now()));
+            } catch (e) { console.warn('[Neighbor] Seller auto-send failed (poll will retry):', e); }
+          }
+
           setContract(prev => ({
             ...prev,
             agreementId: agrId,
             description: agreement.description || '',
-            buyerPubkey: myPubkey,
-            sellerPubkey: sellerPubkey,
+            buyerPubkey: iAmProposer ? sellerPubkey : myPubkey,
+            sellerPubkey: iAmProposer ? myPubkey : sellerPubkey,
             counterpartyPubkey: sellerPubkey,
-            itemPriceKas: sellerAmount,
-            sellerCommitmentKas: sellerAmount,
+            ...canonicalToContract(canon),
+            // canonical overrides all contract fields
             multisigAddress: frostData.address,
             frostData,
           }));
@@ -1700,12 +1905,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           if (myLockAmount > 0n) {
             try {
               const { commitForCollateral } = await import('./utxo_ledger');
-              await commitForCollateral(wallet.address, myLockAmount, agrId);
+              const sellerTagResult = await canonicalCommit(wallet.address, myLockAmount, agrId, canon?.role || 'seller', myPubkey || '');
+          console.log('[UTXO-Tag] Seller accept tagged:', sellerTagResult.success, 'role:', canon?.role, 'hashes:', sellerTagResult.commitHashes?.length);
               console.log('[Neighbor] Spendable reduced by', sellerAmount, 'KASPA for', agrId);
             } catch (e) { console.warn('[Neighbor] Ledger commit skipped:', e); }
           }
           // Set state and go to step 3 — poll handles the rest
-          setRole('buyer');
+          setRole(iAmProposer ? 'seller' : 'buyer');
           setAgreementType('trade');
           setStep(3);
           // AUTO-CONFIRM on TownHall — breaks the Arweave polling deadlock
@@ -1733,6 +1939,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       Alert.alert('Error', e instanceof Error ? e.message : 'Accept failed');
     } finally {
       setIsLoading(false);
+      setAcceptingId(null);
     }
   };
 
@@ -1842,7 +2049,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         setIsLoading(false);
         return;
       }
-      const privKeyHex = wallet.privKeyHex;
+      const privKeyHex = wallet?.privKeyHex;
+      if (!privKeyHex) { Alert.alert('Error', 'Failed to decrypt wallet'); setIsLoading(false); return; }
       const network = wallet.network;
       
       const recipientAddress = role === 'buyer' 
@@ -2192,6 +2400,108 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 </TouchableOpacity>
                 <Text style={{ fontSize: rs.font(16), fontWeight: 'bold', color: '#1E1B4B', marginBottom: 12, textAlign: 'center' }}>Pending Proposals</Text>
                 
+                {/* Manual Agreement Lookup */}
+                <View style={{ backgroundColor: '#eef2ff', borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#a5b4fc' }}>
+                  <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#3730a3', marginBottom: 8 }}>Enter Agreement ID</Text>
+                  <Text style={{ fontSize: rs.font(10), color: '#4338ca', marginBottom: 8 }}>Paste the AGR_ ID or Arweave TX ID shared by your counterparty</Text>
+                  <TextInput
+                    style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: rs.font(12), fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
+                    placeholder="AGR_1779..."
+                    placeholderTextColor="#a8a29e"
+                    value={manualAgrId}
+                    onChangeText={setManualAgrId}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  {manualLookupResult && (
+                    <View style={{ backgroundColor: '#f0fdf4', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: '#86efac' }}>
+                      <Text style={{ fontSize: rs.font(11), color: '#166534', fontWeight: 'bold' }}>Found: {manualLookupResult.description || manualLookupResult.agreementId}</Text>
+                      <Text style={{ fontSize: rs.font(10), color: '#15803d', marginTop: 2 }}>From: {(manualLookupResult.pubkey || '').slice(0, 16)}...</Text>
+                      <Text style={{ fontSize: rs.font(10), color: '#15803d', fontWeight: 'bold' }}>Total Locked: {(manualLookupResult.amount_sompi || 0) / 1e8} KASPA</Text>
+                      <Text style={{ fontSize: rs.font(10), color: '#166534' }}>  Buyer: {(manualLookupResult.buyerAmountSompi || 0) / 1e8} KASPA</Text>
+                      <Text style={{ fontSize: rs.font(10), color: '#166534' }}>  Seller: {((manualLookupResult.amount_sompi || 0) - (manualLookupResult.buyerAmountSompi || 0)) / 1e8} KASPA (good faith)</Text>
+                      <Text style={{ fontSize: rs.font(10), color: '#15803d' }}>Network: {manualLookupResult.network || 'testnet-10'}</Text>
+                      <Text style={{ fontSize: rs.font(10), color: '#15803d' }}>FROST: {(manualLookupResult.frostAddress || 'pending').slice(0, 30)}...</Text>
+                      <Text style={{ fontSize: rs.font(10), color: '#166534', marginTop: 6 }}>Counterparty Address: {(() => {
+                        try {
+                          const pk = manualLookupResult.pubkey || manualLookupResult.partyA?.pubkey || manualLookupResult.party_a?.pubkey || '';
+                          return pk ? 'Verified secp256k1 ✓' : 'Unknown';
+                        } catch { return 'Unknown'; }
+                      })()}</Text>
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={{ fontSize: rs.font(11), color: '#92400e', fontWeight: 'bold' }}>Enter Verification Code</Text>
+                        <Text style={{ fontSize: rs.font(9), color: '#b45309', marginBottom: 4 }}>Get this from your counterparty via call/DM</Text>
+                        <TextInput
+                          style={{ backgroundColor: '#fff', borderWidth: 2, borderColor: manualVerCode.length === 4 ? '#16a34a' : '#fbbf24', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: rs.font(18), fontFamily: 'monospace', textAlign: 'center', letterSpacing: 8, color: '#1c1917' }}
+                          placeholder="A3E5"
+                          placeholderTextColor="#d6d3d1"
+                          value={manualVerCode}
+                          onChangeText={(t) => setManualVerCode(t.toUpperCase().slice(0, 4))}
+                          autoCapitalize="characters"
+                          maxLength={4}
+                        />
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => {
+                          // Verify code matches before accepting
+                          const wallet_pk = role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey;
+                          const counter_pk = manualLookupResult.pubkey || manualLookupResult.partyA?.pubkey || manualLookupResult.party_a?.pubkey || '';
+                          let myPk = '';
+                          try {
+                            const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+                            // Will be set after loadMainWallet in handleAcceptFromInbox
+                          } catch {}
+                          if (manualVerCode.length !== 4) { Alert.alert('Verification', 'Enter the 4-character verification code'); return; }
+                          handleAcceptFromInbox({ ...manualLookupResult, _verificationCode: manualVerCode });
+                        }}
+                        disabled={!!acceptingId || manualVerCode.length !== 4}
+                        style={{ backgroundColor: (acceptingId || manualVerCode.length !== 4) ? '#888' : '#059669', borderRadius: 8, padding: 12, marginTop: 10, alignItems: 'center' }}
+                      >
+                        <Text style={{ color: '#FFF', fontSize: rs.font(13), fontWeight: 'bold' }}>
+                          {manualVerCode.length !== 4 ? 'Enter Code to Unlock' : 'Accept This Agreement'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (!manualAgrId || manualAgrId.length < 8) { Alert.alert('Invalid', 'Enter a valid AGR_ ID or Arweave TX ID'); return; }
+                      setInboxLoading(true);
+                      try {
+                        const { queryAgreementsFromArweave } = await import('./townhall_client');
+                        const all = await queryAgreementsFromArweave({ status: 'Proposed', network: 'testnet-10' });
+                        const match = all.find((a: any) => (a.agreementId || a.agreement_id) === manualAgrId);
+                        if (match) {
+                          console.log('[Neighbor] Manual lookup found:', manualAgrId);
+                          setManualLookupResult(match);
+                        } else {
+                          // Try direct Arweave fetch if ID looks like a TX ID (43 chars, no AGR_ prefix)
+                          if (!manualAgrId.startsWith('AGR_') && manualAgrId.length > 30) {
+                            try {
+                              const resp = await fetch('https://arweave.net/' + manualAgrId);
+                              const data = await resp.json();
+                              if (data && data.agreementId) {
+                                console.log('[Neighbor] Direct Arweave fetch found:', data.agreementId);
+                                setManualLookupResult(data);
+                                setInboxLoading(false);
+                                return;
+                              }
+                            } catch {}
+                          }
+                          Alert.alert('Not Found', 'Agreement not found on Arweave. It may still be indexing — try again in 1-2 minutes.');
+                        }
+                      } catch (e) { Alert.alert('Error', String(e)); }
+                      setInboxLoading(false);
+                    }}
+                    disabled={inboxLoading || !manualAgrId}
+                    style={{ backgroundColor: inboxLoading ? '#ccc' : '#4f46e5', borderRadius: 8, padding: 10, alignItems: 'center' }}
+                  >
+                    <Text style={{ color: '#FFF', fontSize: rs.font(12), fontWeight: '600' }}>
+                      {inboxLoading ? 'Searching Arweave...' : 'Look Up Agreement'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={{ fontSize: rs.font(10), color: '#78716c', textAlign: 'center', marginBottom: 8 }}>— or browse inbox below —</Text>
                 <TouchableOpacity
                   onPress={loadInbox}
                   style={{ backgroundColor: '#F5F3FF', borderRadius: 8, padding: 10, marginBottom: 12, alignItems: 'center' }}
@@ -2224,10 +2534,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     </Text>
                     <TouchableOpacity
                       onPress={() => handleAcceptFromInbox(agr)}
-                      disabled={isLoading}
-                      style={{ backgroundColor: isLoading ? '#888' : '#059669', borderRadius: 8, padding: 10, marginTop: 10, alignItems: 'center' }}
+                      disabled={!!acceptingId}
+                      style={{ backgroundColor: acceptingId === (agr.agreementId || agr.agreement_id) ? '#888' : !!acceptingId ? '#ccc' : '#059669', borderRadius: 8, padding: 10, marginTop: 10, alignItems: 'center' }}
                     >
-                      {isLoading ? (
+                      {acceptingId === (agr.agreementId || agr.agreement_id) ? (
                         <ActivityIndicator color='#FFF' size='small' />
                       ) : (
                         <Text style={{ color: '#FFF', fontSize: rs.font(12), fontWeight: 'bold' }}>Accept Agreement</Text>
@@ -2416,7 +2726,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   
                   <TouchableOpacity
                     style={[styles.roleCard, { backgroundColor: COLORS.blue50, borderColor: COLORS.blue300 }]}
-                    onPress={() => { setRole('seller'); setStep(3); }}
+                    onPress={() => { setRole('seller'); Alert.alert('Seller Mode', 'As a seller, you accept buyer proposals.\n\nBuyers set the terms — sellers show good faith by locking collateral first.\n\nUse "Join Existing Agreement" below to accept a buyer\'s proposal.', [{ text: 'Browse Proposals', onPress: () => { setStep(1); /* go to inbox/join */ } }, { text: 'OK' }]); }}
                   >
                     <Store size={rs.s(32)} color={COLORS.blue600} />
                     <Text style={[styles.roleTitle, { color: COLORS.blue800 }]}>I'm Seller</Text>
@@ -2464,6 +2774,44 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 {/* Only show rest after verification confirmed */}
                 {(!contract.verificationCode || verificationConfirmed) && (
                   <>
+                    {/* Agreement ID + Verification Code — share with counterparty */}
+                    {contract.agreementId && (
+                      <View style={{ backgroundColor: '#fffbeb', borderRadius: 12, borderWidth: 2, borderColor: '#f59e0b', padding: 16, marginBottom: 16 }}>
+                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#92400e', marginBottom: 8 }}>📋 Share with Counterparty</Text>
+                        <Text style={{ fontSize: rs.font(10), color: '#b45309', marginBottom: 8 }}>Send these via DM (Instagram, Signal, etc.)</Text>
+                        <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 8 }}>
+                          <Text style={{ fontSize: rs.font(10), color: '#78716c', marginBottom: 2 }}>Agreement ID:</Text>
+                          <Text selectable style={{ fontSize: rs.font(14), fontFamily: 'monospace', fontWeight: 'bold', color: '#1c1917' }}>{contract.agreementId}</Text>
+                          {contract.arweaveTxId ? (
+                            <View style={{ marginTop: 6, backgroundColor: '#f0fdf4', borderRadius: 6, padding: 8 }}>
+                              <Text style={{ fontSize: rs.font(9), color: '#166534', fontWeight: '600' }}>Arweave TX (fastest lookup):</Text>
+                              <Text selectable style={{ fontSize: rs.font(10), fontFamily: 'monospace', color: '#15803d', marginTop: 2 }}>{contract.arweaveTxId}</Text>
+                            </View>
+                          ) : (
+                            <Text style={{ fontSize: rs.font(9), color: '#a8a29e', marginTop: 4 }}>Arweave TX ID loading...</Text>
+                          )}
+                        </View>
+                        {contract.verificationCode && (
+                          <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 12 }}>
+                            <Text style={{ fontSize: rs.font(10), color: '#78716c', marginBottom: 2 }}>Verification Code:</Text>
+                            <Text selectable style={{ fontSize: rs.font(24), fontFamily: 'monospace', fontWeight: '900', color: '#312e81', letterSpacing: 6, textAlign: 'center' }}>{contract.verificationCode}</Text>
+                          </View>
+                        )}
+                        <TouchableOpacity onPress={() => { 
+                          const shareText = 'AGR: ' + contract.agreementId + '\nTX: ' + (contract.arweaveTxId || 'pending') + '\nCode: ' + (contract.verificationCode || '');
+                          import('expo-clipboard').then(Clipboard => Clipboard.setStringAsync(shareText)).catch(() => {});
+                          Alert.alert('Copied!', 'Agreement details copied to clipboard');
+                        }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 10, marginTop: 8, alignItems: 'center' }}>
+                          <Text style={{ color: '#fff', fontSize: rs.font(11), fontWeight: '600' }}>Copy All to Clipboard</Text>
+                        </TouchableOpacity>
+                        <View style={{ backgroundColor: '#fef3c7', borderRadius: 8, padding: 10, marginTop: 10, borderWidth: 1, borderColor: '#f59e0b' }}>
+                          <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#92400e' }}>Shipping Info (if physical)</Text>
+                          <Text style={{ fontSize: rs.font(9), color: '#b45309', marginTop: 4 }}>Carrier: FedEx, UPS, DHL, USPS, or other</Text>
+                          <Text style={{ fontSize: rs.font(9), color: '#dc2626', fontWeight: 'bold', marginTop: 4 }}>⚠️ NEVER share your home address. Ship to a UPS Store, FedEx Office, USPS Post Office, Amazon Locker, or any carrier service center near you.\n\nBuyer creates a prepaid shipping label (via carrier app/website) and DMs it to seller. Seller prints label and drops off package. No shipping cost in the agreement.</Text>
+                        </View>
+                        <Text style={{ fontSize: rs.font(9), color: '#d97706', marginTop: 8, textAlign: 'center' }}>Share AGR ID + TX + Code via DM (Instagram, Signal, etc.)</Text>
+                      </View>
+                    )}
                     <View style={styles.multisigBox}>
                       <Text style={styles.multisigLabel}>🔐 FROST 2-of-2 Address (Kaspa L1)</Text>
                       <View style={styles.multisigAddress}>
@@ -2576,6 +2924,31 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       )}
                     </TouchableOpacity>
                     
+                    {role === 'seller' && (
+                    <TouchableOpacity
+                      style={{ backgroundColor: '#3b82f6', paddingVertical: 12, borderRadius: 8, marginTop: 8, alignItems: 'center' }}
+                      onPress={async () => {
+                        try {
+                          setIsLoading(true);
+                          const agrId = contract.agreementId || '';
+                          console.log('[Seller-Check] Checking for buyer partial sig:', agrId);
+                          const gql = '{ transactions(first: 1, tags: [{ name: "KV-AgreementId", values: ["' + agrId + '"] }, { name: "KV-Status", values: ["PartialSig"] }]) { edges { node { id } } } }';
+                          const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+                          const json = await resp.json();
+                          const edge = json?.data?.transactions?.edges?.[0];
+                          if (edge) {
+                            console.log('[Seller-Check] Found!', edge.node.id);
+                            Alert.alert('Found!', 'Buyer confirmed delivery. Auto-release will trigger shortly.');
+                          } else {
+                            Alert.alert('Not Yet', 'Buyer has not confirmed delivery yet.');
+                          }
+                        } catch (e) { Alert.alert('Error', String(e)); }
+                        finally { setIsLoading(false); }
+                      }}>
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Check for Buyer Confirmation</Text>
+                    </TouchableOpacity>
+                    )}
+
                     {userStats.xp >= XP_THRESHOLD_IOU_ACCESS ? (
                       <TouchableOpacity
                         style={styles.iouBtn}
@@ -2636,6 +3009,23 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             
             {/* Step 5: Complete */}
             {step === 5 && (
+            <>
+            <View style={{ backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#86efac' }}>
+              <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>? Delivery Confirmed ? Send to Seller</Text>
+              <Text style={{ fontSize: 11, color: '#15803d' }}>AGR ID: {contract.agreementId}</Text>
+              <Text style={{ fontSize: 11, color: '#15803d', marginTop: 2 }}>Arweave TX: {contract.partialReleaseTx || contract.arweaveTxId || 'pending...'}</Text>
+              <TouchableOpacity 
+                style={{ backgroundColor: '#22c55e', paddingVertical: 8, borderRadius: 6, marginTop: 8, alignItems: 'center' }}
+                onPress={async () => {
+                  try {
+                    const { default: Clipboard } = await import('expo-clipboard');
+                    await Clipboard.setStringAsync('AGR: ' + (contract.agreementId || '') + '\nArweave TX: ' + (contract.partialReleaseTx || contract.arweaveTxId || '') + '\nSeller: press Check for Release');
+                    Alert.alert('Copied', 'Send this to the seller so they can release funds');
+                  } catch {}
+                }}>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>?? Copy Release Info for Seller</Text>
+              </TouchableOpacity>
+            </View>
               <View style={styles.completeContainer}>
                 <View style={styles.completeIcon}>
                   <CheckCircle size={rs.s(40)} color={COLORS.green600} />
@@ -2668,7 +3058,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   <Text style={styles.primaryBtnText}>Close</Text>
                 </TouchableOpacity>
               </View>
-            )}
+            </>)}
             
             {/* Step 6: Mutual Release */}
             {step === 6 && (

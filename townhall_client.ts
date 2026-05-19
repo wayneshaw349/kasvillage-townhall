@@ -578,6 +578,11 @@ export async function proposeAgreement(params: {
   description: string;
   stipulations?: string;
   network: string;
+  buyerAmountSompi?: number;
+  sellerAmountSompi?: number;
+  counterpartyPubkey?: string;
+  frostAddress?: string;
+  daaScore?: number;
 }): Promise<{ success: boolean; agreementId?: string; error?: string }> {
   try {
     const resp = await fetch(TOWN_HALL_BASE_URL + '/api/agreement/propose', {
@@ -588,7 +593,7 @@ export async function proposeAgreement(params: {
     const result = await resp.json();
     // Arweave dual-write for propose
     try {
-      await inscribeAgreementToArweave({
+      const arweaveResult = await inscribeAgreementToArweave({
         agreementId: params.agreementId || '',
         pubkey: params.pubkey,
         amount_sompi: params.amount_sompi,
@@ -597,7 +602,11 @@ export async function proposeAgreement(params: {
         status: 'Proposed',
         signature: params.signature,
         counterpartyPubkey: (params as any).counterpartyPubkey || undefined,
+        daaScore: (params as any).daaScore || 0,
+        buyerAmountSompi: (params as any).buyerAmountSompi || 0,
+        sellerAmountSompi: (params as any).sellerAmountSompi || 0,
       });
+    if (arweaveResult?.txId) { result.arweaveTxId = arweaveResult.txId; console.log('[TownHall] Arweave TX ID:', arweaveResult.txId); }
     } catch (e) { console.warn('[TownHall] Arweave inscription failed (non-fatal):', e); }
     return result;
   } catch (e: any) {
@@ -756,6 +765,8 @@ export async function inscribeAgreementToArweave(agreement: {
   counterpartyPubkey?: string;
   frostAddress?: string;
   daaScore?: number;
+  buyerAmountSompi?: number;
+  sellerAmountSompi?: number;
 }): Promise<IrysUploadResult> {
   const tags: ArweaveTag[] = [
     { name: 'App-Name', value: 'KasVillage' },
@@ -766,6 +777,8 @@ export async function inscribeAgreementToArweave(agreement: {
     { name: 'KV-Pubkey', value: agreement.pubkey },
     { name: 'KV-Network', value: agreement.network },
     { name: 'KV-Amount', value: String(agreement.amount_sompi) },
+    { name: 'KV-BuyerAmount', value: String(agreement.buyerAmountSompi || (agreement as any).buyerAmountSompi || 0) },
+    { name: 'KV-SellerAmount', value: String(agreement.sellerAmountSompi || (agreement as any).sellerAmountSompi || 0) },
     { name: 'KV-Description', value: (agreement.description || '').slice(0, 100) },
     { name: 'KV-DAAScore', value: String(agreement.daaScore || 0) },
     { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
@@ -795,7 +808,9 @@ export async function queryCounterpartyAgreed(opts: {
     '{ name: "KV-AgreementId", values: ["' + opts.agreementId + '"] }',
     '{ name: "KV-Pubkey", values: ["' + opts.counterpartyPubkey + '"] }',
   ];
-  if (opts.myPubkey) {
+  // KV-Counterparty filter disabled — some inscriptions don't include it
+  // Match by agreementId + counterparty pubkey + status is sufficient
+  if (false && opts.myPubkey) {
     tagFilters.push('{ name: "KV-Counterparty", values: ["' + opts.myPubkey + '"] }');
   }
   if (opts.frostAddress) {
@@ -900,6 +915,9 @@ export async function queryAgreementsFromArweave(opts?: {
           party_a: {
             pubkey: tags['KV-Pubkey'] || '',
             amount_sompi: parseInt(tags['KV-Amount'] || '0', 10),
+            counterpartyPubkey: tags['KV-Counterparty'] || '',
+            buyerAmountSompi: parseInt(tags['KV-BuyerAmount'] || '0', 10),
+            sellerAmountSompi: parseInt(tags['KV-SellerAmount'] || '0', 10),
           },
           ...agreementData,
         };

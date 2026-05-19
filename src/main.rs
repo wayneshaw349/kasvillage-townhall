@@ -2343,6 +2343,7 @@ pub enum FrostAgreementStatus { Proposed, Accepted, Confirming, BothConfirmed, F
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FrostParty {
     pub pubkey: String, pub amount_sompi: u64, pub signature: String,
+    pub buyer_amount_sompi: Option<u64>, pub seller_amount_sompi: Option<u64>, pub counterparty_pubkey: Option<String>,
     pub confirmed: bool, pub confirm_signature: Option<String>, pub collateral_tx_id: Option<String>,
 }
 
@@ -4516,14 +4517,18 @@ async fn frost_propose(state: web::Data<AppStateV3>, body: web::Json<serde_json:
     let desc = body.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let stip = body.get("stipulations").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let net = body.get("network").and_then(|v| v.as_str()).unwrap_or("testnet-10").to_string();
+    let buyer_amt = body.get("buyerAmountSompi").and_then(|v| v.as_u64());
+    let seller_amt = body.get("sellerAmountSompi").and_then(|v| v.as_u64());
+    let counterparty_pk = body.get("counterpartyPubkey").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let frost_addr = body.get("frostAddress").and_then(|v| v.as_str()).map(|s| s.to_string());
     if aid.is_empty() || pk.is_empty() || sig.is_empty() {
         return HttpResponse::BadRequest().json(json!({"error": "Missing required fields"}));
     }
     let agr = FrostAgreementData {
         agreement_id: aid.clone(), status: FrostAgreementStatus::Proposed,
         description: desc, stipulations: stip, network: net,
-        party_a: FrostParty { pubkey: pk, amount_sompi: amt, signature: sig, confirmed: false, confirm_signature: None, collateral_tx_id: None },
-        party_b: None, frost_address: None, release_recipient: None, partial_sig_a: None, partial_sig_b: None, release_tx_id: None, created_at: now_ms(), updated_at: now_ms(),
+        party_a: FrostParty { pubkey: pk, amount_sompi: amt, signature: sig, confirmed: false, confirm_signature: None, collateral_tx_id: None, buyer_amount_sompi: buyer_amt, seller_amount_sompi: seller_amt, counterparty_pubkey: counterparty_pk.clone() },
+        party_b: None, frost_address: frost_addr, release_recipient: None, partial_sig_a: None, partial_sig_b: None, release_tx_id: None, created_at: now_ms(), updated_at: now_ms(),
     };
     match state.frost_relay.propose(agr) {
         Ok(id) => HttpResponse::Ok().json(json!({"success": true, "agreementId": id, "status": "proposed"})),
@@ -4539,7 +4544,7 @@ async fn frost_accept(state: web::Data<AppStateV3>, body: web::Json<serde_json::
     if aid.is_empty() || pk.is_empty() || sig.is_empty() {
         return HttpResponse::BadRequest().json(json!({"error": "Missing required fields"}));
     }
-    let pb = FrostParty { pubkey: pk, amount_sompi: amt, signature: sig, confirmed: false, confirm_signature: None, collateral_tx_id: None };
+    let pb = FrostParty { pubkey: pk, amount_sompi: amt, signature: sig, confirmed: false, confirm_signature: None, collateral_tx_id: None, buyer_amount_sompi: None, seller_amount_sompi: None, counterparty_pubkey: None };
     match state.frost_relay.accept(aid, pb) {
         Ok(()) => HttpResponse::Ok().json(json!({"success": true, "agreementId": aid, "status": "accepted"})),
         Err(e) => HttpResponse::BadRequest().json(json!({"error": e})),
@@ -4567,7 +4572,7 @@ async fn frost_get_agreement(state: web::Data<AppStateV3>, path: web::Path<Strin
             HttpResponse::Ok().json(json!({
                 "agreementId": a.agreement_id, "status": format!("{:?}", a.status),
                 "description": a.description, "network": a.network, "frostAddress": a.frost_address,
-                "partyA": {"pubkey": a.party_a.pubkey, "amount_sompi": a.party_a.amount_sompi, "confirmed": a.party_a.confirmed, "collateralTxId": a.party_a.collateral_tx_id},
+                "partyA": {"pubkey": a.party_a.pubkey, "amount_sompi": a.party_a.amount_sompi, "confirmed": a.party_a.confirmed, "collateralTxId": a.party_a.collateral_tx_id, "buyerAmountSompi": a.party_a.buyer_amount_sompi, "sellerAmountSompi": a.party_a.seller_amount_sompi, "counterpartyPubkey": a.party_a.counterparty_pubkey},
                 "partyB": pb_json, "createdAt": a.created_at, "updatedAt": a.updated_at, "partialSigA": a.partial_sig_a, "partialSigB": a.partial_sig_b, "releaseRecipient": a.release_recipient, "releaseTxId": a.release_tx_id, "partialSigA": a.partial_sig_a, "partialSigB": a.partial_sig_b, "releaseRecipient": a.release_recipient, "releaseTxId": a.release_tx_id,
             }))
         }
@@ -7710,6 +7715,7 @@ async fn rehydrate_agreements_from_arweave(
                 pubkey: pubkey.clone(),
                 amount_sompi: amount,
                 signature: format!("arweave_rehydrated_{}", &agreement_id),
+                buyer_amount_sompi: None, seller_amount_sompi: None, counterparty_pubkey: if counterparty.is_empty() { None } else { Some(counterparty.clone()) },
                 confirmed: matches!(frost_status, 
                     FrostAgreementStatus::Confirming | 
                     FrostAgreementStatus::BothConfirmed | 
@@ -7725,6 +7731,7 @@ async fn rehydrate_agreements_from_arweave(
                     pubkey: counterparty.clone(),
                     amount_sompi: amount,
                     signature: format!("arweave_rehydrated_b_{}", &agreement_id),
+                    buyer_amount_sompi: None, seller_amount_sompi: None, counterparty_pubkey: None,
                     confirmed: matches!(frost_status, 
                         FrostAgreementStatus::BothConfirmed | 
                         FrostAgreementStatus::Collateralized |

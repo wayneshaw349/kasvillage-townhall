@@ -165,7 +165,7 @@ export interface ArweaveIdentity {
 
 export async function queryArweave(
   query: string,
-  useGoldsky = false
+  useGoldsky = true
 ): Promise<GraphQLResponse | null> {
   const endpoint = useGoldsky ? GOLDSKY_GRAPHQL : ARWEAVE_GRAPHQL;
 

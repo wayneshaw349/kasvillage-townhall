@@ -37,6 +37,9 @@ export interface LedgerEntry {
   status: UtxoStatus;
   commitReason?: string;     // agreementId or iouId
   committedAt?: number;      // timestamp
+  role?: 'buyer' | 'seller'; // canonical role in agreement
+  pubkey?: string;           // my pubkey (proves ownership)
+  commitHash?: string;       // SHA256(txId + index + agreementId + role + pubkey)
 }
 
 export interface SpendableResult {
@@ -402,6 +405,177 @@ export async function getAgreementCommitments(agreementId: string): Promise<Ledg
 /**
  * Clear all ledger data (for wallet reset/recovery).
  */
+
+// ============================================================================
+
+// ============================================================================
+// EXPIRY: Auto-release uncommitted tags after timeout
+// ============================================================================
+
+const COMMIT_EXPIRY_MS = 20 * 60 * 1000; // 20 minutes (testing), change to 24h for production
+
+/**
+ * Release stale committed UTXOs that were never sent (seller ghosted).
+ * Call periodically (e.g. on app resume, inbox refresh).
+ */
+export async function releaseExpiredCommitments(): Promise<number> {
+  const ledger = await loadLedger();
+  const now = Date.now();
+  let released = 0;
+
+  for (const entry of ledger.values()) {
+    if (entry.status === 'collateral-committed' && entry.committedAt) {
+      const age = now - entry.committedAt;
+      if (age > COMMIT_EXPIRY_MS) {
+        console.log('[UTXO-Expiry] Releasing stale tag:', entry.utxoKey, 'age:', Math.floor(age / 60000), 'min, agr:', entry.commitReason);
+        entry.status = 'free';
+        entry.commitReason = undefined;
+        entry.committedAt = undefined;
+        entry.role = undefined;
+        entry.pubkey = undefined;
+        entry.commitHash = undefined;
+        released++;
+      }
+    }
+  }
+
+  if (released > 0) {
+    await saveLedger(ledger);
+    console.log('[UTXO-Expiry] Released', released, 'stale commitments');
+  }
+  return released;
+}
+
+// CANONICAL COMMIT (binds UTXOs to agreement with role proof)
+// ============================================================================
+
+/**
+ * Canonical commit: tags UTXOs with agreement, role, pubkey, and commitHash.
+ * The commitHash is a tamper-proof binding: SHA256(txId:index + agreementId + role + pubkey)
+ * This proves: "UTXO X was committed to AGR_Y by BUYER/SELLER pubkey Z"
+ */
+export async function canonicalCommit(
+  address: string,
+  amountSompi: bigint,
+  agreementId: string,
+  role: 'buyer' | 'seller',
+  pubkey: string,
+): Promise<{ success: boolean; committedKeys: string[]; commitHashes: string[]; error?: string }> {
+  const result = await syncLedger(address);
+
+  if (result.spendableBalance < amountSompi) {
+    return {
+      success: false, committedKeys: [], commitHashes: [],
+      error: `Insufficient: have ${Number(result.spendableBalance) / 1e8} free, need ${Number(amountSompi) / 1e8} KASPA`,
+    };
+  }
+
+  const ledger = await loadLedger();
+  let remaining = amountSompi;
+  const committedKeys: string[] = [];
+  const commitHashes: string[] = [];
+
+  const freeEntries = Array.from(ledger.values())
+    .filter(e => e.status === 'free')
+    .sort((a, b) => Number(BigInt(a.amountSompi) - BigInt(b.amountSompi)));
+
+  for (const entry of freeEntries) {
+    if (remaining <= 0n) break;
+    // Compute commit hash
+    const hashInput = entry.utxoKey + agreementId + role + pubkey;
+    const encoder = new TextEncoder();
+    const hashBytes = await (async () => {
+      try {
+        const { sha256 } = await import('@noble/hashes/sha256');
+        return sha256(encoder.encode(hashInput));
+      } catch {
+        // Fallback: use simple string hash
+        return encoder.encode(hashInput);
+      }
+    })();
+    const hash = Array.from(hashBytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    entry.status = 'collateral-committed';
+    entry.commitReason = agreementId;
+    entry.committedAt = Date.now();
+    entry.role = role;
+    entry.pubkey = pubkey;
+    entry.commitHash = hash;
+    committedKeys.push(entry.utxoKey);
+    commitHashes.push(hash);
+    remaining -= BigInt(entry.amountSompi);
+  }
+
+  await saveLedger(ledger);
+  console.log(`[UTXO-Tag] Committed ${committedKeys.length} UTXOs (${Number(amountSompi) / 1e8} KAS) to ${agreementId} as ${role.toUpperCase()}`);
+  console.log(`[UTXO-Tag] Hashes: ${commitHashes.join(', ')}`);
+  return { success: true, committedKeys, commitHashes };
+}
+
+/**
+ * Verify that UTXOs are properly committed to an agreement.
+ * Returns true if commitHashes match recomputed values.
+ */
+export async function verifyCommitment(agreementId: string, role: 'buyer' | 'seller', pubkey: string): Promise<{
+  valid: boolean;
+  utxoCount: number;
+  totalSompi: bigint;
+}> {
+  const ledger = await loadLedger();
+  let totalSompi = 0n;
+  let utxoCount = 0;
+  let valid = true;
+
+  for (const entry of ledger.values()) {
+    if (entry.commitReason === agreementId && entry.role === role) {
+      utxoCount++;
+      totalSompi += BigInt(entry.amountSompi);
+      // Verify hash
+      if (entry.commitHash) {
+        const hashInput = entry.utxoKey + agreementId + role + pubkey;
+        try {
+          const { sha256 } = await import('@noble/hashes/sha256');
+          const expected = Array.from(sha256(new TextEncoder().encode(hashInput)).slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('');
+          if (expected !== entry.commitHash) {
+            console.warn('[UTXO-Tag] Hash mismatch for', entry.utxoKey);
+            valid = false;
+          }
+        } catch {}
+      }
+    }
+  }
+
+  console.log(`[UTXO-Tag] Verified ${agreementId}: ${utxoCount} UTXOs, ${Number(totalSompi) / 1e8} KAS, valid: ${valid}`);
+  return { valid, utxoCount, totalSompi };
+}
+
+/**
+ * Get all UTXO tags for display (balance sheet / tax tracking).
+ */
+export async function getTaggedUtxos(): Promise<{
+  free: LedgerEntry[];
+  committed: { entry: LedgerEntry; agreementId: string; role: string }[];
+  locked: { entry: LedgerEntry; agreementId: string; role: string }[];
+  iou: { entry: LedgerEntry; iouId: string }[];
+}> {
+  const ledger = await loadLedger();
+  const free: LedgerEntry[] = [];
+  const committed: any[] = [];
+  const locked: any[] = [];
+  const iou: any[] = [];
+
+  for (const entry of ledger.values()) {
+    switch (entry.status) {
+      case 'free': free.push(entry); break;
+      case 'collateral-committed': committed.push({ entry, agreementId: entry.commitReason || '', role: entry.role || 'unknown' }); break;
+      case 'collateral-locked': locked.push({ entry, agreementId: entry.commitReason || '', role: entry.role || 'unknown' }); break;
+      case 'iou-allocated': iou.push({ entry, iouId: entry.commitReason || '' }); break;
+    }
+  }
+
+  return { free, committed, locked, iou };
+}
+
 export async function clearLedger(): Promise<void> {
   await AsyncStorage.removeItem(LEDGER_KEY);
 }

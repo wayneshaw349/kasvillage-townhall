@@ -144,8 +144,11 @@ export function aggregateFrostSig(params: {
 import { Platform, PermissionsAndroid, Linking } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as secp from '@noble/secp256k1';
+import { schnorr } from '@noble/curves/secp256k1';
+
 import { sha256 } from '@noble/hashes/sha256';
 import { blake2b } from '@noble/hashes/blake2b';
+const N_ORDER = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
 
 // ============================================================================
 // KASPA SIGHASH — Blake2b-256 with TransactionSigningHash domain key
@@ -449,10 +452,22 @@ export function createPartialSigLocal(params: {
   // The aggregation function handles combining R values and recomputing e
   
   // Sign with tweaked key using BIP340 schnorr
-  const sig = schnorr.sign(message, d.toString(16).padStart(64, '0'));
-  
+  // Deterministic FROST nonce: k = SHA256(d_tweaked || P_agg || tx_message)
+  const kInput = new Uint8Array([...hexToBytes(d.toString(16).padStart(64, '0')), ...hexToBytes(aggPubkeyHex), ...message]);
+  const kHash = sha256(kInput);
+  const kFrost = BigInt('0x' + bytesToHex(kHash)) % N_ORDER;
+  if (kFrost === 0n) throw new Error('Invalid nonce');
+  const R_point = (secp as any).ProjectivePoint.BASE.multiply(kFrost);
+  const R_x = R_point.toRawBytes(true).slice(1);
+  const aggXOnly = hexToBytes(aggPubkeyHex).length === 33 ? hexToBytes(aggPubkeyHex).slice(1) : hexToBytes(aggPubkeyHex);
+  const e_hash = blake2b(new Uint8Array([...R_x, ...aggXOnly, ...message]), { dkLen: 32 });
+  const e_val = BigInt('0x' + bytesToHex(e_hash)) % N_ORDER;
+  const s_i = (kFrost + e_val * d) % N_ORDER;
+  const sigBytes = new Uint8Array(64);
+  sigBytes.set(R_x, 0);
+  sigBytes.set(hexToBytes(s_i.toString(16).padStart(64, '0')), 32);
   const messageHash = bytesToHex(message);
-  const partialSig = bytesToHex(sig);
+  const partialSig = bytesToHex(sigBytes);
 
   return {
     partialSig,
@@ -471,8 +486,8 @@ export function aggregatePartialSigs(sigA: string, sigB: string): string {
 
   // R_agg = R_A + R_B (EC point addition on secp256k1)
   // R is x-only (32 bytes) — lift to full point, add, compress back to x-only
-  const R_A = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x02, ...sigABytes.slice(0, 32)]));
-  const R_B = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x02, ...sigBBytes.slice(0, 32)]));
+  let R_A; try { R_A = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x02, ...sigABytes.slice(0, 32)])); } catch { R_A = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x03, ...sigABytes.slice(0, 32)])); }
+  let R_B; try { R_B = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x02, ...sigBBytes.slice(0, 32)])); } catch { R_B = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x03, ...sigBBytes.slice(0, 32)])); }
   const R_agg = R_A.add(R_B);
   const R_aggBytes = R_agg.toRawBytes(true); // 33 bytes compressed
   const R_aggX = R_aggBytes.slice(1); // 32 bytes x-only
