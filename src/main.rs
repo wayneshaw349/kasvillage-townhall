@@ -7691,6 +7691,10 @@ async fn rehydrate_agreements_from_arweave(
             let network = get_tag("KV-Network");
             let frost_address = get_tag("KV-FrostAddress");
             let counterparty = get_tag("KV-Counterparty");
+            let buyer_amt_str = get_tag("KV-BuyerAmount");
+            let seller_amt_str = get_tag("KV-SellerAmount");
+            let buyer_amt: Option<u64> = if buyer_amt_str.is_empty() { None } else { buyer_amt_str.parse().ok() };
+            let seller_amt: Option<u64> = if seller_amt_str.is_empty() { None } else { seller_amt_str.parse().ok() };
             let daa_score_str = get_tag("KV-DAAScore");
             let daa_score: u64 = daa_score_str.parse().unwrap_or(0);
             let kv_status = get_tag("KV-Status");
@@ -7715,7 +7719,7 @@ async fn rehydrate_agreements_from_arweave(
                 pubkey: pubkey.clone(),
                 amount_sompi: amount,
                 signature: format!("arweave_rehydrated_{}", &agreement_id),
-                buyer_amount_sompi: None, seller_amount_sompi: None, counterparty_pubkey: if counterparty.is_empty() { None } else { Some(counterparty.clone()) },
+                buyer_amount_sompi: buyer_amt, seller_amount_sompi: seller_amt, counterparty_pubkey: if counterparty.is_empty() { None } else { Some(counterparty.clone()) },
                 confirmed: matches!(frost_status, 
                     FrostAgreementStatus::Confirming | 
                     FrostAgreementStatus::BothConfirmed | 
