@@ -2761,10 +2761,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 
                 <TouchableOpacity
                   style={[styles.primaryBtn, !canProceedFromCreate && styles.primaryBtnDisabled]}
-                  onPress={() => setStep(2)}
+                  onPress={() => { setRole('buyer'); setStep(3); }}
                   disabled={!canProceedFromCreate}
                 >
-                  <Text style={styles.primaryBtnText}>Continue to Role Selection</Text>
+                  <Text style={styles.primaryBtnText}>Continue</Text>
                 </TouchableOpacity>
               </View>
             )}
