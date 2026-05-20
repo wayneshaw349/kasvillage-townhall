@@ -1269,7 +1269,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           // If we haven't sent yet, the counterparty has — trigger our auto-send
           const myExpected = role === 'buyer' ? expectedBuyer : expectedSeller;
           const counterpartyExpected = role === 'buyer' ? expectedSeller : expectedBuyer;
-          const iShouldSend = frostBalance >= counterpartyExpected && frostBalance < expectedTotal;
+          const alreadySentKey = await AsyncStorage.getItem('kv_frost_sent_' + contract.agreementId);
+          const iShouldSend = !alreadySentKey && frostBalance >= counterpartyExpected && frostBalance < expectedTotal;
           if (iShouldSend) {
             console.log('[FROST-Poll] Counterparty sent! Triggering our auto-send...');
             try {
