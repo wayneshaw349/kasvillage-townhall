@@ -2551,6 +2551,44 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   </Text>
                 </TouchableOpacity>
 
+                <View style={{ backgroundColor: '#f0fdf4', borderRadius: 8, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#86efac' }}>
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>?? Paste Release Key</Text>
+                  <TextInput
+                    style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#86efac', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
+                    placeholder="Paste encrypted key from buyer..."
+                    placeholderTextColor="#a8a29e"
+                    onChangeText={(txt) => setContract(prev => ({ ...prev, partialReleaseTx: txt.trim() }))}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    multiline
+                  />
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#059669', borderRadius: 8, padding: 10, alignItems: 'center' }}
+                    disabled={isLoading}
+                    onPress={async () => {
+                      try {
+                        setIsLoading(true);
+                        const sig = contract.partialReleaseTx || '';
+                        if (!sig || sig.length < 10) { Alert.alert('Invalid', 'Paste the release key'); setIsLoading(false); return; }
+                        const session = await loadAgreementSession();
+                        if (!session?.contract?.frostData) { Alert.alert('No Agreement', 'Accept an agreement first'); setIsLoading(false); return; }
+                        const w = await loadMainWallet();
+                        if (!w) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
+                        const sc = session.contract;
+                        const total = BigInt(Math.floor(((sc.itemPriceKas || 0) + (sc.sellerCommitmentKas || 0)) * 1e8));
+                        const dec = (() => { try { return decryptPartialSig({ encrypted: sig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: sc.buyerPubkey || '' }); } catch { return sig; } })();
+                        const res = await completeFrostAndBroadcast({ frostAddress: sc.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, counterpartyPartialSig: dec });
+                        if (res.success && res.txId) {
+                          Alert.alert('Released!', 'TX: ' + (res.txId || '').slice(0,16) + '...');
+                          await clearAgreementSession();
+                        } else { Alert.alert('Failed', res.error || 'Co-sign failed'); }
+                      } catch (e) { Alert.alert('Error', String(e)); }
+                      finally { setIsLoading(false); }
+                    }}>
+                    {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Release Funds</Text>}
+                  </TouchableOpacity>
+                </View>
+
                 {inboxAgreements.length === 0 && !inboxLoading && (
                   <View style={{ backgroundColor: '#F5F5F4', borderRadius: 8, padding: 20, alignItems: 'center' }}>
                     <Text style={{ color: '#78716C', fontSize: rs.font(12) }}>No pending proposals</Text>
