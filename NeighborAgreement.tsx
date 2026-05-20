@@ -1576,10 +1576,15 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           const xOnly = result.slice(1, 33);
           const pubkey = '02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join('');
           console.log('[Neighbor] My pubkey:', pubkey);
-          if (role === 'buyer') {
-            setContract(prev => ({ ...prev, buyerPubkey: pubkey }));
+          // Only set pubkey if FROST hasn't been derived yet
+          if (!contract.multisigAddress) {
+            if (role === 'buyer') {
+              setContract(prev => ({ ...prev, buyerPubkey: pubkey }));
+            } else {
+              setContract(prev => ({ ...prev, sellerPubkey: pubkey }));
+            }
           } else {
-            setContract(prev => ({ ...prev, sellerPubkey: pubkey }));
+            console.log('[Neighbor] Pubkey frozen ? FROST already derived');
           }
         }
       } catch (e) {
@@ -2947,6 +2952,55 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       }}>
                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Check for Buyer Confirmation</Text>
                     </TouchableOpacity>
+                    <View style={{ backgroundColor: '#eef2ff', borderRadius: 8, padding: 12, marginTop: 10, borderWidth: 1, borderColor: '#a5b4fc' }}>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#3730a3', marginBottom: 6 }}>Paste Release Info from Buyer</Text>
+                      <TextInput
+                        style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
+                        placeholder="Arweave TX ID from buyer..."
+                        placeholderTextColor="#a8a29e"
+                        onChangeText={(txt) => setContract(prev => ({ ...prev, partialReleaseTx: txt.trim() }))}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      <TouchableOpacity
+                        style={{ backgroundColor: '#059669', borderRadius: 8, padding: 10, alignItems: 'center' }}
+                        onPress={async () => {
+                          try {
+                            setIsLoading(true);
+                            const arTxId = contract.partialReleaseTx || '';
+                            if (!arTxId || arTxId.length < 10) { Alert.alert('Invalid', 'Paste the Arweave TX ID from the buyer'); setIsLoading(false); return; }
+                            console.log('[Seller-Release] Fetching partial sig from Arweave:', arTxId);
+                            // Fetch the partial sig data from Arweave
+                            const resp = await fetch('https://arweave-search.goldsky.com/graphql', {
+                              method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ query: '{ transactions(ids: ["' + arTxId + '"]) { edges { node { id, tags { name, value } } } } }' })
+                            });
+                            const json = await resp.json();
+                            const tags = json?.data?.transactions?.edges?.[0]?.node?.tags;
+                            if (!tags) { Alert.alert('Not Found', 'Could not find TX on Arweave. Try again in 1-2 min.'); setIsLoading(false); return; }
+                            const tagMap = {};
+                            tags.forEach((t) => { tagMap[t.name] = t.value; });
+                            const partialSig = tagMap['KV-Signature'] || '';
+                            if (!partialSig) { Alert.alert('No Signature', 'TX found but no partial signature in tags'); setIsLoading(false); return; }
+                            console.log('[Seller-Release] Found partial sig, co-signing...');
+                            // Co-sign and broadcast
+                            const w = await loadMainWallet();
+                            if (!w || !contract.frostData) { Alert.alert('Error', 'Wallet or FROST not ready'); setIsLoading(false); return; }
+                            const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
+                            const decrypted = (() => { try { const { decryptPartialSig } = require('./frost_encrypted_relay'); return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '', ctx: { agreementId: contract.agreementId || '', buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', multisigAddress: contract.multisigAddress || '', aggregatedPubkey: contract.frostData?.aggregatedPubkey || '', network: contract.frostData?.network || 'testnet-10', itemPriceKas: contract.itemPriceKas, sellerCommitmentKas: contract.sellerCommitmentKas, R_hex: '' }, nonce: '' }); } catch { return partialSig; } })();
+                            const result = await completeFrostAndBroadcast({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, counterpartyPartialSig: decrypted });
+                            if (result.success && result.txId) {
+                              console.log('[Seller-Release] Release TX:', result.txId);
+                              setContract(prev => ({ ...prev, releaseTxId: result.txId, releaseExplorerUrl: result.explorerUrl }));
+                              setStep(7);
+                              Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...');
+                            } else { Alert.alert('Failed', result.error || 'Co-sign failed'); }
+                          } catch (e) { Alert.alert('Error', String(e)); }
+                          finally { setIsLoading(false); }
+                        }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Release Funds</Text>
+                      </TouchableOpacity>
+                    </View>
                     )}
 
                     {userStats.xp >= XP_THRESHOLD_IOU_ACCESS ? (
