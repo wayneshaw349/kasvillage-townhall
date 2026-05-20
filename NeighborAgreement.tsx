@@ -2197,7 +2197,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         
         setContract(prev => ({
           ...prev,
-          partialReleaseTx: result.partialSig,
+          partialReleaseTx: encrypted.encrypted,
           releaseRecipient: recipientAddress,
         }));
         
