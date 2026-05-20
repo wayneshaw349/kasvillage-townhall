@@ -1267,9 +1267,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           // At least one party sent — check if it's us or counterparty
           console.log('[FROST-Poll] Partial balance detected:', Number(frostBalance) / 1e8, 'KASPA');
           // If we haven't sent yet, the counterparty has — trigger our auto-send
-          const mySentKey = 'kv_frost_sent_' + contract.agreementId;
-          const mySent = await AsyncStorage.getItem(mySentKey);
-          if (!mySent) {
+          const myExpected = role === 'buyer' ? expectedBuyer : expectedSeller;
+          const counterpartyExpected = role === 'buyer' ? expectedSeller : expectedBuyer;
+          const iShouldSend = frostBalance >= counterpartyExpected && frostBalance < expectedTotal;
+          if (iShouldSend) {
             console.log('[FROST-Poll] Counterparty sent! Triggering our auto-send...');
             try {
               const wallet = await loadMainWallet();
@@ -1284,7 +1285,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     network: wallet.network,
                   });
                   if (sendResult.success) {
-                    await AsyncStorage.setItem(mySentKey, sendResult.txId || String(Date.now()));
+                    await AsyncStorage.setItem('kv_frost_sent_' + contract.agreementId, sendResult.txId || String(Date.now()));
                     console.log('[FROST-Poll] Our collateral sent! TX:', sendResult.txId);
                     try { const { markLocked } = await import('./utxo_ledger'); await markLocked(contract.agreementId || ''); } catch {}
                     if (role === 'buyer') { setBuyerLocked(true); } else { setSellerLocked(true); }
