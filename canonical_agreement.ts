@@ -177,3 +177,22 @@ export function canonicalSendAmount(canon: CanonicalAgreement): number {
 export function canonicalSendsFirst(canon: CanonicalAgreement): boolean {
   return canon.role === 'seller';
 }
+
+
+// === CANONICAL RELEASE FLOW ===
+// Enforces: buyer creates partial sig, seller co-signs and broadcasts
+export function canonicalReleaseSigner(role: string): 'create' | 'cosign' {
+  // Buyer confirms delivery ? creates partial sig
+  // Seller receives partial sig ? co-signs ? broadcasts release TX
+  return role === 'buyer' ? 'create' : 'cosign';
+}
+
+export function canonicalCanCreatePartialSig(role: string, step: number): boolean {
+  // Only buyer can create partial sig, only at step 4
+  return role === 'buyer' && step === 4;
+}
+
+export function canonicalCanCosign(role: string, step: number): boolean {
+  // Only seller can co-sign, at step 4 or 5
+  return role === 'seller' && (step === 4 || step === 5);
+}
