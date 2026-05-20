@@ -1946,7 +1946,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             } catch (e) { console.warn('[Neighbor] Ledger commit skipped:', e); }
           }
           // Set state and go to step 3 — poll handles the rest
-          setRole(iAmProposer ? 'seller' : 'buyer');
+          // Role already set by canonical module above
+          // setRole(iAmProposer ? 'seller' : 'buyer');
           setAgreementType('trade');
           setStep(3);
           // AUTO-CONFIRM on TownHall — breaks the Arweave polling deadlock
