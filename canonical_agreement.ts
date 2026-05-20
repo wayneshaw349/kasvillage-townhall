@@ -196,3 +196,17 @@ export function canonicalCanCosign(role: string, step: number): boolean {
   // Only seller can co-sign, at step 4 or 5
   return role === 'seller' && (step === 4 || step === 5);
 }
+
+
+// === CANONICAL PROPOSER RULE ===
+// The proposer is ALWAYS the buyer. No role selection needed.
+// The acceptor is ALWAYS the seller.
+// This is enforced at the protocol level ? UI should not offer role choice.
+export function canonicalProposerRole(): 'buyer' { return 'buyer'; }
+export function canonicalAcceptorRole(): 'seller' { return 'seller'; }
+
+// Validate: if proposer pubkey matches myPubkey, I am buyer
+// If I am accepting (not proposing), I am seller
+export function canonicalDetermineRole(proposerPubkey: string, myPubkey: string): 'buyer' | 'seller' {
+  return proposerPubkey === myPubkey ? 'buyer' : 'seller';
+}

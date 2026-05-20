@@ -112,7 +112,7 @@ import {
 
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
-import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign } from './canonical_agreement';
+import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
 import { canonicalCommit, verifyCommitment, releaseExpiredCommitments } from './utxo_ledger';
 import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
@@ -1761,6 +1761,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       const agreementCounterparty = agreement.counterpartyPubkey || agreement.counterparty || agreement.KVCounterparty || '';
       // Determine: am I the proposer or the acceptor?
       const iAmProposer = agreementPubkey === myPubkey;
+      const canonRole = canonicalDetermineRole(agreementPubkey, myPubkey);
+      console.log('[Canonical] Role determined:', canonRole, 'proposer:', agreementPubkey.slice(0,16), 'me:', myPubkey.slice(0,16));
       const sellerPubkey = iAmProposer ? (agreementCounterparty || '') : agreementPubkey;
       console.log('[Neighbor] Role detection:', iAmProposer ? 'I am proposer' : 'I am acceptor', 'seller:', sellerPubkey.slice(0,16), 'me:', myPubkey.slice(0,16));
       const agrAmount = agreement.partyA?.amount_sompi || agreement.party_a?.amount_sompi || agreement.amount_sompi || 0;
