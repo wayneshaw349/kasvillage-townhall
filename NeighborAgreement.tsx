@@ -1866,6 +1866,11 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         console.log('[Neighbor] Already agreed to', agrId, '- skipping duplicate inscription');
       }
       const agreementPubkey = agreement.partyA?.pubkey || agreement.party_a?.pubkey || agreement.pubkey || '';
+      if (agreementPubkey === myPubkey) {
+        console.warn('[Canonical] BLOCKED: cannot accept own proposal');
+        Alert.alert('Cannot Accept', 'This is your own proposal.');
+        setIsLoading(false); setAcceptingId(null); return;
+      }
       const agreementCounterparty = agreement.counterpartyPubkey || agreement.counterparty || agreement.KVCounterparty || '';
       // Determine: am I the proposer or the acceptor?
       const iAmProposer = agreementPubkey === myPubkey;
