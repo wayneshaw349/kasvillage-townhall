@@ -1073,6 +1073,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   // Background: check saved session for pending FROST funding on mount
   useEffect(() => {
     const checkPendingFrost = async () => {
+      if ((global as any).__frostRestored) return;
+      (global as any).__frostRestored = true;
       try {
         const session = await loadAgreementSession();
         if (!session || session.step < 3 || !session.contract?.multisigAddress) return;
@@ -1324,11 +1326,12 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         const thResp = await fetch('https://kasvillage.app.runonflux.io/api/agreement/' + (contract.agreementId || ''));
         const thData = await thResp.json();
         const frostAddr = contract.multisigAddress || '';
-        const l1UtxoResp = await fetch('https://api.kaspa.org/addresses/' + frostAddr + '/utxos');
+        const l1UtxoResp = await fetch(apiBase + '/addresses/' + frostAddr + '/utxos');
         const l1Utxos = await l1UtxoResp.json();
-        const l1DaaResp = await fetch('https://api.kaspa.org/info/virtual-chain-blue-score');
+        const l1DaaResp = await fetch(apiBase + '/info/virtual-chain-blue-score');
         const l1Daa = await l1DaaResp.json();
-        console.log('[FROST-Poll] === TRIPLE CHECK ===');
+        const pollCount = (global.__frostPollCount = (global.__frostPollCount || 0) + 1);
+      if (pollCount % 6 === 1) { console.log('[FROST-Poll] === TRIPLE CHECK ===');
         console.log('[FROST-Poll] AgrID:', contract.agreementId);
         console.log('[FROST-Poll] My pubkey:', (contract.buyerPubkey || contract.sellerPubkey || 'unknown').substring(0,16));
         console.log('[FROST-Poll] PartyA pubkey (TH):', thData.partyA?.pubkey?.substring(0,16) || 'missing');
@@ -1349,7 +1352,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           thData.partyB ? 'PartyB ?' : 'PartyB ?',
           thData.partyA?.pubkey ? 'PartyA ?' : 'PartyA ?'
         );
-        console.log('[FROST-Poll] =================');
+        console.log('[FROST-Poll] ================='); }
       } catch (e) { console.warn('[FROST-Poll] Triple check failed:', e); }
       console.log('[FROST-Poll] Balance:', Number(frostBalance) / 1e8, 'KASPA, expected:', Number(expectedTotal) / 1e8);
         if (frostBalance >= expectedTotal) {
@@ -1625,7 +1628,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               frostAddress: frostData.address,
               daaScore: currentDaa,
               buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
-              sellerAmountSompi: Math.floor(contract.itemPriceKas * 1e8), // Equal stakes
+              sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
             } as any);
             // Reduce spendable for proposer (input cap)
             try {
