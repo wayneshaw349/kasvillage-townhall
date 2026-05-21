@@ -1022,6 +1022,37 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   }, [step, role, agreementType, contract, buyerLocked, sellerLocked]);
 
   // Check Tailscale on mount
+  // Background: check saved session for pending FROST funding on mount
+  useEffect(() => {
+    const checkPendingFrost = async () => {
+      try {
+        const session = await loadAgreementSession();
+        if (!session || session.step < 3 || !session.contract?.multisigAddress) return;
+        if (session.contract?.buyerPubkey === session.contract?.sellerPubkey) return;
+        const frostAddr = session.contract.multisigAddress;
+        const networkStr = await SecureStore.getItemAsync('kaspa_network');
+        const apiBase = networkStr?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+        const resp = await fetch(apiBase + '/addresses/' + frostAddr + '/balance');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const bal = BigInt(data.balance || '0');
+        console.log('[Background-FROST] Session:', session.contract.agreementId?.slice(0,12), 'FROST:', frostAddr.slice(0,20), 'Balance:', Number(bal)/1e8, 'Step:', session.step);
+        if (bal > 0n || session.step >= 3) {
+          console.log('[Background-FROST] Restoring active session');
+          setStep(session.step);
+          setRole(session.role);
+          setAgreementType(session.agreementType);
+          setContract(session.contract);
+          setBuyerLocked(session.buyerLocked);
+          setSellerLocked(session.sellerLocked);
+          if (session.counterpartyAddress) setCounterpartyAddress(session.counterpartyAddress);
+          if (session.counterpartyKaspaAddr) setCounterpartyKaspaAddr(session.counterpartyKaspaAddr);
+        }
+      } catch (e) { console.warn('[Background-FROST] Check failed:', e); }
+    };
+    checkPendingFrost();
+  }, []);
+
   useEffect(() => {
     isTailscaleFunnelAvailable().then(setTailscaleAvailable);
     return () => cleanupFrost();
