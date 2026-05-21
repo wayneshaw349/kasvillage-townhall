@@ -1893,7 +1893,11 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           console.log('[Neighbor] Auto-send check: sendsFirst=', sendsFirst, 'mySendAmount=', mySendAmount / 1e8, 'role:', canon.role, 'myPubkey=', myPubkey?.slice(0,16));
           const immediateSendAmount = mySendAmount;
           if (immediateSendAmount > 0 && wallet.privKeyHex) {
-            try {
+            const frostSentKey = 'kv_frost_sent_' + agrId;
+            const alreadyFrostSent = await AsyncStorage.getItem(frostSentKey);
+            if (alreadyFrostSent) {
+              console.log('[Neighbor] Already sent to FROST for', agrId, '- skipping');
+            } else try {
               console.log('[Neighbor] Seller auto-sending', immediateSendAmount / 1e8, 'KASPA to FROST');
               // sendKaspaViaRest is already imported/available in this scope
               const txResult = await sendKaspaViaRest({
@@ -2366,12 +2370,12 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               <Handshake size={rs.s(24)} color={COLORS.indigo900} />
               <Text style={styles.headerTitle}>Neighbor Agreement</Text>
             </View>
-            <TouchableOpacity onPress={() => { clearAgreementSession(); onClose(); }} style={styles.closeBtn}>
+            <TouchableOpacity onPress={() => { onClose(); }} style={styles.closeBtn}>
               <X size={rs.s(24)} color={COLORS.stone400} />
             </TouchableOpacity>
           </View>
           <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: "#e7e5e4" }}>
-            <TouchableOpacity onPress={() => { clearAgreementSession(); onClose(); }} style={{ flexDirection: "row", alignItems: "center", padding: 8 }}>
+            <TouchableOpacity onPress={() => { onClose(); }} style={{ flexDirection: "row", alignItems: "center", padding: 8 }}>
               <Text style={{ color: "#4f46e5", fontSize: 14, fontWeight: "bold" }}>{"< Back"}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setIouModalVisible(true)} style={{ flexDirection: "row", alignItems: "center", padding: 8, backgroundColor: "#eff6ff", borderRadius: 8 }}>
