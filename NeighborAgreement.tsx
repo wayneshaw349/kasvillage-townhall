@@ -175,6 +175,53 @@ async function clearAgreementSession(): Promise<void> {
   try { await AsyncStorage.removeItem(AGR_SESSION_KEY); } catch {}
 }
 
+const FROST_ACTIVE_KEY = 'kv_frost_active_list';
+
+interface FrostActiveEntry {
+  agrId: string;
+  frostAddr: string;
+  role: 'buyer' | 'seller';
+  step: number;
+  buyerAmount: number;
+  sellerAmount: number;
+  buyerPubkey: string;
+  sellerPubkey: string;
+  description: string;
+  createdAt: number;
+}
+
+async function addToFrostList(entry: FrostActiveEntry): Promise<void> {
+  try {
+    const list = await getFrostList();
+    const existing = list.findIndex(e => e.agrId === entry.agrId);
+    if (existing >= 0) list[existing] = entry; else list.push(entry);
+    await AsyncStorage.setItem(FROST_ACTIVE_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+async function getFrostList(): Promise<FrostActiveEntry[]> {
+  try {
+    const json = await AsyncStorage.getItem(FROST_ACTIVE_KEY);
+    return json ? JSON.parse(json) : [];
+  } catch { return []; }
+}
+
+async function updateFrostEntry(agrId: string, updates: Partial<FrostActiveEntry>): Promise<void> {
+  try {
+    const list = await getFrostList();
+    const idx = list.findIndex(e => e.agrId === agrId);
+    if (idx >= 0) { list[idx] = { ...list[idx], ...updates }; await AsyncStorage.setItem(FROST_ACTIVE_KEY, JSON.stringify(list)); }
+  } catch {}
+}
+
+async function removeFrostEntry(agrId: string): Promise<void> {
+  try {
+    const list = await getFrostList();
+    await AsyncStorage.setItem(FROST_ACTIVE_KEY, JSON.stringify(list.filter(e => e.agrId !== agrId)));
+  } catch {}
+}
+
+
 // Re-export types for external use
 export type { KaspaNetwork, FrostAddress, ExchangeMethod };
 
@@ -927,6 +974,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   const [manualAgrId, setManualAgrId] = useState('');
   const [manualLookupResult, setManualLookupResult] = useState<any>(null);
   const [manualVerCode, setManualVerCode] = useState('');
+  const [frostActiveList, setFrostActiveList] = useState<FrostActiveEntry[]>([]);
 
   // Inline canonicalVerify REMOVED ? using module import from canonical_agreement.ts
 
@@ -1037,6 +1085,21 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         const data = await resp.json();
         const bal = BigInt(data.balance || '0');
         console.log('[Background-FROST] Session:', session.contract.agreementId?.slice(0,12), 'FROST:', frostAddr.slice(0,20), 'Balance:', Number(bal)/1e8, 'Step:', session.step);
+        // Also poll all active FROST entries
+        const allActive = await getFrostList();
+        const updatedList: FrostActiveEntry[] = [];
+        for (const entry of allActive) {
+          try {
+            const eResp = await fetch(apiBase + '/addresses/' + entry.frostAddr + '/balance');
+            if (eResp.ok) {
+              const eData = await eResp.json();
+              const eBal = Number(eData.balance || '0') / 1e8;
+              console.log('[Background-FROST] Polling', entry.agrId.slice(0,12), ':', eBal, 'KAS', 'step:', entry.step);
+              updatedList.push({ ...entry, step: eBal >= (entry.buyerAmount + entry.sellerAmount) ? 4 : entry.step });
+            } else { updatedList.push(entry); }
+          } catch { updatedList.push(entry); }
+        }
+        setFrostActiveList(updatedList);
         if (bal > 0n || session.step >= 3) {
           console.log('[Background-FROST] Restoring active session');
           setStep(session.step);
@@ -1575,7 +1638,20 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             } catch (e) { console.warn('[Neighbor] Proposer ledger commit skipped:', e); }
             // AUTO-CONFIRM disabled at propose time — confirms after Party B accepts
             // Proposer confirms in FROST-Poll when TH status changes to Accepted
-            console.log('[Neighbor] Proposal sent — waiting for counterparty to accept');
+            // Add to active FROST list
+          addToFrostList({
+            agrId: agreementId,
+            frostAddr: frostData.address,
+            role: 'buyer',
+            step: 3,
+            buyerAmount: contract.itemPriceKas,
+            sellerAmount: contract.sellerCommitmentKas,
+            buyerPubkey: contract.buyerPubkey || '',
+            sellerPubkey: contract.sellerPubkey || '',
+            description: contract.itemDescription || '',
+            createdAt: Date.now(),
+          });
+          console.log('[Neighbor] Proposal sent — waiting for counterparty to accept');
           console.log('[Neighbor] Agreement proposed on TownHall:', agreementId);
             if (proposeResult?.arweaveTxId) {
               console.log('[Neighbor] Arweave TX ID:', proposeResult.arweaveTxId);
@@ -1971,6 +2047,19 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               counterpartyPubkey: sellerPubkey,
             });
             console.log('[Neighbor] Acceptance inscribed to Arweave');
+            // Add to active FROST list
+            addToFrostList({
+              agrId: agrId,
+              frostAddr: frostData.address,
+              role: canon?.role as any || 'seller',
+              step: 3,
+              buyerAmount: buyerKas,
+              sellerAmount: sellerKas,
+              buyerPubkey: iAmProposer ? sellerPubkey : myPubkey,
+              sellerPubkey: iAmProposer ? myPubkey : sellerPubkey,
+              description: agreement.description || '',
+              createdAt: Date.now(),
+            });
           } catch (e) { console.warn('[Neighbor] Arweave accept inscription failed:', e); }
 
           // Reduce spendable (input cap) — Agreed-Send poll handles auto-send
@@ -2447,6 +2536,33 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             {/* Step 1: Create */}
             {step === 1 && !agreementType && (
               <View>
+                {frostActiveList.length > 0 && (
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e1b4b', marginBottom: 8 }}>Active Agreements</Text>
+                    {frostActiveList.map((entry, idx) => (
+                      <TouchableOpacity key={idx} style={{ backgroundColor: entry.step >= 4 ? '#f0fdf4' : '#eff6ff', borderRadius: 8, padding: 10, marginBottom: 6, borderWidth: 1, borderColor: entry.step >= 4 ? '#86efac' : '#93c5fd' }}
+                        onPress={async () => {
+                          const session = await loadAgreementSession();
+                          if (session?.contract?.agreementId === entry.agrId) {
+                            setStep(session.step); setRole(session.role); setAgreementType(session.agreementType);
+                            setContract(session.contract); setBuyerLocked(session.buyerLocked); setSellerLocked(session.sellerLocked);
+                          } else {
+                            Alert.alert('Switch Agreement', 'Load ' + entry.agrId.slice(0,12) + '?\nThis will switch your active session.', [
+                              { text: 'Cancel' },
+                              { text: 'Load', onPress: async () => {
+                                // Save minimal session to restore
+                                await saveAgreementSession({ step: entry.step, role: entry.role, agreementType: 'trade', contract: { agreementId: entry.agrId, multisigAddress: entry.frostAddr, itemPriceKas: entry.buyerAmount, sellerCommitmentKas: entry.sellerAmount, buyerPubkey: entry.buyerPubkey, sellerPubkey: entry.sellerPubkey, itemDescription: entry.description, stipulations: '', expiryHours: 24 }, buyerLocked: entry.step >= 4, sellerLocked: entry.step >= 4, counterpartyAddress: null, counterpartyKaspaAddr: '', savedAt: Date.now() });
+                                setStep(entry.step); setRole(entry.role); setContract({ agreementId: entry.agrId, multisigAddress: entry.frostAddr, itemPriceKas: entry.buyerAmount, sellerCommitmentKas: entry.sellerAmount, buyerPubkey: entry.buyerPubkey, sellerPubkey: entry.sellerPubkey, itemDescription: entry.description, stipulations: '', expiryHours: 24 });
+                              }},
+                            ]);
+                          }
+                        }}>
+                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: entry.step >= 4 ? '#166534' : '#1d4ed8' }}>{entry.description || entry.agrId.slice(0,12)} ? {entry.role}</Text>
+                        <Text style={{ fontSize: 10, color: '#78716c' }}>Buyer: {entry.buyerAmount} / Seller: {entry.sellerAmount} KASPA ? Step {entry.step}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
                 <Text style={{ fontSize: rs.font(16), fontWeight: 'bold', color: COLORS.indigo900, marginBottom: 12, textAlign: 'center' }}>What type of agreement?</Text>
                 <TouchableOpacity
                   onPress={() => { setAgreementType('simple'); setRole('buyer'); }}
