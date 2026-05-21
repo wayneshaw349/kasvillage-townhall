@@ -2503,7 +2503,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             <TouchableOpacity onPress={() => { onClose(); }} style={{ flexDirection: "row", alignItems: "center", padding: 8 }}>
               <Text style={{ color: "#4f46e5", fontSize: 14, fontWeight: "bold" }}>{"< Back"}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setIouModalVisible(true)} style={{ flexDirection: "row", alignItems: "center", padding: 8, backgroundColor: "#eff6ff", borderRadius: 8 }}>
+            <TouchableOpacity onPress={async () => { await clearAgreementSession(); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setRole(null); setAgreementType(null); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, stipulations: "", itemDescription: "", expiryHours: 24 }); Alert.alert("Cleared", "Session reset"); }} style={{ padding: 8, backgroundColor: "#fee2e2", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "bold" }}>Reset</Text></TouchableOpacity><TouchableOpacity onPress={() => setIouModalVisible(true)} style={{ flexDirection: "row", alignItems: "center", padding: 8, backgroundColor: "#eff6ff", borderRadius: 8 }}>
               <Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text>
             </TouchableOpacity>
           </View>
