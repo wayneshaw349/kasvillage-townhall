@@ -1879,8 +1879,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       const iAmProposer = agreementPubkey === myPubkey;
       const canonRole = canonicalDetermineRole(agreementPubkey, myPubkey);
       console.log('[Canonical] Role determined:', canonRole, 'proposer:', agreementPubkey.slice(0,16), 'me:', myPubkey.slice(0,16));
-      const sellerPubkey = iAmProposer ? (agreementCounterparty || '') : agreementPubkey;
-      console.log('[Neighbor] Role detection:', iAmProposer ? 'I am proposer' : 'I am acceptor', 'seller:', sellerPubkey.slice(0,16), 'me:', myPubkey.slice(0,16));
+      const proposerPubkey = iAmProposer ? (agreementCounterparty || '') : agreementPubkey;
+      console.log('[Neighbor] Role detection:', iAmProposer ? 'I am proposer' : 'I am acceptor', 'proposer:', proposerPubkey.slice(0,16), 'me:', myPubkey.slice(0,16));
       const agrAmount = agreement.partyA?.amount_sompi || agreement.party_a?.amount_sompi || agreement.amount_sompi || 0;
       if (!alreadyAgreed) {
         try {
@@ -1893,7 +1893,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             status: 'Agreed',
             frostAddress: contract.frostData?.address || contract.multisigAddress || '',
             signature: 'agree_' + Date.now(),
-            counterpartyPubkey: sellerPubkey,
+            counterpartyPubkey: proposerPubkey,
           });
           await AsyncStorage.setItem(agrSessionKey, String(Date.now()));
           console.log('[Neighbor] Agreed inscribed to Arweave');
@@ -1994,7 +1994,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           const frostNetwork = wallet.network || 'testnet-10';
           const frostData = deriveFrostAddressLocal({
             pubkeyA: myPubkey,
-            pubkeyB: sellerPubkey,
+            pubkeyB: proposerPubkey,
             network: frostNetwork,
             agreementId: agrId,
           });
@@ -2031,9 +2031,9 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             ...prev,
             agreementId: agrId,
             description: agreement.description || '',
-            buyerPubkey: iAmProposer ? sellerPubkey : myPubkey,
-            sellerPubkey: iAmProposer ? myPubkey : sellerPubkey,
-            counterpartyPubkey: sellerPubkey,
+            buyerPubkey: iAmProposer ? myPubkey : proposerPubkey,
+            sellerPubkey: iAmProposer ? proposerPubkey : myPubkey,
+            counterpartyPubkey: proposerPubkey,
             ...canonicalToContract(canon),
             // canonical overrides all contract fields
             multisigAddress: frostData.address,
@@ -2052,7 +2052,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               status: 'Accepted',
             frostAddress: frostData.address,
               signature: 'accept_' + Date.now(),
-              counterpartyPubkey: sellerPubkey,
+              counterpartyPubkey: proposerPubkey,
             });
             console.log('[Neighbor] Acceptance inscribed to Arweave');
             // Add to active FROST list
@@ -2063,8 +2063,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               step: 3,
               buyerAmount: buyerKas,
               sellerAmount: sellerKas,
-              buyerPubkey: iAmProposer ? sellerPubkey : myPubkey,
-              sellerPubkey: iAmProposer ? myPubkey : sellerPubkey,
+              buyerPubkey: iAmProposer ? myPubkey : proposerPubkey,
+              sellerPubkey: iAmProposer ? proposerPubkey : myPubkey,
               description: agreement.description || '',
               createdAt: Date.now(),
             });
