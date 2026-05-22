@@ -582,6 +582,7 @@ export async function proposeAgreement(params: {
   sellerAmountSompi?: number;
   counterpartyPubkey?: string;
   frostAddress?: string;
+  frostR?: string;
   daaScore?: number;
 }): Promise<{ success: boolean; agreementId?: string; error?: string }> {
   try {
@@ -785,6 +786,9 @@ export async function inscribeAgreementToArweave(agreement: {
   ];
   if (agreement.frostAddress) {
     tags.push({ name: 'KV-FrostAddress', value: agreement.frostAddress });
+  }
+  if (agreement.frostR) {
+    tags.push({ name: 'KV-FrostR', value: agreement.frostR });
   }
   if (agreement.counterpartyPubkey) {
     tags.push({ name: 'KV-Counterparty', value: agreement.counterpartyPubkey });

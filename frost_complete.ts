@@ -43,8 +43,14 @@ export function generateFrostNonce(params: {
   const sk_raw = BigInt('0x' + privateKeyHex);
   const P_agg = (secp as any).ProjectivePoint.fromHex(frostAddress.aggregatedPubkey);
   const P_agg_bytes = P_agg.toRawBytes(true);
-  let d = sk_raw;
-  if (P_agg_bytes[0] === 0x03) d = (N - sk_raw) % N;
+  // MuSig tweak: d = a_i * sk_raw (mod N)
+  const myPubkey = bytesToHex((secp as any).getPublicKey(hexToBytes(privateKeyHex), true));
+  const [_pk1, _pk2] = [frostAddress.pubkeyA, frostAddress.pubkeyB].sort();
+  const _L = sha256(new TextEncoder().encode(_pk1 + _pk2 + (frostAddress.sessionId || '')));
+  const _myA = BigInt('0x' + bytesToHex(sha256(new Uint8Array([..._L, ...hexToBytes(myPubkey === _pk1 ? _pk1 : _pk2)])))) % N;
+  const sk_tweaked = (sk_raw * _myA) % N;
+  let d = sk_tweaked;
+  if (P_agg_bytes[0] === 0x03) d = (N - sk_tweaked) % N;
 
   // Deterministic nonce: k = Blake2b(d || message) mod N
   // Uses Kaspa's hash function for consistency
@@ -425,9 +431,15 @@ export function createPartialSigLocal(params: {
   // The aggregation will work because createPartialSigLocal is called
   // with the same message by both parties
   
-  let d = sk_raw;
+  // MuSig tweak: d = a_i * sk_raw (mod N)
+  const myPubkey = bytesToHex((secp as any).getPublicKey(hexToBytes(privateKeyHex), true));
+  const [_pk1, _pk2] = [frostAddress.pubkeyA, frostAddress.pubkeyB].sort();
+  const _L = sha256(new TextEncoder().encode(_pk1 + _pk2 + (frostAddress.sessionId || '')));
+  const _myA = BigInt('0x' + bytesToHex(sha256(new Uint8Array([..._L, ...hexToBytes(myPubkey === _pk1 ? _pk1 : _pk2)])))) % N;
+  const sk_tweaked = (sk_raw * _myA) % N;
+  let d = sk_tweaked;
   // BIP340: if P (our pubkey) has odd y... but for MuSig we adjust for P_agg parity
-  if (needNegatePubkey) d = (N - sk_raw) % N;
+  if (needNegatePubkey) d = (N - sk_tweaked) % N;
 
   // 3. Deterministic nonce: k = SHA256(d || message) mod N
   const k_bytes = sha256(new Uint8Array([
@@ -1108,6 +1120,61 @@ export async function completeFrostAndBroadcast(params: {
   }
 }
 
+
+
+// ============================================================================
+// 2-ROUND FROST COMPLETION — uses proper nonce protocol
+// ============================================================================
+export async function completeFrost2Round(params: {
+  frostAddress: FrostAddress;
+  myPrivateKeyHex: string;
+  recipientAddress: string;
+  amountSompi: bigint;
+  myNonceJson: string; // JSON stringified FrostNonce from AsyncStorage
+  counterpartyR_hex: string;
+  counterpartySig?: { R_agg_x_hex: string; s_hex: string };
+}): Promise<{ success: boolean; txId?: string; explorerUrl?: string; error?: string }> {
+  try {
+    const myNonce: FrostNonce = JSON.parse(params.myNonceJson);
+    
+    // Compute my partial s
+    const myPartial = computeFrostPartialS({
+      myNonce,
+      counterpartyR_hex: params.counterpartyR_hex,
+      frostAddress: params.frostAddress,
+    });
+    
+    if (params.counterpartySig) {
+      // We have counterparty's s — aggregate
+      const aggSig = aggregateFrostSig({
+        s_A_hex: myPartial.s_hex,
+        s_B_hex: params.counterpartySig.s_hex,
+        R_agg_x_hex: myPartial.R_agg_x_hex, // Both compute same R_agg
+      });
+      
+      // Broadcast
+      const { sendKaspaWithSignature } = await import('./kaspa_rest_tx');
+      const result = await sendKaspaWithSignature({
+        senderAddress: params.frostAddress.address,
+        recipientAddress: params.recipientAddress,
+        amountSompi: params.amountSompi,
+        aggregateSignature: aggSig,
+        aggregatePubkey: params.frostAddress.aggregatedPubkey,
+        network: params.frostAddress.network,
+      });
+      
+      if (!result.success) return { success: false, error: result.error || 'L1 broadcast failed' };
+      const explorerBase = params.frostAddress.network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';
+      return { success: true, txId: result.txId, explorerUrl: explorerBase + result.txId };
+    }
+    
+    // Return our partial for relay
+    return { success: true, partialSig: myPartial.s_hex, R_agg_x: myPartial.R_agg_x_hex } as any;
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
+
 // ============================================================================
 // SECTION 6: CLEANUP
 // ============================================================================
@@ -1124,5 +1191,5 @@ export default {
   generatePubkeyQR, parsePubkeyQR, scanForBlePeers, advertiseBleForFrost, exchangePubkeyViaBle,
   startWifiP2PServer, connectToWifiPeer, getTailscaleIP, isTailscaleFunnelAvailable,
   startTailscaleFunnel, openTailscaleApp, exchangeViaTownhall,
-  exchangePubkeys, createFrostAgreement, cleanup,
+  exchangePubkeys, createFrostAgreement, completeFrost2Round, cleanup,
 };

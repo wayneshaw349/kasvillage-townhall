@@ -1197,6 +1197,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               status: 'Agreed-Send',
               signature: 'agreed_send_' + Date.now(),
               counterpartyPubkey: counterpartyPubkey,
+              frostAddress: contract.multisigAddress || '',
+              frostR: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.releaseRecipient || counterpartyKaspaAddr || contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: (await loadMainWallet())?.privKeyHex || '' }); await AsyncStorage.setItem('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ R_hex: nonce.R_hex, k_private: nonce.k_private, d_tweaked: nonce.d_tweaked, message_hex: nonce.message_hex })); console.log('[FROST-R] Generated nonce R:', nonce.R_hex.slice(0,20)); return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Nonce generation failed:', e); return ''; } })(),
             });
             await AsyncStorage.setItem(ownAgreedKey, String(Date.now()));
             console.log('[Agreed-Send Poll] Own Agreed-Send inscribed');
@@ -2242,12 +2244,55 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       
       const totalAmountSompi = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
       
-      const result = await createFrostPartialSig({
-        frostAddress: contract.frostData,
-        recipientAddress,
-        amountSompi: totalAmountSompi,
-        privateKeyHex: privKeyHex,
-      });
+      // 2-round FROST: load saved nonce, get counterparty R from Arweave
+      let myNonce;
+      try {
+        const savedNonce = await AsyncStorage.getItem('kv_frost_nonce_' + contract.agreementId);
+        if (savedNonce) {
+          myNonce = JSON.parse(savedNonce);
+          console.log('[FROST-2R] Loaded saved nonce R:', myNonce.R_hex?.slice(0,20));
+        }
+      } catch {}
+      if (!myNonce) {
+        // Generate fresh nonce if not saved
+        myNonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress, amountSompi: totalAmountSompi, privateKeyHex: privKeyHex });
+        console.log('[FROST-2R] Generated fresh nonce R:', myNonce.R_hex?.slice(0,20));
+      }
+      // Query counterparty R from Arweave
+      let counterpartyR = '';
+      try {
+        const { queryAgreementsFromArweave } = await import('./townhall_client');
+        const rResults = await queryAgreementsFromArweave({ status: 'Agreed-Send' });
+        const counterMatch = rResults.find((r) => (r.agreementId || r.agreement_id) === contract.agreementId && (r.pubkey || r.KVPubkey) !== (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey));
+        if (counterMatch?.frostR || counterMatch?.KVFrostR) {
+          counterpartyR = counterMatch.frostR || counterMatch.KVFrostR || '';
+          console.log('[FROST-2R] Found counterparty R:', counterpartyR.slice(0,20));
+        }
+      } catch(e) { console.warn('[FROST-2R] Counterparty R lookup failed:', e); }
+      // Fallback: also check Arweave tags directly
+      if (!counterpartyR) {
+        try {
+          const cpPub = role === 'buyer' ? contract.sellerPubkey : contract.buyerPubkey;
+          const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["Agreed-Send"] }, { name: "KV-Pubkey", values: ["' + cpPub + '"] }]) { edges { node { tags { name value } } } } }';
+          const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+          const json = await resp.json();
+          const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || [];
+          const rTag = tags.find((t) => t.name === 'KV-FrostR');
+          if (rTag?.value) { counterpartyR = rTag.value; console.log('[FROST-2R] Found R via Goldsky:', counterpartyR.slice(0,20)); }
+        } catch(e) { console.warn('[FROST-2R] Goldsky R lookup failed:', e); }
+      }
+      let result;
+      if (counterpartyR && myNonce?.R_hex) {
+        // Proper 2-round FROST
+        const partialS = computeFrostPartialS({ myNonce, counterpartyR_hex: counterpartyR, frostAddress: contract.frostData });
+        console.log('[FROST-2R] Computed partial s:', partialS.s_hex.slice(0,20), 'R_agg_x:', partialS.R_agg_x_hex.slice(0,20));
+        // Pack as 64-byte sig: R_agg_x (32) + s (32) for relay
+        const sigHex = partialS.R_agg_x_hex + partialS.s_hex;
+        result = { success: true, partialSig: sigHex, messageHash: myNonce.message_hex };
+      } else {
+        console.warn('[FROST-2R] No counterparty R — falling back to single-round (will fail BIP340)');
+        result = await createFrostPartialSig({ frostAddress: contract.frostData, recipientAddress, amountSompi: totalAmountSompi, privateKeyHex: privKeyHex });
+      }
       
       if (result.success && result.partialSig) {
         console.log('[Neighbor] Created FROST partial signature');
