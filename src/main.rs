@@ -7735,7 +7735,7 @@ async fn rehydrate_agreements_from_arweave(
                     pubkey: counterparty.clone(),
                     amount_sompi: amount,
                     signature: format!("arweave_rehydrated_b_{}", &agreement_id),
-                    buyer_amount_sompi: None, seller_amount_sompi: None, counterparty_pubkey: None,
+                    buyer_amount_sompi: buyer_amt, seller_amount_sompi: seller_amt, counterparty_pubkey: Some(pubkey.clone()),
                     confirmed: matches!(frost_status, 
                         FrostAgreementStatus::BothConfirmed | 
                         FrostAgreementStatus::Collateralized |
