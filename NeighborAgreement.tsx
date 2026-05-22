@@ -1992,6 +1992,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         // Derive FROST address immediately with both pubkeys
         try {
           const frostNetwork = wallet.network || 'testnet-10';
+          console.log('[FROST-DEBUG] pubkeyA:', myPubkey?.slice(0,16), 'pubkeyB:', proposerPubkey?.slice(0,16), 'network:', frostNetwork, 'agrId:', agrId);
           const frostData = deriveFrostAddressLocal({
             pubkeyA: myPubkey,
             pubkeyB: proposerPubkey,
@@ -2002,10 +2003,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           // === CANONICAL AUTO-SEND: each party finds their pubkey + amount ===
           // Proposer pubkey = KV-Pubkey, Acceptor pubkey = KV-Counterparty
           // Proposer = buyer (sets terms), Acceptor = seller (accepts terms)
-          const proposerPubkey = agreement.pubkey || agreement.partyA?.pubkey || '';
+          const agrProposerPubkey = agreement.pubkey || agreement.partyA?.pubkey || '';
           const sendsFirst = canonicalSendsFirst(canon);
           const mySendAmount = sendsFirst ? canonicalSendAmount(canon) : 0;
-          console.log('[Neighbor] Auto-send check: sendsFirst=', sendsFirst, 'mySendAmount=', mySendAmount / 1e8, 'role:', canon.role, 'myPubkey=', myPubkey?.slice(0,16));
+          console.log('[Neighbor] Auto-send check: sendsFirst=', sendsFirst, 'mySendAmount=', mySendAmount / 1e8, 'role:', canon.role, 'myPubkey=', myPubkey?.slice(0,16), 'proposer=', agrProposerPubkey?.slice(0,16));
           const immediateSendAmount = mySendAmount;
           if (immediateSendAmount > 0 && wallet.privKeyHex) {
             const frostSentKey = 'kv_frost_sent_' + agrId;
@@ -3278,7 +3279,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 style={{ backgroundColor: '#22c55e', paddingVertical: 8, borderRadius: 6, marginTop: 8, alignItems: 'center' }}
                 onPress={async () => {
                   try {
-                    const { default: Clipboard } = await import('expo-clipboard');
+                    const clipMod = await import('expo-clipboard'); const Clipboard = clipMod.default || clipMod;
                     await Clipboard.setStringAsync('AGR: ' + (contract.agreementId || '') + '\nArweave TX: ' + (contract.partialReleaseTx || contract.arweaveTxId || '') + '\nSeller: press Check for Release');
                     Alert.alert('Copied', 'Send this to the seller so they can release funds');
                   } catch {}
