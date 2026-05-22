@@ -3040,7 +3040,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                         )}
                         <TouchableOpacity onPress={() => { 
                           const shareText = 'AGR: ' + contract.agreementId + '\nTX: ' + (contract.arweaveTxId || 'pending') + '\nCode: ' + (contract.verificationCode || '');
-                          import('expo-clipboard').then(Clipboard => Clipboard.setStringAsync(shareText)).catch(() => {});
+                          import('expo-clipboard').then(mod => (mod.default || mod).setStringAsync(shareText)).catch(() => {});
                           Alert.alert('Copied!', 'Agreement details copied to clipboard');
                         }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 10, marginTop: 8, alignItems: 'center' }}>
                           <Text style={{ color: '#fff', fontSize: rs.font(11), fontWeight: '600' }}>Copy All to Clipboard</Text>
@@ -3249,9 +3249,9 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       console.log('[Seller-Release] Got partial sig, co-signing...');
                       const w = await loadMainWallet();
                       if (!w || !contract.frostData) { Alert.alert('Error', 'Wallet or FROST not ready'); setIsLoading(false); return; }
-                      const { completeFrostAndBroadcast } = require('./frost_2of2');
+                      const { completeFrostAndBroadcast } = require('./frost_complete');
                       const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
-                      const decrypted = (() => { try { const { decryptPartialSig } = require('./frost_encrypted_relay'); return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return partialSig; } })();
+                      const decrypted = (() => { try { // decryptPartialSig already imported at top return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return partialSig; } })();
                       const result = await completeFrostAndBroadcast({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, counterpartyPartialSig: decrypted });
                       if (result.success && result.txId) {
                         console.log('[Seller-Release] Release TX:', result.txId);
