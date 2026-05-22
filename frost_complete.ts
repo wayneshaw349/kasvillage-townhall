@@ -392,7 +392,6 @@ export function createPartialSigLocal(params: {
     to: recipientAddress || (recipients ? recipients.map(r => r.address).join(',') : ''),
     amount: amountSompi.toString(),
     recipients: recipients ? recipients.map(r => ({ address: r.address, amount: r.amount.toString() })) : undefined,
-    ts: Math.floor(Date.now() / 1000),
   }));
   const message = kaspaBlake2b(messageData);
 
