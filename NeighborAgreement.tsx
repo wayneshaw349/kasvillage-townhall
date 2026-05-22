@@ -3251,7 +3251,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       if (!w || !contract.frostData) { Alert.alert('Error', 'Wallet or FROST not ready'); setIsLoading(false); return; }
                       const { completeFrostAndBroadcast } = require('./frost_complete');
                       const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
-                      const decrypted = (() => { try { // decryptPartialSig already imported at top return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return partialSig; } })();
+                      const decrypted = (() => { try { const { decryptPartialSig } = require('./frost_encrypted_relay'); return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return partialSig; } })();
                       const result = await completeFrostAndBroadcast({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, counterpartyPartialSig: decrypted });
                       if (result.success && result.txId) {
                         console.log('[Seller-Release] Release TX:', result.txId);
