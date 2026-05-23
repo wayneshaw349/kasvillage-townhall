@@ -419,7 +419,7 @@ const ExchangeMethodSelector: React.FC<ExchangeMethodSelectorProps> = ({
       
       {!tailscaleAvailable && (
         <TouchableOpacity style={exchangeStyles.installTailscale} onPress={openTailscaleApp}>
-          <Text style={exchangeStyles.installText}>Install Tailscale for remote P2P ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢</Text>
+          <Text style={exchangeStyles.installText}>Install Tailscale for remote P2P →</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -513,7 +513,7 @@ interface VerificationCodeProps {
 
 const VerificationCodeDisplay: React.FC<VerificationCodeProps> = ({ code, onConfirmed }) => (
   <View style={verifyStyles.container}>
-    <Text style={verifyStyles.title}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â Verification Code</Text>
+    <Text style={verifyStyles.title}>🔐 Verification Code</Text>
     <Text style={verifyStyles.instruction}>
       Read this code to your counterparty via voice/video call.{'\n'}
       Both must see the SAME code to proceed safely.
@@ -524,17 +524,17 @@ const VerificationCodeDisplay: React.FC<VerificationCodeProps> = ({ code, onConf
     </View>
     
     <View style={verifyStyles.checkList}>
-      <Text style={verifyStyles.checkItem}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Call counterparty (phone, FaceTime, etc.)</Text>
-      <Text style={verifyStyles.checkItem}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Read your code aloud</Text>
-      <Text style={verifyStyles.checkItem}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Confirm they see the same code</Text>
+      <Text style={verifyStyles.checkItem}>✓ Call counterparty (phone, FaceTime, etc.)</Text>
+      <Text style={verifyStyles.checkItem}>✓ Read your code aloud</Text>
+      <Text style={verifyStyles.checkItem}>✓ Confirm they see the same code</Text>
     </View>
     
     <TouchableOpacity style={verifyStyles.confirmBtn} onPress={onConfirmed}>
-      <Text style={verifyStyles.confirmBtnText}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Codes Match - Continue</Text>
+      <Text style={verifyStyles.confirmBtnText}>✓ Codes Match - Continue</Text>
     </TouchableOpacity>
     
     <Text style={verifyStyles.warning}>
-      ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â If codes DON'T match, STOP! Someone may be intercepting.
+      ⚠️ If codes DON'T match, STOP! Someone may be intercepting.
     </Text>
   </View>
 );
@@ -620,7 +620,7 @@ const ProgressSteps: React.FC<ProgressStepsProps> = ({ currentStep, steps }) => 
           currentStep === i + 1 && progressStyles.circleCurrent,
         ]}>
           {currentStep > i + 1 ? (
-            <Text style={progressStyles.checkmark}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ</Text>
+            <Text style={progressStyles.checkmark}>✓</Text>
           ) : (
             <Text style={[
               progressStyles.stepNumber,
@@ -749,7 +749,7 @@ interface CollateralBreakdownProps {
 
 const CollateralBreakdown: React.FC<CollateralBreakdownProps> = ({ buyerAmount, sellerAmount, role }) => (
   <View style={collateralStyles.container}>
-    <Text style={collateralStyles.title}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â° Collateral Breakdown</Text>
+    <Text style={collateralStyles.title}>💰 Collateral Breakdown</Text>
     <View style={collateralStyles.grid}>
       <View style={[
         collateralStyles.box,
@@ -759,8 +759,8 @@ const CollateralBreakdown: React.FC<CollateralBreakdownProps> = ({ buyerAmount, 
         <Text style={collateralStyles.boxLabel}>BUYER LOCKS</Text>
         <Text style={collateralStyles.boxValue}>{buyerAmount} KASPA</Text>
         <Text style={collateralStyles.boxNote}>
-          ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ {buyerAmount} KASPA to seller on success{'\n'}
-          ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Returns to buyer if cancelled
+          → {buyerAmount} KASPA to seller on success{'\n'}
+          → Returns to buyer if cancelled
         </Text>
       </View>
       <View style={[
@@ -771,14 +771,14 @@ const CollateralBreakdown: React.FC<CollateralBreakdownProps> = ({ buyerAmount, 
         <Text style={[collateralStyles.boxLabel, { color: COLORS.blue600 }]}>SELLER LOCKS</Text>
         <Text style={[collateralStyles.boxValue, { color: COLORS.blue800 }]}>{sellerAmount} KASPA</Text>
         <Text style={[collateralStyles.boxNote, { color: COLORS.blue600 }]}>
-          ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Returns to seller on success{'\n'}
-          ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Returns to seller if cancelled
+          → Returns to seller on success{'\n'}
+          → Returns to seller if cancelled
         </Text>
       </View>
     </View>
     <View style={collateralStyles.keyPoint}>
       <Text style={collateralStyles.keyPointText}>
-        <Text style={{ fontWeight: 'bold' }}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ Key:</Text> Collateral is insurance only. 
+        <Text style={{ fontWeight: 'bold' }}>🔑 Key:</Text> Collateral is insurance only. 
         <Text style={{ fontWeight: 'bold' }}> Buyer's {buyerAmount} KASPA</Text> pays the seller. 
         <Text style={{ fontWeight: 'bold' }}> Seller's {sellerAmount} KASPA</Text> returns after completion.
       </Text>
@@ -866,7 +866,7 @@ const ReleaseStatus: React.FC<ReleaseStatusProps> = ({ buyerRequested, sellerReq
           releaseStyles.statusText,
           { color: buyerRequested ? COLORS.green700 : COLORS.stone500 }
         ]}>
-          {buyerRequested ? 'ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Wants to cancel' : 'No request yet'}
+          {buyerRequested ? '✓ Wants to cancel' : 'No request yet'}
         </Text>
       </View>
     </View>
@@ -883,7 +883,7 @@ const ReleaseStatus: React.FC<ReleaseStatusProps> = ({ buyerRequested, sellerReq
           releaseStyles.statusText,
           { color: sellerRequested ? COLORS.green700 : COLORS.stone500 }
         ]}>
-          {sellerRequested ? 'ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Wants to cancel' : 'No request yet'}
+          {sellerRequested ? '✓ Wants to cancel' : 'No request yet'}
         </Text>
       </View>
     </View>
@@ -1124,7 +1124,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   }, []);
 
   // Poll for counterparty's Agreed-Send on Arweave
-  // DEBUG: log guard values ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â triggers auto-send
+  // DEBUG: log guard values — triggers auto-send
   useEffect(() => {
     console.log('[Agreed-Send Guard]', 'step:', step, 'agrId:', contract.agreementId?.slice(0,12), 'frost:', contract.multisigAddress?.slice(0,20), 'buyer:', contract.buyerPubkey?.slice(0,16), 'seller:', contract.sellerPubkey?.slice(0,16));
     if (step < 3 || !contract.agreementId || !contract.multisigAddress) return;
@@ -1156,7 +1156,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               (r.partyA?.pubkey || r.party_a?.pubkey || r.pubkey) === counterpartyPubkey
             );
             if (counterAccepted) {
-              console.log('[Agreed-Send Poll] Counterparty accepted ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â inscribing our Agreed');
+              console.log('[Agreed-Send Poll] Counterparty accepted — inscribing our Agreed');
               await inscribeAgreementToArweave({
                 agreementId: contract.agreementId || '',
                 pubkey: myPubkey || '',
@@ -1261,11 +1261,11 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
     return () => { cancelled = true; clearInterval(interval); };
   }, [step, contract.agreementId, contract.multisigAddress, contract.buyerPubkey, contract.sellerPubkey, role]);
 
-  // Poll FROST address balance ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½ auto-advance to step 4 when both confirmed
+  // Poll FROST address balance � auto-advance to step 4 when both confirmed
   useEffect(() => {
     if (step !== 3 || !contract.multisigAddress) return;
     // L1 failsafe: poll FROST balance regardless of local lock state
-    // If FROST has the expected funds, both parties sent ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â advance to step 4
+    // If FROST has the expected funds, both parties sent — advance to step 4
     const expectedBuyer = BigInt(Math.floor(contract.itemPriceKas * 1e8));
     const expectedSeller = BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
     const expectedTotal = expectedBuyer + expectedSeller;
@@ -1281,30 +1281,32 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         if (!resp.ok || cancelled) return;
         const data = await resp.json();
         const frostBalance = BigInt(data.balance || '0');
-        // Check TownHall ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â if both confirmed, proceed to send even if Arweave hasn't indexed yet
+        // Check TownHall — if both confirmed, proceed to send even if Arweave hasn't indexed yet
         try {
           const { getAgreementStatus } = await import('./townhall_client');
           const thStatus = await getAgreementStatus(contract.agreementId || '');
           if (thStatus && (thStatus.status === 'BothConfirmed' || thStatus.status === 'Collateralized' || thStatus.status === 'Accepted')) {
-            console.log('[FROST-Poll] TownHall status:', thStatus.status, 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â both parties confirmed');
+            console.log('[FROST-Poll] TownHall status:', thStatus.status, '— both parties confirmed');
             // If we haven't sent collateral yet, send now
             const sentKey = 'kv_frost_sent_' + (contract.agreementId || '');
             const alreadySent = await AsyncStorage.getItem(sentKey);
             const iAmBuyerHere = role === 'buyer'; if (iAmBuyerHere) { console.log('[FROST-Poll] Buyer waits - seller sends first'); }
             if (!alreadySent && contract.multisigAddress && !iAmBuyerHere) {
+              console.log('[FROST-Poll] Auto-sending collateral to FROST:', contract.multisigAddress);
               try {
                 const wallet = await loadMainWallet();
                 if (wallet) {
+                    const myAmount = role === 'buyer' ? contract.itemPriceKas : contract.sellerCommitmentKas;
                     const sendResult = await sendKaspaViaRest({
                       senderAddress: wallet.address,
                       recipientAddress: contract.multisigAddress || '',
-                      amountSompi: BigInt(Math.floor((role === 'buyer' ? contract.itemPriceKas : contract.sellerCommitmentKas) * 1e8)),
+                      amountSompi: BigInt(Math.floor(myAmount * 1e8)),
                       privateKeyHex: wallet.privKeyHex,
                       network: wallet.network,
                     });
                     if (sendResult.txId) {
                       await AsyncStorage.setItem(sentKey, sendResult.txId);
-                      console.log('[FROST-Poll] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Collateral sent! TX:', sendResult.txId);
+                      console.log('[FROST-Poll] ✅ Collateral sent! TX:', sendResult.txId);
                       // Record on TownHall
                       try {
                         const { recordCollateral } = await import('./townhall_client');
@@ -1320,7 +1322,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 } catch (e) { console.warn('[FROST-Poll] Auto-send failed:', e); }
             }
           }
-        } catch (e) { /* TownHall check failed ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â fall through to balance poll */ }
+        } catch (e) { /* TownHall check failed — fall through to balance poll */ }
 
         // Triple-check: TownHall + L1 address + DAA
       try {
@@ -1362,9 +1364,9 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           setSellerLocked(true);
           setStep(4);
         } else if (frostBalance > 0n && frostBalance >= expectedBuyer) {
-          // At least one party sent ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â check if it's us or counterparty
+          // At least one party sent — check if it's us or counterparty
           console.log('[FROST-Poll] Partial balance detected:', Number(frostBalance) / 1e8, 'KASPA');
-          // If we haven't sent yet, the counterparty has ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â trigger our auto-send
+          // If we haven't sent yet, the counterparty has — trigger our auto-send
           const myExpected = role === 'buyer' ? expectedBuyer : expectedSeller;
           const counterpartyExpected = role === 'buyer' ? expectedSeller : expectedBuyer;
           const alreadySentKey = await AsyncStorage.getItem('kv_frost_sent_' + contract.agreementId);
@@ -1640,7 +1642,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               console.log('[UTXO-Tag] Buyer proposal tagged:', tagResult.success, 'hashes:', tagResult.commitHashes?.length);
             }
             } catch (e) { console.warn('[Neighbor] Proposer ledger commit skipped:', e); }
-            // AUTO-CONFIRM disabled at propose time ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â confirms after Party B accepts
+            // AUTO-CONFIRM disabled at propose time — confirms after Party B accepts
             // Proposer confirms in FROST-Poll when TH status changes to Accepted
             // Add to active FROST list
           addToFrostList({
@@ -1655,14 +1657,14 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             description: contract.itemDescription || '',
             createdAt: Date.now(),
           });
-          console.log('[Neighbor] Proposal sent ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â waiting for counterparty to accept');
+          console.log('[Neighbor] Proposal sent — waiting for counterparty to accept');
           console.log('[Neighbor] Agreement proposed on TownHall:', agreementId);
             if (proposeResult?.arweaveTxId) {
               console.log('[Neighbor] Arweave TX ID:', proposeResult.arweaveTxId);
               setContract(prev => ({ ...prev, arweaveTxId: proposeResult.arweaveTxId }));
             }
           } catch (e) { console.warn('[Neighbor] TownHall propose failed:', e); }
-          // L1 inscription disabled ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½ Arweave inscription is the permanent record
+          // L1 inscription disabled � Arweave inscription is the permanent record
           // wRPC sendWithInscription not available from React Native/Hermes
           console.log('[Neighbor] Skipping wRPC inscription (Arweave is source of truth)');
         } catch (e) {
@@ -1759,9 +1761,9 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       // Also fetch all proposed agreements (for Party B inbox)
       const { listProposedAgreements } = await import('./townhall_client');
       const allProposed = await listProposedAgreements();
-      // Arweave fallback ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â query permanent storage if TownHall cache is empty
+      // Arweave fallback — query permanent storage if TownHall cache is empty
       let arweaveProposals: any[] = [];
-      // Always query Arweave ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½ TownHall is stateless and may have stale data
+      // Always query Arweave � TownHall is stateless and may have stale data
       try {
         arweaveProposals = await queryAgreementsFromArweave({ status: 'Proposed', network: 'testnet-10' });
         console.log('[Neighbor] Arweave found', arweaveProposals.length, 'proposals');
@@ -1912,11 +1914,11 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         console.log('[Neighbor] TownHall accept registered');
       } catch (e) { console.warn('[Neighbor] TownHall accept failed:', e); }
 
-      // Step 2: Buyer accepted ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â derive FROST + wait for mutual Agreed-Send poll to trigger auto-send
-      console.log('[Neighbor] Buyer accepted ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â deriving FROST, auto-send via poll');
+      // Step 2: Buyer accepted — derive FROST + wait for mutual Agreed-Send poll to trigger auto-send
+      console.log('[Neighbor] Buyer accepted — deriving FROST, auto-send via poll');
       setInboxAgreements(prev => prev.filter(a => (a.agreementId || a.agreement_id) !== agrId));
 
-      // Proceed to FROST derivation ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½ derive FROST + auto-send
+      // Proceed to FROST derivation � derive FROST + auto-send
       // Run canonical verification
       // Normalize raw agreement data
       const normalized = normalizeAgreement(agreement);
@@ -1947,11 +1949,11 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         } catch (e) { console.warn('[Canonical-Enrich] Goldsky fetch failed:', e); }
       }
       console.log('[Canonical-DEBUG] normalized:', JSON.stringify({ agr: normalized.agreementId, pub: normalized.pubkey?.slice(0,16), cp: normalized.counterpartyPubkey?.slice(0,16), amt: normalized.amount_sompi, buyer: normalized.buyerAmountSompi, seller: normalized.sellerAmountSompi }));
-      const canon = canonicalVerify(normalized, myPubkey || ''); // sync ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â no await needed
+      const canon = canonicalVerify(normalized, myPubkey || ''); // sync — no await needed
       console.log('[Canonical] Module result:', JSON.stringify({ role: canon.role, buyer: canon.buyerAmountSompi / 1e8, seller: canon.sellerAmountSompi / 1e8, total: canon.totalAmountSompi / 1e8, frost: canon.frostAddress?.slice(0,25) }));
       // Override role from canonical
       setRole(canon.role as any);
-      console.log('[Neighbor] BOTH AGREED ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½ deriving FROST and auto-sending collateral');
+      console.log('[Neighbor] BOTH AGREED � deriving FROST and auto-sending collateral');
       if (true) {
         // Party A = seller (proposer), Party B = buyer (acceptor)
         const rawAmount = (typeof agrAmount === 'number' ? agrAmount : Number(agrAmount)) / 1e8;
@@ -2072,7 +2074,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             });
           } catch (e) { console.warn('[Neighbor] Arweave accept inscription failed:', e); }
 
-          // Reduce spendable (input cap) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Agreed-Send poll handles auto-send
+          // Reduce spendable (input cap) — Agreed-Send poll handles auto-send
           const myLockAmount = BigInt(Math.floor(sellerAmount * 1e8));
           if (myLockAmount > 0n) {
             try {
@@ -2082,12 +2084,12 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               console.log('[Neighbor] Spendable reduced by', sellerAmount, 'KASPA for', agrId);
             } catch (e) { console.warn('[Neighbor] Ledger commit skipped:', e); }
           }
-          // Set state and go to step 3 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â poll handles the rest
+          // Set state and go to step 3 — poll handles the rest
           // Role already set by canonical module above
           // setRole(iAmProposer ? 'seller' : 'buyer');
           setAgreementType('trade');
           setStep(3);
-          // AUTO-CONFIRM on TownHall ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â breaks the Arweave polling deadlock
+          // AUTO-CONFIRM on TownHall — breaks the Arweave polling deadlock
           try {
             const { confirmAgreement } = await import('./townhall_client');
             await confirmAgreement({
@@ -2095,7 +2097,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               pubkey: myPubkey,
               signature: 'confirm_' + Date.now(),
             });
-            console.log('[Neighbor] TownHall confirm sent ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â waiting for counterparty confirm');
+            console.log('[Neighbor] TownHall confirm sent — waiting for counterparty confirm');
           } catch (e) { console.warn('[Neighbor] TownHall confirm failed:', e); }
           Alert.alert('Agreement Accepted!', 'Polling for counterparty.\nAuto-send triggers when both confirm.\nYou can close the app safely.');
           setIsLoading(false);
@@ -2131,7 +2133,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         if (fResp.ok) {
           const fBal = await fResp.json();
           if (BigInt(fBal.balance || '0') === 0n) {
-            Alert.alert('Waiting for Counterparty', 'Counterparty has not sent collateral yet.\nPolling every 30 seconds ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â auto-send will trigger when they do.');
+            Alert.alert('Waiting for Counterparty', 'Counterparty has not sent collateral yet.\nPolling every 30 seconds — auto-send will trigger when they do.');
             setIsLoading(false);
             return;
           }
@@ -2143,7 +2145,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         : BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
 
       if (myLockAmount <= 0n) {
-        // Zero collateral ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â just mark as done
+        // Zero collateral — just mark as done
         if (role === 'buyer') setBuyerLocked(true); else setSellerLocked(true);
         setStep(4);
         setIsLoading(false);
@@ -2203,7 +2205,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       }
 
       Alert.alert('Collateral Sent', 'TX: ' + (result.txId || '').slice(0, 16) + '...\nWaiting for counterparty to lock...');
-      // Stay on step 3 ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½ don't advance until both confirmed via L1 poll
+      // Stay on step 3 � don't advance until both confirmed via L1 poll
     } catch (e) {
       console.error('[Neighbor] Lock error:', e);
       Alert.alert('Error', e instanceof Error ? e.message : 'Lock failed');
@@ -2289,7 +2291,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         const sigHex = partialS.R_agg_x_hex + partialS.s_hex;
         result = { success: true, partialSig: sigHex, messageHash: myNonce.message_hex };
       } else {
-        console.warn('[FROST-2R] No counterparty R ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â falling back to single-round (will fail BIP340)');
+        console.warn('[FROST-2R] No counterparty R — falling back to single-round (will fail BIP340)');
         result = await createFrostPartialSig({ frostAddress: contract.frostData, recipientAddress, amountSompi: totalAmountSompi, privateKeyHex: privKeyHex });
       }
       
@@ -2343,7 +2345,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             description: 'partial-sig',
             network: 'testnet-10',
             status: 'PartialSig',
-            signature: encrypted.encrypted || '', // ENCRYPTED ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â only counterparty can decrypt
+            signature: encrypted.encrypted || '', // ENCRYPTED — only counterparty can decrypt
             counterpartyPubkey: counterpartyPubkey || '',
             frostAddress: contract.multisigAddress || '',
           });
@@ -2442,7 +2444,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         });
         
         if (result.success && result.txId) {
-          console.log('[Neighbor] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Release TX broadcast:', result.txId);
+          console.log('[Neighbor] ✓ Release TX broadcast:', result.txId);
           // Merkle archive: per-TX proof for release (fire-and-forget)
           uploadPerTxProof({
             txId: result.txId || '',
@@ -2559,7 +2561,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled" onScrollBeginDrag={Keyboard.dismiss}>
             {snailModeActive && (
               <View style={styles.snailWarning}>
-                <Text style={styles.snailEmoji}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢</Text>
+                <Text style={styles.snailEmoji}>🐌</Text>
                 <View style={styles.snailContent}>
                   <Text style={styles.snailTitle}>Snail Poison Active</Text>
                   <Text style={styles.snailText}>
@@ -2574,7 +2576,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             )}
             
             {isNewUser && !snailModeActive && (
-              <InfoBox title="ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ New to agreements?" variant="info">
+              <InfoBox title="👋 New to agreements?" variant="info">
                 <Text style={{ fontSize: rs.font(11), color: COLORS.blue700 }}>
                   You start with benefit of doubt. Complete 3+ transactions to build your trust score. Deadlocks hurt your score.
                 </Text>
@@ -2622,7 +2624,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   style={{ backgroundColor: COLORS.green50, borderWidth: 2, borderColor: COLORS.green500, borderRadius: 12, padding: 16, marginBottom: 12 }}
                 >
                   <Text style={{ fontSize: rs.font(14), fontWeight: 'bold', color: COLORS.green800 }}>Collateral Agreement</Text>
-                  <Text style={{ fontSize: rs.font(11), color: COLORS.green600, marginTop: 4 }}>Both parties lock equal collateral as good faith deposit. For any agreement ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â services, loans, rentals, freelance work, or any mutual commitment.</Text>
+                  <Text style={{ fontSize: rs.font(11), color: COLORS.green600, marginTop: 4 }}>Both parties lock equal collateral as good faith deposit. For any agreement — services, loans, rentals, freelance work, or any mutual commitment.</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => setAgreementType('trade')}
@@ -2673,7 +2675,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       <Text style={{ fontSize: rs.font(10), color: '#166534', marginTop: 6 }}>Counterparty Address: {(() => {
                         try {
                           const pk = manualLookupResult.pubkey || manualLookupResult.partyA?.pubkey || manualLookupResult.party_a?.pubkey || '';
-                          return pk ? 'Verified secp256k1 ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ' : 'Unknown';
+                          return pk ? 'Verified secp256k1 ✓' : 'Unknown';
                         } catch { return 'Unknown'; }
                       })()}</Text>
                       <View style={{ marginTop: 8 }}>
@@ -2736,7 +2738,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                               }
                             } catch {}
                           }
-                          Alert.alert('Not Found', 'Agreement not found on Arweave. It may still be indexing ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â try again in 1-2 minutes.');
+                          Alert.alert('Not Found', 'Agreement not found on Arweave. It may still be indexing — try again in 1-2 minutes.');
                         }
                       } catch (e) { Alert.alert('Error', String(e)); }
                       setInboxLoading(false);
@@ -2749,7 +2751,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     </Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={{ fontSize: rs.font(10), color: '#78716c', textAlign: 'center', marginBottom: 8 }}>ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â or browse inbox below ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â</Text>
+                <Text style={{ fontSize: rs.font(10), color: '#78716c', textAlign: 'center', marginBottom: 8 }}>— or browse inbox below —</Text>
                 <TouchableOpacity
                   onPress={loadInbox}
                   style={{ backgroundColor: '#F5F3FF', borderRadius: 8, padding: 10, marginBottom: 12, alignItems: 'center' }}
@@ -2816,7 +2818,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       Amount: {((agr.partyA?.amount_sompi || agr.party_a?.amount_sompi || 0) / 1e8).toFixed(2)} KASPA
                     </Text>
                     <Text style={{ fontSize: rs.font(10), color: '#D97706', marginTop: 2 }}>
-                      Status: {agr.status} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Network: {agr.network || 'testnet-10'}
+                      Status: {agr.status} • Network: {agr.network || 'testnet-10'}
                     </Text>
                     <TouchableOpacity
                       onPress={() => handleAcceptFromInbox(agr)}
@@ -2853,7 +2855,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       </View>
                       <View style={styles.stepInfo}>
                         <Text style={styles.stepItemTitle}>Both Lock Funds</Text>
-                        <Text style={styles.stepItemDesc}>Buyer locks agreed amount ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Seller locks commitment</Text>
+                        <Text style={styles.stepItemDesc}>Buyer locks agreed amount • Seller locks commitment</Text>
                         <Text style={styles.stepItemNote}>Funds go to FROST 2-of-2 address - requires both signatures</Text>
                       </View>
                     </View>
@@ -2863,7 +2865,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       </View>
                       <View style={styles.stepInfo}>
                         <Text style={styles.stepItemTitle}>Exchange Happens</Text>
-                        <Text style={styles.stepItemDesc}>Seller delivers item ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Buyer inspects</Text>
+                        <Text style={styles.stepItemDesc}>Seller delivers item • Buyer inspects</Text>
                       </View>
                     </View>
                     <View style={styles.stepItem}>
@@ -2872,28 +2874,28 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       </View>
                       <View style={styles.stepInfo}>
                         <Text style={[styles.stepItemTitle, { color: COLORS.green800 }]}>Buyer Confirms Delivery</Text>
-                        <Text style={[styles.stepItemDesc, { color: COLORS.green600 }]}>Both sign release ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Payment transfers to seller</Text>
+                        <Text style={[styles.stepItemDesc, { color: COLORS.green600 }]}>Both sign release • Payment transfers to seller</Text>
                       </View>
                     </View>
                   </View>
                 </InfoBox>
                 
-                <InfoBox title="ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â If There's a Problem" variant="warning">
+                <InfoBox title="⚠️ If There's a Problem" variant="warning">
                   <View style={styles.outcomeList}>
                     <View style={styles.outcomeItem}>
-                      <Text style={styles.outcomeCheck}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ</Text>
+                      <Text style={styles.outcomeCheck}>✓</Text>
                       <Text style={styles.outcomeText}>
-                        <Text style={{ fontWeight: 'bold' }}>Both agree to cancel:</Text> Both sign refund ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ No payment
+                        <Text style={{ fontWeight: 'bold' }}>Both agree to cancel:</Text> Both sign refund → No payment
                       </Text>
                     </View>
                     <View style={styles.outcomeItem}>
-                      <Text style={styles.outcomeWait}>ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â³</Text>
+                      <Text style={styles.outcomeWait}>⏳</Text>
                       <Text style={styles.outcomeText}>
                         <Text style={{ fontWeight: 'bold' }}>Disagreement:</Text> Funds stay locked until both agree
                       </Text>
                     </View>
                   </View>
-                  <Text style={styles.outcomeNote}>No arbitration ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â FROST 2-of-2 requires mutual agreement.</Text>
+                  <Text style={styles.outcomeNote}>No arbitration — FROST 2-of-2 requires mutual agreement.</Text>
                 </InfoBox>
                 
                 <View style={styles.formSection}>
@@ -3012,7 +3014,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   
                   <TouchableOpacity
                     style={[styles.roleCard, { backgroundColor: COLORS.blue50, borderColor: COLORS.blue300 }]}
-                    onPress={() => { setRole('seller'); Alert.alert('Seller Mode', 'As a seller, you accept buyer proposals.\n\nBuyers set the terms ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â sellers show good faith by locking collateral first.\n\nUse "Join Existing Agreement" below to accept a buyer\'s proposal.', [{ text: 'Browse Proposals', onPress: () => { setStep(1); /* go to inbox/join */ } }, { text: 'OK' }]); }}
+                    onPress={() => { setRole('seller'); Alert.alert('Seller Mode', 'As a seller, you accept buyer proposals.\n\nBuyers set the terms — sellers show good faith by locking collateral first.\n\nUse "Join Existing Agreement" below to accept a buyer\'s proposal.', [{ text: 'Browse Proposals', onPress: () => { setStep(1); /* go to inbox/join */ } }, { text: 'OK' }]); }}
                   >
                     <Store size={rs.s(32)} color={COLORS.blue600} />
                     <Text style={[styles.roleTitle, { color: COLORS.blue800 }]}>I'm Seller</Text>
@@ -3060,10 +3062,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 {/* Only show rest after verification confirmed */}
                 {(!contract.verificationCode || verificationConfirmed) && (
                   <>
-                    {/* Agreement ID + Verification Code ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â share with counterparty */}
+                    {/* Agreement ID + Verification Code — share with counterparty */}
                     {contract.agreementId && (
                       <View style={{ backgroundColor: '#fffbeb', borderRadius: 12, borderWidth: 2, borderColor: '#f59e0b', padding: 16, marginBottom: 16 }}>
-                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#92400e', marginBottom: 8 }}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ Share with Counterparty</Text>
+                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#92400e', marginBottom: 8 }}>📋 Share with Counterparty</Text>
                         <Text style={{ fontSize: rs.font(10), color: '#b45309', marginBottom: 8 }}>Send these via DM (Instagram, Signal, etc.)</Text>
                         <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 8 }}>
                           <Text style={{ fontSize: rs.font(10), color: '#78716c', marginBottom: 2 }}>Agreement ID:</Text>
@@ -3093,13 +3095,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                         <View style={{ backgroundColor: '#fef3c7', borderRadius: 8, padding: 10, marginTop: 10, borderWidth: 1, borderColor: '#f59e0b' }}>
                           <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#92400e' }}>Shipping Info (if physical)</Text>
                           <Text style={{ fontSize: rs.font(9), color: '#b45309', marginTop: 4 }}>Carrier: FedEx, UPS, DHL, USPS, or other</Text>
-                          <Text style={{ fontSize: rs.font(9), color: '#dc2626', fontWeight: 'bold', marginTop: 4 }}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â NEVER share your home address. Ship to a UPS Store, FedEx Office, USPS Post Office, Amazon Locker, or any carrier service center near you.\n\nBuyer creates a prepaid shipping label (via carrier app/website) and DMs it to seller. Seller prints label and drops off package. No shipping cost in the agreement.</Text>
+                          <Text style={{ fontSize: rs.font(9), color: '#dc2626', fontWeight: 'bold', marginTop: 4 }}>⚠️ NEVER share your home address. Ship to a UPS Store, FedEx Office, USPS Post Office, Amazon Locker, or any carrier service center near you.\n\nBuyer creates a prepaid shipping label (via carrier app/website) and DMs it to seller. Seller prints label and drops off package. No shipping cost in the agreement.</Text>
                         </View>
                         <Text style={{ fontSize: rs.font(9), color: '#d97706', marginTop: 8, textAlign: 'center' }}>Share AGR ID + TX + Code via DM (Instagram, Signal, etc.)</Text>
                       </View>
                     )}
                     <View style={styles.multisigBox}>
-                      <Text style={styles.multisigLabel}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â FROST 2-of-2 Address (Kaspa L1)</Text>
+                      <Text style={styles.multisigLabel}>🔐 FROST 2-of-2 Address (Kaspa L1)</Text>
                       <View style={styles.multisigAddress}>
                         <Text style={styles.multisigAddressText} numberOfLines={2}>
                           {contract.multisigAddress || 'kaspa:pq...generating...'}
@@ -3110,7 +3112,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       </Text>
                       {contract.inscriptionTxId && (
                         <Text style={styles.inscriptionNote}>
-                          ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€šÃ‚Â Inscribed: {contract.inscriptionTxId.slice(0, 12)}...
+                          📝 Inscribed: {contract.inscriptionTxId.slice(0, 12)}...
                         </Text>
                       )}
                     </View>
@@ -3125,13 +3127,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       <View style={styles.lockStatusRow}>
                         <View style={[styles.lockDot, buyerLocked && styles.lockDotActive]} />
                         <Text style={styles.lockStatusText}>
-                          Buyer Lock ({contract.itemPriceKas} KASPA): {buyerLocked ? 'Locked ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ' : 'Pending...'}
+                          Buyer Lock ({contract.itemPriceKas} KASPA): {buyerLocked ? 'Locked ✓' : 'Pending...'}
                         </Text>
                       </View>
                       <View style={styles.lockStatusRow}>
                         <View style={[styles.lockDot, sellerLocked && styles.lockDotActive]} />
                         <Text style={styles.lockStatusText}>
-                          Seller Lock ({contract.sellerCommitmentKas} KASPA): {sellerLocked ? 'Locked ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ' : 'Pending...'}
+                          Seller Lock ({contract.sellerCommitmentKas} KASPA): {sellerLocked ? 'Locked ✓' : 'Pending...'}
                         </Text>
                       </View>
                     </View>
@@ -3176,14 +3178,14 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   <Text style={styles.flowTitle}>On Successful Delivery:</Text>
                   <View style={[styles.flowRow, { backgroundColor: COLORS.green100 }]}>
                     <Text style={styles.flowLabel}>Buyer's {contract.itemPriceKas} KASPA</Text>
-                    <Text style={styles.flowArrow}>ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢</Text>
+                    <Text style={styles.flowArrow}>→</Text>
                     <Text style={styles.flowValue}>To Seller</Text>
                   </View>
                   <View style={[styles.flowRow, { backgroundColor: COLORS.blue100 }]}>
                     <Text style={[styles.flowLabel, { color: COLORS.blue700 }]}>
                       Seller's {contract.sellerCommitmentKas} KASPA
                     </Text>
-                    <Text style={styles.flowArrow}>ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢</Text>
+                    <Text style={styles.flowArrow}>→</Text>
                     <Text style={[styles.flowValue, { color: COLORS.blue800 }]}>Back to Seller</Text>
                   </View>
                 </View>
@@ -3206,7 +3208,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       {isLoading ? (
                         <ActivityIndicator color={COLORS.white} />
                       ) : (
-                        <Text style={styles.successBtnText}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Confirm & Release KASPA to Seller</Text>
+                        <Text style={styles.successBtnText}>✓ Confirm & Release KASPA to Seller</Text>
                       )}
                     </TouchableOpacity>
                     
@@ -3218,12 +3220,12 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                         onPress={() => setIouModalVisible(true)}
                       >
                         <Coins size={rs.s(18)} color={COLORS.purple600} />
-                        <Text style={styles.iouBtnText}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â° IOU Balance Sheet</Text>
+                        <Text style={styles.iouBtnText}>💰 IOU Balance Sheet</Text>
                       </TouchableOpacity>
                     ) : (
                       <View style={styles.iouBtnDisabled}>
                         <Coins size={rs.s(18)} color={COLORS.stone400} />
-                        <Text style={styles.iouBtnTextDisabled}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â° IOU (Need {XP_THRESHOLD_IOU_ACCESS} XP)</Text>
+                        <Text style={styles.iouBtnTextDisabled}>💰 IOU (Need {XP_THRESHOLD_IOU_ACCESS} XP)</Text>
                       </View>
                     )}
                     
@@ -3250,12 +3252,12 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                         onPress={() => setIouModalVisible(true)}
                       >
                         <Coins size={rs.s(18)} color={COLORS.purple600} />
-                        <Text style={styles.iouBtnText}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â° IOU Balance Sheet</Text>
+                        <Text style={styles.iouBtnText}>💰 IOU Balance Sheet</Text>
                       </TouchableOpacity>
                     ) : (
                       <View style={styles.iouBtnDisabled}>
                         <Coins size={rs.s(18)} color={COLORS.stone400} />
-                        <Text style={styles.iouBtnTextDisabled}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â° IOU (Need {XP_THRESHOLD_IOU_ACCESS} XP)</Text>
+                        <Text style={styles.iouBtnTextDisabled}>💰 IOU (Need {XP_THRESHOLD_IOU_ACCESS} XP)</Text>
                       </View>
                     )}
                     
@@ -3345,17 +3347,17 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   <View style={styles.completeRow}>
                     <Text style={styles.completeLabel}>Payment transferred:</Text>
                     <Text style={[styles.completeValue, { color: COLORS.green700 }]}>
-                      {contract.itemPriceKas} KASPA ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Seller
+                      {contract.itemPriceKas} KASPA → Seller
                     </Text>
                   </View>
                   <View style={styles.completeDivider} />
                   <View style={styles.completeRow}>
                     <Text style={styles.completeSmallLabel}>Buyer commitment:</Text>
-                    <Text style={styles.completeSmallValue}>Unlocked ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ</Text>
+                    <Text style={styles.completeSmallValue}>Unlocked ✓</Text>
                   </View>
                   <View style={styles.completeRow}>
                     <Text style={styles.completeSmallLabel}>Seller commitment:</Text>
-                    <Text style={styles.completeSmallValue}>Unlocked ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ</Text>
+                    <Text style={styles.completeSmallValue}>Unlocked ✓</Text>
                   </View>
                 </View>
                 
@@ -3386,7 +3388,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 
                 <View style={styles.warningBox}>
                   <Text style={styles.warningText}>
-                    ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â If you request release and the other party refuses, you'll be stuck until they agree (deadlock).
+                    ⚠️ If you request release and the other party refuses, you'll be stuck until they agree (deadlock).
                   </Text>
                 </View>
                 
@@ -3403,7 +3405,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   ) : (
                     <Text style={styles.warningBtnText}>
                       {(role === 'buyer' && buyerRequestedRelease) || (role === 'seller' && sellerRequestedRelease)
-                        ? 'ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â³ Waiting for other party...'
+                        ? '⏳ Waiting for other party...'
                         : 'Request Mutual Release (Cancel Transaction)'}
                     </Text>
                   )}
@@ -3421,13 +3423,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                         style={[styles.smallBtn, { backgroundColor: COLORS.green600 }]}
                         onPress={handleRequestRelease}
                       >
-                        <Text style={styles.smallBtnText}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Agree to Cancel</Text>
+                        <Text style={styles.smallBtnText}>✓ Agree to Cancel</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.smallBtn, { backgroundColor: COLORS.amber600 }]}
                         onPress={handleEnterDispute}
                       >
-                        <Text style={styles.smallBtnText}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ Enter Dispute</Text>
+                        <Text style={styles.smallBtnText}>🐌 Enter Dispute</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -3437,7 +3439,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   style={styles.backLink}
                   onPress={() => setStep(4)}
                 >
-                  <Text style={styles.backLinkText}>ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Ãƒâ€šÃ‚Â Go back and complete transaction instead</Text>
+                  <Text style={styles.backLinkText}>← Go back and complete transaction instead</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -3481,7 +3483,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     style={[styles.secondaryBtn, { marginBottom: rs.s(12) }]}
                     onPress={() => Linking.openURL(contract.releaseExplorerUrl!)}
                   >
-                    <Text style={styles.secondaryBtnText}>View on Explorer ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢</Text>
+                    <Text style={styles.secondaryBtnText}>View on Explorer →</Text>
                   </TouchableOpacity>
                 )}
                 
@@ -3499,7 +3501,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               <View>
                 <View style={styles.disputeHeader}>
                   <View style={styles.snailIcon}>
-                    <Text style={styles.snailIconEmoji}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢</Text>
+                    <Text style={styles.snailIconEmoji}>🐌</Text>
                   </View>
                   <View>
                     <Text style={styles.disputeTitle}>Dispute - Snail Poison</Text>
@@ -3507,17 +3509,17 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   </View>
                 </View>
                 
-                <InfoBox title="ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ Snail Poison Active" variant="warning">
+                <InfoBox title="🐌 Snail Poison Active" variant="warning">
                   <Text style={{ fontSize: rs.font(10), color: COLORS.amber700 }}>
-                    ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Reputation drains -5/day for both parties{'\n'}
-                    ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Platform actions are rate-limited{'\n'}
-                    ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Cannot create new agreements when rep &lt; 20{'\n'}
-                    ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Only resolved when both sign agreeing on split
+                    • Reputation drains -5/day for both parties{'\n'}
+                    • Platform actions are rate-limited{'\n'}
+                    • Cannot create new agreements when rep &lt; 20{'\n'}
+                    • Only resolved when both sign agreeing on split
                   </Text>
                 </InfoBox>
                 
                 <View style={styles.disputeFundsBox}>
-                  <Text style={styles.disputeFundsTitle}>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â° Funds in FROST Address</Text>
+                  <Text style={styles.disputeFundsTitle}>💰 Funds in FROST Address</Text>
                   <View style={[styles.disputeFundsRow, { backgroundColor: COLORS.green100 }]}>
                     <Text style={styles.disputeFundsLabel}>Buyer posted:</Text>
                     <Text style={styles.disputeFundsValue}>{contract.itemPriceKas} KASPA</Text>
@@ -3605,7 +3607,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   style={styles.backLink}
                   onPress={() => setStep(6)}
                 >
-                  <Text style={styles.backLinkText}>ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Ãƒâ€šÃ‚Â Back to release options</Text>
+                  <Text style={styles.backLinkText}>← Back to release options</Text>
                 </TouchableOpacity>
               </View>
             )}
