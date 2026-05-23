@@ -141,7 +141,7 @@ interface AgreementSession {
 
 async function saveAgreementSession(session: AgreementSession): Promise<void> {
   try {
-    const serializable = { ...session, contract: { ...session.contract, frostData: session.contract.frostData ? { address: session.contract.frostData.address, aggregatedPubkey: session.contract.frostData.aggregatedPubkey, network: session.contract.frostData.network } : undefined } };
+    const serializable = { ...session, contract: { ...session.contract, frostData: session.contract.frostData ? { address: session.contract.frostData.address, aggregatedPubkey: session.contract.frostData.aggregatedPubkey, network: session.contract.frostData.network, pubkeyA: session.contract.frostData.pubkeyA, pubkeyB: session.contract.frostData.pubkeyB, sessionId: session.contract.frostData.sessionId || session.contract.agreementId, verificationCode: session.contract.frostData.verificationCode || '', createdAt: session.contract.frostData.createdAt || 0 } : undefined } };
     await AsyncStorage.setItem(AGR_SESSION_KEY, JSON.stringify(serializable));
   } catch {}
 }
