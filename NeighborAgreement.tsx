@@ -1387,6 +1387,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     amountSompi: myAmount,
                     privateKeyHex: wallet.privKeyHex,
                     network: wallet.network,
+                    payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await AsyncStorage.setItem('kv_frost_nonce_' + contract.agreementId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in buyer collateral payload:', nonce.R_hex.slice(0,20)); return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Buyer payload failed:', e); return ''; } })(),
                   });
                   if (sendResult.success) {
                     await AsyncStorage.setItem('kv_frost_sent_' + contract.agreementId, sendResult.txId || String(Date.now()));
@@ -2028,6 +2029,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 amountSompi: BigInt(immediateSendAmount),
                 privateKeyHex: wallet.privKeyHex,
                 network: wallet.network || 'testnet-10',
+                payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await AsyncStorage.setItem('kv_frost_nonce_' + agrId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in collateral TX payload:', nonce.R_hex.slice(0,20)); return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Payload nonce failed:', e); return ''; } })(),
               });
               console.log('[Neighbor] Seller collateral TX:', txResult.txId);
               await AsyncStorage.setItem('kv_frost_sent_' + agrId, String(Date.now()));
@@ -2285,6 +2287,23 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           if (rTag?.value) { counterpartyR = rTag.value; console.log('[FROST-2R] Found R via Goldsky:', counterpartyR.slice(0,20)); }
         } catch(e) { console.warn('[FROST-2R] Goldsky R lookup failed:', e); }
       }
+      // Check L1 UTXO payloads for counterparty R
+      if (!counterpartyR) {
+        try {
+          const nw = await SecureStore.getItemAsync('kaspa_network');
+          const apiBase = nw?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+          const txResp = await fetch(apiBase + '/addresses/' + contract.multisigAddress + '/full-transactions?limit=10&resolve_previous_outpoints=no');
+          const txData = await txResp.json();
+          for (const tx of txData || []) {
+            const pl = tx.payload || '';
+            if (pl && pl.length >= 66 && (pl.startsWith('02') || pl.startsWith('03'))) {
+              counterpartyR = pl;
+              console.log('[FROST-2R] Found R in L1 TX payload:', counterpartyR.slice(0,20));
+              break;
+            }
+          }
+        } catch(e) { console.warn('[FROST-2R] L1 payload check failed:', e); }
+      }
       let result;
       if (counterpartyR && myNonce?.R_hex) {
         // Proper 2-round FROST
@@ -2294,7 +2313,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         const sigHex = partialS.R_agg_x_hex + partialS.s_hex;
         result = { success: true, partialSig: sigHex, messageHash: myNonce.message_hex };
       } else {
-        console.warn('[FROST-2R] No counterparty R — falling back to single-round (will fail BIP340)');
+        console.warn('[FROST-2R] No counterparty R found');
+        Alert.alert('Waiting for Counterparty', 'Counterparty nonce not found yet. Wait 2-5 minutes and try again.');
+        setIsLoading(false);
+        return;
         result = await createFrostPartialSig({ frostAddress: contract.frostData, recipientAddress, amountSompi: totalAmountSompi, privateKeyHex: privKeyHex });
       }
       
