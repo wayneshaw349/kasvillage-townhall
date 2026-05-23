@@ -107,6 +107,9 @@ import {
   // High-level
   exchangePubkeys,
   createFrostAgreement,
+  generateFrostNonce,
+  computeFrostPartialS,
+  aggregateFrostSig,
   cleanup as cleanupFrost,
 } from './frost_complete';
 
