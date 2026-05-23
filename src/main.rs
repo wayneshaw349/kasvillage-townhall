@@ -2355,6 +2355,8 @@ pub struct FrostAgreementData {
     pub release_recipient: Option<String>,
     pub partial_sig_a: Option<String>,
     pub partial_sig_b: Option<String>,
+    pub frost_r_a: Option<String>,
+    pub frost_r_b: Option<String>,
     pub release_tx_id: Option<String>,
     pub created_at: u64, pub updated_at: u64,
 }
@@ -2410,6 +2412,18 @@ impl FrostRelayStore {
         if both { a.status = FrostAgreementStatus::Releasing; }
         a.updated_at = now_ms();
         Ok((both, a.partial_sig_a.clone(), a.partial_sig_b.clone()))
+    }
+    pub fn submit_frost_r(&self, id: &str, pk: &str, r_hex: &str) -> Result<(), String> {
+        let mut s = self.agreements.write().unwrap();
+        let a = s.get_mut(id).ok_or("Not found")?;
+        if a.party_a.pubkey == pk { a.frost_r_a = Some(r_hex.into()); }
+        else if let Some(ref b) = a.party_b { if b.pubkey == pk { a.frost_r_b = Some(r_hex.into()); } else { return Err("Not a party".into()); } }
+        else { return Err("No party B".into()); }
+        a.updated_at = now_ms(); Ok(())
+    }
+    pub fn get_frost_r(&self, id: &str) -> Option<(Option<String>, Option<String>)> {
+        let s = self.agreements.read().unwrap();
+        s.get(id).map(|a| (a.frost_r_a.clone(), a.frost_r_b.clone()))
     }
     pub fn record_release_tx(&self, id: &str, tx_id: &str) -> Result<(), String> {
         let mut s = self.agreements.write().unwrap();
@@ -4528,7 +4542,7 @@ async fn frost_propose(state: web::Data<AppStateV3>, body: web::Json<serde_json:
         agreement_id: aid.clone(), status: FrostAgreementStatus::Proposed,
         description: desc, stipulations: stip, network: net,
         party_a: FrostParty { pubkey: pk, amount_sompi: amt, signature: sig, confirmed: false, confirm_signature: None, collateral_tx_id: None, buyer_amount_sompi: buyer_amt, seller_amount_sompi: seller_amt, counterparty_pubkey: counterparty_pk.clone() },
-        party_b: None, frost_address: frost_addr, release_recipient: None, partial_sig_a: None, partial_sig_b: None, release_tx_id: None, created_at: now_ms(), updated_at: now_ms(),
+        party_b: None, frost_address: frost_addr, release_recipient: None, partial_sig_a: None, partial_sig_b: None, frost_r_a: None, frost_r_b: None, release_tx_id: None, created_at: now_ms(), updated_at: now_ms(),
     };
     match state.frost_relay.propose(agr) {
         Ok(id) => HttpResponse::Ok().json(json!({"success": true, "agreementId": id, "status": "proposed"})),
@@ -4573,7 +4587,7 @@ async fn frost_get_agreement(state: web::Data<AppStateV3>, path: web::Path<Strin
                 "agreementId": a.agreement_id, "status": format!("{:?}", a.status),
                 "description": a.description, "network": a.network, "frostAddress": a.frost_address,
                 "partyA": {"pubkey": a.party_a.pubkey, "amount_sompi": a.party_a.amount_sompi, "confirmed": a.party_a.confirmed, "collateralTxId": a.party_a.collateral_tx_id, "buyerAmountSompi": a.party_a.buyer_amount_sompi, "sellerAmountSompi": a.party_a.seller_amount_sompi, "counterpartyPubkey": a.party_a.counterparty_pubkey},
-                "partyB": pb_json, "createdAt": a.created_at, "updatedAt": a.updated_at, "partialSigA": a.partial_sig_a, "partialSigB": a.partial_sig_b, "releaseRecipient": a.release_recipient, "releaseTxId": a.release_tx_id, "partialSigA": a.partial_sig_a, "partialSigB": a.partial_sig_b, "releaseRecipient": a.release_recipient, "releaseTxId": a.release_tx_id,
+                "partyB": pb_json, "createdAt": a.created_at, "updatedAt": a.updated_at, "partialSigA": a.partial_sig_a, "frostRA": a.frost_r_a, "frostRB": a.frost_r_b, "partialSigB": a.partial_sig_b, "releaseRecipient": a.release_recipient, "releaseTxId": a.release_tx_id, "partialSigA": a.partial_sig_a, "partialSigB": a.partial_sig_b, "releaseRecipient": a.release_recipient, "releaseTxId": a.release_tx_id,
             }))
         }
         None => HttpResponse::NotFound().json(json!({"error": "Agreement not found"})),
@@ -7258,6 +7272,26 @@ async fn stateless_get_xp_ledger(
 // ============================================================================
 
 
+
+async fn frost_submit_r(state: web::Data<AppStateV3>, body: web::Json<serde_json::Value>) -> impl Responder {
+    let aid = body.get("agreement_id").and_then(|v| v.as_str()).unwrap_or("");
+    let pk = body.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
+    let r = body.get("frost_r").and_then(|v| v.as_str()).unwrap_or("");
+    if aid.is_empty() || pk.is_empty() || r.is_empty() { return HttpResponse::BadRequest().json(serde_json::json!({"error": "Missing fields"})); }
+    match state.frost_relay.submit_frost_r(aid, pk, r) {
+        Ok(()) => HttpResponse::Ok().json(serde_json::json!({"success": true})),
+        Err(e) => HttpResponse::BadRequest().json(serde_json::json!({"error": e})),
+    }
+}
+
+async fn frost_get_r(state: web::Data<AppStateV3>, path: web::Path<String>) -> impl Responder {
+    let aid = path.into_inner();
+    match state.frost_relay.get_frost_r(&aid) {
+        Some((ra, rb)) => HttpResponse::Ok().json(serde_json::json!({"frost_r_a": ra, "frost_r_b": rb})),
+        None => HttpResponse::NotFound().json(serde_json::json!({"error": "Not found"})),
+    }
+}
+
 async fn frost_submit_partial_sig(state: web::Data<AppStateV3>, body: web::Json<serde_json::Value>) -> impl Responder {
     let aid = body.get("agreementId").and_then(|v| v.as_str()).unwrap_or("");
     let pk = body.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
@@ -7339,6 +7373,8 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/agreements", web::get().to(frost_list_agreements))
         .route("/api/agreements/proposed", web::get().to(frost_list_proposed))
         .route("/api/agreement/partial-sig", web::post().to(frost_submit_partial_sig))
+        .route("/api/agreement/{id}/frost-r", web::get().to(frost_get_r))
+        .route("/api/agreement/frost-r", web::post().to(frost_submit_r))
         .route("/api/agreement/release", web::post().to(frost_release_complete));
 }
 
@@ -7759,6 +7795,8 @@ async fn rehydrate_agreements_from_arweave(
                 release_recipient: None,
                 partial_sig_a: None,
                 partial_sig_b: None,
+                frost_r_a: None,
+                frost_r_b: None,
                 release_tx_id: None,
                 created_at: daa_score, // Use DAA score as creation timestamp
                 updated_at: now_ms(),
@@ -7855,6 +7893,20 @@ async fn main() -> std::io::Result<()> {
             }
 
             
+
+            // Background: poll Arweave every 30 seconds to stay synced
+            let poll_relay = state.frost_relay.clone();
+            let poll_client = state.arweave_reader.http_client.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                    match rehydrate_agreements_from_arweave(&poll_relay, &poll_client).await {
+                        Ok(count) => { if count > 0 { println!("[Arweave-Poll] Rehydrated {} agreements", count); } }
+                        Err(e) => println!("[Arweave-Poll] Failed: {}", e),
+                    }
+                }
+            });
+
             HttpServer::new(move || {
                 App::new()
                     .app_data(web::Data::new(state.clone()))

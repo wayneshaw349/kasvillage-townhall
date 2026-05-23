@@ -121,7 +121,7 @@ import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
 import { encryptPartialSig, decryptPartialSig } from './frost_encrypted_relay';
-import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave } from './townhall_client';
+import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave, postFrostR, getFrostR } from './townhall_client';
 import { getUserStats } from './wallet_registration_v2';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -1201,7 +1201,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               signature: 'agreed_send_' + Date.now(),
               counterpartyPubkey: counterpartyPubkey,
               frostAddress: contract.multisigAddress || '',
-              frostR: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.releaseRecipient || counterpartyKaspaAddr || contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: (await loadMainWallet())?.privKeyHex || '' }); await AsyncStorage.setItem('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ R_hex: nonce.R_hex, k_private: nonce.k_private, d_tweaked: nonce.d_tweaked, message_hex: nonce.message_hex })); console.log('[FROST-R] Generated nonce R:', nonce.R_hex.slice(0,20)); return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Nonce generation failed:', e); return ''; } })(),
+              frostR: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.releaseRecipient || counterpartyKaspaAddr || contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: (await loadMainWallet())?.privKeyHex || '' }); await AsyncStorage.setItem('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ R_hex: nonce.R_hex, k_private: nonce.k_private, d_tweaked: nonce.d_tweaked, message_hex: nonce.message_hex })); console.log('[FROST-R] Generated nonce R:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: contract.agreementId || '', pubkey: myPubkey || '', frostR: nonce.R_hex }).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Nonce generation failed:', e); return ''; } })(),
             });
             await AsyncStorage.setItem(ownAgreedKey, String(Date.now()));
             console.log('[Agreed-Send Poll] Own Agreed-Send inscribed');
@@ -1387,7 +1387,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     amountSompi: myAmount,
                     privateKeyHex: wallet.privKeyHex,
                     network: wallet.network,
-                    payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await AsyncStorage.setItem('kv_frost_nonce_' + contract.agreementId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in buyer collateral payload:', nonce.R_hex.slice(0,20)); return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Buyer payload failed:', e); return ''; } })(),
+                    payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await AsyncStorage.setItem('kv_frost_nonce_' + contract.agreementId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in buyer collateral payload:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: contract.agreementId || '', pubkey: (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey) || '', frostR: nonce.R_hex }).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Buyer payload failed:', e); return ''; } })(),
                   });
                   if (sendResult.success) {
                     await AsyncStorage.setItem('kv_frost_sent_' + contract.agreementId, sendResult.txId || String(Date.now()));
@@ -2029,7 +2029,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 amountSompi: BigInt(immediateSendAmount),
                 privateKeyHex: wallet.privKeyHex,
                 network: wallet.network || 'testnet-10',
-                payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await AsyncStorage.setItem('kv_frost_nonce_' + agrId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in collateral TX payload:', nonce.R_hex.slice(0,20)); return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Payload nonce failed:', e); return ''; } })(),
+                payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await AsyncStorage.setItem('kv_frost_nonce_' + agrId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in collateral TX payload:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: nonce.R_hex }).then(() => console.log('[FROST-R] R posted to TownHall')).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Payload nonce failed:', e); return ''; } })(),
               });
               console.log('[Neighbor] Seller collateral TX:', txResult.txId);
               await AsyncStorage.setItem('kv_frost_sent_' + agrId, String(Date.now()));
@@ -2264,6 +2264,16 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         myNonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress, amountSompi: totalAmountSompi, privateKeyHex: privKeyHex });
         console.log('[FROST-2R] Generated fresh nonce R:', myNonce.R_hex?.slice(0,20));
       }
+      // Check TownHall for counterparty R (instant, no indexing delay)
+      try {
+        const rData = await getFrostR(contract.agreementId || '');
+        if (rData) {
+          const myR = role === 'buyer' ? rData.frost_r_a : rData.frost_r_b;
+          const cpR = role === 'buyer' ? rData.frost_r_b : rData.frost_r_a;
+          if (cpR) { counterpartyR = cpR; console.log('[FROST-2R] Found R via TownHall:', counterpartyR.slice(0,20)); }
+        }
+      } catch(e) { console.warn('[FROST-2R] TownHall R lookup failed:', e); }
+
       // Query counterparty R from Arweave
       let counterpartyR = '';
       try {

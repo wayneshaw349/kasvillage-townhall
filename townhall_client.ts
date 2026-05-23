@@ -570,6 +570,8 @@ export interface AgreementListItem {
   createdAt: number;
 }
 
+const TOWNHALL_BASE = 'https://kasvillage.app.runonflux.io';
+
 export async function proposeAgreement(params: {
   agreementId: string;
   pubkey: string;
@@ -841,6 +843,29 @@ export async function queryCounterpartyAgreed(opts: {
   }
   return false;
 }
+
+
+// Post FROST R nonce to TownHall
+export async function postFrostR(params: { agreementId: string; pubkey: string; frostR: string }): Promise<{ success: boolean }> {
+  try {
+    const resp = await fetch(TOWNHALL_BASE + '/api/agreement/frost-r', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agreement_id: params.agreementId, pubkey: params.pubkey, frost_r: params.frostR }),
+    });
+    return await resp.json();
+  } catch (e) { console.warn('[TownHall] postFrostR failed:', e); return { success: false }; }
+}
+
+// Get FROST R nonces from TownHall
+export async function getFrostR(agreementId: string): Promise<{ frost_r_a?: string; frost_r_b?: string } | null> {
+  try {
+    const resp = await fetch(TOWNHALL_BASE + '/api/agreement/' + agreementId + '/frost-r');
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch { return null; }
+}
+
 export async function queryAgreementsFromArweave(opts?: {
   status?: string;
   pubkey?: string;
