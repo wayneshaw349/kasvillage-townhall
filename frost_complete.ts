@@ -81,6 +81,7 @@ export function computeFrostPartialS(params: {
   myNonce: FrostNonce;
   counterpartyR_hex: string;
   frostAddress: FrostAddress;
+  sighash_hex?: string; // real Kaspa sighash ? overrides myNonce.message_hex for challenge e
 }): { s_hex: string; R_agg_x_hex: string } {
   const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
   const { myNonce, counterpartyR_hex, frostAddress } = params;
@@ -106,7 +107,7 @@ export function computeFrostPartialS(params: {
 
   // Challenge e = Kaspa Blake2b tagged hash
   // Kaspa uses Blake2b for the Schnorr challenge, not SHA256
-  const message = hexToBytes(myNonce.message_hex);
+  const message = hexToBytes(params.sighash_hex || myNonce.message_hex); // use real sighash if provided
   const challengeInput = new Uint8Array([...R_agg_x, ...P_x, ...message]);
   const eHash = kaspaBlake2b(challengeInput);
   const e = BigInt('0x' + bytesToHex(eHash)) % N;
@@ -1145,24 +1146,53 @@ export async function completeFrost2Round(params: {
     });
     
     if (params.counterpartySig) {
-      // We have counterparty's s â€” aggregate
-      const aggSig = aggregateFrostSig({
-        s_A_hex: myPartial.s_hex,
-        s_B_hex: params.counterpartySig.s_hex,
-        R_agg_x_hex: myPartial.R_agg_x_hex, // Both compute same R_agg
-      });
-      
-      // Broadcast
+      // Multi-input FROST with real Kaspa sighashes
       const { sendKaspaWithSignature } = await import('./kaspa_rest_tx');
+      const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
+
+      // Parse buyer's packed partial sigs: R_agg_x(64) + s_0(64) + s_1(64) + ...
+      const cpSigFull = params.counterpartySig.R_agg_x_hex + params.counterpartySig.s_hex;
+      // counterpartySig.s_hex may contain multiple s values packed together
+      // If buyer sent multi-input sigs, s_hex = s_0 + s_1 + ...
+      const cpAllS: string[] = [];
+      const rawS = params.counterpartySig.s_hex;
+      for (let si = 0; si < rawS.length; si += 64) {
+        cpAllS.push(rawS.slice(si, si + 64));
+      }
+      console.log('[FROST-2R] Buyer sent', cpAllS.length, 'partial s values');
+
+      // Cache for per-input derivation
+      const R_agg_x_hex = myPartial.R_agg_x_hex;
+      const d_tw = BigInt('0x' + myNonce.d_tweaked);
+      let myS0_real: bigint | null = null;
+      let e0_cached: bigint | null = null;
+
       const result = await sendKaspaWithSignature({
         senderAddress: params.frostAddress.address,
         recipientAddress: params.recipientAddress,
         amountSompi: params.amountSompi,
-        aggregateSignature: aggSig,
         aggregatePubkey: params.frostAddress.aggregatedPubkey,
         network: params.frostAddress.network,
+        perInputSigner: (sighashHex: string, inputIndex: number): string => {
+          // Compute my partial s for this input's sighash
+          const myPartialN = computeFrostPartialS({
+            myNonce,
+            counterpartyR_hex: params.counterpartyR_hex,
+            frostAddress: params.frostAddress,
+            sighash_hex: sighashHex,
+          });
+          const mySN = BigInt('0x' + myPartialN.s_hex);
+
+          // Get buyer's s for this input
+          const cpSN = cpAllS[inputIndex] ? BigInt('0x' + cpAllS[inputIndex]) : 0n;
+
+          // Aggregate: s_agg = my_s + cp_s
+          const s_agg = (mySN + cpSN) % N;
+          const sigHex = R_agg_x_hex + s_agg.toString(16).padStart(64, '0');
+          console.log('[FROST-2R] Input', inputIndex, ': myS=', mySN.toString(16).slice(0,16), 'cpS=', cpSN.toString(16).slice(0,16), 'agg=', s_agg.toString(16).slice(0,16));
+          return sigHex;
+        },
       });
-      
       if (!result.success) return { success: false, error: result.error || 'L1 broadcast failed' };
       const explorerBase = params.frostAddress.network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';
       return { success: true, txId: result.txId, explorerUrl: explorerBase + result.txId };

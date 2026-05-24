@@ -225,7 +225,7 @@ function hashOutputs(outputs: { value: bigint; scriptVersion: number; script: Ui
   return hashBlake2b(concat(...parts));
 }
 
-function computeSighash(
+export function computeSighash(
   txVersion: number,
   inputs: { txId: Uint8Array; index: number; sequence: bigint; sigOpCount: number; scriptVersion: number; scriptPubKey: Uint8Array; value: bigint }[],
   outputs: { value: bigint; scriptVersion: number; script: Uint8Array }[],
@@ -527,6 +527,7 @@ export async function sendKaspaWithSignature(params: {
   aggregatePubkey: string;     // 33-byte compressed pubkey of the FROST address
   network: string;
   recipients?: Array<{ address: string; amount: bigint }>;
+  perInputSigner?: (sighashHex: string, inputIndex: number) => string;
 }): Promise<{ success: boolean; txId?: string; error?: string }> {
   const { senderAddress, recipientAddress, amountSompi, aggregateSignature, aggregatePubkey, network } = params;
 
@@ -604,7 +605,7 @@ export async function sendKaspaWithSignature(params: {
     // Most FROST addresses will have exactly 1 UTXO (the collateral deposit)
     // Multi-UTXO FROST will be handled in a future update
     
-    if (selectedUtxos.length > 1) {
+    if (false /* multi-UTXO now handled by perInputSigner */) {
       console.warn('[FROST] Multiple UTXOs in FROST address — using first UTXO only');
       // Recalculate with single UTXO
       const singleUtxo = selectedUtxos[0];
@@ -626,12 +627,22 @@ export async function sendKaspaWithSignature(params: {
       }
     }
 
-    const signedInputs = selectedUtxos.map(u => ({
-      previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
-      signatureScript: sigScriptHex,
-      sequence: '0',
-      sigOpCount: 1,
-    }));
+    // Per-input signing for multi-UTXO FROST
+    const subnetId = hexToBytes('0000000000000000000000000000000000000000');
+    const frostInputsData = selectedUtxos.map(u => ({ txId: hexToBytes(u.outpoint.transactionId), index: u.outpoint.index, sequence: 0n, sigOpCount: 1, scriptVersion: 0, scriptPubKey: hexToBytes(u.utxoEntry.scriptPublicKey.scriptPublicKey), value: BigInt(u.utxoEntry.amount) }));
+    const frostOutputsData = outputs.map(o => ({ value: BigInt(o.amount), scriptVersion: 0, script: hexToBytes(o.scriptPublicKey.scriptPublicKey) }));
+    const signedInputs = selectedUtxos.map((u, idx) => {
+      let thisSigHex: string;
+      if (params.perInputSigner) {
+        const sighash = computeSighash(0, frostInputsData, frostOutputsData, idx, subnetId, 0n, 0n, true, new Uint8Array(0));
+        thisSigHex = params.perInputSigner(bytesToHex(sighash), idx);
+        console.log('[FROST-MultiUTXO] Input', idx, 'sighash:', bytesToHex(sighash).slice(0,20), 'sig:', thisSigHex.slice(0,20));
+      } else { thisSigHex = aggregateSignature || ''; }
+      const sb = hexToBytes(thisSigHex);
+      const swt = new Uint8Array(sb.length + 1); swt.set(sb); swt[sb.length] = 0x01;
+      const ss = new Uint8Array(1 + swt.length); ss[0] = swt.length; ss.set(swt, 1);
+      return { previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: bytesToHex(ss), sequence: '0', sigOpCount: 1 };
+    });
 
     // 5. Submit transaction
     const txBody = {
