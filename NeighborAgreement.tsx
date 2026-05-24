@@ -1493,7 +1493,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 } catch { return partialSig; }
               })(),
                     });
-                    if (res2.success && res2.txId) {
+                    if (false /* disabled: old single-round */ && res2.success && res2.txId) {
                       console.log('[PartialSig-Poll] Release TX:', res2.txId);
                       setContract(prev => ({ ...prev, releaseTxId: res2.txId, releaseExplorerUrl: res2.explorerUrl }));
                       setStep(7);
@@ -1517,13 +1517,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               const w = await loadMainWallet();
               if (w && contract.frostData && !cancelled) {
                 const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
-                const res = await completeFrostAndBroadcast({
-                  frostAddress: contract.frostData,
-                  myPrivateKeyHex: w.privKeyHex,
-                  recipientAddress: w.address,
-                  amountSompi: total,
-                  counterpartyPartialSig: relayPayload.partialTx,
-                });
+                console.log('[PartialSig-Poll] Relay path skipped - using 2-round via Arweave poll'); const res = { success: false } as any;
                 if (res.success && res.txId) {
                   console.log('[PartialSig-Poll] Release TX:', res.txId);
                   setContract(prev => ({ ...prev, releaseTxId: res.txId, releaseExplorerUrl: res.explorerUrl }));
