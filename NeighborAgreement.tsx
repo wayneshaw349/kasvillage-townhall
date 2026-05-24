@@ -121,6 +121,10 @@ import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
 import { encryptPartialSig, decryptPartialSig } from './frost_encrypted_relay';
+import { computeSighash } from './kaspa_rest_tx';
+import { hexToBytes as h2b, bytesToHex as b2h } from '@noble/hashes/utils';
+import { blake2b as blk } from '@noble/hashes/blake2b';
+import { secp256k1 as secpCurve } from '@noble/curves/secp256k1';
 import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave, postFrostR, getFrostR } from './townhall_client';
 import { getUserStats } from './wallet_registration_v2';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -2330,8 +2334,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       if (counterpartyR && myNonce?.R_hex) {
         // Proper 2-round FROST
         // Build TX to compute real Kaspa sighash for BIP340 verification
-        const { computeSighash } = await import('./kaspa_rest_tx');
-        const { hexToBytes: h2b, bytesToHex: b2h } = await import('@noble/hashes/utils');
+        // computeSighash imported statically at top
+        // h2b, b2h imported statically at top
         const frostAddr = contract.frostData?.address || '';
         const frostNet = contract.frostData?.network || 'testnet-10';
         const apiBase = frostNet === 'mainnet' ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org';
@@ -2382,7 +2386,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         const d_tw2 = BigInt('0x' + myNonce.d_tweaked);
         const s0val = BigInt('0x' + partialS.s_hex);
         if (insData.length > 1) {
-          const { blake2b: blk } = await import('@noble/hashes/blake2b');
+          // blk imported statically at top
           const HK = new TextEncoder().encode('TransactionSigningHash');
           const Rx = h2b(partialS.R_agg_x_hex);
           const { secp256k1: secp2 } = await import('@noble/curves/secp256k1'); const Ppt = secp2.ProjectivePoint.fromHex(contract.frostData.aggregatedPubkey);
