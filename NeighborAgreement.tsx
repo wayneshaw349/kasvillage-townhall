@@ -1392,6 +1392,18 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   if (sendResult.success) {
                     await AsyncStorage.setItem('kv_frost_sent_' + contract.agreementId, sendResult.txId || String(Date.now()));
                     console.log('[FROST-Poll] Our collateral sent! TX:', sendResult.txId);
+                    // Post buyer R to TownHall + Arweave
+                    if (role === 'buyer') {
+                      try {
+                        const savedNonce = await AsyncStorage.getItem('kv_frost_nonce_' + contract.agreementId);
+                        if (savedNonce) {
+                          const nData = JSON.parse(savedNonce);
+                          const { postFrostR } = await import('./townhall_client');
+                          await postFrostR({ agreementId: contract.agreementId || '', pubkey: myPubkey, frostR: nData.R_hex });
+                          console.log('[FROST-R] Buyer R posted to TownHall:', nData.R_hex.slice(0,20));
+                        }
+                      } catch(e2) { console.warn('[FROST-R] Buyer R post failed:', e2); }
+                    }
                     try { const { markLocked } = await import('./utxo_ledger'); await markLocked(contract.agreementId || ''); } catch {}
                     if (role === 'buyer') { setBuyerLocked(true); } else { setSellerLocked(true); }
                     Alert.alert('Collateral Sent!', Number(myAmount) / 1e8 + ' KASPA sent to FROST.\nTX: ' + (sendResult.txId || '').slice(0, 16));
