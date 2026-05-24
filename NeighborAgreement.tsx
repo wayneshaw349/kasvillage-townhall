@@ -125,7 +125,7 @@ import { computeSighash } from './kaspa_rest_tx';
 import { hexToBytes as h2b, bytesToHex as b2h } from '@noble/hashes/utils';
 import { blake2b as blk } from '@noble/hashes/blake2b';
 import { secp256k1 as secpCurve } from '@noble/curves/secp256k1';
-import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave, postFrostR, getFrostR } from './townhall_client';
+import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave, postFrostR, getFrostR, listProposedAgreements, submitPartialSig } from './townhall_client';
 import { getUserStats } from './wallet_registration_v2';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
