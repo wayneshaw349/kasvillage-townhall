@@ -523,7 +523,7 @@ export async function sendKaspaWithSignature(params: {
   senderAddress: string;
   recipientAddress: string;
   amountSompi: bigint;
-  aggregateSignature: string;  // 64-byte hex Schnorr sig (aggregated from both parties)
+  aggregateSignature?: string;  // 64-byte hex Schnorr sig (optional when perInputSigner used)
   aggregatePubkey: string;     // 33-byte compressed pubkey of the FROST address
   network: string;
   recipients?: Array<{ address: string; amount: bigint }>;
