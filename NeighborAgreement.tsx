@@ -2474,7 +2474,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             agreementId: contract.agreementId || '',
             pubkey: role === 'buyer' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''),
             partialSig: result.partialSig || '',
-            recipientAddress: recipientAddress,
+            recipientAddress: recipientAddress || '',
           });
           console.log('[Neighbor] Partial sig submitted to TownHall agreement endpoint');
         } catch (e) { console.warn('[Neighbor] TownHall partial sig failed:', e); }

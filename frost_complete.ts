@@ -484,7 +484,7 @@ export function createPartialSigLocal(params: {
   return {
     partialSig,
     messageHash,
-    publicKey: myPubkey,
+    signerPubkey: myPubkey,
   };
 }
 
