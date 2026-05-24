@@ -2283,6 +2283,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         myNonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress, amountSompi: totalAmountSompi, privateKeyHex: privKeyHex });
         console.log('[FROST-2R] Generated fresh nonce R:', myNonce.R_hex?.slice(0,20));
       }
+      let counterpartyR = '';
       // Check TownHall for counterparty R (instant, no indexing delay)
       try {
         const rData = await getFrostR(contract.agreementId || '');
@@ -2294,7 +2295,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       } catch(e) { console.warn('[FROST-2R] TownHall R lookup failed:', e); }
 
       // Query counterparty R from Arweave
-      let counterpartyR = '';
+      // counterpartyR already set by TownHall check above
       try {
         const { queryAgreementsFromArweave } = await import('./townhall_client');
         const rResults = await queryAgreementsFromArweave({ status: 'Agreed-Send' });
