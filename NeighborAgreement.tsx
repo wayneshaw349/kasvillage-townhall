@@ -3351,10 +3351,28 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       console.log('[Seller-Release] Got partial sig, co-signing...');
                       const w = await loadMainWallet();
                       if (!w || !contract.frostData) { Alert.alert('Error', 'Wallet or FROST not ready'); setIsLoading(false); return; }
-                      const { completeFrostAndBroadcast } = require('./frost_complete');
+                      const { completeFrost2Round } = require('./frost_complete');
+                      const { getFrostR } = await import('./townhall_client');
+                      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
                       const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
                       const decrypted = (() => { try { const { decryptPartialSig } = require('./frost_encrypted_relay'); return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return partialSig; } })();
-                      const result = await completeFrostAndBroadcast({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, counterpartyPartialSig: decrypted });
+                      // Get buyer R from TownHall
+                      let buyerR = '';
+                      try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
+                      if (!buyerR) {
+                        try { const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["PartialSig"] }]) { edges { node { tags { name value } } } } }';
+                          const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+                          const json = await resp.json(); const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || [];
+                          const rTag = tags.find((t) => t.name === 'KV-FrostR'); if (rTag?.value) buyerR = rTag.value;
+                        } catch {}
+                      }
+                      // Parse buyer's partial sig (R_agg_x || s format)
+                      const sigBytes = typeof decrypted === 'string' ? decrypted : '';
+                      const buyerSig = sigBytes.length >= 128 ? { R_agg_x_hex: sigBytes.slice(0, 64), s_hex: sigBytes.slice(64, 128) } : undefined;
+                      const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
+                      if (!myNonceJson || !buyerR) { Alert.alert('Missing Data', 'Nonce or buyer R not found. Try again.'); setIsLoading(false); return; }
+                      console.log('[Seller-Release] 2-round: buyerR=', buyerR.slice(0,20), 'buyerSig=', buyerSig ? 'yes' : 'no');
+                      const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig });
                       if (result.success && result.txId) {
                         console.log('[Seller-Release] Release TX:', result.txId);
                         setContract(prev => ({ ...prev, releaseTxId: result.txId }));
