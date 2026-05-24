@@ -1105,7 +1105,7 @@ export async function completeFrostAndBroadcast(params: {
       const { sendKaspaWithSignature } = await import('./kaspa_rest_tx');
       const result = await sendKaspaWithSignature({
         senderAddress: frostAddress.address,
-        recipientAddress: recipientAddress || '',
+        recipientAddress: (recipientAddress || '') as string,
         amountSompi,
         aggregateSignature: aggregateSig,
         aggregatePubkey: frostAddress.aggregatedPubkey,
