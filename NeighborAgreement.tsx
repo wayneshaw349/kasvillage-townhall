@@ -1458,7 +1458,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             const decrypted = (() => { try { const d = decryptPartialSig({ encrypted: match.signature, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: { agreementId: contract.agreementId || '', buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', multisigAddress: contract.multisigAddress || '', aggregatedPubkey: contract.frostData?.aggregatedPubkey || '', network: contract.frostData?.network || 'testnet-10', itemPriceKas: contract.itemPriceKas, sellerCommitmentKas: contract.sellerCommitmentKas, R_hex: '' }, nonce: match.nonce || '' }); console.log('[FROST] Decrypted counterparty partial sig'); return d; } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; } })();
             let buyerR = '';
             try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
-            if (!buyerR) { try { const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["Agreed-Send", "Proposed", "Accepted"] }]) { edges { node { tags { name value } } } } }'; const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }); const json = await resp.json(); const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || []; const rTag = tags.find((t) => t.name === 'KV-FrostR'); if (rTag?.value) buyerR = rTag.value; } catch {} }
+            if (!buyerR) { try { const gql = '{ transactions(first: 10, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }]) { edges { node { tags { name value } } } } }'; const resp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }); const json = await resp.json(); for (const edge2 of (json?.data?.transactions?.edges || [])) { const t2 = edge2?.node?.tags || []; const m2 = {}; t2.forEach(t => { m2[t.name] = t.value; }); const p2 = m2['KV-Pubkey'] || ''; if (p2 !== (role === 'seller' ? (contract.sellerPubkey || '') : (contract.buyerPubkey || '')) && m2['KV-FrostR']) { buyerR = m2['KV-FrostR']; console.log('[FROST-2R] Found counterparty R from Arweave:', buyerR.slice(0,20)); break; } } } catch {} }
             const sigStr = typeof decrypted === 'string' ? decrypted : '';
             // Parse all s values: R_agg_x (64) + s_0 (64) + s_1 (64) + ...
             const cpAllS: string[] = []; for (let si = 64; si < sigStr.length; si += 64) { cpAllS.push(sigStr.slice(si, si + 64)); }
@@ -1809,7 +1809,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       // Phase 3: Direct Goldsky query for proposals addressed to MY pubkey
       try {
         const myGql = '{ transactions(first: 10, tags: [{ name: "KV-Counterparty", values: ["' + myPubkey + '"] }, { name: "KV-Status", values: ["Proposed"] }], sort: HEIGHT_DESC) { edges { node { id, tags { name, value } } } } }';
-        const myResp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: myGql }) });
+        let myResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: myGql }) }).catch(() => null);
+        if (!myResp?.ok) myResp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: myGql }) });
         const myJson = await myResp.json();
         const myEdges = myJson?.data?.transactions?.edges || [];
         console.log('[Neighbor] Direct inbox query found', myEdges.length, 'proposals for me');
@@ -2306,8 +2307,9 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         try {
           const cpPub = role === 'buyer' ? contract.sellerPubkey : contract.buyerPubkey;
           const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["Accepted"] }, { name: "KV-Pubkey", values: ["' + cpPub + '"] }]) { edges { node { tags { name value } } } } }';
-          const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
-          const json = await resp.json();
+          // Layer 2: arweave.net (fast)
+          let arResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+          const json = await arResp.json();
           const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || [];
           const rTag = tags.find((t) => t.name === 'KV-FrostR');
           if (rTag?.value) { counterpartyR = rTag.value; console.log('[FROST-2R] Found R via Goldsky:', counterpartyR.slice(0,20)); }
