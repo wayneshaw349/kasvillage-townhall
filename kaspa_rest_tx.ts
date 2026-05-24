@@ -532,7 +532,7 @@ export async function sendKaspaWithSignature(params: {
 
   try {
     // 1. Fetch UTXOs for the FROST address
-    const apiBase = network === 'mainnet' ? 'https://api.kaspa.org' : 'https://api-tn.kaspa.org';
+    const apiBase = network === 'mainnet' ? 'https://api.kaspa.org' : (network === 'testnet-10' ? 'https://api-tn10.kaspa.org' : 'https://api-tn.kaspa.org');
     const utxoResp = await fetch(apiBase + '/addresses/' + senderAddress + '/utxos');
     if (!utxoResp.ok) return { success: false, error: 'Failed to fetch FROST UTXOs' };
     const utxos = await utxoResp.json();
