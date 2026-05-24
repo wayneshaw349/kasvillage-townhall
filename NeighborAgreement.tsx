@@ -116,7 +116,7 @@ import {
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
 import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
-import { canonicalCommit, verifyCommitment, releaseExpiredCommitments } from './utxo_ledger';
+import { canonicalCommit, verifyCommitment, releaseExpiredCommitments, markLocked } from './utxo_ledger';
 import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
@@ -1156,7 +1156,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         if (!alreadyAgreed) {
           // Check if counterparty accepted/agreed on Arweave
           try {
-            const { queryAgreementsFromArweave } = await import('./townhall_client');
+            // queryAgreementsFromArweave imported statically
             const allStatuses = await queryAgreementsFromArweave({ status: 'Accepted' });
             const counterAccepted = allStatuses.find((r: any) => 
               (r.agreementId || r.agreement_id) === contract.agreementId &&
@@ -1241,7 +1241,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           if (sendResult.success) {
             await AsyncStorage.setItem(sentKey, sendResult.txId || String(Date.now()));
             console.log('[Agreed-Send Poll] FROST TX confirmed:', sendResult.txId);
-            try { const { markLocked } = await import('./utxo_ledger'); await markLocked(contract.agreementId || ''); } catch {}
+            try { await markLocked(contract.agreementId || ''); } catch {}
             // Merkle proof (fire-and-forget)
             uploadPerTxProof({
               txId: sendResult.txId || '', txIndex: 0, amountSompi: myAmount,
@@ -1290,7 +1290,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         const frostBalance = BigInt(data.balance || '0');
         // Check TownHall — if both confirmed, proceed to send even if Arweave hasn't indexed yet
         try {
-          const { getAgreementStatus } = await import('./townhall_client');
+          // getAgreementStatus imported statically
           const thStatus = await getAgreementStatus(contract.agreementId || '');
           if (thStatus && (thStatus.status === 'BothConfirmed' || thStatus.status === 'Collateralized' || thStatus.status === 'Accepted')) {
             console.log('[FROST-Poll] TownHall status:', thStatus.status, '— both parties confirmed');
@@ -1316,7 +1316,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       console.log('[FROST-Poll] ✅ Collateral sent! TX:', sendResult.txId);
                       // Record on TownHall
                       try {
-                        const { recordCollateral } = await import('./townhall_client');
+                        // recordCollateral imported statically
                         await recordCollateral({
                           agreementId: contract.agreementId || '',
                           pubkey: (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey) || '',
@@ -1402,13 +1402,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                         const savedNonce = await AsyncStorage.getItem('kv_frost_nonce_' + contract.agreementId);
                         if (savedNonce) {
                           const nData = JSON.parse(savedNonce);
-                          const { postFrostR } = await import('./townhall_client');
+                          // postFrostR imported statically
                           await postFrostR({ agreementId: contract.agreementId || '', pubkey: myPubkey, frostR: nData.R_hex });
                           console.log('[FROST-R] Buyer R posted to TownHall:', nData.R_hex.slice(0,20));
                         }
                       } catch(e2) { console.warn('[FROST-R] Buyer R post failed:', e2); }
                     }
-                    try { const { markLocked } = await import('./utxo_ledger'); await markLocked(contract.agreementId || ''); } catch {}
+                    try { await markLocked(contract.agreementId || ''); } catch {}
                     if (role === 'buyer') { setBuyerLocked(true); } else { setSellerLocked(true); }
                     Alert.alert('Collateral Sent!', Number(myAmount) / 1e8 + ' KASPA sent to FROST.\nTX: ' + (sendResult.txId || '').slice(0, 16));
                   } else {
@@ -1439,7 +1439,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       if (cancelled) return;
       try {
         // Check Arweave for PartialSig from counterparty
-        const { queryAgreementsFromArweave } = await import('./townhall_client');
+        // queryAgreementsFromArweave imported statically
         const results = await queryAgreementsFromArweave({
           status: 'PartialSig',
         });
@@ -1453,8 +1453,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             const totalAmount = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
             // 2-round FROST co-sign
             const { completeFrost2Round } = require('./frost_complete');
-            const { getFrostR } = await import('./townhall_client');
-            const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+            // getFrostR imported statically
+            // AsyncStorage imported statically
             const decrypted = (() => { try { const d = decryptPartialSig({ encrypted: match.signature, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: { agreementId: contract.agreementId || '', buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', multisigAddress: contract.multisigAddress || '', aggregatedPubkey: contract.frostData?.aggregatedPubkey || '', network: contract.frostData?.network || 'testnet-10', itemPriceKas: contract.itemPriceKas, sellerCommitmentKas: contract.sellerCommitmentKas, R_hex: '' }, nonce: match.nonce || '' }); console.log('[FROST] Decrypted counterparty partial sig'); return d; } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; } })();
             let buyerR = '';
             try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
@@ -1526,7 +1526,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         }
         // Also try TownHall relay as fast path
         if (!cancelled) {
-          const { fetchPartialTx } = await import('./neighbor_relay');
+          // fetchPartialTx imported statically
           const relayPayload = await fetchPartialTx(contract.agreementId || '');
           if (relayPayload?.partialTx) {
             console.log('[PartialSig-Poll] Found on TownHall relay! Auto-completing...');
@@ -1635,7 +1635,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             } as any);
             // Reduce spendable for proposer (input cap)
             try {
-              const { commitForCollateral } = await import('./utxo_ledger');
+              // commitForCollateral from utxo_ledger (canonicalCommit imported statically)
               const proposeAmount = role === 'buyer' ? BigInt(Math.floor(contract.itemPriceKas * 1e8)) : BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
               if (proposeAmount > 0n) {
               const tagResult = await canonicalCommit(propWallet?.address || '', proposeAmount, agreementId, 'buyer', myPubkey || '');
@@ -1759,7 +1759,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       if (!myPubkey) { setInboxLoading(false); return; }
       const agreements = await listMyAgreements(myPubkey);
       // Also fetch all proposed agreements (for Party B inbox)
-      const { listProposedAgreements } = await import('./townhall_client');
+      // listProposedAgreements imported statically
       const allProposed = await listProposedAgreements();
       // Arweave fallback — query permanent storage if TownHall cache is empty
       let arweaveProposals: any[] = [];
@@ -2061,7 +2061,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           
           // Inscribe acceptance to Arweave
           try {
-            const { inscribeAgreementToArweave } = await import('./townhall_client');
+            // inscribeAgreementToArweave imported statically
             await inscribeAgreementToArweave({
               agreementId: agrId,
               pubkey: myPubkey,
@@ -2098,7 +2098,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           const myLockAmount = BigInt(Math.floor(sellerAmount * 1e8));
           if (myLockAmount > 0n) {
             try {
-              const { commitForCollateral } = await import('./utxo_ledger');
+              // commitForCollateral from utxo_ledger (canonicalCommit imported statically)
               const sellerTagResult = await canonicalCommit(wallet.address, myLockAmount, agrId, canon?.role || 'seller', myPubkey || '');
           console.log('[UTXO-Tag] Seller accept tagged:', sellerTagResult.success, 'role:', canon?.role, 'hashes:', sellerTagResult.commitHashes?.length);
               console.log('[Neighbor] Spendable reduced by', sellerAmount, 'KASPA for', agrId);
@@ -2111,7 +2111,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           setStep(3);
           // AUTO-CONFIRM on TownHall — breaks the Arweave polling deadlock
           try {
-            const { confirmAgreement } = await import('./townhall_client');
+            // confirmAgreement imported statically
             await confirmAgreement({
               agreementId: agrId,
               pubkey: myPubkey,
@@ -2189,7 +2189,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       }
 
       console.log('[Neighbor] Collateral TX:', result.txId);
-      try { const { markLocked } = await import('./utxo_ledger'); await markLocked(contract.agreementId || 'AGR_manual'); } catch {}
+      try { await markLocked(contract.agreementId || 'AGR_manual'); } catch {}
       // Merkle archive: per-TX proof for collateral (fire-and-forget, ~0.6 KB, free)
       uploadPerTxProof({
         txId: result.txId || '',
@@ -2294,7 +2294,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       // Query counterparty R from Arweave
       // counterpartyR already set by TownHall check above
       try {
-        const { queryAgreementsFromArweave } = await import('./townhall_client');
+        // queryAgreementsFromArweave imported statically
         const rResults = await queryAgreementsFromArweave({ status: 'Accepted' });
         const counterMatch = rResults.find((r) => (r.agreementId || r.agreement_id) === contract.agreementId && (r.pubkey || r.KVPubkey) !== (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey));
         if (counterMatch?.frostR || counterMatch?.KVFrostR) {
@@ -2391,7 +2391,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           // blk imported statically at top
           const HK = new TextEncoder().encode('TransactionSigningHash');
           const Rx = h2b(partialS.R_agg_x_hex);
-          const { secp256k1: secp2 } = await import('@noble/curves/secp256k1'); const Ppt = secp2.ProjectivePoint.fromHex(contract.frostData.aggregatedPubkey);
+          // secpCurve imported statically as secp256k1 const Ppt = secpCurve.ProjectivePoint.fromHex(contract.frostData.aggregatedPubkey);
           const Pf = Ppt.toRawBytes(true);
           const Px = Pf[0] === 0x03 ? Ppt.negate().toRawBytes(true).slice(1) : Pf.slice(1);
           const e0d = new Uint8Array([...Rx, ...Px, ...sighash0]);
@@ -2459,7 +2459,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         
         // Inscribe partial sig to Arweave (permanent, survives TownHall restart)
         try {
-          const { inscribeAgreementToArweave } = await import('./townhall_client');
+          // inscribeAgreementToArweave imported statically
           await inscribeAgreementToArweave({
             agreementId: contract.agreementId || '',
             pubkey: role === 'buyer' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''),
@@ -2490,7 +2490,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         } catch (e) { console.warn('[Neighbor] TownHall local relay failed:', e); }
         // Also use TownHall agreement partial-sig endpoint
         try {
-          const { submitPartialSig } = await import('./townhall_client');
+          // submitPartialSig imported statically
           await submitPartialSig({
             agreementId: contract.agreementId || '',
             pubkey: role === 'buyer' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''),
@@ -2840,7 +2840,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       if (!manualAgrId || manualAgrId.length < 8) { Alert.alert('Invalid', 'Enter a valid AGR_ ID or Arweave TX ID'); return; }
                       setInboxLoading(true);
                       try {
-                        const { queryAgreementsFromArweave } = await import('./townhall_client');
+                        // queryAgreementsFromArweave imported statically
                         const all = await queryAgreementsFromArweave({ status: 'Proposed', network: 'testnet-10' });
                         const match = all.find((a: any) => (a.agreementId || a.agreement_id) === manualAgrId);
                         if (match) {
@@ -3419,8 +3419,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       const w = await loadMainWallet();
                       if (!w || !contract.frostData) { Alert.alert('Error', 'Wallet or FROST not ready'); setIsLoading(false); return; }
                       const { completeFrost2Round } = require('./frost_complete');
-                      const { getFrostR } = await import('./townhall_client');
-                      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+                      // getFrostR imported statically
+                      // AsyncStorage imported statically
                       const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
                       const decrypted = (() => { try { const { decryptPartialSig } = require('./frost_encrypted_relay'); return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return partialSig; } })();
                       // Get buyer R from TownHall
