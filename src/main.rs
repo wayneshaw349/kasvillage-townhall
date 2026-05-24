@@ -2415,11 +2415,24 @@ impl FrostRelayStore {
     }
     pub fn submit_frost_r(&self, id: &str, pk: &str, r_hex: &str) -> Result<(), String> {
         let mut s = self.agreements.write().unwrap();
-        let a = s.get_mut(id).ok_or("Not found")?;
-        if a.party_a.pubkey == pk { a.frost_r_a = Some(r_hex.into()); }
-        else if let Some(ref b) = a.party_b { if b.pubkey == pk { a.frost_r_b = Some(r_hex.into()); } else { return Err("Not a party".into()); } }
-        else { return Err("No party B".into()); }
-        a.updated_at = now_ms(); Ok(())
+        if let Some(a) = s.get_mut(id) {
+            // Update existing agreement
+            if a.party_a.pubkey == pk { a.frost_r_a = Some(r_hex.into()); }
+            else if let Some(ref b) = a.party_b { if b.pubkey == pk { a.frost_r_b = Some(r_hex.into()); } else { a.frost_r_b = Some(r_hex.into()); } }
+            else { a.frost_r_b = Some(r_hex.into()); }
+            a.updated_at = now_ms();
+        } else {
+            // Upsert: create stub agreement with R value
+            let stub = FrostAgreementData {
+                agreement_id: id.to_string(), status: FrostAgreementStatus::Proposed,
+                description: String::new(), stipulations: String::new(), network: "testnet-10".into(),
+                party_a: FrostParty { pubkey: pk.into(), amount_sompi: 0, signature: String::new(), confirmed: false, confirm_signature: None, collateral_tx_id: None, buyer_amount_sompi: None, seller_amount_sompi: None, counterparty_pubkey: None },
+                party_b: None, frost_address: None, release_recipient: None, partial_sig_a: None, partial_sig_b: None,
+                frost_r_a: Some(r_hex.into()), frost_r_b: None, release_tx_id: None, created_at: now_ms(), updated_at: now_ms(),
+            };
+            s.insert(id.to_string(), stub);
+        }
+        Ok(())
     }
     pub fn get_frost_r(&self, id: &str) -> Option<(Option<String>, Option<String>)> {
         let s = self.agreements.read().unwrap();
