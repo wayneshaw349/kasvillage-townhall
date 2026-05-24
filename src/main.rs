@@ -2457,10 +2457,29 @@ impl FrostRelayStore {
     }
 
     /// Load a rehydrated agreement from Arweave into relay store
+    /// Load a rehydrated agreement from Arweave (merge, preserve R/sigs)
     pub fn load_agreement(&self, agr: FrostAgreementData) -> Result<(), String> {
         let id = agr.agreement_id.clone();
         let mut s = self.agreements.write().unwrap();
-        s.insert(id, agr);
+        if let Some(ex) = s.get_mut(&id) {
+            let ra = ex.frost_r_a.clone(); let rb = ex.frost_r_b.clone();
+            let sa = ex.partial_sig_a.clone(); let sb = ex.partial_sig_b.clone();
+            let ca = ex.party_a.collateral_tx_id.clone();
+            let cb = ex.party_b.as_ref().and_then(|b| b.collateral_tx_id.clone());
+            if agr.updated_at >= ex.updated_at { ex.status = agr.status.clone(); ex.updated_at = agr.updated_at; }
+            if ex.party_b.is_none() && agr.party_b.is_some() { ex.party_b = agr.party_b; }
+            if ex.frost_address.is_none() && agr.frost_address.is_some() { ex.frost_address = agr.frost_address; }
+            if agr.frost_r_a.is_some() { ex.frost_r_a = agr.frost_r_a; } else if ex.frost_r_a.is_none() { ex.frost_r_a = ra; }
+            if agr.frost_r_b.is_some() { ex.frost_r_b = agr.frost_r_b; } else if ex.frost_r_b.is_none() { ex.frost_r_b = rb; }
+            if ex.partial_sig_a.is_none() { ex.partial_sig_a = sa; }
+            if ex.partial_sig_b.is_none() { ex.partial_sig_b = sb; }
+            if ex.party_a.collateral_tx_id.is_none() { ex.party_a.collateral_tx_id = ca; }
+            if let Some(ref mut pb) = ex.party_b { if pb.collateral_tx_id.is_none() { pb.collateral_tx_id = cb; } }
+            if ex.party_a.buyer_amount_sompi.is_none() && agr.party_a.buyer_amount_sompi.is_some() { ex.party_a.buyer_amount_sompi = agr.party_a.buyer_amount_sompi; }
+            if ex.party_a.seller_amount_sompi.is_none() && agr.party_a.seller_amount_sompi.is_some() { ex.party_a.seller_amount_sompi = agr.party_a.seller_amount_sompi; }
+        } else {
+            s.insert(id, agr);
+        }
         Ok(())
     }
 
@@ -7728,10 +7747,8 @@ async fn rehydrate_agreements_from_arweave(
             };
             
             let agreement_id = get_tag("KV-AgreementId");
-            if agreement_id.is_empty() || seen_ids.contains(&agreement_id) {
-                continue;
-            }
-            seen_ids.insert(agreement_id.clone());
+            if agreement_id.is_empty() { continue; }
+            let is_new = seen_ids.insert(agreement_id.clone());
             
             let pubkey = get_tag("KV-Pubkey");
             let amount_str = get_tag("KV-Amount");
@@ -7746,6 +7763,7 @@ async fn rehydrate_agreements_from_arweave(
             let seller_amt: Option<u64> = if seller_amt_str.is_empty() { None } else { seller_amt_str.parse().ok() };
             let daa_score_str = get_tag("KV-DAAScore");
             let daa_score: u64 = daa_score_str.parse().unwrap_or(0);
+            let frost_r = get_tag("KV-FrostR");
             let kv_status = get_tag("KV-Status");
             
             if pubkey.is_empty() {
@@ -7808,7 +7826,7 @@ async fn rehydrate_agreements_from_arweave(
                 release_recipient: None,
                 partial_sig_a: None,
                 partial_sig_b: None,
-                frost_r_a: None,
+                frost_r_a: if !frost_r.is_empty() { Some(frost_r.clone()) } else { None },
                 frost_r_b: None,
                 release_tx_id: None,
                 created_at: daa_score, // Use DAA score as creation timestamp
@@ -7816,7 +7834,7 @@ async fn rehydrate_agreements_from_arweave(
             };
             
             match frost_relay.load_agreement(agr) {
-                Ok(()) => total_loaded += 1,
+                Ok(()) => { if is_new { total_loaded += 1; } },
                 Err(e) => println!("   ⚠ Failed to load {}: {}", &agreement_id, e),
             }
         }
