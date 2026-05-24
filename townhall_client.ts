@@ -767,6 +767,7 @@ export async function inscribeAgreementToArweave(agreement: {
   signature: string;
   counterpartyPubkey?: string;
   frostAddress?: string;
+  frostR?: string;
   daaScore?: number;
   buyerAmountSompi?: number;
   sellerAmountSompi?: number;
