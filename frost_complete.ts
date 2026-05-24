@@ -485,6 +485,9 @@ export function createPartialSigLocal(params: {
     partialSig,
     messageHash,
     signerPubkey: myPubkey,
+    recipientAddress: recipientAddress || '',
+    amountSompi,
+    timestamp: Date.now(),
   };
 }
 
