@@ -2298,7 +2298,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       // counterpartyR already set by TownHall check above
       try {
         const { queryAgreementsFromArweave } = await import('./townhall_client');
-        const rResults = await queryAgreementsFromArweave({ status: 'Agreed-Send' });
+        const rResults = await queryAgreementsFromArweave({ status: 'Accepted' });
         const counterMatch = rResults.find((r) => (r.agreementId || r.agreement_id) === contract.agreementId && (r.pubkey || r.KVPubkey) !== (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey));
         if (counterMatch?.frostR || counterMatch?.KVFrostR) {
           counterpartyR = counterMatch.frostR || counterMatch.KVFrostR || '';
@@ -2309,7 +2309,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       if (!counterpartyR) {
         try {
           const cpPub = role === 'buyer' ? contract.sellerPubkey : contract.buyerPubkey;
-          const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["Agreed-Send"] }, { name: "KV-Pubkey", values: ["' + cpPub + '"] }]) { edges { node { tags { name value } } } } }';
+          const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["Accepted"] }, { name: "KV-Pubkey", values: ["' + cpPub + '"] }]) { edges { node { tags { name value } } } } }';
           const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
           const json = await resp.json();
           const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || [];
