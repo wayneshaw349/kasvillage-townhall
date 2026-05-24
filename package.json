@@ -10,6 +10,7 @@
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
+    "@expo/cli": "^56.1.10",
     "@expo/vector-icons": "^15.0.3",
     "@kcoin/kaspa-web3.js": "^1.1.4",
     "@noble/curves": "^1.9.7",
