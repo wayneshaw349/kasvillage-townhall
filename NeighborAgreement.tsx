@@ -1435,36 +1435,19 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             const wallet = await loadMainWallet();
             if (!wallet || !contract.frostData) return;
             const totalAmount = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
-            const result = await completeFrostAndBroadcast({
-              frostAddress: contract.frostData,
-              myPrivateKeyHex: wallet.privKeyHex,
-              recipientAddress: wallet.address, // seller receives
-              amountSompi: totalAmount,
-              counterpartyPartialSig: (() => {
-                try {
-                  const dCtx = {
-                    agreementId: contract.agreementId || '',
-                    buyerPubkey: contract.buyerPubkey || '',
-                    sellerPubkey: contract.sellerPubkey || '',
-                    multisigAddress: contract.multisigAddress || '',
-                    aggregatedPubkey: contract.frostData?.aggregatedPubkey || '',
-                    network: contract.frostData?.network || 'testnet-10',
-                    itemPriceKas: contract.itemPriceKas,
-                    sellerCommitmentKas: contract.sellerCommitmentKas,
-                    R_hex: '',
-                  };
-                  const decrypted = decryptPartialSig({
-                    encrypted: match.signature,
-                    myPrivKeyHex: wallet.privKeyHex,
-                    counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''),
-                    ctx: dCtx,
-                    nonce: match.nonce || '',
-                  });
-                  console.log('[FROST] Decrypted counterparty partial sig');
-                  return decrypted;
-                } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; }
-              })(),
-            });
+            // 2-round FROST co-sign
+            const { completeFrost2Round } = require('./frost_complete');
+            const { getFrostR } = await import('./townhall_client');
+            const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+            const decrypted = (() => { try { const d = decryptPartialSig({ encrypted: match.signature, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || '') }); console.log('[FROST] Decrypted counterparty partial sig'); return d; } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; } })();
+            let buyerR = '';
+            try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
+            if (!buyerR) { try { const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["Accepted"] }]) { edges { node { tags { name value } } } } }'; const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }); const json = await resp.json(); const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || []; const rTag = tags.find((t) => t.name === 'KV-FrostR'); if (rTag?.value) buyerR = rTag.value; } catch {} }
+            const sigStr = typeof decrypted === 'string' ? decrypted : '';
+            const buyerSig = sigStr.length >= 128 ? { R_agg_x_hex: sigStr.slice(0, 64), s_hex: sigStr.slice(64, 128) } : undefined;
+            const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
+            if (!myNonceJson || !buyerR) { console.warn('[PartialSig-Poll] Missing nonce or buyer R, skipping'); return; }
+            const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig });
             if (result.success && result.txId) {
               console.log('[PartialSig-Poll] Release TX broadcast:', result.txId);
               setContract(prev => ({ ...prev, releaseTxId: result.txId, releaseExplorerUrl: result.explorerUrl }));
