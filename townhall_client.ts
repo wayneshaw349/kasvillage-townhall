@@ -586,7 +586,7 @@ export async function proposeAgreement(params: {
   frostAddress?: string;
   frostR?: string;
   daaScore?: number;
-}): Promise<{ success: boolean; agreementId?: string; error?: string }> {
+}): Promise<{ success: boolean; agreementId?: string; error?: string; arweaveTxId?: string }> {
   try {
     const resp = await fetch(TOWN_HALL_BASE_URL + '/api/agreement/propose', {
       method: 'POST',
