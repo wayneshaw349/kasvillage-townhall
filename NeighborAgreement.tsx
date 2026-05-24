@@ -2370,7 +2370,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           const { blake2b: blk } = await import('@noble/hashes/blake2b');
           const HK = new TextEncoder().encode('TransactionSigningHash');
           const Rx = h2b(partialS.R_agg_x_hex);
-          const Ppt = (secp as any).ProjectivePoint.fromHex(contract.frostData.aggregatedPubkey);
+          const { secp256k1: secp2 } = await import('@noble/curves/secp256k1'); const Ppt = secp2.ProjectivePoint.fromHex(contract.frostData.aggregatedPubkey);
           const Pf = Ppt.toRawBytes(true);
           const Px = Pf[0] === 0x03 ? Ppt.negate().toRawBytes(true).slice(1) : Pf.slice(1);
           const e0d = new Uint8Array([...Rx, ...Px, ...sighash0]);
