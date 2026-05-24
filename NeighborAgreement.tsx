@@ -1901,6 +1901,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             frostAddress: contract.frostData?.address || contract.multisigAddress || '',
             signature: 'agree_' + Date.now(),
             counterpartyPubkey: proposerPubkey,
+              buyerAmountSompi: Math.floor((canon?.buyerAmountSompi || 0)),
+              sellerAmountSompi: Math.floor((canon?.sellerAmountSompi || 0)),
           });
           await AsyncStorage.setItem(agrSessionKey, String(Date.now()));
           console.log('[Neighbor] Agreed inscribed to Arweave');
@@ -2062,8 +2064,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             frostAddress: frostData.address,
               signature: 'accept_' + Date.now(),
               counterpartyPubkey: proposerPubkey,
+              buyerAmountSompi: Math.floor(buyerKas * 1e8),
+              sellerAmountSompi: Math.floor(sellerKas * 1e8),
+              frostR: await (async () => { try { const saved = await AsyncStorage.getItem('kv_frost_nonce_' + agrId); if (saved) { const n = JSON.parse(saved); console.log('[FROST-R] Including R in Accepted inscription:', n.R_hex?.slice(0,20)); return n.R_hex; } } catch {} return ''; })(),
             });
             console.log('[Neighbor] Acceptance inscribed to Arweave');
+            // Post R to TownHall (after accept, so party_b exists)
+            try { const saved = await AsyncStorage.getItem('kv_frost_nonce_' + agrId); if (saved) { const n = JSON.parse(saved); await postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: n.R_hex }); console.log('[FROST-R] R posted to TownHall after accept'); } } catch(e) { console.warn('[FROST-R] TownHall R post failed:', e); }
             // Add to active FROST list
             addToFrostList({
               agrId: agrId,
