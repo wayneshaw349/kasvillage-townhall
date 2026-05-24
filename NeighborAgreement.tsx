@@ -1982,6 +1982,17 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               }
             } catch (e) { console.warn('[Neighbor] Arweave amount fetch failed:', e); }
           }
+          // TownHall fallback for amounts (instant, no Goldsky indexing needed)
+          if (buyerAmtTag === 0) {
+            try {
+              const thAgr = await getAgreementStatus(agrId);
+              if (thAgr?.partyA?.buyerAmountSompi) {
+                buyerAmtTag = thAgr.partyA.buyerAmountSompi;
+                sellerAmtTagTemp = thAgr.partyA.sellerAmountSompi || 0;
+                console.log('[Neighbor] TownHall amounts: buyer=', buyerAmtTag, 'seller=', sellerAmtTagTemp);
+              }
+            } catch(e) { console.warn('[Neighbor] TownHall amount lookup failed:', e); }
+          }
           const sellerAmtTag = sellerAmtTagTemp || agreement.sellerAmountSompi || agreement.KVSellerAmount || 0;
           const buyerKas = buyerAmtTag > 0 ? Number(buyerAmtTag) / 1e8 : 0;
           if (buyerKas === 0 && rawAmount > 0) {
