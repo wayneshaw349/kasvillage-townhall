@@ -1555,6 +1555,69 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
     return () => { cancelled = true; clearInterval(interval); };
   }, [step, contract.agreementId, role, contract.buyerPubkey]);
 
+  // Background inbox poll every 30 seconds when on Join screen
+  useEffect(() => {
+    if (step !== 1 || agreementType !== 'join') return;
+    let cancelled = false;
+    const pollInbox = async () => {
+      if (cancelled) return;
+      try {
+        const wallet = await loadMainWallet();
+        if (!wallet || cancelled) return;
+        const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+        const dataPart = wallet.address.split(':')[1];
+        const data5bit = Array.from(dataPart).map((c: string) => CHARSET.indexOf(c));
+        const result: number[] = [];
+        let buff = 0, bits = 0;
+        for (const d of data5bit) { buff = (buff << 5) | d; bits += 5; while (bits >= 8) { bits -= 8; result.push((buff >> bits) & 0xff); } }
+        let myPubkey = '';
+        if (result[0] === 0x00 && result.length >= 33) {
+          const xOnly = result.slice(1, 33);
+          myPubkey = '02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+        }
+        if (!myPubkey || cancelled) return;
+        // Layer 1: TownHall (instant)
+        const allProposed = await listProposedAgreements();
+        const thPending = allProposed.filter((a: any) => (a.party_a?.pubkey || a.pubkey || '') !== myPubkey && (a.status || '').toLowerCase() === 'proposed');
+        if (thPending.length > 0 && !cancelled) {
+          console.log('[Inbox-Poll] TownHall:', thPending.length, 'proposals');
+          setInboxAgreements(prev => {
+            const ids = new Set(prev.map(p => p.agreementId || p.agreement_id));
+            const newOnes = thPending.filter((a: any) => !ids.has(a.agreementId || a.agreement_id));
+            return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+          });
+        }
+        // Layer 2: arweave.net (0.3s)
+        try {
+          const gql = '{ transactions(first: 10, tags: [{ name: "KV-Counterparty", values: ["' + myPubkey + '"] }, { name: "KV-Status", values: ["Proposed"] }], sort: HEIGHT_DESC) { edges { node { id, tags { name, value } } } } }';
+          let arResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }).catch(() => null);
+          if (!arResp?.ok) arResp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+          const arJson = await arResp.json();
+          const arEdges = arJson?.data?.transactions?.edges || [];
+          if (arEdges.length > 0 && !cancelled) {
+            const arProposals = arEdges.map((edge: any) => {
+              const tags = edge?.node?.tags || [];
+              const tm: any = {};
+              tags.forEach((t: any) => { tm[t.name] = t.value; });
+              return { agreementId: tm['KV-AgreementId'] || '', pubkey: tm['KV-Pubkey'] || '', counterpartyPubkey: tm['KV-Counterparty'] || '', amount_sompi: parseInt(tm['KV-Amount'] || '0'), buyerAmountSompi: parseInt(tm['KV-BuyerAmount'] || '0'), sellerAmountSompi: parseInt(tm['KV-SellerAmount'] || '0'), description: tm['KV-Description'] || '', network: tm['KV-Network'] || 'testnet-10', status: 'Proposed', arweave_tx_id: edge.node.id, frostAddress: tm['KV-FrostAddress'] || '', partyA: { pubkey: tm['KV-Pubkey'] || '', amount_sompi: parseInt(tm['KV-Amount'] || '0') } };
+            }).filter((a: any) => a.agreementId && a.pubkey !== myPubkey);
+            if (arProposals.length > 0) {
+              console.log('[Inbox-Poll] Arweave:', arProposals.length, 'proposals');
+              setInboxAgreements(prev => {
+                const ids = new Set(prev.map(p => p.agreementId || p.agreement_id));
+                const newOnes = arProposals.filter((a: any) => !ids.has(a.agreementId));
+                return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+              });
+            }
+          }
+        } catch (e) { /* Arweave poll failed, non-fatal */ }
+      } catch (e) { console.warn('[Inbox-Poll] Error:', e); }
+    };
+    const interval = setInterval(pollInbox, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [step, agreementType]);
+
+
 
   
   // Generate FROST address when both pubkeys available
