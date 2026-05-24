@@ -2238,6 +2238,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   };
   
   const handleConfirmDelivery = async () => {
+    if (isLoading) { console.log('[FROST-2R] Already processing, skipping duplicate call'); return; }
     if (!canonicalCanCreatePartialSig(role || '', step)) {
       console.warn('[Canonical] BLOCKED: only buyer can create partial sig at step 4, got role:', role, 'step:', step);
       Alert.alert('Not Allowed', 'Only the buyer can confirm delivery and create the release key.');
