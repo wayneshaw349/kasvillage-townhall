@@ -2344,6 +2344,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         console.log('[FROST-2R] Generated fresh nonce R:', myNonce.R_hex?.slice(0,20));
       }
       let counterpartyR = '';
+      // Check for manually pasted R first
+      try { const manualR = await AsyncStorage.getItem('kv_manual_counterparty_r_' + contract.agreementId); if (manualR && manualR.length === 66) { counterpartyR = manualR; console.log('[FROST-2R] Using manually pasted R:', counterpartyR.slice(0,20)); } } catch {}
       // Check TownHall for counterparty R (instant, no indexing delay)
       try {
         const rData = await getFrostR(contract.agreementId || '');
@@ -3385,6 +3387,11 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       </Text>
                     </View>
                     
+                    <View style={{ backgroundColor: "#eef2ff", borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: "#a5b4fc" }}>
+                      <Text style={{ fontSize: 13, fontWeight: "bold", color: "#3730a3", marginBottom: 6 }}>Paste Seller R Nonce (optional)</Text>
+                      <Text style={{ fontSize: 10, color: "#4338ca", marginBottom: 8 }}>Only needed if auto-detection fails. Seller sends via DM.</Text>
+                      <TextInput style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#a5b4fc", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: "monospace", color: "#1c1917" }} placeholder="02abc...def (66 hex chars)" placeholderTextColor="#a8a29e" onChangeText={async (txt) => { const trimmed = txt.trim(); if (trimmed.length === 66 && (trimmed.startsWith("02") || trimmed.startsWith("03"))) { await AsyncStorage.setItem("kv_manual_counterparty_r_" + (contract.agreementId || ""), trimmed); console.log("[FROST-2R] Manual R saved:", trimmed.slice(0,20)); } }} autoCapitalize="none" autoCorrect={false} />
+                    </View>
                     <TouchableOpacity
                       style={[styles.successBtn, isLoading && styles.primaryBtnDisabled]}
                       onPress={handleConfirmDelivery}
@@ -3429,6 +3436,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       <Text style={styles.waitingNote}>
                         You'll receive {contract.itemPriceKas} KASPA + your {contract.sellerCommitmentKas} KASPA back
                       </Text>
+                    </View>
+                    <View style={{ backgroundColor: "#fffbeb", borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: "#f59e0b" }}>
+                      <Text style={{ fontSize: 13, fontWeight: "bold", color: "#92400e", marginBottom: 6 }}>Your Nonce (R) ? Share with Buyer</Text>
+                      <Text style={{ fontSize: 10, color: "#b45309", marginBottom: 8 }}>If buyer cannot find your R automatically, copy and send via DM</Text>
+                      <TouchableOpacity style={{ backgroundColor: "#4f46e5", borderRadius: 8, padding: 10, alignItems: "center" }} onPress={async () => { try { const saved = await AsyncStorage.getItem("kv_frost_nonce_" + (contract.agreementId || "")); if (saved) { const n = JSON.parse(saved); const clipMod = await import("expo-clipboard"); const Clipboard = clipMod.default || clipMod; await Clipboard.setStringAsync(n.R_hex || ""); Alert.alert("Copied!", "Your R nonce copied. Send to buyer via DM."); } else { Alert.alert("No Nonce", "Nonce not found yet."); } } catch (e) { Alert.alert("Error", String(e)); } }}>
+                        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce</Text>
+                      </TouchableOpacity>
                     </View>
                     
                     {userStats.xp >= XP_THRESHOLD_IOU_ACCESS ? (
