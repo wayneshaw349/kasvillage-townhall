@@ -3507,7 +3507,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       if (!buyerR) {
                         try { const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["PartialSig"] }]) { edges { node { tags { name value } } } } }';
                           const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
-                          const json = await resp.json(); const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || [];
+                          const json = await arResp.json(); const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || [];
                           const rTag = tags.find((t) => t.name === 'KV-FrostR'); if (rTag?.value) buyerR = rTag.value;
                         } catch {}
                       }
