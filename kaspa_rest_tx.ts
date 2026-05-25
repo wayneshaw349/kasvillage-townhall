@@ -585,15 +585,17 @@ export async function sendKaspaWithSignature(params: {
     // The aggregate Schnorr sig is valid for ALL inputs from this FROST address
     // because they all share the same scriptPubKey (same aggregate pubkey)
     const SIG_HASH_ALL = 0x01;
-    const sigBytes = hexToBytes(aggregateSignature);
-    const sigWithType = new Uint8Array(sigBytes.length + 1);
-    sigWithType.set(sigBytes);
-    sigWithType[sigBytes.length] = SIG_HASH_ALL;
-    
-    const sigScript = new Uint8Array(1 + sigWithType.length);
-    sigScript[0] = sigWithType.length;
-    sigScript.set(sigWithType, 1);
-    const sigScriptHex = bytesToHex(sigScript);
+    let sigScriptHex = '';
+    if (aggregateSignature) {
+      const sigBytes = hexToBytes(aggregateSignature);
+      const sigWithType = new Uint8Array(sigBytes.length + 1);
+      sigWithType.set(sigBytes);
+      sigWithType[sigBytes.length] = SIG_HASH_ALL;
+      const sigScript = new Uint8Array(1 + sigWithType.length);
+      sigScript[0] = sigWithType.length;
+      sigScript.set(sigWithType, 1);
+      sigScriptHex = bytesToHex(sigScript);
+    }
 
     // BUT: each input needs its OWN sighash signed
     // The aggregate sig was computed for a specific sighash
