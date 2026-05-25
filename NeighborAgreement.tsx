@@ -1639,9 +1639,9 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             (contract.sellerPubkey || '') + 
             Math.floor(contract.itemPriceKas * 1e8).toString() +
             Math.floor(contract.sellerCommitmentKas * 1e8).toString() +
-            (contract.itemDescription || '') +
-            network +
-            String(typeof currentDaa !== 'undefined' ? currentDaa : Date.now())
+            network
+
+
           );
           const agrHash = sha256Agr(agrInput);
           const agreementId = 'AGR_' + Array.from(agrHash.slice(0, 6)).map(b => b.toString(16).padStart(2, '0')).join('');
