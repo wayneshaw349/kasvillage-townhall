@@ -2456,7 +2456,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           // blk imported statically at top
           const HK = new TextEncoder().encode('TransactionSigningHash');
           const Rx = h2b(partialS.R_agg_x_hex);
-          // secpCurve imported statically as secp256k1 const Ppt = secpCurve.ProjectivePoint.fromHex(contract.frostData.aggregatedPubkey);
+          // secpCurve imported statically as secp256k1
+          const Ppt = secpCurve.ProjectivePoint.fromHex(contract.frostData.aggregatedPubkey);
           const Pf = Ppt.toRawBytes(true);
           const Px = Pf[0] === 0x03 ? Ppt.negate().toRawBytes(true).slice(1) : Pf.slice(1);
           const e0d = new Uint8Array([...Rx, ...Px, ...sighash0]);
