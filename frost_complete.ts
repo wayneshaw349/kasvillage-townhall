@@ -1139,6 +1139,8 @@ export async function completeFrost2Round(params: {
   counterpartySig?: { R_agg_x_hex: string; s_hex: string };
   buyerAmountSompi?: bigint;
   sellerAmountSompi?: bigint;
+  buyerAddress?: string;
+  sellerAddress?: string;
 }): Promise<{ success: boolean; txId?: string; explorerUrl?: string; error?: string }> {
   try {
     const myNonce: FrostNonce = JSON.parse(params.myNonceJson);
