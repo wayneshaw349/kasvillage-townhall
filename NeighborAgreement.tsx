@@ -1900,7 +1900,11 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         }
       } catch (e) { console.warn('[Neighbor] Direct inbox query failed:', e); }
       console.log('[Neighbor] Inbox:', enrichedPending.length, 'valid proposals (filtered', pending.length - enrichedPending.length, 'invalid)');
-      setInboxAgreements(enrichedPending);
+      setInboxAgreements(prev => {
+        const ids = new Set(enrichedPending.map(p => p.agreementId || p.agreement_id));
+        const kept = prev.filter(p => !ids.has(p.agreementId || p.agreement_id));
+        return [...enrichedPending, ...kept];
+      });
     } catch (e) {
       console.error('[Neighbor] Inbox load error:', e);
     }
@@ -3019,6 +3023,12 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                         <Text style={{ color: '#FFF', fontSize: rs.font(12), fontWeight: 'bold' }}>Accept Agreement</Text>
                       )}
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => { setInboxAgreements(prev => prev.filter(a => (a.agreementId || a.agreement_id) !== (agr.agreementId || agr.agreement_id))); }}
+                      style={{ backgroundColor: '#DC2626', borderRadius: 8, padding: 8, marginTop: 6, alignItems: 'center' }}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 11 }}>Dismiss</Text>
+                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -3389,7 +3399,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     </View>
                     
                     <View style={{ backgroundColor: "#eef2ff", borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: "#a5b4fc" }}>
-                      <Text style={{ fontSize: 13, fontWeight: "bold", color: "#3730a3", marginBottom: 6 }}>Paste Seller R Nonce (optional)</Text>
+                      <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = (await import('expo-clipboard')).default; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
+                      <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce (Buyer)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = (await import('expo-clipboard')).default; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
+                      <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce (Buyer)</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#3730a3", marginBottom: 6 }}>Paste Seller R Nonce (optional)</Text>
                       <Text style={{ fontSize: 10, color: "#4338ca", marginBottom: 8 }}>Only needed if auto-detection fails. Seller sends via DM.</Text>
                       <TextInput style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#a5b4fc", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: "monospace", color: "#1c1917" }} placeholder="02abc...def (66 hex chars)" placeholderTextColor="#a8a29e" onChangeText={async (txt) => { const trimmed = txt.trim(); if (trimmed.length === 66 && (trimmed.startsWith("02") || trimmed.startsWith("03"))) { await AsyncStorage.setItem("kv_manual_counterparty_r_" + (contract.agreementId || ""), trimmed); console.log("[FROST-2R] Manual R saved:", trimmed.slice(0,20)); } }} autoCapitalize="none" autoCorrect={false} />
                     </View>
