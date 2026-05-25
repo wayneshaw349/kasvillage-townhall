@@ -2960,7 +2960,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#86efac', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
                     placeholder="Paste encrypted key from buyer..."
                     placeholderTextColor="#a8a29e"
-                    onChangeText={(txt) => setContract(prev => ({ ...prev, partialReleaseTx: txt.trim() }))}
+                    onChangeText={async (txt) => { const v = txt.trim(); const rMatch = v.match(/^R:\s*(.+)$/m); const sigMatch = v.match(/^SIG:\s*(.+)$/m); if (rMatch && rMatch[1].length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), rMatch[1].trim()); console.log('[Seller] Auto-extracted buyer R from paste:', rMatch[1].slice(0,20)); } const sig = sigMatch ? sigMatch[1].trim() : v; setContract(prev => ({ ...prev, partialReleaseTx: sig })); }}
                     autoCapitalize="none"
                     autoCorrect={false}
                     multiline
@@ -3589,7 +3589,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 onPress={async () => {
                   try {
                     const clipMod = await import('expo-clipboard'); const Clipboard = clipMod.default || clipMod;
-                    await Clipboard.setStringAsync('AGR: ' + (contract.agreementId || '') + '\nArweave TX: ' + (contract.partialReleaseTx || contract.arweaveTxId || '') + '\nSeller: press Check for Release');
+                    const myR = await (async () => { try { const s = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (s) return JSON.parse(s).R_hex || ''; } catch {} return ''; })(); await Clipboard.setStringAsync('AGR: ' + (contract.agreementId || '') + '\nR: ' + myR + '\nSIG: ' + (contract.partialReleaseTx || '') + '\nSeller: press Check for Release');
                     Alert.alert('Copied', 'Send this to the seller so they can release funds');
                   } catch {}
                 }}>
