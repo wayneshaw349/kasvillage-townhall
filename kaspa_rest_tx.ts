@@ -532,6 +532,7 @@ export interface CanonicalFrostTxParams {
   buyerAmountSompi: bigint;
   sellerAmountSompi: bigint;
   network: string;
+  utxoSnapshot?: Array<{ t: string; i: number; a: string; s: string }>;
 }
 
 export interface CanonicalFrostTx {
@@ -546,11 +547,17 @@ export async function buildCanonicalFrostTx(params: CanonicalFrostTxParams): Pro
   const { frostAddress, buyerAddress, sellerAddress, buyerAmountSompi, sellerAmountSompi, network } = params;
   const FEE = 10000n;
 
-  // 1. Fetch and sort UTXOs deterministically
-  const apiBase = network === 'mainnet' ? 'https://api.kaspa.org' : (network === 'testnet-10' ? 'https://api-tn10.kaspa.org' : 'https://api-tn.kaspa.org');
-  const utxoResp = await fetch(apiBase + '/addresses/' + frostAddress + '/utxos');
-  if (!utxoResp.ok) throw new Error('Failed to fetch FROST UTXOs');
-  const rawUtxos = await utxoResp.json();
+  // 1. Fetch and sort UTXOs deterministically (or use snapshot)
+  let rawUtxos: any[];
+  if (params.utxoSnapshot && params.utxoSnapshot.length > 0) {
+    rawUtxos = params.utxoSnapshot.map(u => ({ outpoint: { transactionId: u.t, index: u.i }, utxoEntry: { amount: u.a, scriptPublicKey: { scriptPublicKey: u.s } } }));
+    console.log('[FROST-Canonical] Using UTXO snapshot:', rawUtxos.length, 'UTXOs');
+  } else {
+    const apiBase = network === 'mainnet' ? 'https://api.kaspa.org' : (network === 'testnet-10' ? 'https://api-tn10.kaspa.org' : 'https://api-tn.kaspa.org');
+    const utxoResp = await fetch(apiBase + '/addresses/' + frostAddress + '/utxos');
+    if (!utxoResp.ok) throw new Error('Failed to fetch FROST UTXOs');
+    rawUtxos = await utxoResp.json();
+  }
   if (!rawUtxos || rawUtxos.length === 0) throw new Error('No UTXOs in FROST address');
 
   // Sort UTXOs by txId (ascending) then index (ascending) ? deterministic

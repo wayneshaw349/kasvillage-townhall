@@ -1157,7 +1157,14 @@ export async function completeFrost2Round(params: {
       const { buildCanonicalFrostTx, canonicalSighash, submitCanonicalFrostTx } = await import('./kaspa_rest_tx');
       const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
       const cpAllS: string[] = [];
-      const rawS = params.counterpartySig.s_hex;
+      let rawS = params.counterpartySig.s_hex;
+      let utxoSnapshot: any[] | undefined;
+      // Extract UTXO snapshot if packed with sig
+      const pipeIdx = rawS.indexOf('|');
+      if (pipeIdx > 0) {
+        try { utxoSnapshot = JSON.parse(atob(rawS.slice(pipeIdx + 1))); console.log('[FROST-Canonical-Seller] Got UTXO snapshot:', utxoSnapshot?.length, 'UTXOs'); } catch {}
+        rawS = rawS.slice(0, pipeIdx);
+      }
       for (let si = 0; si < rawS.length; si += 64) { cpAllS.push(rawS.slice(si, si + 64)); }
       console.log('[FROST-2R] Buyer sent', cpAllS.length, 'partial s values');
       const R_agg_x_hex = myPartial.R_agg_x_hex;
@@ -1175,7 +1182,7 @@ export async function completeFrost2Round(params: {
       const bAmt = params.buyerAmountSompi || 0n;
       const sAmt = params.sellerAmountSompi || 0n;
       console.log('[FROST-Canonical-Seller] buyer=', buyerAddr.slice(0,20), 'seller=', sellerAddr.slice(0,20), 'bAmt=', bAmt.toString(), 'sAmt=', sAmt.toString());
-      const canonTx = await buildCanonicalFrostTx({ frostAddress: params.frostAddress.address, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: bAmt, sellerAmountSompi: sAmt, network: params.frostAddress.network });
+      const canonTx = await buildCanonicalFrostTx({ frostAddress: params.frostAddress.address, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: bAmt, sellerAmountSompi: sAmt, network: params.frostAddress.network, utxoSnapshot });
       const result = await submitCanonicalFrostTx({
         tx: canonTx,
         perInputSigner: (sighashHex: string, inputIndex: number): string => {
