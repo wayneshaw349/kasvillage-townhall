@@ -7822,7 +7822,7 @@ async fn rehydrate_agreements_from_arweave(
                 network: if network.is_empty() { "testnet-10".into() } else { network },
                 party_a,
                 party_b,
-                frost_address: if frost_address.is_empty() { None } else { Some(frost_address) },
+                frost_address: if frost_address.is_empty() { None } else { Some(frost_address.clone()) },
                 release_recipient: None,
                 partial_sig_a: None,
                 partial_sig_b: None,
@@ -7833,9 +7833,30 @@ async fn rehydrate_agreements_from_arweave(
                 updated_at: now_ms(),
             };
             
-            match frost_relay.load_agreement(agr) {
-                Ok(()) => { if is_new { total_loaded += 1; } },
-                Err(e) => println!("   ⚠ Failed to load {}: {}", &agreement_id, e),
+            if is_new {
+                match frost_relay.load_agreement(agr) {
+                    Ok(()) => total_loaded += 1,
+                    Err(e) => println!("   Failed to load {}: {}", &agreement_id, e),
+                }
+            }
+            // Merge R from any inscription
+            if !frost_r.is_empty() {
+                let _ = frost_relay.submit_frost_r(&agreement_id, &pubkey, &frost_r);
+            }
+            // If duplicate inscription has different pubkey, set as party_b
+            if !is_new && !pubkey.is_empty() {
+                let mut s = frost_relay.agreements.write().unwrap();
+                if let Some(ex) = s.get_mut(&agreement_id) {
+                    if ex.party_a.pubkey != pubkey && ex.party_b.is_none() {
+                        ex.party_b = Some(FrostParty {
+                            pubkey: pubkey.clone(), amount_sompi: amount, signature: format!("arweave_rehydrated_b_{}", &agreement_id),
+                            buyer_amount_sompi: buyer_amt, seller_amount_sompi: seller_amt, counterparty_pubkey: Some(ex.party_a.pubkey.clone()),
+                            confirmed: true, confirm_signature: None, collateral_tx_id: None,
+                        });
+                        if !frost_address.is_empty() && ex.frost_address.is_none() { ex.frost_address = Some(frost_address.clone()); }
+                    }
+                }
+                drop(s);
             }
         }
     }
