@@ -1450,7 +1450,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           try {
             const wallet = await loadMainWallet();
             if (!wallet || !contract.frostData) return;
-            const totalAmount = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
+            const totalAmount = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
             // 2-round FROST co-sign
             const { completeFrost2Round } = require('./frost_complete');
             // getFrostR imported statically
@@ -1489,7 +1489,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 try {
                   const w2 = await loadMainWallet();
                   if (w2 && contract.frostData && !cancelled) {
-                    const total2 = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
+                    const total2 = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
                     const res2 = await completeFrostAndBroadcast({
                       frostAddress: contract.frostData,
                       myPrivateKeyHex: w2.privKeyHex,
@@ -1535,7 +1535,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             try {
               const w = await loadMainWallet();
               if (w && contract.frostData && !cancelled) {
-                const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
+                const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n; // subtract fee
                 console.log('[PartialSig-Poll] Relay path skipped - using 2-round via Arweave poll'); const res = { success: false } as any;
                 if (res.success && res.txId) {
                   console.log('[PartialSig-Poll] Release TX:', res.txId);
@@ -2327,7 +2327,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         return;
       }
       
-      const totalAmountSompi = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
+      const totalAmountSompi = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
       
       // 2-round FROST: load saved nonce, get counterparty R from Arweave
       let myNonce;
@@ -2627,7 +2627,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           frostAddress: contract.frostData!,
           myPrivateKeyHex: privKeyHex,
           recipientAddress: contract.releaseRecipient || '',
-          amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)),
+          amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n,
           counterpartyPartialSig: partialTx,
         });
         
@@ -2637,7 +2637,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           uploadPerTxProof({
             txId: result.txId || '',
             txIndex: 0,
-            amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)),
+            amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n,
             scriptPubKey: '',
             daaScore: 0,
             txType: 'release',
@@ -2973,7 +2973,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                         const w = await loadMainWallet();
                         if (!w) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
                         const sc = session.contract;
-                        const total = BigInt(Math.floor(((sc.itemPriceKas || 0) + (sc.sellerCommitmentKas || 0)) * 1e8));
+                        const total = BigInt(Math.floor(((sc.itemPriceKas || 0) + (sc.sellerCommitmentKas || 0)) * 1e8)) - 10000n;
                         const dec = (() => { try { return decryptPartialSig({ encrypted: sig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: sc.buyerPubkey || '' }); } catch { return sig; } })();
                         const res = await completeFrostAndBroadcast({ frostAddress: sc.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, counterpartyPartialSig: dec });
                         if (res.success && res.txId) {
@@ -3499,7 +3499,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       const { completeFrost2Round } = require('./frost_complete');
                       // getFrostR imported statically
                       // AsyncStorage imported statically
-                      const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8));
+                      const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
                       const decrypted = (() => { try { const { decryptPartialSig } = require('./frost_encrypted_relay'); return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return partialSig; } })();
                       // Get buyer R from TownHall
                       let buyerR = '';
