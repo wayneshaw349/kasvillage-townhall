@@ -109,7 +109,7 @@ import {// Types
   generateFrostNonce,
   computeFrostPartialS,
   aggregateFrostSig,
-  cleanup as cleanupFrost,, aggregateToAddress} from './frost_complete';
+  cleanup as cleanupFrost,, aggregateToAddress, completeFrost2Round} from './frost_complete';
 
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
@@ -1451,7 +1451,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             if (!wallet || !contract.frostData) return;
             const totalAmount = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
             // 2-round FROST co-sign
-            const { completeFrost2Round } = require('./frost_complete');
+            // completeFrost2Round imported statically from frost_complete
             // getFrostR imported statically
             // AsyncStorage imported statically
             const decrypted = (() => { try { const d = decryptPartialSig({ encrypted: match.signature, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: { agreementId: contract.agreementId || '', buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', multisigAddress: contract.multisigAddress || '', aggregatedPubkey: contract.frostData?.aggregatedPubkey || '', network: contract.frostData?.network || 'testnet-10', itemPriceKas: contract.itemPriceKas, sellerCommitmentKas: contract.sellerCommitmentKas, R_hex: '' }, nonce: match.nonce || '' }); console.log('[FROST] Decrypted counterparty partial sig'); return d; } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; } })();
@@ -3496,7 +3496,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       console.log('[Seller-Release] Got partial sig, co-signing...');
                       const w = await loadMainWallet();
                       if (!w || !contract.frostData) { Alert.alert('Error', 'Wallet or FROST not ready'); setIsLoading(false); return; }
-                      const { completeFrost2Round } = require('./frost_complete');
+                      // completeFrost2Round imported statically from frost_complete
                       // getFrostR imported statically
                       // AsyncStorage imported statically
                       const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
