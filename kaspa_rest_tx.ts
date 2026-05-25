@@ -519,6 +519,139 @@ export async function getBalanceRest(address: string, network: KaspaNetwork): Pr
 // Instead of signing with a private key, uses the aggregate Schnorr sig
 // from the FROST partial sig exchange
 // ============================================================================
+
+// ============================================================================
+// CANONICAL FROST TX ? deterministic TX construction for 2-of-2 FROST
+// Both buyer and seller MUST produce identical sighashes
+// Rules: UTXOs sorted by txId+index, outputs sorted buyer?seller, no change
+// ============================================================================
+export interface CanonicalFrostTxParams {
+  frostAddress: string;
+  buyerAddress: string;
+  sellerAddress: string;
+  buyerAmountSompi: bigint;
+  sellerAmountSompi: bigint;
+  network: string;
+}
+
+export interface CanonicalFrostTx {
+  utxos: any[];
+  inputs: { txId: Uint8Array; index: number; sequence: bigint; sigOpCount: number; scriptVersion: number; scriptPubKey: Uint8Array; value: bigint }[];
+  outputs: { value: bigint; scriptVersion: number; script: Uint8Array }[];
+  fee: bigint;
+  totalIn: bigint;
+}
+
+export async function buildCanonicalFrostTx(params: CanonicalFrostTxParams): Promise<CanonicalFrostTx> {
+  const { frostAddress, buyerAddress, sellerAddress, buyerAmountSompi, sellerAmountSompi, network } = params;
+  const FEE = 10000n;
+
+  // 1. Fetch and sort UTXOs deterministically
+  const apiBase = network === 'mainnet' ? 'https://api.kaspa.org' : (network === 'testnet-10' ? 'https://api-tn10.kaspa.org' : 'https://api-tn.kaspa.org');
+  const utxoResp = await fetch(apiBase + '/addresses/' + frostAddress + '/utxos');
+  if (!utxoResp.ok) throw new Error('Failed to fetch FROST UTXOs');
+  const rawUtxos = await utxoResp.json();
+  if (!rawUtxos || rawUtxos.length === 0) throw new Error('No UTXOs in FROST address');
+
+  // Sort UTXOs by txId (ascending) then index (ascending) ? deterministic
+  const utxos = [...rawUtxos].sort((a: any, b: any) => {
+    const cmp = a.outpoint.transactionId.localeCompare(b.outpoint.transactionId);
+    return cmp !== 0 ? cmp : a.outpoint.index - b.outpoint.index;
+  });
+
+  let totalIn = 0n;
+  for (const u of utxos) totalIn += BigInt(u.utxoEntry.amount);
+
+  // 2. Build outputs ? buyer first, seller second (deterministic order)
+  const buyerScript = addressToScript(buyerAddress);
+  const sellerScript = addressToScript(sellerAddress);
+  
+  // Distribute: total - fee split according to agreement amounts
+  const available = totalIn - FEE;
+  if (available <= 0n) throw new Error('FROST balance too low for fee');
+  
+  // Use exact agreement amounts if they sum to <= available
+  let bOut = buyerAmountSompi;
+  let sOut = sellerAmountSompi;
+  const requestedTotal = bOut + sOut;
+  
+  if (requestedTotal > available) {
+    // Scale down proportionally
+    bOut = (available * buyerAmountSompi) / requestedTotal;
+    sOut = available - bOut;
+  } else if (requestedTotal < available) {
+    // Extra goes to seller (dust remainder)
+    sOut += (available - requestedTotal);
+  }
+
+  const outputs: { value: bigint; scriptVersion: number; script: Uint8Array }[] = [];
+  if (bOut > 0n) outputs.push({ value: bOut, scriptVersion: 0, script: buyerScript });
+  if (sOut > 0n) outputs.push({ value: sOut, scriptVersion: 0, script: sellerScript });
+
+  // 3. Build input data
+  const inputs = utxos.map((u: any) => ({
+    txId: hexToBytes(u.outpoint.transactionId),
+    index: u.outpoint.index,
+    sequence: 0n,
+    sigOpCount: 1,
+    scriptVersion: 0,
+    scriptPubKey: hexToBytes(u.utxoEntry.scriptPublicKey.scriptPublicKey),
+    value: BigInt(u.utxoEntry.amount),
+  }));
+
+  return { utxos, inputs, outputs, fee: FEE, totalIn };
+}
+
+export function canonicalSighash(tx: CanonicalFrostTx, inputIndex: number): Uint8Array {
+  const subnetId = hexToBytes('0000000000000000000000000000000000000000');
+  return computeSighash(0, tx.inputs, tx.outputs, inputIndex, subnetId, 0n, 0n, true, new Uint8Array(0));
+}
+
+export async function submitCanonicalFrostTx(params: {
+  tx: CanonicalFrostTx;
+  perInputSigner: (sighashHex: string, inputIndex: number) => string;
+  network: string;
+}): Promise<{ success: boolean; txId?: string; error?: string }> {
+  const { tx, perInputSigner, network } = params;
+  const apiBase = network === 'mainnet' ? 'https://api.kaspa.org' : (network === 'testnet-10' ? 'https://api-tn10.kaspa.org' : 'https://api-tn.kaspa.org');
+
+  const signedInputs = tx.utxos.map((u: any, idx: number) => {
+    const sighash = canonicalSighash(tx, idx);
+    const sigHex = perInputSigner(bytesToHex(sighash), idx);
+    console.log('[FROST-Canonical] Input', idx, 'sighash:', bytesToHex(sighash).slice(0,20), 'sig:', sigHex.slice(0,20));
+    const sb = hexToBytes(sigHex);
+    const swt = new Uint8Array(sb.length + 1); swt.set(sb); swt[sb.length] = 0x01;
+    const ss = new Uint8Array(1 + swt.length); ss[0] = swt.length; ss.set(swt, 1);
+    return { previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: bytesToHex(ss), sequence: '0', sigOpCount: 1 };
+  });
+
+  const outputs = tx.outputs.map(o => ({
+    amount: o.value.toString(),
+    scriptPublicKey: { version: o.scriptVersion, scriptPublicKey: bytesToHex(o.script) },
+  }));
+
+  const txBody = {
+    transaction: {
+      version: 0, inputs: signedInputs, outputs,
+      lockTime: '0', subnetworkId: '0000000000000000000000000000000000000000', gas: '0', payload: '',
+    },
+  };
+
+  const submitResp = await fetch(apiBase + '/transactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(txBody),
+  });
+
+  if (!submitResp.ok) {
+    const errText = await submitResp.text();
+    return { success: false, error: 'L1 rejected: ' + errText };
+  }
+
+  const result = await submitResp.json();
+  return { success: true, txId: result.transactionId || result.txId || '' };
+}
+
 export async function sendKaspaWithSignature(params: {
   senderAddress: string;
   recipientAddress: string;

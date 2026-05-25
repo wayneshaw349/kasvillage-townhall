@@ -1137,6 +1137,8 @@ export async function completeFrost2Round(params: {
   myNonceJson: string; // JSON stringified FrostNonce from AsyncStorage
   counterpartyR_hex: string;
   counterpartySig?: { R_agg_x_hex: string; s_hex: string };
+  buyerAmountSompi?: bigint;
+  sellerAmountSompi?: bigint;
 }): Promise<{ success: boolean; txId?: string; explorerUrl?: string; error?: string }> {
   try {
     const myNonce: FrostNonce = JSON.parse(params.myNonceJson);
@@ -1150,51 +1152,40 @@ export async function completeFrost2Round(params: {
     
     if (params.counterpartySig) {
       // Multi-input FROST with real Kaspa sighashes
-      const { sendKaspaWithSignature } = await import('./kaspa_rest_tx');
+      const { buildCanonicalFrostTx, canonicalSighash, submitCanonicalFrostTx } = await import('./kaspa_rest_tx');
       const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
-
-      // Parse buyer's packed partial sigs: R_agg_x(64) + s_0(64) + s_1(64) + ...
-      const cpSigFull = params.counterpartySig.R_agg_x_hex + params.counterpartySig.s_hex;
-      // counterpartySig.s_hex may contain multiple s values packed together
-      // If buyer sent multi-input sigs, s_hex = s_0 + s_1 + ...
       const cpAllS: string[] = [];
       const rawS = params.counterpartySig.s_hex;
-      for (let si = 0; si < rawS.length; si += 64) {
-        cpAllS.push(rawS.slice(si, si + 64));
-      }
+      for (let si = 0; si < rawS.length; si += 64) { cpAllS.push(rawS.slice(si, si + 64)); }
       console.log('[FROST-2R] Buyer sent', cpAllS.length, 'partial s values');
-
-      // Cache for per-input derivation
       const R_agg_x_hex = myPartial.R_agg_x_hex;
-      const d_tw = BigInt('0x' + myNonce.d_tweaked);
-      let myS0_real: bigint | null = null;
-      let e0_cached: bigint | null = null;
-
-      const result = await sendKaspaWithSignature({
-        senderAddress: params.frostAddress.address,
-        recipientAddress: params.recipientAddress,
-        amountSompi: params.amountSompi,
-        aggregatePubkey: params.frostAddress.aggregatedPubkey,
-        network: params.frostAddress.network,
+      // Derive buyer/seller addresses from pubkeys
+      const buyerPk = params.frostAddress.pubkeyA;
+      const sellerPk = params.frostAddress.pubkeyB;
+      const buyerAddr = aggregateToAddress('02' + (buyerPk.length === 66 ? buyerPk.slice(2) : buyerPk), params.frostAddress.network);
+      const sellerAddr = aggregateToAddress('02' + (sellerPk.length === 66 ? sellerPk.slice(2) : sellerPk), params.frostAddress.network);
+      // Determine which is buyer/seller based on recipientAddress
+      // recipientAddress is the seller's wallet (seller gets paid)
+      // But in canonical: buyer output first, seller output second
+      // We need buyerAmountSompi and sellerAmountSompi ? derive from total
+      // For now: buyer gets their collateral back, seller gets item price + their collateral
+      // These must match what the buyer used ? passed via params
+      const bAmt = params.buyerAmountSompi || 0n;
+      const sAmt = params.sellerAmountSompi || 0n;
+      console.log('[FROST-Canonical-Seller] buyer=', buyerAddr.slice(0,20), 'seller=', sellerAddr.slice(0,20), 'bAmt=', bAmt.toString(), 'sAmt=', sAmt.toString());
+      const canonTx = await buildCanonicalFrostTx({ frostAddress: params.frostAddress.address, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: bAmt, sellerAmountSompi: sAmt, network: params.frostAddress.network });
+      const result = await submitCanonicalFrostTx({
+        tx: canonTx,
         perInputSigner: (sighashHex: string, inputIndex: number): string => {
-          // Compute my partial s for this input's sighash
-          const myPartialN = computeFrostPartialS({
-            myNonce,
-            counterpartyR_hex: params.counterpartyR_hex,
-            frostAddress: params.frostAddress,
-            sighash_hex: sighashHex,
-          });
+          const myPartialN = computeFrostPartialS({ myNonce, counterpartyR_hex: params.counterpartyR_hex, frostAddress: params.frostAddress, sighash_hex: sighashHex });
           const mySN = BigInt('0x' + myPartialN.s_hex);
-
-          // Get buyer's s for this input
           const cpSN = cpAllS[inputIndex] ? BigInt('0x' + cpAllS[inputIndex]) : 0n;
-
-          // Aggregate: s_agg = my_s + cp_s
           const s_agg = (mySN + cpSN) % N;
           const sigHex = R_agg_x_hex + s_agg.toString(16).padStart(64, '0');
-          console.log('[FROST-2R] Input', inputIndex, ': myS=', mySN.toString(16).slice(0,16), 'cpS=', cpSN.toString(16).slice(0,16), 'agg=', s_agg.toString(16).slice(0,16));
+          console.log('[FROST-Canonical] Input', inputIndex, ': myS=', mySN.toString(16).slice(0,16), 'cpS=', cpSN.toString(16).slice(0,16), 'agg=', s_agg.toString(16).slice(0,16));
           return sigHex;
         },
+        network: params.frostAddress.network,
       });
       if (!result.success) return { success: false, error: result.error || 'L1 broadcast failed' };
       const explorerBase = params.frostAddress.network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';

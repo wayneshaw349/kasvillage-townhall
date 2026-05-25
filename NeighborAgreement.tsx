@@ -121,7 +121,7 @@ import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
 import { encryptPartialSig, decryptPartialSig } from './frost_encrypted_relay';
-import { computeSighash } from './kaspa_rest_tx';
+import { computeSighash, buildCanonicalFrostTx, canonicalSighash } from './kaspa_rest_tx';
 import { hexToBytes as h2b, bytesToHex as b2h } from '@noble/hashes/utils';
 import { blake2b as blk } from '@noble/hashes/blake2b';
 import { secp256k1 as secpCurve } from '@noble/curves/secp256k1';
@@ -1467,7 +1467,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             const buyerSig = cpAllS.length > 0 ? { R_agg_x_hex: sigStr.slice(0, 64), s_hex: cpAllS.join('') } : undefined;
             const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
             if (!myNonceJson || !buyerR) { console.warn('[PartialSig-Poll] Missing nonce or buyer R, skipping'); return; }
-            const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig });
+            const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)) });
             if (result.success && result.txId) {
               console.log('[PartialSig-Poll] Release TX broadcast:', result.txId);
               setContract(prev => ({ ...prev, releaseTxId: result.txId, releaseExplorerUrl: result.explorerUrl }));
@@ -2408,76 +2408,29 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         // Build TX to compute real Kaspa sighash for BIP340 verification
         // computeSighash imported statically at top
         // h2b, b2h imported statically at top
+        // === CANONICAL FROST TX ===
         const frostAddr = contract.frostData?.address || '';
         const frostNet = contract.frostData?.network || 'testnet-10';
-        const apiBase = frostNet === 'mainnet' ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org';
-        const utxoResp2 = await fetch(apiBase + '/addresses/' + frostAddr + '/utxos');
-        const frostUtxos = await utxoResp2.json();
-        console.log('[FROST-2R] FROST UTXOs for sighash:', frostUtxos?.length || 0);
-        const FEE = 10000n;
-        let frostTotal = 0n;
-        for (const u of (frostUtxos || [])) frostTotal += BigInt(u.utxoEntry?.amount || 0);
-        const sendAmt = frostTotal - FEE;
-        // Bech32 address to scriptPubKey
-        const a2s = (addr: string): Uint8Array => {
-          const CS = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
-          const dp = addr.slice(addr.indexOf(':') + 1);
-          const d5: number[] = []; for (const c2 of dp) { const v = CS.indexOf(c2); if (v >= 0) d5.push(v); }
-          const p5 = d5.slice(0, d5.length - 8);
-          let bits2 = 0, acc2 = 0; const p8: number[] = [];
-          for (const v of p5) { acc2 = (acc2 << 5) | v; bits2 += 5; while (bits2 >= 8) { bits2 -= 8; p8.push((acc2 >> bits2) & 0xff); } }
-          const hk = new Uint8Array(p8).slice(1);
-          return h2b('20' + b2h(hk).slice(0, 64) + 'ac');
-        };
-        const recipScript = a2s(recipientAddress);
-        const frostScrpt = a2s(frostAddr);
-        const outsData: { value: bigint; scriptVersion: number; script: Uint8Array }[] = [
-          { value: sendAmt > 0n ? sendAmt : 0n, scriptVersion: 0, script: recipScript }
-        ];
-        const chng = frostTotal - (sendAmt > 0n ? sendAmt : 0n) - FEE;
-        if (chng > 0n) outsData.push({ value: chng, scriptVersion: 0, script: frostScrpt });
-        const insData = (frostUtxos || []).map((u: any) => ({
-          txId: h2b(u.outpoint.transactionId), index: u.outpoint.index,
-          sequence: 0n, sigOpCount: 1, scriptVersion: 0,
-          scriptPubKey: h2b(u.utxoEntry.scriptPublicKey.scriptPublicKey),
-          value: BigInt(u.utxoEntry.amount)
-        }));
-        const subnetId = h2b('0000000000000000000000000000000000000000');
-        // Sighash for input 0
-        const sighash0 = computeSighash(0, insData, outsData, 0, subnetId, 0n, 0n, true, new Uint8Array(0));
-        console.log('[FROST-2R] Sighash 0:', b2h(sighash0).slice(0,20));
-        // Compute partial sig with REAL sighash
-        const partialS = computeFrostPartialS({
-          myNonce, counterpartyR_hex: counterpartyR, frostAddress: contract.frostData,
-          sighash_hex: b2h(sighash0)
-        });
-        console.log('[FROST-2R] Computed partial s (real sighash):', partialS.s_hex.slice(0,20), 'R_agg_x:', partialS.R_agg_x_hex.slice(0,20));
-        // Derive s for additional inputs
-        const N2R = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
-        const allPartials = [partialS.s_hex];
-        const d_tw2 = BigInt('0x' + myNonce.d_tweaked);
-        const s0val = BigInt('0x' + partialS.s_hex);
-        if (insData.length > 1) {
-          // blk imported statically at top
-          const HK = new TextEncoder().encode('TransactionSigningHash');
-          const Rx = h2b(partialS.R_agg_x_hex);
-          // secpCurve imported statically as secp256k1
-          const Ppt = secpCurve.ProjectivePoint.fromHex(contract.frostData.aggregatedPubkey);
-          const Pf = Ppt.toRawBytes(true);
-          const Px = Pf[0] === 0x03 ? Ppt.negate().toRawBytes(true).slice(1) : Pf.slice(1);
-          const e0d = new Uint8Array([...Rx, ...Px, ...sighash0]);
-          const e0v = BigInt('0x' + b2h(blk(e0d, { dkLen: 32, key: HK } as any))) % N2R;
-          for (let idx = 1; idx < insData.length; idx++) {
-            const shN = computeSighash(0, insData, outsData, idx, subnetId, 0n, 0n, true, new Uint8Array(0));
-            const eNd = new Uint8Array([...Rx, ...Px, ...shN]);
-            const eNv = BigInt('0x' + b2h(blk(eNd, { dkLen: 32, key: HK } as any))) % N2R;
-            const delta = (eNv - e0v + N2R) % N2R;
-            const sNv = (s0val + delta * d_tw2) % N2R;
-            allPartials.push(sNv.toString(16).padStart(64, '0'));
-            console.log('[FROST-2R] Input', idx, 'partial s derived');
-          }
+        const buyerAddr = wallet.address || '';
+        // Derive seller address from pubkey
+        const { aggregateToAddress } = require('./frost_complete');
+        const sellerPk = contract.sellerPubkey || '';
+        const sellerXOnly = sellerPk.length === 66 ? sellerPk.slice(2) : sellerPk;
+        const sellerAddr = aggregateToAddress('02' + sellerXOnly, frostNet);
+        const buyerAmtS = BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8));
+        const sellerAmtS = BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8));
+        console.log('[FROST-Canonical] Building TX: frost=', frostAddr.slice(0,20), 'buyer=', buyerAddr.slice(0,20), 'seller=', sellerAddr.slice(0,20));
+        const canonTx = await buildCanonicalFrostTx({ frostAddress: frostAddr, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: buyerAmtS, sellerAmountSompi: sellerAmtS, network: frostNet });
+        console.log('[FROST-Canonical] UTXOs:', canonTx.inputs.length, 'Outputs:', canonTx.outputs.length, 'Total:', canonTx.totalIn.toString());
+        const allPartials: string[] = [];
+        let partialS: any;
+        for (let idx = 0; idx < canonTx.inputs.length; idx++) {
+          const sh = canonicalSighash(canonTx, idx);
+          const ps = computeFrostPartialS({ myNonce, counterpartyR_hex: counterpartyR, frostAddress: contract.frostData, sighash_hex: b2h(sh) });
+          allPartials.push(ps.s_hex);
+          if (idx === 0) { partialS = ps; console.log('[FROST-Canonical] R_agg_x:', ps.R_agg_x_hex.slice(0,20)); }
+          console.log('[FROST-Canonical] Input', idx, 'sighash:', b2h(sh).slice(0,20), 's:', ps.s_hex.slice(0,16));
         }
-        // Pack: R_agg_x (64 hex) + s_0 (64 hex) + s_1 (64 hex) + ...
         const sigHex = partialS.R_agg_x_hex + allPartials.join('');
         result = { success: true, partialSig: sigHex, messageHash: myNonce.message_hex };
       } else {
@@ -3562,7 +3515,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
                       if (!myNonceJson || !buyerR) { Alert.alert('Missing Data', 'Nonce or buyer R not found. Try again.'); setIsLoading(false); return; }
                       console.log('[Seller-Release] 2-round: buyerR=', buyerR.slice(0,20), 'buyerSig=', buyerSig ? 'yes' : 'no');
-                      const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig });
+                      const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)) });
                       if (result.success && result.txId) {
                         console.log('[Seller-Release] Release TX:', result.txId);
                         setContract(prev => ({ ...prev, releaseTxId: result.txId }));
