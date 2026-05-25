@@ -3491,6 +3491,15 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             {/* Seller Release Bar */}
             {(step === 4 || step === 5) && role === 'seller' && (
               <View style={{ backgroundColor: '#eef2ff', borderRadius: 8, padding: 12, marginTop: 10, borderWidth: 1, borderColor: '#a5b4fc' }}>
+                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#059669', marginBottom: 6 }}>Paste Buyer R Nonce (optional)</Text>
+                <TextInput
+                  style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#6ee7b7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 10 }}
+                  placeholder="Paste buyer R nonce (starts with 02 or 03)..."
+                  placeholderTextColor="#a8a29e"
+                  onChangeText={async (txt) => { const v = txt.trim(); if (v.length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), v); console.log('[Seller] Saved manual buyer R:', v.slice(0,20)); } }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
                 <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#3730a3', marginBottom: 6 }}>Paste Buyer's Release Key</Text>
                 <TextInput
                   style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
