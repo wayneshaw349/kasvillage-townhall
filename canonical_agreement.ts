@@ -34,11 +34,12 @@ export function computeAgreementId(
   sellerPubkey: string,
   buyerAmountSompi: number,
   sellerAmountSompi: number,
-  description: string,
-  network: string,
-  daaScore: string,
+  _description?: string,
+  network?: string,
+  _daaScore?: string,
 ): string {
-  const input = buyerPubkey + sellerPubkey + buyerAmountSompi.toString() + sellerAmountSompi.toString() + description + network + daaScore;
+  // Deterministic: pubkeys + amounts + network only (no timestamp, no description)
+  const input = buyerPubkey + sellerPubkey + buyerAmountSompi.toString() + sellerAmountSompi.toString() + (network || 'testnet-10');
   const hash = sha256(new TextEncoder().encode(input));
   return 'AGR_' + bytesToHex(hash.slice(0, 6));
 }
