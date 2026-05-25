@@ -71,8 +71,7 @@ import {
 import { IOUBalanceSheetModal } from './IOUBalanceSheetShare';
 
 // FROST 2-of-2 complete module (all crypto + P2P methods)
-import {
-  // Types
+import {// Types
   KaspaNetwork,
   FrostAddress,
   FrostPartialSig,
@@ -110,8 +109,7 @@ import {
   generateFrostNonce,
   computeFrostPartialS,
   aggregateFrostSig,
-  cleanup as cleanupFrost,
-} from './frost_complete';
+  cleanup as cleanupFrost,, aggregateToAddress} from './frost_complete';
 
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
@@ -2413,7 +2411,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         const frostNet = contract.frostData?.network || 'testnet-10';
         const buyerAddr = wallet.address || '';
         // Derive seller address from pubkey
-        const { aggregateToAddress } = require('./frost_complete');
+        // aggregateToAddress imported statically from frost_complete
         const sellerPk = contract.sellerPubkey || '';
         const sellerXOnly = sellerPk.length === 66 ? sellerPk.slice(2) : sellerPk;
         const sellerAddr = aggregateToAddress('02' + sellerXOnly, frostNet);
