@@ -7797,7 +7797,7 @@ async fn rehydrate_agreements_from_arweave(
             };
             
             // Build party B (if counterparty exists)
-            let party_b = if !counterparty.is_empty() {
+            let party_b = if !counterparty.is_empty() && !matches!(frost_status, FrostAgreementStatus::Proposed) {
                 Some(FrostParty {
                     pubkey: counterparty.clone(),
                     amount_sompi: amount,
