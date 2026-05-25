@@ -977,6 +977,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   const [agreementType, setAgreementType] = useState<'simple' | 'trade' | 'join' | null>(null);
   const [inboxAgreements, setInboxAgreements] = useState<any[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxSort, setInboxSort] = useState<'recent'|'buyerHigh'|'sellerLow'|'name'>('recent');
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [manualAgrId, setManualAgrId] = useState('');
   const [manualLookupResult, setManualLookupResult] = useState<any>(null);
@@ -2991,6 +2992,16 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   </TouchableOpacity>
                 </View>
 
+                {inboxAgreements.length > 0 && (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                    {[{k:'recent',l:'Recent'},{k:'buyerHigh',l:'Buyer ↑'},{k:'sellerLow',l:'Seller ↓'},{k:'name',l:'Name'}].map(s => (
+                      <TouchableOpacity key={s.k} onPress={() => setInboxSort(s.k as any)} style={{ backgroundColor: inboxSort === s.k ? '#4f46e5' : '#e5e7eb', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
+                        <Text style={{ fontSize: 10, color: inboxSort === s.k ? '#fff' : '#374151', fontWeight: inboxSort === s.k ? 'bold' : 'normal' }}>{s.l}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
                 {inboxAgreements.length === 0 && !inboxLoading && (
                   <View style={{ backgroundColor: '#F5F5F4', borderRadius: 8, padding: 20, alignItems: 'center' }}>
                     <Text style={{ color: '#78716C', fontSize: rs.font(12) }}>No pending proposals</Text>
@@ -2998,7 +3009,16 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   </View>
                 )}
 
-                {inboxAgreements.map((agr: any, idx: number) => (
+                {[...inboxAgreements].sort((a, b) => {
+                  const aBA = Number(a.buyerAmountSompi || a.partyA?.amount_sompi || a.amount_sompi || 0);
+                  const bBA = Number(b.buyerAmountSompi || b.partyA?.amount_sompi || b.amount_sompi || 0);
+                  const aSA = Number(a.sellerAmountSompi || 0);
+                  const bSA = Number(b.sellerAmountSompi || 0);
+                  if (inboxSort === 'buyerHigh') return bBA - aBA;
+                  if (inboxSort === 'sellerLow') return aSA - bSA;
+                  if (inboxSort === 'name') return (a.description || '').localeCompare(b.description || '');
+                  return (b._score || b.created_at || 0) - (a._score || a.created_at || 0);
+                }).map((agr: any, idx: number) => (
                   <View key={idx} style={{ backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#F59E0B', borderRadius: 12, padding: 14, marginBottom: 10 }}>
                     <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#92400E' }}>
                       {agr.description || 'Agreement ' + (agr.agreementId || agr.agreement_id || '').slice(0, 8)}
