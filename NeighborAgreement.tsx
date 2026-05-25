@@ -1463,7 +1463,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             // Parse all s values: R_agg_x (64) + s_0 (64) + s_1 (64) + ...
             const cpAllS: string[] = []; for (let si = 64; si < sigStr.length; si += 64) { cpAllS.push(sigStr.slice(si, si + 64)); }
             console.log('[FROST-2R] Buyer sent', cpAllS.length, 'partial s values');
-            const buyerSig = cpAllS.length > 0 ? { R_agg_x_hex: sigStr.slice(0, 64), s_hex: cpAllS[0] } : undefined;
+            const buyerSig = cpAllS.length > 0 ? { R_agg_x_hex: sigStr.slice(0, 64), s_hex: cpAllS.join('') } : undefined;
             const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
             if (!myNonceJson || !buyerR) { console.warn('[PartialSig-Poll] Missing nonce or buyer R, skipping'); return; }
             const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig });
