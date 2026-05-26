@@ -2445,6 +2445,11 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         const myPubkey = await SecureStore.getItemAsync('kaspa_pubkey') || '';
         const counterpartyPubkey = role === 'buyer' ? contract.sellerPubkey : contract.buyerPubkey;
         
+        // Split UTXO snapshot from sig before encryption
+        let sigForEncrypt = result.partialSig;
+        let utxoSnapshotB64 = '';
+        const pipeIdx2 = sigForEncrypt.indexOf('|');
+        if (pipeIdx2 > 0) { utxoSnapshotB64 = sigForEncrypt.slice(pipeIdx2); sigForEncrypt = sigForEncrypt.slice(0, pipeIdx2); }
         // ENCRYPT partial sig before relay
         const encCtx = {
           agreementId: contract.agreementId || '',
@@ -2458,7 +2463,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           R_hex: '',
         };
         const encrypted = encryptPartialSig({
-          partialSig: result.partialSig,
+          partialSig: sigForEncrypt,
           myPrivKeyHex: privKeyHex,
           counterpartyPubKeyHex: counterpartyPubkey || '',
           ctx: encCtx,
