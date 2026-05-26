@@ -1193,6 +1193,27 @@ export async function completeFrost2Round(params: {
         let totalIn = 0n; for (const u of utxos) totalIn += BigInt(u.utxoEntry.amount);
         canonTx = { utxos, inputs, outputs, fee, totalIn };
         console.log('[FROST-Canonical-Seller] Using buyer TX template:', inputs.length, 'inputs', outputs.length, 'outputs');
+        // VERIFY template matches agreement terms
+        if (outputs.length >= 2) {
+          const out0val = outputs[0].value;
+          const out1val = outputs[1].value;
+          const expectedBuyer = bAmt;
+          const expectedSeller = sAmt;
+          // Check output values match agreement (allow fee variance)
+          const totalOut = out0val + out1val;
+          const totalExpected = expectedBuyer + expectedSeller;
+          if (totalOut > totalIn) { throw new Error('[FROST-Verify] Outputs exceed inputs: ' + totalOut.toString() + ' > ' + totalIn.toString()); }
+          if (totalExpected > 0n && totalOut < totalExpected - 100000n) { throw new Error('[FROST-Verify] Output total too low: ' + totalOut.toString() + ' expected ~' + totalExpected.toString()); }
+          // Check seller output contains seller's address script
+          const myWalletPk = bytesToHex((secp as any).getPublicKey(hexToBytes(params.myPrivateKeyHex), true));
+          const myXonly = myWalletPk.slice(2);
+          const myScript = '20' + myXonly + 'ac';
+          const out0script = bytesToHex(outputs[0].script);
+          const out1script = bytesToHex(outputs[1].script);
+          const myOutputIdx = out0script === myScript ? 0 : out1script === myScript ? 1 : -1;
+          if (myOutputIdx === -1) { throw new Error('[FROST-Verify] No output pays to my address! Scripts: ' + out0script.slice(0,20) + ' / ' + out1script.slice(0,20) + ' expected: ' + myScript.slice(0,20)); }
+          console.log('[FROST-Verify] Template OK: my output idx=' + myOutputIdx + ' value=' + outputs[myOutputIdx].value.toString() + ' total=' + totalOut.toString());
+        }
       } else {
         canonTx = await buildCanonicalFrostTx({ frostAddress: params.frostAddress.address, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: bAmt, sellerAmountSompi: sAmt, network: params.frostAddress.network });
       }
