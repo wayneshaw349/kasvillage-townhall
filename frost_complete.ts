@@ -1158,11 +1158,11 @@ export async function completeFrost2Round(params: {
       const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
       const cpAllS: string[] = [];
       let rawS = params.counterpartySig.s_hex;
-      let utxoSnapshot: any[] | undefined;
-      // Extract UTXO snapshot if packed with sig
+      let txTemplate: any | undefined;
+      // Extract TX template if packed with sig
       const pipeIdx = rawS.indexOf('|');
       if (pipeIdx > 0) {
-        try { utxoSnapshot = JSON.parse(atob(rawS.slice(pipeIdx + 1))); console.log('[FROST-Canonical-Seller] Got UTXO snapshot:', utxoSnapshot?.length, 'UTXOs'); } catch {}
+        try { txTemplate = JSON.parse(atob(rawS.slice(pipeIdx + 1))); console.log('[FROST-Canonical-Seller] Got TX template:', txTemplate?.u?.length, 'inputs', txTemplate?.o?.length, 'outputs'); } catch {}
         rawS = rawS.slice(0, pipeIdx);
       }
       for (let si = 0; si < rawS.length; si += 64) { cpAllS.push(rawS.slice(si, si + 64)); }
@@ -1182,7 +1182,20 @@ export async function completeFrost2Round(params: {
       const bAmt = params.buyerAmountSompi || 0n;
       const sAmt = params.sellerAmountSompi || 0n;
       console.log('[FROST-Canonical-Seller] buyer=', buyerAddr.slice(0,20), 'seller=', sellerAddr.slice(0,20), 'bAmt=', bAmt.toString(), 'sAmt=', sAmt.toString());
-      const canonTx = await buildCanonicalFrostTx({ frostAddress: params.frostAddress.address, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: bAmt, sellerAmountSompi: sAmt, network: params.frostAddress.network, utxoSnapshot });
+      let canonTx;
+      if (txTemplate && txTemplate.u && txTemplate.o) {
+        // Use buyer's exact TX template ? no derivation needed
+        const { hexToBytes } = await import('@noble/hashes/utils');
+        const utxos = txTemplate.u.map((u: any) => ({ outpoint: { transactionId: u.t, index: u.i }, utxoEntry: { amount: u.a, scriptPublicKey: { scriptPublicKey: u.s } } }));
+        const inputs = utxos.map((u: any) => ({ txId: hexToBytes(u.outpoint.transactionId), index: u.outpoint.index, sequence: 0n, sigOpCount: 1, scriptVersion: 0, scriptPubKey: hexToBytes(u.utxoEntry.scriptPublicKey.scriptPublicKey), value: BigInt(u.utxoEntry.amount) }));
+        const outputs = txTemplate.o.map((o: any) => ({ value: BigInt(o.v), scriptVersion: 0, script: hexToBytes(o.s) }));
+        const fee = BigInt(txTemplate.f || '10000');
+        let totalIn = 0n; for (const u of utxos) totalIn += BigInt(u.utxoEntry.amount);
+        canonTx = { utxos, inputs, outputs, fee, totalIn };
+        console.log('[FROST-Canonical-Seller] Using buyer TX template:', inputs.length, 'inputs', outputs.length, 'outputs');
+      } else {
+        canonTx = await buildCanonicalFrostTx({ frostAddress: params.frostAddress.address, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: bAmt, sellerAmountSompi: sAmt, network: params.frostAddress.network });
+      }
       const result = await submitCanonicalFrostTx({
         tx: canonTx,
         perInputSigner: (sighashHex: string, inputIndex: number): string => {
