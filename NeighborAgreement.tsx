@@ -2463,7 +2463,9 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           counterpartyPubKeyHex: counterpartyPubkey || '',
           ctx: encCtx,
         });
-        console.log('[Neighbor] Partial sig ENCRYPTED for relay');
+        // Reattach UTXO snapshot to encrypted sig
+        if (utxoSnapshotB64) { encrypted.encrypted = encrypted.encrypted + utxoSnapshotB64; }
+        console.log('[Neighbor] Partial sig ENCRYPTED for relay (utxo:', utxoSnapshotB64 ? 'yes' : 'no', ')');
 
         const relayPayload: PartialTxPayload = {
           agreementId: contract.agreementId || `AGR_${Date.now()}`,
