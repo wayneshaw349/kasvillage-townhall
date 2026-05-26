@@ -114,7 +114,8 @@ import {// Types
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
 import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
-import { canonicalCommit, verifyCommitment, releaseExpiredCommitments, markLocked } from './utxo_ledger';
+import { canonicalCommit, verifyCommitment, releaseExpiredCommitments, markLocked, isAlreadyCommitted } from './utxo_ledger';
+import { generateProposal, parseProposal, verifyProposalForMe, parseReleaseKey } from './kv_proposal';
 import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
@@ -1686,6 +1687,14 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               const daaResp = await fetch(daaBase + '/info/virtual-chain-blue-score');
               if (daaResp.ok) { const daaData = await daaResp.json(); currentDaa = daaData.blueScore || 0; }
             } catch (e) { console.warn('[Neighbor] DAA fetch failed:', e); }
+            // Check duplicate proposal guard
+            const dupGuard = await isAlreadyCommitted(agreementId);
+            if (dupGuard.committed) {
+              console.log('[UTXO-Guard] Already committed to', agreementId, '- skipping re-propose');
+              Alert.alert('Already Proposed', 'Agreement ' + agreementId.slice(0,12) + ' already exists. Reset to create a new one.');
+              setIsLoading(false);
+              return;
+            }
             console.log('[Neighbor] Proposing to TownHall:', agreementId, 'frost:', frostData.address, 'DAA:', currentDaa);
             const proposeResult = await proposeAgreement({
               agreementId: agreementId,
@@ -3267,7 +3276,19 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                           </View>
                         )}
                         <TouchableOpacity onPress={() => { 
-                          const shareText = 'AGR: ' + contract.agreementId + '\nTX: ' + (contract.arweaveTxId || 'pending') + '\nCode: ' + (contract.verificationCode || '');
+                          // Generate KV proposal clipboard format
+                          const buyerR_saved = await (async () => { try { const s = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); return s ? JSON.parse(s).R_hex || '' : ''; } catch { return ''; } })();
+                          const shareText = generateProposal({
+                            agrId: contract.agreementId || '',
+                            buyerAddress: myAddress || '',
+                            sellerAddress: counterpartyKaspaAddr || '',
+                            buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
+                            sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
+                            network: contract.frostData?.network || 'testnet-10',
+                            buyerR: buyerR_saved,
+                            verificationCode: contract.verificationCode || '',
+                            description: contract.itemDescription || '',
+                          });
                           import('expo-clipboard').then(mod => (mod.default || mod).setStringAsync(shareText)).catch(() => {});
                           Alert.alert('Copied!', 'Agreement details copied to clipboard');
                         }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 10, marginTop: 8, alignItems: 'center' }}>

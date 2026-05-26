@@ -576,6 +576,42 @@ export async function getTaggedUtxos(): Promise<{
   return { free, committed, locked, iou };
 }
 
+
+
+// ============================================================================
+// DUPLICATE PROPOSAL GUARD
+// ============================================================================
+
+/**
+ * Check if an agreement ID already has committed UTXOs.
+ * Call BEFORE proposing to prevent duplicate proposals.
+ */
+export async function isAlreadyCommitted(agreementId: string): Promise<{
+  committed: boolean;
+  utxoCount: number;
+  totalSompi: bigint;
+  status: UtxoStatus | null;
+}> {
+  const ledger = await loadLedger();
+  let totalSompi = 0n;
+  let utxoCount = 0;
+  let status: UtxoStatus | null = null;
+
+  for (const entry of ledger.values()) {
+    if (entry.commitReason === agreementId) {
+      utxoCount++;
+      totalSompi += BigInt(entry.amountSompi);
+      status = entry.status;
+    }
+  }
+
+  if (utxoCount > 0) {
+    console.log('[UTXO-Guard] AGR', agreementId, 'already has', utxoCount, 'tagged UTXOs:', Number(totalSompi) / 1e8, 'KAS, status:', status);
+  }
+
+  return { committed: utxoCount > 0, utxoCount, totalSompi, status };
+}
+
 export async function clearLedger(): Promise<void> {
   await AsyncStorage.removeItem(LEDGER_KEY);
 }
