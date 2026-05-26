@@ -109,7 +109,7 @@ import {// Types
   generateFrostNonce,
   computeFrostPartialS,
   aggregateFrostSig,
-  cleanup as cleanupFrost,, aggregateToAddress, completeFrost2Round} from './frost_complete';
+  cleanup as cleanupFrost, aggregateToAddress, completeFrost2Round} from './frost_complete';
 
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
