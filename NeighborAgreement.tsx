@@ -1454,7 +1454,12 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             // completeFrost2Round imported statically from frost_complete
             // getFrostR imported statically
             // AsyncStorage imported statically
-            const decrypted = (() => { try { const d = decryptPartialSig({ encrypted: match.signature, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: { agreementId: contract.agreementId || '', buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', multisigAddress: contract.multisigAddress || '', aggregatedPubkey: contract.frostData?.aggregatedPubkey || '', network: contract.frostData?.network || 'testnet-10', itemPriceKas: contract.itemPriceKas, sellerCommitmentKas: contract.sellerCommitmentKas, R_hex: '' }, nonce: match.nonce || '' }); console.log('[FROST] Decrypted counterparty partial sig'); return d; } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; } })();
+            // Split template from encrypted sig before decrypt
+            let encSig = match.signature || '';
+            let txTemplateB64 = '';
+            const pipePos = encSig.indexOf('|');
+            if (pipePos > 0) { txTemplateB64 = encSig.slice(pipePos + 1); encSig = encSig.slice(0, pipePos); }
+            const decrypted = (() => { try { const d = decryptPartialSig({ encrypted: encSig, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: { agreementId: contract.agreementId || '', buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', multisigAddress: contract.multisigAddress || '', aggregatedPubkey: contract.frostData?.aggregatedPubkey || '', network: contract.frostData?.network || 'testnet-10', itemPriceKas: contract.itemPriceKas, sellerCommitmentKas: contract.sellerCommitmentKas, R_hex: '' }, nonce: match.nonce || '' }); console.log('[FROST] Decrypted counterparty partial sig'); return d; } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; } })();
             let buyerR = '';
             try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
             if (!buyerR) { try { const gql = '{ transactions(first: 10, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }]) { edges { node { tags { name value } } } } }'; const resp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }); const json = await resp.json(); for (const edge2 of (json?.data?.transactions?.edges || [])) { const t2 = edge2?.node?.tags || []; const m2 = {}; t2.forEach(t => { m2[t.name] = t.value; }); const p2 = m2['KV-Pubkey'] || ''; if (p2 !== (role === 'seller' ? (contract.sellerPubkey || '') : (contract.buyerPubkey || '')) && m2['KV-FrostR']) { buyerR = m2['KV-FrostR']; console.log('[FROST-2R] Found counterparty R from Arweave:', buyerR.slice(0,20)); break; } } } catch {} }
@@ -1462,10 +1467,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
             // Parse all s values: R_agg_x (64) + s_0 (64) + s_1 (64) + ...
             const cpAllS: string[] = []; for (let si = 64; si < sigStr.length; si += 64) { cpAllS.push(sigStr.slice(si, si + 64)); }
             console.log('[FROST-2R] Buyer sent', cpAllS.length, 'partial s values');
-            const buyerSig = cpAllS.length > 0 ? { R_agg_x_hex: sigStr.slice(0, 64), s_hex: cpAllS.join('') } : undefined;
+            const buyerSig = cpAllS.length > 0 ? { R_agg_x_hex: sigStr.slice(0, 64), s_hex: cpAllS.join('') + (txTemplateB64 ? '|' + txTemplateB64 : '') } : undefined;
             const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
             if (!myNonceJson || !buyerR) { console.warn('[PartialSig-Poll] Missing nonce or buyer R, skipping'); return; }
-            const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return require('./frost_complete').aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: wallet.address });
+            const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: wallet.address });
             if (result.success && result.txId) {
               console.log('[PartialSig-Poll] Release TX broadcast:', result.txId);
               setContract(prev => ({ ...prev, releaseTxId: result.txId, releaseExplorerUrl: result.explorerUrl }));
@@ -1590,7 +1595,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         try {
           const gql = '{ transactions(first: 50, tags: [{ name: "KV-Counterparty", values: ["' + myPubkey + '"] }, { name: "KV-Status", values: ["Proposed"] }], sort: HEIGHT_DESC) { edges { node { id, tags { name, value } } } } }';
           let arResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }).catch(() => null);
-          if (!arResp?.ok) arResp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+          if (!arResp?.ok) arResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
           const arJson = await arResp.json();
           const arEdges = arJson?.data?.transactions?.edges || [];
           if (arEdges.length > 0 && !cancelled) {
@@ -1868,7 +1873,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       try {
         const myGql = '{ transactions(first: 50, tags: [{ name: "KV-Counterparty", values: ["' + myPubkey + '"] }, { name: "KV-Status", values: ["Proposed"] }], sort: HEIGHT_DESC) { edges { node { id, tags { name, value } } } } }';
         let myResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: myGql }) }).catch(() => null);
-        if (!myResp?.ok) myResp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: myGql }) });
+        if (!myResp?.ok) myResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: myGql }) });
         const myJson = await myResp.json();
         const myEdges = myJson?.data?.transactions?.edges || [];
         console.log('[Neighbor] Direct inbox query found', myEdges.length, 'proposals for me');
@@ -1996,7 +2001,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       if (normalized.buyerAmountSompi === 0 && normalized.agreementId) {
         try {
           const gql = '{ transactions(first: 1, tags: [{ name: "KV-AgreementId", values: ["' + normalized.agreementId + '"] }, { name: "KV-Status", values: ["Proposed"] }]) { edges { node { tags { name, value } } } } }';
-          const gResp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+          const gResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
           const gJson = await gResp.json();
           const gTags = gJson?.data?.transactions?.edges?.[0]?.node?.tags;
           if (gTags) {
@@ -2029,7 +2034,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           if (buyerAmtTag === 0 && agrId) {
             try {
               const gql = '{ transactions(first: 1, tags: [{ name: "KV-AgreementId", values: ["' + agrId + '"] }, { name: "KV-Status", values: ["Proposed"] }]) { edges { node { tags { name, value } } } } }';
-              const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+              const resp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
               const json = await resp.json();
               const tags = json?.data?.transactions?.edges?.[0]?.node?.tags;
               if (tags) {
@@ -3518,20 +3523,27 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       // getFrostR imported statically
                       // AsyncStorage imported statically
                       const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
-                      const decrypted = (() => { try { const { decryptPartialSig } = require('./frost_encrypted_relay'); return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return partialSig; } })();
+                      // Split template from sig before decrypt
+                      let encSig2 = partialSig || '';
+                      let txTemplateB64_2 = '';
+                      const pipePos2 = encSig2.indexOf('|');
+                      if (pipePos2 > 0) { txTemplateB64_2 = encSig2.slice(pipePos2 + 1); encSig2 = encSig2.slice(0, pipePos2); }
+                      const decrypted = (() => { try { return decryptPartialSig({ encrypted: encSig2, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return encSig2; } })();
                       // Get buyer R from TownHall
                       let buyerR = '';
                       try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
                       if (!buyerR) {
                         try { const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["PartialSig"] }]) { edges { node { tags { name value } } } } }';
-                          const resp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
-                          const json = await arResp.json(); const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || [];
+                          const resp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
+                          const arResp2 = await resp.json(); const tags = arResp2?.data?.transactions?.edges?.[0]?.node?.tags || [];
                           const rTag = tags.find((t) => t.name === 'KV-FrostR'); if (rTag?.value) buyerR = rTag.value;
                         } catch {}
                       }
                       // Parse buyer's partial sig (R_agg_x || s format)
                       const sigBytes = typeof decrypted === 'string' ? decrypted : '';
-                      const buyerSig = sigBytes.length >= 128 ? { R_agg_x_hex: sigBytes.slice(0, 64), s_hex: sigBytes.slice(64, 128) } : undefined;
+                      // Parse all s values + reattach template
+                      const cpAllS2: string[] = []; for (let si = 64; si < sigBytes.length; si += 64) { cpAllS2.push(sigBytes.slice(si, si + 64)); }
+                      const buyerSig = cpAllS2.length > 0 ? { R_agg_x_hex: sigBytes.slice(0, 64), s_hex: cpAllS2.join('') + (txTemplateB64_2 ? '|' + txTemplateB64_2 : '') } : undefined;
                       const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
                       if (!myNonceJson || !buyerR) { Alert.alert('Missing Data', 'Nonce or buyer R not found. Try again.'); setIsLoading(false); return; }
                       console.log('[Seller-Release] 2-round: buyerR=', buyerR.slice(0,20), 'buyerSig=', buyerSig ? 'yes' : 'no');
