@@ -1588,7 +1588,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
         }
         // Layer 2: arweave.net (0.3s)
         try {
-          const gql = '{ transactions(first: 10, tags: [{ name: "KV-Counterparty", values: ["' + myPubkey + '"] }, { name: "KV-Status", values: ["Proposed"] }], sort: HEIGHT_DESC) { edges { node { id, tags { name, value } } } } }';
+          const gql = '{ transactions(first: 50, tags: [{ name: "KV-Counterparty", values: ["' + myPubkey + '"] }, { name: "KV-Status", values: ["Proposed"] }], sort: HEIGHT_DESC) { edges { node { id, tags { name, value } } } } }';
           let arResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }).catch(() => null);
           if (!arResp?.ok) arResp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
           const arJson = await arResp.json();
@@ -1696,34 +1696,30 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
             } as any);
             // Reduce spendable for proposer (input cap)
-            try {
-              // commitForCollateral from utxo_ledger (canonicalCommit imported statically)
-              const proposeAmount = role === 'buyer' ? BigInt(Math.floor(contract.itemPriceKas * 1e8)) : BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
-              if (proposeAmount > 0n) {
-              const tagResult = await canonicalCommit(propWallet?.address || '', proposeAmount, agreementId, 'buyer', myPubkey || '');
-              console.log('[UTXO-Tag] Buyer proposal tagged:', tagResult.success, 'hashes:', tagResult.commitHashes?.length);
-            }
-            } catch (e) { console.warn('[Neighbor] Proposer ledger commit skipped:', e); }
-            // AUTO-CONFIRM disabled at propose time — confirms after Party B accepts
-            // Proposer confirms in FROST-Poll when TH status changes to Accepted
-            // Add to active FROST list
-          addToFrostList({
-            agrId: agreementId,
-            frostAddr: frostData.address,
-            role: 'buyer',
-            step: 3,
-            buyerAmount: contract.itemPriceKas,
-            sellerAmount: contract.sellerCommitmentKas,
-            buyerPubkey: contract.buyerPubkey || '',
-            sellerPubkey: contract.sellerPubkey || '',
-            description: contract.itemDescription || '',
-            createdAt: Date.now(),
-          });
-          console.log('[Neighbor] Proposal sent — waiting for counterparty to accept');
-          if (proposeResult?.success) { console.log('[Neighbor] Agreement proposed on TownHall:', agreementId); } else { console.warn('[Neighbor] TownHall propose returned:', JSON.stringify(proposeResult)); }
-            if (proposeResult?.arweaveTxId) {
-              console.log('[Neighbor] Arweave TX ID:', proposeResult.arweaveTxId);
-              setContract(prev => ({ ...prev, arweaveTxId: proposeResult.arweaveTxId }));
+            console.log('[Neighbor] Proposal sent ? waiting for counterparty to accept');
+            if (!proposeResult?.success) {
+              console.warn('[Neighbor] TownHall propose failed:', JSON.stringify(proposeResult));
+              Alert.alert('Proposal Failed', 'Could not post to TownHall. Please try again.');
+            } else {
+              console.log('[Neighbor] Agreement proposed on TownHall:', agreementId);
+              // Tag UTXOs only after successful proposal
+              try {
+                const proposeAmount = role === 'buyer' ? BigInt(Math.floor(contract.itemPriceKas * 1e8)) : BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
+                if (proposeAmount > 0n) {
+                  const tagResult = await canonicalCommit(propWallet?.address || '', proposeAmount, agreementId, 'buyer', myPubkey || '');
+                  console.log('[UTXO-Tag] Buyer proposal tagged:', tagResult.success, 'hashes:', tagResult.commitHashes?.length);
+                }
+              } catch (e) { console.warn('[Neighbor] Proposer ledger commit skipped:', e); }
+              addToFrostList({
+                agrId: agreementId, frostAddr: frostData.address, role: 'buyer', step: 3,
+                buyerAmount: contract.itemPriceKas, sellerAmount: contract.sellerCommitmentKas,
+                buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '',
+                description: contract.itemDescription || '', createdAt: Date.now(),
+              });
+              if (proposeResult?.arweaveTxId) {
+                console.log('[Neighbor] Arweave TX ID:', proposeResult.arweaveTxId);
+                setContract(prev => ({ ...prev, arweaveTxId: proposeResult.arweaveTxId }));
+              }
             }
           } catch (e) { console.warn('[Neighbor] TownHall propose failed:', e); }
           // L1 inscription disabled � Arweave inscription is the permanent record
@@ -1855,7 +1851,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       const validPending = pending.filter((a) => {
         const pk = a.partyA?.pubkey || a.party_a?.pubkey || a.pubkey || '';
         const amt = Number(a.partyA?.amount_sompi || a.party_a?.amount_sompi || a.amount_sompi || 0);
-        return pk.length >= 60 && (pk.startsWith('02') || pk.startsWith('03')) && amt > 0;
+        return pk.length >= 60 && (pk.startsWith('02') || pk.startsWith('03')) && amt >= 0;
       });
       // Enrich: if entry has amount but no buyer/seller split, get from Arweave
       const enrichedPending = validPending.map((a: any) => {
@@ -1870,7 +1866,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       });
       // Phase 3: Direct Goldsky query for proposals addressed to MY pubkey
       try {
-        const myGql = '{ transactions(first: 10, tags: [{ name: "KV-Counterparty", values: ["' + myPubkey + '"] }, { name: "KV-Status", values: ["Proposed"] }], sort: HEIGHT_DESC) { edges { node { id, tags { name, value } } } } }';
+        const myGql = '{ transactions(first: 50, tags: [{ name: "KV-Counterparty", values: ["' + myPubkey + '"] }, { name: "KV-Status", values: ["Proposed"] }], sort: HEIGHT_DESC) { edges { node { id, tags { name, value } } } } }';
         let myResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: myGql }) }).catch(() => null);
         if (!myResp?.ok) myResp = await fetch('https://arweave-search.goldsky.com/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: myGql }) });
         const myJson = await myResp.json();
