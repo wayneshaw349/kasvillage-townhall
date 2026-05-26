@@ -3483,7 +3483,22 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
                   placeholder="Paste encrypted partial sig from buyer..."
                   placeholderTextColor="#a8a29e"
-                  onChangeText={(txt) => setContract(prev => ({ ...prev, partialReleaseTx: txt.trim() }))}
+                  onChangeText={async (txt) => {
+                    const v = txt.trim();
+                    // Auto-extract R and SIG from multi-line paste
+                    const rMatch = v.match(/R:\s*([0-9a-f]{60,66})/i);
+                    const sigMatch = v.match(/SIG:\s*(.+)/i);
+                    if (rMatch && sigMatch) {
+                      // Multi-line paste from buyer's Copy Release Info
+                      const extractedR = rMatch[1].trim();
+                      const extractedSig = sigMatch[1].trim();
+                      await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), extractedR);
+                      console.log('[Seller] Auto-extracted R:', extractedR.slice(0,20), 'SIG:', extractedSig.slice(0,20));
+                      setContract(prev => ({ ...prev, partialReleaseTx: extractedSig }));
+                    } else {
+                      setContract(prev => ({ ...prev, partialReleaseTx: v }));
+                    }
+                  }}
                   autoCapitalize="none"
                   autoCorrect={false}
                   multiline
