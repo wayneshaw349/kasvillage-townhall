@@ -2430,11 +2430,11 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           if (idx === 0) { partialS = ps; console.log('[FROST-Canonical] R_agg_x:', ps.R_agg_x_hex.slice(0,20)); }
           console.log('[FROST-Canonical] Input', idx, 'sighash:', b2h(sh).slice(0,20), 's:', ps.s_hex.slice(0,16));
         }
-        // Serialize UTXO snapshot so seller uses exact same inputs
-        const utxoSnapshot = canonTx.utxos.map((u: any) => ({ t: u.outpoint.transactionId, i: u.outpoint.index, a: u.utxoEntry.amount, s: u.utxoEntry.scriptPublicKey.scriptPublicKey }));
-        const utxoB64 = btoa(JSON.stringify(utxoSnapshot));
-        const sigHex = partialS.R_agg_x_hex + allPartials.join('') + '|' + utxoB64;
-        console.log('[FROST-Canonical] Packed', allPartials.length, 's values +', utxoSnapshot.length, 'UTXOs');
+        // Serialize full TX template so seller builds identical TX
+        const txTemplate = { u: canonTx.utxos.map((u: any) => ({ t: u.outpoint.transactionId, i: u.outpoint.index, a: u.utxoEntry.amount, s: u.utxoEntry.scriptPublicKey.scriptPublicKey })), o: canonTx.outputs.map((o: any) => ({ v: o.value.toString(), s: b2h(o.script) })), f: canonTx.fee.toString() };
+        const templateB64 = btoa(JSON.stringify(txTemplate));
+        const sigHex = partialS.R_agg_x_hex + allPartials.join('') + '|' + templateB64;
+        console.log('[FROST-Canonical] Packed', allPartials.length, 's values + TX template (' + txTemplate.u.length + ' inputs,' + txTemplate.o.length + ' outputs)');
         result = { success: true, partialSig: sigHex, messageHash: myNonce.message_hex };
       } else {
         console.warn('[FROST-2R] No counterparty R found');
