@@ -37,6 +37,7 @@ export interface KVProposal {
   buyerR: string;
   verificationCode: string;
   description: string;
+  utxoTag?: string;           // buyer's committed UTXO key (txId:index)
   buyerPubkey?: string | null;
   sellerPubkey?: string | null;
   valid?: boolean;

@@ -1745,6 +1745,12 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   console.log('[UTXO-Tag] Buyer proposal tagged:', tagResult.success, 'hashes:', tagResult.commitHashes?.length);
                 }
               } catch (e) { console.warn('[Neighbor] Proposer ledger commit skipped:', e); }
+              // Generate R nonce at proposal time for clipboard
+              try {
+                const propNonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: counterpartyKaspaAddr || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: propWallet?.privKeyHex || '' });
+                await AsyncStorage.setItem('kv_frost_nonce_' + agreementId, JSON.stringify({ R_hex: propNonce.R_hex, k_private: propNonce.k_private, d_tweaked: propNonce.d_tweaked, message_hex: propNonce.message_hex }));
+                console.log('[FROST-R] Generated nonce R at proposal:', propNonce.R_hex.slice(0,20));
+              } catch(e) { console.warn('[FROST-R] Proposal nonce failed:', e); }
               addToFrostList({
                 agrId: agreementId, frostAddr: frostData.address, role: 'buyer', step: 3,
                 buyerAmount: contract.itemPriceKas, sellerAmount: contract.sellerCommitmentKas,

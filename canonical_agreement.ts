@@ -37,9 +37,10 @@ export function computeAgreementId(
   _description?: string,
   network?: string,
   _daaScore?: string,
+  utxoTag?: string,
 ): string {
   // Deterministic: pubkeys + amounts + network only (no timestamp, no description)
-  const input = buyerPubkey + sellerPubkey + buyerAmountSompi.toString() + sellerAmountSompi.toString() + (network || 'testnet-10');
+  const input = buyerPubkey + sellerPubkey + buyerAmountSompi.toString() + sellerAmountSompi.toString() + (network || 'testnet-10') + (utxoTag || '');
   const hash = sha256(new TextEncoder().encode(input));
   return 'AGR_' + bytesToHex(hash.slice(0, 6));
 }
