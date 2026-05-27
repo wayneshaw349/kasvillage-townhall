@@ -342,6 +342,7 @@ interface Contract {
   buyerLockTxId?: string;
   sellerLockTxId?: string;
   partialReleaseTx?: string;
+  shippingCenter?: string;
   releaseRecipient?: string;
   releaseTxId?: string;
   releaseExplorerUrl?: string;
@@ -1236,7 +1237,7 @@ function parseClipboard(raw: string): {
                 agreementId: contract.agreementId || '',
                 pubkey: myPubkey || '',
                 amount_sompi: Math.floor((role === 'buyer' ? contract.itemPriceKas : contract.sellerCommitmentKas) * 1e8),
-                description: contract.itemDescription || '',
+                description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                 network: 'testnet-10',
                 status: 'Agreed',
                 signature: 'agreed_auto_' + Date.now(),
@@ -1267,7 +1268,7 @@ function parseClipboard(raw: string): {
               agreementId: contract.agreementId || '',
               pubkey: myPubkey || '',
               amount_sompi: Math.floor((role === 'buyer' ? contract.itemPriceKas : contract.sellerCommitmentKas) * 1e8),
-              description: contract.itemDescription || '',
+              description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
               network: 'testnet-10',
               status: 'Agreed-Send',
               signature: 'agreed_send_' + Date.now(),
@@ -1789,7 +1790,7 @@ function parseClipboard(raw: string): {
               pubkey: myPubkey || '',
               amount_sompi: Math.floor(contract.itemPriceKas * 1e8) + Math.floor(contract.sellerCommitmentKas * 1e8),
               signature: 'frost_create_' + Date.now(),
-              description: contract.itemDescription || '',
+              description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
               network,
               counterpartyPubkey: counterPubkey || undefined,
               frostAddress: frostData.address,
@@ -1824,7 +1825,7 @@ function parseClipboard(raw: string): {
                 agrId: agreementId, frostAddr: frostData.address, role: 'buyer', step: 3,
                 buyerAmount: contract.itemPriceKas, sellerAmount: contract.sellerCommitmentKas,
                 buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '',
-                description: contract.itemDescription || '', createdAt: Date.now(),
+                description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''), createdAt: Date.now(),
               });
               if (proposeResult?.arweaveTxId) {
                 console.log('[Neighbor] Arweave TX ID:', proposeResult.arweaveTxId);
@@ -3434,7 +3435,7 @@ function parseClipboard(raw: string): {
                             network: contract.frostData?.network || 'testnet-10',
                             buyerR: buyerR_saved,
                             verificationCode: contract.verificationCode || '',
-                            description: contract.itemDescription || '',
+                            description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });
                           Clipboard.setStringAsync(shareText);
                           Alert.alert('Copied!', 'Agreement details copied to clipboard');
