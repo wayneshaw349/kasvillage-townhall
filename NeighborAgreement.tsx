@@ -3040,7 +3040,7 @@ function parseClipboard(raw: string): {
                       try {
                         setIsLoading(true);
                         const sig = contract.partialReleaseTx || '';
-                        if (!sig || sig.length < 10) { Alert.alert('Invalid', 'Paste the release key'); setIsLoading(false); return; }
+                        if (!sig || sig.length < 10) { Alert.alert('Invalid', 'Paste the buyer signature'); setIsLoading(false); return; }
                         const session = await loadAgreementSession();
                         if (!session?.contract?.frostData) { Alert.alert('No Agreement', 'Accept an agreement first'); setIsLoading(false); return; }
                         const w = await loadMainWallet();
@@ -3551,12 +3551,12 @@ function parseClipboard(raw: string): {
                     
                     <View style={{ backgroundColor: "#eef2ff", borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: "#a5b4fc" }}>
                       <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
-                      <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce (Buyer)</Text>
+                      <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My Verification</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
                       <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce (Buyer)</Text>
                     </TouchableOpacity>
-                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#3730a3", marginBottom: 6 }}>Paste Seller R Nonce (optional)</Text>
+                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#3730a3", marginBottom: 6 }}>Paste Seller Verification</Text>
                       <Text style={{ fontSize: 10, color: "#4338ca", marginBottom: 8 }}>Only needed if auto-detection fails. Seller sends via DM.</Text>
                       <TextInput style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#a5b4fc", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: "monospace", color: "#1c1917" }} placeholder="02abc...def (66 hex chars)" placeholderTextColor="#a8a29e" onChangeText={async (txt) => { const p = parseClipboard(txt); const rVal = p.buyerR || p.sig || txt.trim(); if (rVal.length >= 60 && (rVal.startsWith("02") || rVal.startsWith("03"))) { await AsyncStorage.setItem("kv_manual_counterparty_r_" + (contract.agreementId || ""), rVal); console.log("[Buyer] Saved counterparty R:", rVal.slice(0,20)); } }} autoCapitalize="none" autoCorrect={false} />
                     </View>
@@ -3609,7 +3609,7 @@ function parseClipboard(raw: string): {
                       <Text style={{ fontSize: 13, fontWeight: "bold", color: "#92400e", marginBottom: 6 }}>Your Nonce (R) ? Share with Buyer</Text>
                       <Text style={{ fontSize: 10, color: "#b45309", marginBottom: 8 }}>If buyer cannot find your R automatically, copy and send via DM</Text>
                       <TouchableOpacity style={{ backgroundColor: "#4f46e5", borderRadius: 8, padding: 10, alignItems: "center" }} onPress={async () => { try { const saved = await AsyncStorage.getItem("kv_frost_nonce_" + (contract.agreementId || "")); if (saved) { const n = JSON.parse(saved); const clipMod = await import("expo-clipboard"); const Clipboard = clipMod.default || clipMod; await Clipboard.setStringAsync(n.R_hex || ""); Alert.alert("Copied!", "Your R nonce copied. Send to buyer via DM."); } else { Alert.alert("No Nonce", "Nonce not found yet."); } } catch (e) { Alert.alert("Error", String(e)); } }}>
-                        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce</Text>
+                        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My Verification</Text>
                       </TouchableOpacity>
                     </View>
                     
@@ -3642,19 +3642,19 @@ function parseClipboard(raw: string): {
             {/* Seller Release Bar */}
             {(step === 4 || step === 5) && role === 'seller' && (
               <View style={{ backgroundColor: '#eef2ff', borderRadius: 8, padding: 12, marginTop: 10, borderWidth: 1, borderColor: '#a5b4fc' }}>
-                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#059669', marginBottom: 6 }}>Paste Buyer R Nonce (optional)</Text>
+                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#059669', marginBottom: 6 }}>Paste Buyer Verification</Text>
                 <TextInput
                   style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#6ee7b7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 10 }}
-                  placeholder="Paste buyer R nonce (starts with 02 or 03)..."
+                  placeholder="Paste buyer verification code here..."
                   placeholderTextColor="#a8a29e"
                   onChangeText={async (txt) => { const v = txt.trim(); if (v.length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), v); console.log('[Seller] Saved manual buyer R:', v.slice(0,20)); } }}
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
-                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#3730a3', marginBottom: 6 }}>Paste Buyer's Release Key</Text>
+                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#3730a3', marginBottom: 6 }}>Paste Buyer Signature</Text>
                 <TextInput
                   style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
-                  placeholder="Paste encrypted partial sig from buyer..."
+                  placeholder="Paste buyer signature here..."
                   placeholderTextColor="#a8a29e"
                   onChangeText={async (txt) => {
                     const v = txt.trim();
@@ -3683,7 +3683,7 @@ function parseClipboard(raw: string): {
                     try {
                       setIsLoading(true);
                       const partialSig = contract.partialReleaseTx || '';
-                      if (!partialSig || partialSig.length < 10) { Alert.alert('Invalid', 'Paste the release key from the buyer'); setIsLoading(false); return; }
+                      if (!partialSig || partialSig.length < 10) { Alert.alert('Invalid', 'Paste the buyer signature'); setIsLoading(false); return; }
                       console.log('[Seller-Release] Got partial sig, co-signing...');
                       const w = await loadMainWallet();
                       if (!w || !contract.frostData) { Alert.alert('Error', 'Wallet or FROST not ready'); setIsLoading(false); return; }
@@ -3749,7 +3749,7 @@ function parseClipboard(raw: string): {
                     Alert.alert('Copied', 'Send this to the seller so they can release funds');
                   } catch {}
                 }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>?? Copy Release Info for Seller</Text>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>?? Copy Delivery Confirmation</Text>
               </TouchableOpacity>
             </View>
               <View style={styles.completeContainer}>
