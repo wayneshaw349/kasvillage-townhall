@@ -2537,16 +2537,6 @@ function parseClipboard(raw: string): {
               if (!proceedBuyer) return;
             }
           }
-          // Verify FROST UTXOs are pure P2PK
-          const frostUtxos = await (async () => { try { const r = await fetch((await SecureStore.getItemAsync('kaspa_network'))?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org' + '/addresses/' + contract.frostData?.address + '/utxos'); return await r.json(); } catch { return []; } })();
-          for (const u of frostUtxos) {
-            const spk = u.utxoEntry?.scriptPublicKey?.scriptPublicKey || '';
-            if (spk && !isPureP2PK(spk)) {
-              console.error('[COVENANT] ⚠️ FROST UTXO has covenant script!');
-              Alert.alert('⚠️ Safety Warning', 'FROST UTXO contains covenant script. Someone may be attempting a counterfeit transaction.');
-              return;
-            }
-          }
           console.log('[FROST-Canonical] Building TX: frost=', frostAddr.slice(0,20), 'buyer=', buyerAddr.slice(0,20), 'seller=', sellerAddr.slice(0,20));
         const canonTx = await buildCanonicalFrostTx({ frostAddress: frostAddr, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: buyerAmtS, sellerAmountSompi: sellerAmtS, network: frostNet });
         console.log('[FROST-Canonical] UTXOs:', canonTx.inputs.length, 'Outputs:', canonTx.outputs.length, 'Total:', canonTx.totalIn.toString());
