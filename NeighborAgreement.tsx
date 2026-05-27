@@ -114,7 +114,7 @@ import {// Types
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
 import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
-import { canonicalCommit, verifyCommitment, releaseExpiredCommitments, markLocked, isAlreadyCommitted } from './utxo_ledger';
+import { canonicalCommit, verifyCommitment, releaseExpiredCommitments, markLocked, isAlreadyCommitted, syncLedger } from './utxo_ledger';
 import { generateProposal, parseProposal, verifyProposalForMe, parseReleaseKey } from './kv_proposal';
 import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
@@ -128,6 +128,7 @@ import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus
 import { getUserStats } from './wallet_registration_v2';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+declare var global: any;
 const AGR_SESSION_KEY = 'kv_agreement_session';
 
 interface AgreementSession {
@@ -1513,7 +1514,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     sellerCommitmentKas: contract.sellerCommitmentKas,
                     R_hex: '',
                   };
-                  return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: dCtx2, nonce: '' });
+                  return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w2.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: dCtx2, nonce: '' });
                 } catch { return partialSig; }
               })(),
                     });
@@ -1638,12 +1639,23 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
           
           // Deterministic agreement ID from proposal variables
           const { sha256: sha256Agr } = require('@noble/hashes/sha256');
+          // Get UTXO tag for unique AGR ID
+          const propWalletForTag = await loadMainWallet();
+          let utxoTag = 'no-utxo';
+          if (propWalletForTag) {
+            try {
+              const ledgerResult = await syncLedger(propWalletForTag.address);
+              const firstFree = ledgerResult.utxos.find((u: any) => u.status === 'free');
+              if (firstFree) { utxoTag = firstFree.utxoKey; console.log('[AGR-ID] UTXO tag:', utxoTag); }
+            } catch (e) { console.warn('[AGR-ID] Ledger sync failed:', e); }
+          }
           const agrInput = new TextEncoder().encode(
             (contract.buyerPubkey || '') + 
             (contract.sellerPubkey || '') + 
             Math.floor(contract.itemPriceKas * 1e8).toString() +
             Math.floor(contract.sellerCommitmentKas * 1e8).toString() +
-            network
+            network +
+            utxoTag
 
 
           );
