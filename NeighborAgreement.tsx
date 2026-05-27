@@ -3716,7 +3716,9 @@ function parseClipboard(raw: string): {
                       const decrypted = parsed.isEncrypted ? (() => { try { return decryptPartialSig({ encrypted: rawSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return rawSig; } })() : rawSig;
                       console.log('[Seller-Release] Sig mode:', parsed.isEncrypted ? 'ENCRYPTED' : 'RAW', 'template:', txTemplateB64_2 ? 'YES' : 'NO', 'R:', parsed.buyerR ? 'YES' : 'NO');
                       // Get buyer R from TownHall
-                      let buyerR = '';
+                      let buyerR = parsed.buyerR || '';
+                      if (!buyerR) { try { const mr = await AsyncStorage.getItem('kv_manual_counterparty_r_' + (contract.agreementId || '')); if (mr) buyerR = mr; } catch {} }
+                      console.log('[Seller-Release] buyerR source:', buyerR ? (parsed.buyerR ? 'PASTE' : 'STORAGE') : 'NONE', buyerR.slice(0,20));
                       try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
                       if (!buyerR) {
                         try { const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["PartialSig"] }]) { edges { node { tags { name value } } } } }';
