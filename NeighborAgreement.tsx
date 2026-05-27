@@ -3081,6 +3081,16 @@ function parseClipboard(raw: string): {
                     onChangeText={async (txt) => {
                       const v = txt.trim();
                       // Check if KV proposal format
+                      // Universal: detect what was pasted
+                      const clipData = parseClipboard(v);
+                      if (clipData.sig && clipData.sig.length >= 128) {
+                        // This is a release key, not a proposal
+                        if (clipData.buyerR && clipData.buyerR.length >= 60) { await AsyncStorage.setItem("kv_manual_counterparty_r_" + (contract.agreementId || ""), clipData.buyerR); }
+                        const sigWithTmpl = (clipData.sig || "") + (clipData.template ? "|" + clipData.template : "");
+                        setContract(prev => ({ ...prev, partialReleaseTx: sigWithTmpl }));
+                        Alert.alert("Release Key Detected", "Buyer release info saved. Go to Release Funds to complete.");
+                        return;
+                      }
                       if (v.startsWith("KV|")) {
                         try {
                           const { parseProposal } = require("./kv_proposal");
@@ -3548,7 +3558,7 @@ function parseClipboard(raw: string): {
                     </TouchableOpacity>
                     <Text style={{ fontSize: 13, fontWeight: "bold", color: "#3730a3", marginBottom: 6 }}>Paste Seller R Nonce (optional)</Text>
                       <Text style={{ fontSize: 10, color: "#4338ca", marginBottom: 8 }}>Only needed if auto-detection fails. Seller sends via DM.</Text>
-                      <TextInput style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#a5b4fc", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: "monospace", color: "#1c1917" }} placeholder="02abc...def (66 hex chars)" placeholderTextColor="#a8a29e" onChangeText={async (txt) => { const trimmed = txt.trim(); if (trimmed.length === 66 && (trimmed.startsWith("02") || trimmed.startsWith("03"))) { await AsyncStorage.setItem("kv_manual_counterparty_r_" + (contract.agreementId || ""), trimmed); console.log("[FROST-2R] Manual R saved:", trimmed.slice(0,20)); } }} autoCapitalize="none" autoCorrect={false} />
+                      <TextInput style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#a5b4fc", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: "monospace", color: "#1c1917" }} placeholder="02abc...def (66 hex chars)" placeholderTextColor="#a8a29e" onChangeText={async (txt) => { const p = parseClipboard(txt); const rVal = p.buyerR || p.sig || txt.trim(); if (rVal.length >= 60 && (rVal.startsWith("02") || rVal.startsWith("03"))) { await AsyncStorage.setItem("kv_manual_counterparty_r_" + (contract.agreementId || ""), rVal); console.log("[Buyer] Saved counterparty R:", rVal.slice(0,20)); } }} autoCapitalize="none" autoCorrect={false} />
                     </View>
                     <TouchableOpacity
                       style={[styles.successBtn, isLoading && styles.primaryBtnDisabled]}
