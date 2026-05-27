@@ -1746,9 +1746,6 @@ function parseClipboard(raw: string): {
           // Covenant safety check on FROST address
         const frostScriptCheck = '20' + (contract.frostData?.aggregatedPubkey || '').replace(/^02|^03/, '') + 'ac';
         if (!isPureP2PK(frostScriptCheck)) { console.error('[COVENANT] ⚠️ FROST address has non-standard script!'); await new Promise((resolve) => Alert.alert('⚠️ Covenant Detected', 'FROST address contains a non-standard script. This may be a programmed UTXO that could claw back funds.\n\nProceed at your own risk.', [{ text: 'Stop (Recommended)', style: 'cancel', onPress: () => resolve(false) }, { text: 'I understand, continue', style: 'destructive', onPress: () => resolve(true) }])).then(ok => { if (!ok) return; }); }
-        // Covenant safety check on FROST address
-        const frostScriptCheck = '20' + (contract.frostData?.aggregatedPubkey || '').replace(/^02|^03/, '') + 'ac';
-        if (!isPureP2PK(frostScriptCheck)) { console.error('[COVENANT] ⚠️ FROST address has non-standard script!'); Alert.alert('⚠️ Safety Warning', 'FROST address contains non-standard script. Transaction aborted for your protection.'); return; }
         console.log('[Neighbor] Derived FROST address:', frostData.address);
           console.log('[Neighbor] Verification code:', verificationCode);
           
