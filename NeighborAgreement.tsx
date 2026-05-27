@@ -987,6 +987,72 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
 
   // Inline canonicalVerify REMOVED ? using module import from canonical_agreement.ts
 
+
+// ============================================================================
+// UNIVERSAL CLIPBOARD PARSER
+// Accepts any paste format and extracts all fields
+// ============================================================================
+function parseClipboard(raw: string): {
+  agrId?: string;
+  buyerR?: string;
+  sig?: string;
+  template?: string;
+  kvProposal?: string;
+  isEncrypted: boolean;
+} {
+  const v = raw.trim();
+  const result: any = { isEncrypted: false };
+  
+  // KV proposal format: KV|AGR_...|addr|addr|...
+  if (v.startsWith('KV|')) {
+    result.kvProposal = v;
+    const parts = v.split('|');
+    if (parts[1]) result.agrId = parts[1];
+    if (parts[7]) result.buyerR = parts[7];
+    return result;
+  }
+  
+  // Multi-line format: AGR: ... R: ... SIG: ...
+  const agrMatch = v.match(/AGR:\s*(AGR_[0-9a-f]+)/i);
+  const rMatch = v.match(/R:\s*([0-9a-f]{60,130})/i);
+  const sigMatch = v.match(/SIG:\s*(.+)/is);
+  
+  if (agrMatch) result.agrId = agrMatch[1].trim();
+  if (rMatch) result.buyerR = rMatch[1].trim();
+  if (sigMatch) {
+    let sigRaw = sigMatch[1].trim();
+    // Remove trailing "Seller: press..." text
+    sigRaw = sigRaw.replace(/\nSeller:.*/is, '').trim();
+    // Split template from sig
+    const pipeIdx = sigRaw.indexOf('|');
+    if (pipeIdx > 0) {
+      result.sig = sigRaw.slice(0, pipeIdx);
+      result.template = sigRaw.slice(pipeIdx + 1);
+    } else {
+      result.sig = sigRaw;
+    }
+    // Detect if encrypted (raw hex is all hex chars, 128-256 len)
+    result.isEncrypted = !/^[0-9a-f]+$/i.test(result.sig) || result.sig.length > 256;
+  }
+  
+  // Single value: could be AGR ID, raw sig, or encrypted sig
+  if (!agrMatch && !rMatch && !sigMatch) {
+    if (v.startsWith('AGR_')) result.agrId = v;
+    else {
+      const pipeIdx = v.indexOf('|');
+      if (pipeIdx > 0) {
+        result.sig = v.slice(0, pipeIdx);
+        result.template = v.slice(pipeIdx + 1);
+      } else {
+        result.sig = v;
+      }
+      result.isEncrypted = !/^[0-9a-f]+$/i.test(result.sig || '') || (result.sig || '').length > 256;
+    }
+  }
+  
+  return result;
+}
+
   const [contract, setContract] = useState<Contract>({
     itemPriceKas: initialCoupon?.discountedKaspa || 0,
     sellerCommitmentKas: 0,
@@ -3615,12 +3681,15 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                       // getFrostR imported statically
                       // AsyncStorage imported statically
                       const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
-                      // Split template from sig before decrypt
-                      let encSig2 = partialSig || '';
-                      let txTemplateB64_2 = '';
-                      const pipePos2 = encSig2.indexOf('|');
-                      if (pipePos2 > 0) { txTemplateB64_2 = encSig2.slice(pipePos2 + 1); encSig2 = encSig2.slice(0, pipePos2); }
-                      const decrypted = (() => { try { return decryptPartialSig({ encrypted: encSig2, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return encSig2; } })();
+                      // Universal parse of pasted data
+                      const parsed = parseClipboard(partialSig || '');
+                      let txTemplateB64_2 = parsed.template || '';
+                      const rawSig = parsed.sig || '';
+                      // Save buyer R if found in paste
+                      if (parsed.buyerR && parsed.buyerR.length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), parsed.buyerR); console.log('[Seller-Release] Auto-extracted R:', parsed.buyerR.slice(0,20)); }
+                      // Decrypt only if encrypted, otherwise use raw
+                      const decrypted = parsed.isEncrypted ? (() => { try { return decryptPartialSig({ encrypted: rawSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return rawSig; } })() : rawSig;
+                      console.log('[Seller-Release] Sig mode:', parsed.isEncrypted ? 'ENCRYPTED' : 'RAW', 'template:', txTemplateB64_2 ? 'YES' : 'NO', 'R:', parsed.buyerR ? 'YES' : 'NO');
                       // Get buyer R from TownHall
                       let buyerR = '';
                       try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
