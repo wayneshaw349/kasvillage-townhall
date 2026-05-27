@@ -127,6 +127,7 @@ import { secp256k1 as secpCurve } from '@noble/curves/secp256k1';
 import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave, postFrostR, getFrostR, listProposedAgreements, submitPartialSig } from './townhall_client';
 import { getUserStats } from './wallet_registration_v2';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 
 declare var global: any;
 const AGR_SESSION_KEY = 'kv_agreement_session';
@@ -3359,7 +3360,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                             verificationCode: contract.verificationCode || '',
                             description: contract.itemDescription || '',
                           });
-                          import('expo-clipboard').then(mod => (mod.default || mod).setStringAsync(shareText)).catch(() => {});
+                          Clipboard.setStringAsync(shareText);
                           Alert.alert('Copied!', 'Agreement details copied to clipboard');
                         }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 10, marginTop: 8, alignItems: 'center' }}>
                           <Text style={{ color: '#fff', fontSize: rs.font(11), fontWeight: '600' }}>Copy All to Clipboard</Text>
@@ -3473,10 +3474,10 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                     </View>
                     
                     <View style={{ backgroundColor: "#eef2ff", borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: "#a5b4fc" }}>
-                      <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = (await import('expo-clipboard')).default; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
+                      <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
                       <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce (Buyer)</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = (await import('expo-clipboard')).default; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
+                    <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
                       <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce (Buyer)</Text>
                     </TouchableOpacity>
                     <Text style={{ fontSize: 13, fontWeight: "bold", color: "#3730a3", marginBottom: 6 }}>Paste Seller R Nonce (optional)</Text>
@@ -3664,7 +3665,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                 style={{ backgroundColor: '#22c55e', paddingVertical: 8, borderRadius: 6, marginTop: 8, alignItems: 'center' }}
                 onPress={async () => {
                   try {
-                    const clipMod = await import('expo-clipboard'); const Clipboard = clipMod.default || clipMod;
+                    // Clipboard imported statically
                     const myR = await (async () => { try { const s = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (s) return JSON.parse(s).R_hex || ''; } catch {} return ''; })(); await Clipboard.setStringAsync('AGR: ' + (contract.agreementId || '') + '\nR: ' + myR + '\nSIG: ' + (contract.partialReleaseTx || '') + '\nSeller: press Check for Release');
                     Alert.alert('Copied', 'Send this to the seller so they can release funds');
                   } catch {}
