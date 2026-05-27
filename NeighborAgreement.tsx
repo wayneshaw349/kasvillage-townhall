@@ -3275,7 +3275,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                             <Text selectable style={{ fontSize: rs.font(24), fontFamily: 'monospace', fontWeight: '900', color: '#312e81', letterSpacing: 6, textAlign: 'center' }}>{contract.verificationCode}</Text>
                           </View>
                         )}
-                        <TouchableOpacity onPress={() => { 
+                        <TouchableOpacity onPress={async () => { 
                           // Generate KV proposal clipboard format
                           const buyerR_saved = await (async () => { try { const s = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); return s ? JSON.parse(s).R_hex || '' : ''; } catch { return ''; } })();
                           const shareText = generateProposal({
