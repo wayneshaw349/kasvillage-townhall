@@ -40,6 +40,7 @@ export interface LedgerEntry {
   role?: 'buyer' | 'seller'; // canonical role in agreement
   pubkey?: string;           // my pubkey (proves ownership)
   commitHash?: string;       // SHA256(txId + index + agreementId + role + pubkey)
+  covenantWarning?: boolean; // true if script is NOT standard P2PK
 }
 
 export interface SpendableResult {
@@ -52,6 +53,38 @@ export interface SpendableResult {
 }
 
 // ============================================================================
+
+// ============================================================================
+// COVENANT DETECTION
+// ============================================================================
+// Pure P2PK on Kaspa is always: 20{32-byte x-only pubkey}ac = 68 hex chars
+// Anything else is a covenant or unknown script type
+// ============================================================================
+
+export function isPureP2PK(scriptPubKey: string): boolean {
+  return scriptPubKey.length === 68 
+    && scriptPubKey.startsWith('20') 
+    && scriptPubKey.endsWith('ac');
+}
+
+export type UtxoSafety = 'pure' | 'covenant' | 'unknown';
+
+export function classifyUtxo(scriptPubKey: string): { safety: UtxoSafety; reason: string } {
+  if (!scriptPubKey || scriptPubKey.length === 0) {
+    return { safety: 'unknown', reason: 'Empty script' };
+  }
+  if (isPureP2PK(scriptPubKey)) {
+    return { safety: 'pure', reason: 'Standard P2PK (20{pubkey}ac)' };
+  }
+  if (scriptPubKey.length > 68) {
+    return { safety: 'covenant', reason: 'Script contains extra opcodes (' + scriptPubKey.length + ' chars vs 68 standard). DO NOT accept as payment.' };
+  }
+  if (scriptPubKey.length < 68) {
+    return { safety: 'unknown', reason: 'Script too short (' + scriptPubKey.length + ' chars). Non-standard.' };
+  }
+  return { safety: 'unknown', reason: 'Non-standard script format' };
+}
+
 // STORAGE
 // ============================================================================
 
@@ -113,12 +146,16 @@ export async function syncLedger(address: string): Promise<SpendableResult> {
 
     if (!ledger.has(key)) {
       // New UTXO from L1 — mark as free
+      const spk = u.utxoEntry?.scriptPublicKey?.scriptPublicKey || u.utxoEntry?.scriptPublicKey || '';
+      const covenantCheck = isPureP2PK(spk);
+      if (!covenantCheck) { console.warn('[UTXO-Safety] ⚠️ Non-standard script detected:', key, 'script:', spk.slice(0,20) + '...', 'len:', spk.length); }
       ledger.set(key, {
         utxoKey: key,
         txId,
         index,
         amountSompi: String(amount),
         status: 'free',
+        covenantWarning: !covenantCheck,
       });
     }
   }
