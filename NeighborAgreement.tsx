@@ -1741,6 +1741,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               try {
                 const proposeAmount = role === 'buyer' ? BigInt(Math.floor(contract.itemPriceKas * 1e8)) : BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
                 if (proposeAmount > 0n) {
+                  console.log("[UTXO-Debug] propWallet address:", propWallet?.address?.slice(0,30), "amount:", proposeAmount.toString());
+                  const debugResult = await syncLedger(propWallet?.address || ""); console.log("[UTXO-Debug] syncLedger:", debugResult.utxos.length, "free,", debugResult.allEntries.length, "total, spendable:", Number(debugResult.spendableBalance)/1e8, "committed:", Number(debugResult.committedBalance)/1e8);
                   const tagResult = await canonicalCommit(propWallet?.address || '', proposeAmount, agreementId, 'buyer', myPubkey || '');
                   console.log('[UTXO-Tag] Buyer proposal tagged:', tagResult.success, 'hashes:', tagResult.commitHashes?.length);
                 }
@@ -3001,6 +3003,47 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
                   </View>
                 )}
 
+                {/* PASTE BUYER PROPOSAL */}
+                <View style={{ backgroundColor: "#f0f9ff", borderRadius: 8, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: "#93c5fd" }}>
+                  <Text style={{ fontSize: 12, fontWeight: "bold", color: "#1e40af", marginBottom: 6 }}>Paste Buyer Proposal</Text>
+                  <TextInput
+                    style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#93c5fd", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: "monospace", color: "#1c1917", minHeight: 40 }}
+                    placeholder="Paste KV|AGR_...|buyerAddr|... or AGR_ID here"
+                    placeholderTextColor="#a8a29e"
+                    multiline
+                    onChangeText={async (txt) => {
+                      const v = txt.trim();
+                      // Check if KV proposal format
+                      if (v.startsWith("KV|")) {
+                        try {
+                          const { parseProposal } = require("./kv_proposal");
+                          const parsed = parseProposal(v);
+                          if (parsed) {
+                            console.log("[Seller-Paste] Parsed KV proposal:", parsed.agrId, parsed.description);
+                            Alert.alert("Proposal Found", "Item: " + (parsed.description || "N/A") + "\nAmount: " + (Number(parsed.buyerAmountSompi || 0)/1e8) + " KAS\nCode: " + (parsed.verificationCode || ""), [
+                              { text: "Cancel", style: "cancel" },
+                              { text: "Accept", onPress: () => {
+                                // Find matching agreement in inbox or create from parsed data
+                                const match = inboxAgreements.find(a => (a.agreementId || a.agreement_id) === parsed.agrId);
+                                if (match) { handleAcceptFromInbox(match); }
+                                else {
+                                  // Direct accept from clipboard data
+                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.sellerAddress || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } };
+                                  handleAcceptFromInbox(fakeAgr);
+                                }
+                              }}
+                            ]);
+                          }
+                        } catch(e) { console.warn("[Seller-Paste] Parse failed:", e); }
+                      } else if (v.startsWith("AGR_") && v.length >= 10) {
+                        // Direct AGR ID entry (existing flow)
+                        console.log("[Seller-Paste] AGR ID entered:", v);
+                      }
+                    }}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
                 {inboxAgreements.length === 0 && !inboxLoading && (
                   <View style={{ backgroundColor: '#F5F5F4', borderRadius: 8, padding: 20, alignItems: 'center' }}>
                     <Text style={{ color: '#78716C', fontSize: rs.font(12) }}>No pending proposals</Text>
