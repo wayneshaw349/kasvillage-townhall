@@ -114,7 +114,7 @@ import {// Types
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
 import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
-import { canonicalCommit, verifyCommitment, releaseExpiredCommitments, markLocked, isAlreadyCommitted, syncLedger } from './utxo_ledger';
+import { isPureP2PK, canonicalCommit, verifyCommitment, releaseExpiredCommitments, markLocked, isAlreadyCommitted, syncLedger } from './utxo_ledger';
 import { generateProposal, parseProposal, verifyProposalForMe, parseReleaseKey } from './kv_proposal';
 import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
