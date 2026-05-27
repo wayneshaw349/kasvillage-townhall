@@ -1743,7 +1743,13 @@ function parseClipboard(raw: string): {
             contract.sellerPubkey
           );
           
-          console.log('[Neighbor] Derived FROST address:', frostData.address);
+          // Covenant safety check on FROST address
+        const frostScriptCheck = '20' + (contract.frostData?.aggregatedPubkey || '').replace(/^02|^03/, '') + 'ac';
+        if (!isPureP2PK(frostScriptCheck)) { console.error('[COVENANT] ⚠️ FROST address has non-standard script!'); await new Promise((resolve) => Alert.alert('⚠️ Covenant Detected', 'FROST address contains a non-standard script. This may be a programmed UTXO that could claw back funds.\n\nProceed at your own risk.', [{ text: 'Stop (Recommended)', style: 'cancel', onPress: () => resolve(false) }, { text: 'I understand, continue', style: 'destructive', onPress: () => resolve(true) }])).then(ok => { if (!ok) return; }); }
+        // Covenant safety check on FROST address
+        const frostScriptCheck = '20' + (contract.frostData?.aggregatedPubkey || '').replace(/^02|^03/, '') + 'ac';
+        if (!isPureP2PK(frostScriptCheck)) { console.error('[COVENANT] ⚠️ FROST address has non-standard script!'); Alert.alert('⚠️ Safety Warning', 'FROST address contains non-standard script. Transaction aborted for your protection.'); return; }
+        console.log('[Neighbor] Derived FROST address:', frostData.address);
           console.log('[Neighbor] Verification code:', verificationCode);
           
           setContract(prev => ({
@@ -2524,7 +2530,27 @@ function parseClipboard(raw: string): {
         const sellerAddr = aggregateToAddress('02' + sellerXOnly, frostNet);
         const buyerAmtS = BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8));
         const sellerAmtS = BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8));
-        console.log('[FROST-Canonical] Building TX: frost=', frostAddr.slice(0,20), 'buyer=', buyerAddr.slice(0,20), 'seller=', sellerAddr.slice(0,20));
+        // Verify FROST UTXOs are pure P2PK
+          const frostUtxos = await (async () => { try { const r = await fetch((await SecureStore.getItemAsync('kaspa_network'))?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org' + '/addresses/' + contract.frostData?.address + '/utxos'); return await r.json(); } catch { return []; } })();
+          for (const u of frostUtxos) {
+            const spk = u.utxoEntry?.scriptPublicKey?.scriptPublicKey || '';
+            if (spk && !isPureP2PK(spk)) {
+              console.error('[COVENANT] ⚠️ FROST UTXO has covenant script!');
+              const proceedBuyer = await new Promise((resolve) => Alert.alert('⚠️ Covenant Detected', 'A UTXO in the FROST address contains a non-standard script. Someone may have sent a programmed UTXO that could be clawed back.\n\nDo you want to continue?', [{ text: 'Stop (Recommended)', style: 'cancel', onPress: () => resolve(false) }, { text: 'I understand the risk', style: 'destructive', onPress: () => resolve(true) }]));
+              if (!proceedBuyer) return;
+            }
+          }
+          // Verify FROST UTXOs are pure P2PK
+          const frostUtxos = await (async () => { try { const r = await fetch((await SecureStore.getItemAsync('kaspa_network'))?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org' + '/addresses/' + contract.frostData?.address + '/utxos'); return await r.json(); } catch { return []; } })();
+          for (const u of frostUtxos) {
+            const spk = u.utxoEntry?.scriptPublicKey?.scriptPublicKey || '';
+            if (spk && !isPureP2PK(spk)) {
+              console.error('[COVENANT] ⚠️ FROST UTXO has covenant script!');
+              Alert.alert('⚠️ Safety Warning', 'FROST UTXO contains covenant script. Someone may be attempting a counterfeit transaction.');
+              return;
+            }
+          }
+          console.log('[FROST-Canonical] Building TX: frost=', frostAddr.slice(0,20), 'buyer=', buyerAddr.slice(0,20), 'seller=', sellerAddr.slice(0,20));
         const canonTx = await buildCanonicalFrostTx({ frostAddress: frostAddr, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: buyerAmtS, sellerAmountSompi: sellerAmtS, network: frostNet });
         console.log('[FROST-Canonical] UTXOs:', canonTx.inputs.length, 'Outputs:', canonTx.outputs.length, 'Total:', canonTx.totalIn.toString());
         const allPartials: string[] = [];
@@ -3718,6 +3744,35 @@ function parseClipboard(raw: string): {
                       const buyerSig = cpAllS2.length > 0 ? { R_agg_x_hex: sigBytes.slice(0, 64), s_hex: cpAllS2.join('') + (txTemplateB64_2 ? '|' + txTemplateB64_2 : '') } : undefined;
                       const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
                       if (!myNonceJson || !buyerR) { Alert.alert('Missing Data', 'Nonce or buyer R not found. Try again.'); setIsLoading(false); return; }
+                      // Covenant safety: verify all outputs are pure P2PK
+                      if (txTemplateB64_2) {
+                        try {
+                          const tmplCheck = JSON.parse(atob(txTemplateB64_2));
+                          for (const o of (tmplCheck.o || [])) {
+                            if (!isPureP2PK(o.s)) {
+                              console.error('[COVENANT] ⚠️ Output script is not pure P2PK:', o.s?.slice(0,20));
+                              const proceed = await new Promise((resolve) => Alert.alert('⚠️ Covenant Detected', 'Release TX output contains a non-standard script. This is NOT a normal payment — it may have hidden conditions that claw back your funds.\n\nDo you want to continue?', [{ text: 'Stop (Recommended)', style: 'cancel', onPress: () => resolve(false) }, { text: 'I understand the risk', style: 'destructive', onPress: () => resolve(true) }]));
+                              if (!proceed) { setIsLoading(false); return; }
+                            }
+                          }
+                          console.log('[COVENANT] All outputs are pure P2PK ✓');
+                        } catch (e) { console.warn('[COVENANT] Template parse failed:', e); }
+                      }
+                      // Covenant safety: verify all outputs are pure P2PK
+                      if (txTemplateB64_2) {
+                        try {
+                          const tmplCheck = JSON.parse(atob(txTemplateB64_2));
+                          for (const o of (tmplCheck.o || [])) {
+                            if (!isPureP2PK(o.s)) {
+                              console.error('[COVENANT] ⚠️ Output script is not pure P2PK:', o.s?.slice(0,20));
+                              Alert.alert('⚠️ Safety Warning', 'Release TX contains a covenant output. Your funds could be clawed back. Transaction aborted.');
+                              setIsLoading(false);
+                              return;
+                            }
+                          }
+                          console.log('[COVENANT] All outputs are pure P2PK ✓');
+                        } catch (e) { console.warn('[COVENANT] Template parse failed:', e); }
+                      }
                       console.log('[Seller-Release] 2-round: buyerR=', buyerR.slice(0,20), 'buyerSig=', buyerSig ? 'yes' : 'no');
                       const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: w.address });
                       if (result.success && result.txId) {
