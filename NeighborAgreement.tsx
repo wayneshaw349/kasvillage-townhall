@@ -1695,6 +1695,15 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
               setIsLoading(false);
               return;
             }
+            // Also check TownHall for existing agreement
+            try {
+              const thCheck = await getAgreementStatus(agreementId);
+              if (thCheck && !thCheck.error) {
+                console.log('[TH-Guard] Agreement already exists on TownHall:', agreementId, 'status:', thCheck.status);
+                setIsLoading(false);
+                return;
+              }
+            } catch(thErr) { console.log('[TH-Guard] TownHall check failed (proceeding):', thErr); }
             console.log('[Neighbor] Proposing to TownHall:', agreementId, 'frost:', frostData.address, 'DAA:', currentDaa);
             const proposeResult = await proposeAgreement({
               agreementId: agreementId,
