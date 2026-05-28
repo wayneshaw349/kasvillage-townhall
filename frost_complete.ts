@@ -46,7 +46,7 @@ export function generateFrostNonce(params: {
   // MuSig tweak: d = a_i * sk_raw (mod N)
   const myPubkey = bytesToHex((secp as any).getPublicKey(hexToBytes(privateKeyHex), true));
   const [_pk1, _pk2] = [frostAddress.pubkeyA, frostAddress.pubkeyB].sort();
-  const _L = sha256(new TextEncoder().encode(_pk1 + _pk2 + (frostAddress.sessionId || '')));
+  const _L = sha256(new Uint8Array([...hexToBytes(_pk1), ...hexToBytes(_pk2)]));
   const _myA = BigInt('0x' + bytesToHex(sha256(new Uint8Array([..._L, ...hexToBytes(myPubkey === _pk1 ? _pk1 : _pk2)])))) % N;
   const sk_tweaked = (sk_raw * _myA) % N;
   let d = sk_tweaked;
@@ -278,7 +278,7 @@ const KVF_PREFIX = 'KVF';
 export function deriveAggregatePubkey(pubkeyA: string, pubkeyB: string, agreementId?: string): string {
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
   // MuSig-style key aggregation with real EC point math
-  const L = sha256(new TextEncoder().encode(pk1 + pk2 + (agreementId || '')));
+  const L = sha256(new Uint8Array([...hexToBytes(pk1), ...hexToBytes(pk2)]));
   const a1 = sha256(new Uint8Array([...L, ...hexToBytes(pk1)]));
   const a2 = sha256(new Uint8Array([...L, ...hexToBytes(pk2)]));
   const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
@@ -436,7 +436,7 @@ export function createPartialSigLocal(params: {
   // MuSig tweak: d = a_i * sk_raw (mod N)
   const _myPub = bytesToHex((secp as any).getPublicKey(hexToBytes(privateKeyHex), true));
   const [_pk1, _pk2] = [frostAddress.pubkeyA, frostAddress.pubkeyB].sort();
-  const _L = sha256(new TextEncoder().encode(_pk1 + _pk2 + (frostAddress.sessionId || '')));
+  const _L = sha256(new Uint8Array([...hexToBytes(_pk1), ...hexToBytes(_pk2)]));
   const _myA = BigInt('0x' + bytesToHex(sha256(new Uint8Array([..._L, ...hexToBytes(_myPub === _pk1 ? _pk1 : _pk2)])))) % N;
   const sk_tweaked = (sk_raw * _myA) % N;
   let d = sk_tweaked;
