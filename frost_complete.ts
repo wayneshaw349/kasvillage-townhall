@@ -1218,8 +1218,12 @@ export async function completeFrost2Round(params: {
       } else {
         canonTx = await buildCanonicalFrostTx({ frostAddress: params.frostAddress.address, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: bAmt, sellerAmountSompi: sAmt, network: params.frostAddress.network });
       }
+      // Override sighashes with buyer's if available in template
+      const buyerSighashes: string[] = txTemplate?.h || [];
+      if (buyerSighashes.length > 0) { console.log('[FROST-Canonical-Seller] Using buyer sighashes from template:', buyerSighashes.length); }
       const result = await submitCanonicalFrostTx({
         tx: canonTx,
+        buyerSighashes,
         perInputSigner: (sighashHex: string, inputIndex: number): string => {
           const myPartialN = computeFrostPartialS({ myNonce, counterpartyR_hex: params.counterpartyR_hex, frostAddress: params.frostAddress, sighash_hex: sighashHex });
           const mySN = BigInt('0x' + myPartialN.s_hex);

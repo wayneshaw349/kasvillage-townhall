@@ -114,7 +114,7 @@ import {// Types
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
 import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
-import { isPureP2PK, canonicalCommit, verifyCommitment, releaseExpiredCommitments, markLocked, isAlreadyCommitted, syncLedger } from './utxo_ledger';
+import { isPureP2PK, canonicalCommit, verifyCommitment, releaseExpiredCommitments, releaseCommitment, markLocked, isAlreadyCommitted, syncLedger } from './utxo_ledger';
 import { generateProposal, parseProposal, verifyProposalForMe, parseReleaseKey } from './kv_proposal';
 import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
@@ -2548,11 +2548,12 @@ function parseClipboard(raw: string): {
           const sh = canonicalSighash(canonTx, idx);
           const ps = computeFrostPartialS({ myNonce, counterpartyR_hex: counterpartyR, frostAddress: contract.frostData, sighash_hex: b2h(sh) });
           allPartials.push(ps.s_hex);
+          allSighashes.push(b2h(sh));
           if (idx === 0) { partialS = ps; console.log('[FROST-Canonical] R_agg_x:', ps.R_agg_x_hex.slice(0,20)); }
           console.log('[FROST-Canonical] Input', idx, 'sighash:', b2h(sh).slice(0,20), 's:', ps.s_hex.slice(0,16));
         }
         // Serialize full TX template so seller builds identical TX
-        const txTemplate = { u: canonTx.utxos.map((u: any) => ({ t: u.outpoint.transactionId, i: u.outpoint.index, a: u.utxoEntry.amount, s: u.utxoEntry.scriptPublicKey.scriptPublicKey })), o: canonTx.outputs.map((o: any) => ({ v: o.value.toString(), s: b2h(o.script) })), f: canonTx.fee.toString() };
+        const txTemplate = { u: canonTx.utxos.map((u: any) => ({ t: u.outpoint.transactionId, i: u.outpoint.index, a: u.utxoEntry.amount, s: u.utxoEntry.scriptPublicKey.scriptPublicKey })), o: canonTx.outputs.map((o: any) => ({ v: o.value.toString(), s: b2h(o.script) })), f: canonTx.fee.toString(), h: allSighashes };
         const templateB64 = btoa(JSON.stringify(txTemplate));
         const sigHex = partialS.R_agg_x_hex + allPartials.join('') + '|' + templateB64;
         console.log('[FROST-Canonical] Packed', allPartials.length, 's values + TX template (' + txTemplate.u.length + ' inputs,' + txTemplate.o.length + ' outputs)');
@@ -2802,6 +2803,7 @@ function parseClipboard(raw: string): {
       [
         { text: 'Keep Going', style: 'cancel' },
         { text: 'Cancel Agreement', style: 'destructive', onPress: async () => {
+            try { await releaseCommitment(contract.agreementId || ''); console.log('[Cancel] Released UTXO tags for', contract.agreementId); } catch(e) { console.warn('[Cancel] Release failed:', e); }
           await archiveAgreementSession('cancelled');
           await clearAgreementSession();
           setStep(0);

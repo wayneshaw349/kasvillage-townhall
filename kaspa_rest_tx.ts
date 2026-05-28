@@ -618,13 +618,14 @@ export async function submitCanonicalFrostTx(params: {
   tx: CanonicalFrostTx;
   perInputSigner: (sighashHex: string, inputIndex: number) => string;
   network: string;
+  buyerSighashes?: string[];
 }): Promise<{ success: boolean; txId?: string; error?: string }> {
   const { tx, perInputSigner, network } = params;
   const apiBase = network === 'mainnet' ? 'https://api.kaspa.org' : (network === 'testnet-10' ? 'https://api-tn10.kaspa.org' : 'https://api-tn.kaspa.org');
 
   const signedInputs = tx.utxos.map((u: any, idx: number) => {
-    const sighash = canonicalSighash(tx, idx);
-    const sigHex = perInputSigner(bytesToHex(sighash), idx);
+    const sighash = params.buyerSighashes?.[idx] ? hexToBytes(params.buyerSighashes[idx]) : canonicalSighash(tx, idx);
+    const sigHex = perInputSigner(params.buyerSighashes?.[idx] || bytesToHex(sighash), idx);
     console.log('[FROST-Canonical] Input', idx, 'sighash:', bytesToHex(sighash).slice(0,20), 'sig:', sigHex.slice(0,20));
     const sb = hexToBytes(sigHex);
     const swt = new Uint8Array(sb.length + 1); swt.set(sb); swt[sb.length] = 0x01;
