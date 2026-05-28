@@ -1712,7 +1712,8 @@ function parseClipboard(raw: string): {
           let utxoTag = 'no-utxo';
           if (propWalletForTag) {
             try {
-              const ledgerResult = await syncLedger(propWalletForTag.address);
+              await releaseExpiredCommitments();
+            const ledgerResult = await syncLedger(propWalletForTag.address);
               const firstFree = ledgerResult.utxos.find((u: any) => u.status === 'free');
               if (firstFree) { utxoTag = firstFree.utxoKey; console.log('[AGR-ID] UTXO tag:', utxoTag); }
             } catch (e) { console.warn('[AGR-ID] Ledger sync failed:', e); }
@@ -3121,7 +3122,7 @@ function parseClipboard(raw: string): {
                                 if (match) { handleAcceptFromInbox(match); }
                                 else {
                                   // Direct accept from clipboard data
-                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } };
+                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.sellerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } };
                                   handleAcceptFromInbox(fakeAgr);
                                 }
                               }}
