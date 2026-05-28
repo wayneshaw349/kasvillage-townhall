@@ -2820,8 +2820,18 @@ function parseClipboard(raw: string): {
     <Modal visible={visible} animationType="slide" transparent>
       <View style={styles.overlay}>
         <View style={styles.modal}>
-              <Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text>
-            </TouchableOpacity>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+              <Text style={{ fontSize: 20, marginRight: 8 }}>🏠</Text>
+              <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1c1917" }}>Neighbor Agreement</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={{ padding: 4 }}><Text style={{ fontSize: 20, color: "#78716c" }}>×</Text></TouchableOpacity>
+          </View>
+          <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", paddingVertical: 4, gap: 6 }}>
+            <TouchableOpacity onPress={() => { if (step > 1) { setStep(1); } else { onClose(); } }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#2563eb", fontSize: 12, fontWeight: "bold" }}>{"< Back"}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={async () => { await clearAgreementSession(); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setRole(null); setAgreementType(null); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, description: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "" }); Alert.alert("Cleared", "Session reset"); }} style={{ padding: 8, backgroundColor: "#fee2e2", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "bold" }}>Reset</Text></TouchableOpacity>
+            <TouchableOpacity onPress={async () => { const keys = await AsyncStorage.getAllKeys(); const kvKeys = keys.filter((k) => k.startsWith("kv_") || k.startsWith("frost_") || k.startsWith("FROST_")); await AsyncStorage.multiRemove(kvKeys); await AsyncStorage.removeItem("kv_agreement_session"); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, description: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "" }); Alert.alert("Cleared", "All FROST state cleared (" + kvKeys.length + " keys)"); }} style={{ padding: 8, backgroundColor: "#fef3c7", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#92400e", fontSize: 10, fontWeight: "bold" }}>Clear All</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { setShowBalanceSheet(true); }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text></TouchableOpacity>
           </View>
           <Text style={{ fontSize: 10, color: "#78716c", textAlign: "center", paddingVertical: 4 }}>(Two-Party Collateral / Good Faith Deposit)</Text>
           <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled" onScrollBeginDrag={Keyboard.dismiss}>
