@@ -3749,21 +3749,6 @@ function parseClipboard(raw: string): {
                           console.log('[COVENANT] All outputs are pure P2PK ✓');
                         } catch (e) { console.warn('[COVENANT] Template parse failed:', e); }
                       }
-                      // Covenant safety: verify all outputs are pure P2PK
-                      if (txTemplateB64_2) {
-                        try {
-                          const tmplCheck = JSON.parse(atob(txTemplateB64_2));
-                          for (const o of (tmplCheck.o || [])) {
-                            if (!isPureP2PK(o.s)) {
-                              console.error('[COVENANT] ⚠️ Output script is not pure P2PK:', o.s?.slice(0,20));
-                              Alert.alert('⚠️ Safety Warning', 'Release TX contains a covenant output. Your funds could be clawed back. Transaction aborted.');
-                              setIsLoading(false);
-                              return;
-                            }
-                          }
-                          console.log('[COVENANT] All outputs are pure P2PK ✓');
-                        } catch (e) { console.warn('[COVENANT] Template parse failed:', e); }
-                      }
                       console.log('[Seller-Release] 2-round: buyerR=', buyerR.slice(0,20), 'buyerSig=', buyerSig ? 'yes' : 'no');
                       const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: w.address });
                       if (result.success && result.txId) {
