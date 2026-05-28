@@ -3121,7 +3121,7 @@ function parseClipboard(raw: string): {
                                 if (match) { handleAcceptFromInbox(match); }
                                 else {
                                   // Direct accept from clipboard data
-                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.sellerAddress || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } };
+                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } };
                                   handleAcceptFromInbox(fakeAgr);
                                 }
                               }}
