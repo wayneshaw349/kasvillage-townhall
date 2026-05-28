@@ -2820,20 +2820,6 @@ function parseClipboard(raw: string): {
     <Modal visible={visible} animationType="slide" transparent>
       <View style={styles.overlay}>
         <View style={styles.modal}>
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <Handshake size={rs.s(24)} color={COLORS.indigo900} />
-              <Text style={styles.headerTitle}>Neighbor Agreement</Text>
-            </View>
-            <TouchableOpacity onPress={() => { onClose(); }} style={styles.closeBtn}>
-              <X size={rs.s(24)} color={COLORS.stone400} />
-            </TouchableOpacity>
-          </View>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: "#e7e5e4" }}>
-            <TouchableOpacity onPress={() => { onClose(); }} style={{ flexDirection: "row", alignItems: "center", padding: 8 }}>
-              <Text style={{ color: "#4f46e5", fontSize: 14, fontWeight: "bold" }}>{"< Back"}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={async () => { await clearAgreementSession(); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setRole(null); setAgreementType(null); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, stipulations: "", itemDescription: "", expiryHours: 24 }); Alert.alert("Cleared", "Session reset"); }} style={{ padding: 8, backgroundColor: "#fee2e2", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "bold" }}>Reset</Text></TouchableOpacity><TouchableOpacity onPress={() => setIouModalVisible(true)} style={{ flexDirection: "row", alignItems: "center", padding: 8, backgroundColor: "#eff6ff", borderRadius: 8 }}>
               <Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text>
             </TouchableOpacity>
           </View>
