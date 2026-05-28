@@ -1114,10 +1114,7 @@ function parseClipboard(raw: string): {
   
   // Restore session if app was closed mid-agreement
   useEffect(() => {
-    // Guard: skip restore if flush hasn't run yet (old L hash sessions)
-    const _flushDone = await AsyncStorage.getItem('kv_frost_v').catch(() => null);
-    if (!_flushDone) { console.log('[Restore] Waiting for FLUSH-V2 migration...'); return; }
-    loadAgreementSession().then(session => {
+    (async () => { const _v = await AsyncStorage.getItem('kv_frost_v').catch(() => null); if (!_v) { console.log('[Restore] Skip - FLUSH-V2 pending'); return; } const session = await loadAgreementSession();
       if (session && session.step > 1) {
         console.log('[Neighbor] Restoring session at step', session.step);
         // Detect corrupted session: buyer === seller means wrong FROST address
@@ -1136,7 +1133,7 @@ function parseClipboard(raw: string): {
         if (session.counterpartyAddress) setCounterpartyAddress(session.counterpartyAddress);
         if (session.counterpartyKaspaAddr) setCounterpartyKaspaAddr(session.counterpartyKaspaAddr);
       }
-    });
+    })();
   }, []);
 
   const pComplete = (1 + userStats.successes) / (2 + userStats.successes + userStats.deadlocks);
