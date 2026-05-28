@@ -2543,6 +2543,7 @@ function parseClipboard(raw: string): {
         const canonTx = await buildCanonicalFrostTx({ frostAddress: frostAddr, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: buyerAmtS, sellerAmountSompi: sellerAmtS, network: frostNet });
         console.log('[FROST-Canonical] UTXOs:', canonTx.inputs.length, 'Outputs:', canonTx.outputs.length, 'Total:', canonTx.totalIn.toString());
         const allPartials: string[] = [];
+        const allSighashes: string[] = [];
         let partialS: any;
         for (let idx = 0; idx < canonTx.inputs.length; idx++) {
           const sh = canonicalSighash(canonTx, idx);
