@@ -974,7 +974,19 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   initialCoupon,
   userPubkey,
 }) => {
-  // AUTO_FLUSH: clear stale FROST state on mount
+  // AUTO_FLUSH: versioned migration for L hash fix (v2)
+  React.useEffect(() => { (async () => { try {
+    const ver = await AsyncStorage.getItem('kv_frost_v');
+    if (ver !== 'v2') {
+      await AsyncStorage.removeItem('kv_agreement_session');
+      await AsyncStorage.removeItem('kv_frost_active_list');
+      const keys = await AsyncStorage.getAllKeys();
+      const kv = keys.filter((k: string) => k.startsWith('kv_frost_') || k.startsWith('kv_agreed_') || k.startsWith('kv_manual_') || k.startsWith('frost_') || k.startsWith('FROST_'));
+      if (kv.length > 0) await AsyncStorage.multiRemove(kv);
+      await AsyncStorage.setItem('kv_frost_v', 'v2');
+      console.log('[FLUSH-V2] One-time migration done, cleared', kv.length, 'keys');
+    }
+  } catch(e) { console.warn('[FLUSH]', e); } })(); }, []);
   const [step, setStep] = useState(1);
   const [role, setRole] = useState<'buyer' | 'seller' | null>(null);
   const [agreementType, setAgreementType] = useState<'simple' | 'trade' | 'join' | null>(null);
@@ -1102,6 +1114,9 @@ function parseClipboard(raw: string): {
   
   // Restore session if app was closed mid-agreement
   useEffect(() => {
+    // Guard: skip restore if flush hasn't run yet (old L hash sessions)
+    const _flushDone = await AsyncStorage.getItem('kv_frost_v').catch(() => null);
+    if (!_flushDone) { console.log('[Restore] Waiting for FLUSH-V2 migration...'); return; }
     loadAgreementSession().then(session => {
       if (session && session.step > 1) {
         console.log('[Neighbor] Restoring session at step', session.step);
@@ -1165,7 +1180,25 @@ function parseClipboard(raw: string): {
         const bal = BigInt(data.balance || '0');
         console.log('[Background-FROST] Session:', session.contract.agreementId?.slice(0,12), 'FROST:', frostAddr.slice(0,20), 'Balance:', Number(bal)/1e8, 'Step:', session.step);
         // Also poll all active FROST entries
-        const allActive = await getFrostList();
+        let allActive = await getFrostList();
+        // If empty, try recovering from Arweave
+        if (allActive.length === 0) {
+          try {
+            const wallet = await loadMainWallet();
+            if (wallet) {
+              const myPk = '02' + wallet.address.split(':')[1].slice(0,64);
+              // Query Arweave for my agreements
+              const arAll = await queryAgreementsFromArweave({ network: 'testnet-10' });
+              const mine = arAll.filter((a: any) => (a.pubkey || '').startsWith(myPk.slice(0,16)) || (a.counterpartyPubkey || '').startsWith(myPk.slice(0,16)));
+              for (const a of mine.slice(0, 5)) {
+                const agrId = a.agreementId || a.agreement_id || '';
+                if (!agrId) continue;
+                allActive.push({ agrId, frostAddr: a.frostAddress || '', role: a.pubkey?.startsWith(myPk.slice(0,16)) ? 'buyer' : 'seller', step: 3, buyerAmount: (a.buyerAmountSompi || 0) / 1e8, sellerAmount: (a.sellerAmountSompi || 0) / 1e8, buyerPubkey: a.pubkey || '', sellerPubkey: a.counterpartyPubkey || '', description: a.description || agrId.slice(0,12), createdAt: Date.now() });
+              }
+              if (allActive.length > 0) console.log('[Recovery] Found', allActive.length, 'agreements from Arweave');
+            }
+          } catch (e) { console.warn('[Recovery] Arweave scan failed:', e); }
+        }
         const updatedList: FrostActiveEntry[] = [];
         for (const entry of allActive) {
           try {
