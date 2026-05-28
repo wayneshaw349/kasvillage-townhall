@@ -3043,7 +3043,8 @@ function parseClipboard(raw: string): {
                     style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#86efac', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
                     placeholder="Paste encrypted key from buyer..."
                     placeholderTextColor="#a8a29e"
-                    onChangeText={async (txt) => { const v = txt.trim(); const rMatch = v.match(/^R:\s*(.+)$/m); const sigMatch = v.match(/^SIG:\s*(.+)$/m); if (rMatch && rMatch[1].length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), rMatch[1].trim()); console.log('[Seller] Auto-extracted buyer R from paste:', rMatch[1].slice(0,20)); } const sig = sigMatch ? sigMatch[1].trim() : v; setContract(prev => ({ ...prev, partialReleaseTx: sig })); }}
+                    onChangeText={async (txt) => { const v = txt.trim(); const rMatch = v.match(/^R:\s*(.+)$/m); const sigMatch = v.match(/^SIG:\s*(.+)$/m); if (rMatch && rMatch[1].length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), rMatch[1].trim()); console.log('[Seller] Auto-extracted buyer R from paste:', rMatch[1].slice(0,20)); } // Store full paste so Release button can re-extract R
+                    setContract(prev => ({ ...prev, partialReleaseTx: v })); }}
                     autoCapitalize="none"
                     autoCorrect={false}
                     multiline
@@ -3719,7 +3720,7 @@ function parseClipboard(raw: string): {
                       let buyerR = parsed.buyerR || '';
                       if (!buyerR) { try { const mr = await AsyncStorage.getItem('kv_manual_counterparty_r_' + (contract.agreementId || '')); if (mr) buyerR = mr; } catch {} }
                       console.log('[Seller-Release] buyerR source:', buyerR ? (parsed.buyerR ? 'PASTE' : 'STORAGE') : 'NONE', buyerR.slice(0,20));
-                      try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
+                      if (!buyerR) { try { const rData = await getFrostR(contract.agreementId || ''); if (rData?.frost_r_a) buyerR = rData.frost_r_a; } catch {} }
                       if (!buyerR) {
                         try { const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["PartialSig"] }]) { edges { node { tags { name value } } } } }';
                           const resp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
