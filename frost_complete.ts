@@ -105,11 +105,12 @@ export function computeFrostPartialS(params: {
   const P_agg_full = P_agg.toRawBytes(true);
   const P_x = P_agg_full[0] === 0x03 ? P_agg.negate().toRawBytes(true).slice(1) : P_agg_full.slice(1);
 
-  // Challenge e = Kaspa Blake2b tagged hash
-  // Kaspa uses Blake2b for the Schnorr challenge, not SHA256
+  // Challenge e = BIP340 tagged SHA256 (NOT Blake2b)
+  // Blake2b is for sighash only. Challenge uses BIP340 tagged SHA256.
   const message = hexToBytes(params.sighash_hex || myNonce.message_hex); // use real sighash if provided
-  const challengeInput = new Uint8Array([...R_agg_x, ...P_x, ...message]);
-  const eHash = kaspaBlake2b(challengeInput);
+  // challengeInput built inline in tagged hash below
+  const challengeTag = sha256(new TextEncoder().encode("BIP0340/challenge"));
+  const eHash = sha256(new Uint8Array([...challengeTag, ...challengeTag, ...R_agg_x, ...P_x, ...message]));
   const e = BigInt('0x' + bytesToHex(eHash)) % N;
 
   // s_i = k_i + e * d_i (mod N)
