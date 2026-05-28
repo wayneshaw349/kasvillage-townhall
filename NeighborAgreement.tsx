@@ -974,6 +974,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   initialCoupon,
   userPubkey,
 }) => {
+  // AUTO_FLUSH: clear stale FROST state on mount
+  React.useEffect(() => { (async () => { try { const keys = await AsyncStorage.getAllKeys(); const kv = keys.filter((k: string) => k.startsWith('kv_') || k.startsWith('frost_') || k.startsWith('FROST_')); if (kv.length > 0) { await AsyncStorage.multiRemove(kv); console.log('[AUTO_FLUSH] Cleared', kv.length, 'stale keys'); } } catch(e) { console.warn('[AUTO_FLUSH]', e); } })(); }, []);
   const [step, setStep] = useState(1);
   const [role, setRole] = useState<'buyer' | 'seller' | null>(null);
   const [agreementType, setAgreementType] = useState<'simple' | 'trade' | 'join' | null>(null);
