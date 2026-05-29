@@ -46,7 +46,8 @@ export function generateFrostNonce(params: {
   // MuSig tweak: d = a_i * sk_raw (mod N)
   const myPubkey = bytesToHex((secp as any).getPublicKey(hexToBytes(privateKeyHex), true));
   const [_pk1, _pk2] = [frostAddress.pubkeyA, frostAddress.pubkeyB].sort();
-  const _L = sha256(new Uint8Array([...hexToBytes(_pk1), ...hexToBytes(_pk2)]));
+  const _fnonce = (frostAddress?.frostCounter && frostAddress.frostCounter > 0) ? new TextEncoder().encode(String(frostAddress.frostCounter)) : new Uint8Array(0);
+  const _L = sha256(new Uint8Array([...hexToBytes(_pk1), ...hexToBytes(_pk2), ..._fnonce]));
   const _myA = BigInt('0x' + bytesToHex(sha256(new Uint8Array([..._L, ...hexToBytes(myPubkey === _pk1 ? _pk1 : _pk2)])))) % N;
   const sk_tweaked = (sk_raw * _myA) % N;
   let d = sk_tweaked;
@@ -218,6 +219,7 @@ export type KaspaNetwork = 'mainnet' | 'testnet-10' | 'testnet-11';
 export type ExchangeMethod = 'qr' | 'ble' | 'wifi' | 'tailscale' | 'townhall';
 
 export interface FrostAddress {
+  frostCounter?: number;
   address: string;
   pubkeyA: string;
   pubkeyB: string;
@@ -275,10 +277,11 @@ const KVF_PREFIX = 'KVF';
 // SECTION 1: LOCAL FROST DERIVATION
 // ============================================================================
 
-export function deriveAggregatePubkey(pubkeyA: string, pubkeyB: string, agreementId?: string): string {
+export function deriveAggregatePubkey(pubkeyA: string, pubkeyB: string, agreementId?: string, nonce?: number): string {
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
   // MuSig-style key aggregation with real EC point math
-  const L = sha256(new Uint8Array([...hexToBytes(pk1), ...hexToBytes(pk2)]));
+  const _nb = (nonce && nonce > 0) ? new TextEncoder().encode(String(nonce)) : new Uint8Array(0);
+  const L = sha256(new Uint8Array([...hexToBytes(pk1), ...hexToBytes(pk2), ..._nb]));
   const a1 = sha256(new Uint8Array([...L, ...hexToBytes(pk1)]));
   const a2 = sha256(new Uint8Array([...L, ...hexToBytes(pk2)]));
   const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
@@ -350,7 +353,7 @@ export function deriveFrostAddressLocal(params: {
 }): FrostAddress {
   const { pubkeyA, pubkeyB, network, agreementId } = params;
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
-  const aggregatedPubkey = deriveAggregatePubkey(pk1, pk2, agreementId);
+  const aggregatedPubkey = deriveAggregatePubkey(pk1, pk2, agreementId, frostCounter);
   const address = aggregateToAddress(aggregatedPubkey, network);
   const verificationCode = generateVerificationCode(pk1, pk2);
 
@@ -436,7 +439,8 @@ export function createPartialSigLocal(params: {
   // MuSig tweak: d = a_i * sk_raw (mod N)
   const _myPub = bytesToHex((secp as any).getPublicKey(hexToBytes(privateKeyHex), true));
   const [_pk1, _pk2] = [frostAddress.pubkeyA, frostAddress.pubkeyB].sort();
-  const _L = sha256(new Uint8Array([...hexToBytes(_pk1), ...hexToBytes(_pk2)]));
+  const _fnonce = (frostAddress?.frostCounter && frostAddress.frostCounter > 0) ? new TextEncoder().encode(String(frostAddress.frostCounter)) : new Uint8Array(0);
+  const _L = sha256(new Uint8Array([...hexToBytes(_pk1), ...hexToBytes(_pk2), ..._fnonce]));
   const _myA = BigInt('0x' + bytesToHex(sha256(new Uint8Array([..._L, ...hexToBytes(_myPub === _pk1 ? _pk1 : _pk2)])))) % N;
   const sk_tweaked = (sk_raw * _myA) % N;
   let d = sk_tweaked;

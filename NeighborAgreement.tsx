@@ -976,14 +976,13 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
 }) => {
   // AUTO_FLUSH: versioned migration for L hash fix (v2)
   React.useEffect(() => { (async () => { try {
-    const ver = await AsyncStorage.getItem('kv_frost_v');
-    if (ver !== 'v2') {
+    const ver = await AsyncStorage.getItem('kv_frost_v'); if (ver !== 'v7') {
       await AsyncStorage.removeItem('kv_agreement_session');
       await AsyncStorage.removeItem('kv_frost_active_list');
       const keys = await AsyncStorage.getAllKeys();
       const kv = keys.filter((k: string) => k.startsWith('kv_frost_') || k.startsWith('kv_agreed_') || k.startsWith('kv_manual_') || k.startsWith('frost_') || k.startsWith('FROST_'));
       if (kv.length > 0) await AsyncStorage.multiRemove(kv);
-      await AsyncStorage.setItem('kv_frost_v', 'v2');
+      await AsyncStorage.setItem('kv_frost_v', 'v7');
       console.log('[FLUSH-V2] One-time migration done, cleared', kv.length, 'keys');
     }
   } catch(e) { console.warn('[FLUSH]', e); } })(); }, []);
@@ -1763,12 +1762,21 @@ function parseClipboard(raw: string): {
           const agreementId = 'AGR_' + Array.from(agrHash.slice(0, 6)).map(b => b.toString(16).padStart(2, '0')).join('');
           
           // Derive locally with verification code
-          const frostData = deriveFrostAddressLocal({
-            pubkeyA: contract.buyerPubkey,
-            pubkeyB: contract.sellerPubkey,
-            network,
-            agreementId,
-          });
+          // L1 check: find first clean FROST address (counter 0,1,2...)
+          let frostData: any = null;
+          const _frostApi = network.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+          for (let _n = 0; _n < 10; _n++) {
+            const _candidate = deriveFrostAddressLocal({ pubkeyA: contract.buyerPubkey, pubkeyB: contract.sellerPubkey, network, agreementId, frostCounter: _n });
+            try {
+              const _br = await fetch(_frostApi + '/addresses/' + _candidate.address + '/balance');
+              if (_br.ok) {
+                const _bd = await _br.json();
+                if (BigInt(_bd.balance || '0') === 0n) { frostData = _candidate; console.log('[FROST-L1] Clean at nonce', _n, _candidate.address.slice(0,30)); break; }
+                else { console.log('[FROST-L1] Nonce', _n, 'has', Number(BigInt(_bd.balance || '0'))/1e8, 'KAS, skipping'); }
+              } else { frostData = _candidate; break; }
+            } catch { frostData = _candidate; break; }
+          }
+          if (!frostData) frostData = deriveFrostAddressLocal({ pubkeyA: contract.buyerPubkey, pubkeyB: contract.sellerPubkey, network, agreementId, frostCounter: 0 });
           
           const verificationCode = generateVerificationCode(
             contract.buyerPubkey, 
@@ -2219,12 +2227,21 @@ function parseClipboard(raw: string): {
         try {
           const frostNetwork = wallet.network || 'testnet-10';
           console.log('[FROST-DEBUG] pubkeyA:', myPubkey?.slice(0,16), 'pubkeyB:', proposerPubkey?.slice(0,16), 'network:', frostNetwork, 'agrId:', agrId);
-          const frostData = deriveFrostAddressLocal({
-            pubkeyA: myPubkey,
-            pubkeyB: proposerPubkey,
-            network: frostNetwork,
-            agreementId: agrId,
-          });
+          // Seller L1 loop: same algorithm as buyer, no relay dependency
+          let frostData: any = null;
+          const _sApi = frostNetwork.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+          for (let _sc = 0; _sc < 10; _sc++) {
+            const _sCand = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: _sc });
+            try {
+              const _sbr = await fetch(_sApi + '/addresses/' + _sCand.address + '/balance');
+              if (_sbr.ok) {
+                const _sbd = await _sbr.json();
+                if (BigInt(_sbd.balance || '0') === 0n) { frostData = _sCand; console.log('[Seller-L1] Clean at counter', _sc, _sCand.address.slice(0,30)); break; }
+                else { console.log('[Seller-L1] Counter', _sc, 'has', Number(BigInt(_sbd.balance||'0'))/1e8, 'KAS, skip'); }
+              } else { frostData = _sCand; break; }
+            } catch { frostData = _sCand; break; }
+          }
+          if (!frostData) frostData = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: 0 });
           console.log('[Neighbor] Inbox FROST address:', frostData.address);
           // === CANONICAL AUTO-SEND: each party finds their pubkey + amount ===
           // Proposer pubkey = KV-Pubkey, Acceptor pubkey = KV-Counterparty
