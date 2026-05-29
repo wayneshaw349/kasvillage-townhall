@@ -351,7 +351,7 @@ export function deriveFrostAddressLocal(params: {
   network: KaspaNetwork;
   agreementId?: string;
 }): FrostAddress {
-  const { pubkeyA, pubkeyB, network, agreementId } = params;
+  const { pubkeyA, pubkeyB, network, agreementId, frostCounter } = params;
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
   const aggregatedPubkey = deriveAggregatePubkey(pk1, pk2, agreementId, frostCounter);
   const address = aggregateToAddress(aggregatedPubkey, network);
@@ -363,6 +363,7 @@ export function deriveFrostAddressLocal(params: {
     pubkeyB: pk2,
     aggregatedPubkey,
     network,
+    frostCounter,
     sessionId: agreementId || `FROST_${Date.now()}`,
     verificationCode,
     createdAt: Date.now(),
