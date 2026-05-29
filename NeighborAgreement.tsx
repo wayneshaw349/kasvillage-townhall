@@ -1502,7 +1502,8 @@ function parseClipboard(raw: string): {
                         if (savedNonce) {
                           const nData = JSON.parse(savedNonce);
                           // postFrostR imported statically
-                          await postFrostR({ agreementId: contract.agreementId || '', pubkey: myPubkey, frostR: nData.R_hex });
+                          // R is clipboard-only, not posted to relay
+                          console.log('[FROST-R] R is clipboard-only, not posting to TownHall');
                           console.log('[FROST-R] Buyer R posted to TownHall:', nData.R_hex.slice(0,20));
                         }
                       } catch(e2) { console.warn('[FROST-R] Buyer R post failed:', e2); }
@@ -1561,7 +1562,8 @@ function parseClipboard(raw: string): {
             if (pipePos > 0) { txTemplateB64 = encSig.slice(pipePos + 1); encSig = encSig.slice(0, pipePos); }
             const decrypted = (() => { try { const d = decryptPartialSig({ encrypted: encSig, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: { agreementId: contract.agreementId || '', buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', multisigAddress: contract.multisigAddress || '', aggregatedPubkey: contract.frostData?.aggregatedPubkey || '', network: contract.frostData?.network || 'testnet-10', itemPriceKas: contract.itemPriceKas, sellerCommitmentKas: contract.sellerCommitmentKas, R_hex: '' }, nonce: match.nonce || '' }); console.log('[FROST] Decrypted counterparty partial sig'); return d; } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; } })();
             let buyerR = '';
-            try { const rData = await getFrostR(contract.agreementId || ''); buyerR = rData?.frost_r_a || ''; } catch {}
+            // R comes from clipboard, not TownHall
+            console.log('[FROST-R] R is clipboard-only, checking AsyncStorage');
             if (!buyerR) { try { const gql = '{ transactions(first: 10, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }]) { edges { node { tags { name value } } } } }'; const resp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }); const json = await resp.json(); for (const edge2 of (json?.data?.transactions?.edges || [])) { const t2 = edge2?.node?.tags || []; const m2 = {}; t2.forEach(t => { m2[t.name] = t.value; }); const p2 = m2['KV-Pubkey'] || ''; if (p2 !== (role === 'seller' ? (contract.sellerPubkey || '') : (contract.buyerPubkey || '')) && m2['KV-FrostR']) { buyerR = m2['KV-FrostR']; console.log('[FROST-2R] Found counterparty R from Arweave:', buyerR.slice(0,20)); break; } } } catch {} }
             const sigStr = typeof decrypted === 'string' ? decrypted : '';
             // Parse all s values: R_agg_x (64) + s_0 (64) + s_1 (64) + ...
@@ -1864,6 +1866,7 @@ function parseClipboard(raw: string): {
                 const propNonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: counterpartyKaspaAddr || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: propWallet?.privKeyHex || '' });
                 await AsyncStorage.setItem('kv_frost_nonce_' + agreementId, JSON.stringify({ R_hex: propNonce.R_hex, k_private: propNonce.k_private, d_tweaked: propNonce.d_tweaked, message_hex: propNonce.message_hex }));
                 console.log('[FROST-R] Generated nonce R at proposal:', propNonce.R_hex.slice(0,20));
+                setContract(prev => ({ ...prev, buyerR: propNonce.R_hex }));
               } catch(e) { console.warn('[FROST-R] Proposal nonce failed:', e); }
               addToFrostList({
                 agrId: agreementId, frostAddr: frostData.address, role: 'buyer', step: 3,
