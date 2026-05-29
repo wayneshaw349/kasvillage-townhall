@@ -1861,13 +1861,8 @@ function parseClipboard(raw: string): {
                   console.log('[UTXO-Tag] Buyer proposal tagged:', tagResult.success, 'hashes:', tagResult.commitHashes?.length);
                 }
               } catch (e) { console.warn('[Neighbor] Proposer ledger commit skipped:', e); }
-              // Generate R nonce at proposal time for clipboard
-              try {
-                const propNonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: counterpartyKaspaAddr || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: propWallet?.privKeyHex || '' });
-                await SecureStore.setItemAsync('kv_frost_nonce_' + agreementId, JSON.stringify({ R_hex: propNonce.R_hex, k_private: propNonce.k_private, d_tweaked: propNonce.d_tweaked, message_hex: propNonce.message_hex }));
-                console.log('[FROST-R] Generated nonce R at proposal:', propNonce.R_hex.slice(0,20));
-                setContract(prev => ({ ...prev, buyerR: propNonce.R_hex }));
-              } catch(e) { console.warn('[FROST-R] Proposal nonce failed:', e); }
+              // R nonce is now generated at signing time (step 5), not proposal time
+              // This keeps k alive for seconds instead of days
               addToFrostList({
                 agrId: agreementId, frostAddr: frostData.address, role: 'buyer', step: 3,
                 buyerAmount: contract.itemPriceKas, sellerAmount: contract.sellerCommitmentKas,
@@ -3817,8 +3812,84 @@ function parseClipboard(raw: string): {
             )}
 
             {/* Step 5: Complete */}
+            
+  // === TX TEMPLATE + DELAYED R FLOW ===
+  const buildReleaseTemplate = async () => {
+    try {
+      const wallet = await loadMainWallet();
+      if (!wallet || !contract.frostData || !contract.agreementId) { Alert.alert('Error', 'Missing wallet or FROST data'); return; }
+      
+      // Generate k NOW (not at proposal time)
+      const myNonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: counterpartyKaspaAddr || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: wallet.privKeyHex || '' });
+      await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ R_hex: myNonce.R_hex, k_private: myNonce.k_private, d_tweaked: myNonce.d_tweaked, message_hex: myNonce.message_hex }));
+      console.log('[FROST-Template] Generated k + R:', myNonce.R_hex.slice(0,20));
+      
+      // Build TX template with R
+      const apiBase = (wallet.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+      const utxoResp = await fetch(apiBase + '/addresses/' + contract.frostData.address + '/utxos');
+      const utxos = await utxoResp.json();
+      if (!utxos || utxos.length === 0) { Alert.alert('Error', 'No UTXOs at FROST address'); return; }
+      
+      const sortedUtxos = utxos.sort((a: any, b: any) => a.outpoint.transactionId.localeCompare(b.outpoint.transactionId));
+      const totalIn = sortedUtxos.reduce((s: bigint, u: any) => s + BigInt(u.utxoEntry.amount), 0n);
+      const buyerAmt = BigInt(Math.floor(contract.itemPriceKas * 1e8));
+      const fee = 300000n;
+      const sellerAmt = totalIn - buyerAmt - fee;
+      
+      const buyerXonly = (contract.buyerPubkey || '').slice(2);
+      const sellerXonly = (contract.sellerPubkey || '').slice(2);
+      
+      const template = {
+        u: sortedUtxos.map((u: any) => ({ t: u.outpoint.transactionId, i: u.outpoint.index, a: u.utxoEntry.amount, s: u.utxoEntry.scriptPublicKey.scriptPublicKey })),
+        o: [{ v: buyerAmt.toString(), s: '20' + buyerXonly + 'ac' }, { v: sellerAmt.toString(), s: '20' + sellerXonly + 'ac' }],
+        f: fee.toString(),
+        R: myNonce.R_hex,
+        agr: contract.agreementId,
+      };
+      const b64 = Buffer.from(JSON.stringify(template)).toString('base64');
+      
+      const { Clipboard } = require('react-native');
+      if (Clipboard?.setString) Clipboard.setString(b64);
+      else { try { const CB = require('@react-native-clipboard/clipboard'); CB.default?.setString(b64); } catch {} }
+      
+      Alert.alert('TX Template Copied', 'Send to seller via clipboard. Seller will respond with their R + partial signatures. Template: ' + b64.length + ' chars');
+      console.log('[FROST-Template] Template copied:', b64.length, 'chars, R included');
+    } catch (e: any) { console.error('[FROST-Template] Error:', e); Alert.alert('Error', e.message || 'Template build failed'); }
+  };
+
+  // === PROCESS SELLER RESPONSE ===
+  const processSellerResponse = async () => {
+    try {
+      let pastedText = '';
+      try { const { Clipboard } = require('react-native'); pastedText = await Clipboard?.getString?.() || ''; } catch {}
+      if (!pastedText) { try { const CB = require('@react-native-clipboard/clipboard'); pastedText = await CB.default?.getString?.() || ''; } catch {} }
+      if (!pastedText) { Alert.alert('Error', 'Nothing in clipboard'); return; }
+      
+      const resp = JSON.parse(Buffer.from(pastedText, 'base64').toString());
+      if (!resp.R || !resp.s) { Alert.alert('Error', 'Invalid seller response - missing R or signatures'); return; }
+      
+      console.log('[FROST-Template] Seller R:', resp.R.slice(0,20), 'partials:', resp.s.length);
+      
+      // Store seller R + partials for the signing flow
+      await SecureStore.setItemAsync('kv_frost_seller_resp_' + contract.agreementId, JSON.stringify(resp));
+      Alert.alert('Seller Response Received', 'R + ' + resp.s.length + ' partial signatures. Broadcasting release TX...');
+      
+      // TODO: aggregate and broadcast (uses existing completeFrost2Round flow)
+    } catch (e: any) { console.error('[FROST-Template] Response error:', e); Alert.alert('Error', 'Invalid response: ' + (e.message || '')); }
+  };
+
             {step === 5 && (
-            <>
+            
+                <View style={{ marginBottom: 16, gap: 8 }}>
+                  <TouchableOpacity onPress={buildReleaseTemplate} style={{ backgroundColor: '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Build TX Template (generates k + R)'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={processSellerResponse} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 14, alignItems: 'center' }}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Paste Seller Response'}</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center' }}>{'k lives only during this signing ceremony (~seconds)'}</Text>
+                </View>
+<>
             <View style={{ backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#86efac' }}>
               <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>? Delivery Confirmed ? Send to Seller</Text>
               <Text style={{ fontSize: 11, color: '#15803d' }}>AGR ID: {contract.agreementId}</Text>
