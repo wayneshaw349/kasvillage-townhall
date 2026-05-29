@@ -793,7 +793,9 @@ export async function inscribeAgreementToArweave(agreement: {
     if (agreement.frostCounter !== undefined) tags.push({ name: 'KV-FrostCounter', value: String(agreement.frostCounter) });
   }
   if (agreement.frostR) {
-    tags.push({ name: 'KV-FrostR', value: agreement.frostR });
+    // Store hash(R) on Arweave, not raw R (defense-in-depth)
+    const _rHash = require('@noble/hashes/sha256').sha256(new TextEncoder().encode(agreement.frostR));
+    tags.push({ name: 'KV-FrostR-Hash', value: require('@noble/hashes/utils').bytesToHex(_rHash).slice(0,32) });
   }
   if (agreement.counterpartyPubkey) {
     tags.push({ name: 'KV-Counterparty', value: agreement.counterpartyPubkey });
