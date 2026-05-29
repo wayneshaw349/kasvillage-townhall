@@ -1304,7 +1304,7 @@ function parseClipboard(raw: string): {
               signature: 'agreed_send_' + Date.now(),
               counterpartyPubkey: counterpartyPubkey,
               frostAddress: contract.multisigAddress || '',
-              frostRHash: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.releaseRecipient || counterpartyKaspaAddr || contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: (await loadMainWallet())?.privKeyHex || '' }); await AsyncStorage.setItem('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ R_hex: nonce.R_hex, k_private: nonce.k_private, d_tweaked: nonce.d_tweaked, message_hex: nonce.message_hex })); console.log('[FROST-R] Generated nonce R:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: contract.agreementId || '', pubkey: myPubkey || '', frostR: nonce.R_hex }).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Nonce generation failed:', e); return ''; } })(),
+              frostRHash: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.releaseRecipient || counterpartyKaspaAddr || contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: (await loadMainWallet())?.privKeyHex || '' }); await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ R_hex: nonce.R_hex, k_private: nonce.k_private, d_tweaked: nonce.d_tweaked, message_hex: nonce.message_hex })); console.log('[FROST-R] Generated nonce R:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: contract.agreementId || '', pubkey: myPubkey || '', frostR: nonce.R_hex }).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Nonce generation failed:', e); return ''; } })(),
             });
             await AsyncStorage.setItem(ownAgreedKey, String(Date.now()));
             console.log('[Agreed-Send Poll] Own Agreed-Send inscribed');
@@ -1490,7 +1490,7 @@ function parseClipboard(raw: string): {
                     amountSompi: myAmount,
                     privateKeyHex: wallet.privKeyHex,
                     network: wallet.network,
-                    payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await AsyncStorage.setItem('kv_frost_nonce_' + contract.agreementId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in buyer collateral payload:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: contract.agreementId || '', pubkey: (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey) || '', frostR: nonce.R_hex }).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Buyer payload failed:', e); return ''; } })(),
+                    payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in buyer collateral payload:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: contract.agreementId || '', pubkey: (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey) || '', frostR: nonce.R_hex }).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Buyer payload failed:', e); return ''; } })(),
                   });
                   if (sendResult.success) {
                     await AsyncStorage.setItem('kv_frost_sent_' + contract.agreementId, sendResult.txId || String(Date.now()));
@@ -1498,7 +1498,7 @@ function parseClipboard(raw: string): {
                     // Post buyer R to TownHall + Arweave
                     if (role === 'buyer') {
                       try {
-                        const savedNonce = await AsyncStorage.getItem('kv_frost_nonce_' + contract.agreementId);
+                        const savedNonce = await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId);
                         if (savedNonce) {
                           const nData = JSON.parse(savedNonce);
                           // postFrostR imported statically
@@ -1570,13 +1570,13 @@ function parseClipboard(raw: string): {
             const cpAllS: string[] = []; for (let si = 64; si < sigStr.length; si += 64) { cpAllS.push(sigStr.slice(si, si + 64)); }
             console.log('[FROST-2R] Buyer sent', cpAllS.length, 'partial s values');
             const buyerSig = cpAllS.length > 0 ? { R_agg_x_hex: sigStr.slice(0, 64), s_hex: cpAllS.join('') + (txTemplateB64 ? '|' + txTemplateB64 : '') } : undefined;
-            const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
+            const myNonceJson = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || ''));
             if (!myNonceJson || !buyerR) { console.warn('[PartialSig-Poll] Missing nonce or buyer R, skipping'); return; }
             const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: wallet.address });
             if (result.success && result.txId) {
               console.log('[PartialSig-Poll] Release TX broadcast:', result.txId);
               setContract(prev => ({ ...prev, releaseTxId: result.txId, releaseExplorerUrl: result.explorerUrl }));
-              await AsyncStorage.removeItem('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
+              await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
               Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\nFunds returned to your wallet.');
             } else {
               console.warn('[PartialSig-Poll] Broadcast failed:', result.error);
@@ -1621,7 +1621,7 @@ function parseClipboard(raw: string): {
                     if (false /* disabled: old single-round */ && res2.success && res2.txId) {
                       console.log('[PartialSig-Poll] Release TX:', res2.txId);
                       setContract(prev => ({ ...prev, releaseTxId: res2.txId, releaseExplorerUrl: res2.explorerUrl }));
-                      await AsyncStorage.removeItem('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
+                      await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
                       Alert.alert('Funds Released!', 'TX: ' + (res2.txId || '').slice(0, 16) + '...\nFunds returned to your wallet.');
                     }
                   }
@@ -1646,7 +1646,7 @@ function parseClipboard(raw: string): {
                 if (res.success && res.txId) {
                   console.log('[PartialSig-Poll] Release TX:', res.txId);
                   setContract(prev => ({ ...prev, releaseTxId: res.txId, releaseExplorerUrl: res.explorerUrl }));
-                  await AsyncStorage.removeItem('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
+                  await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
                   Alert.alert('Funds Released!', 'TX: ' + (res.txId || '').slice(0, 16) + '...\nFunds returned to your wallet.');
                 }
               }
@@ -1864,7 +1864,7 @@ function parseClipboard(raw: string): {
               // Generate R nonce at proposal time for clipboard
               try {
                 const propNonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: counterpartyKaspaAddr || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: propWallet?.privKeyHex || '' });
-                await AsyncStorage.setItem('kv_frost_nonce_' + agreementId, JSON.stringify({ R_hex: propNonce.R_hex, k_private: propNonce.k_private, d_tweaked: propNonce.d_tweaked, message_hex: propNonce.message_hex }));
+                await SecureStore.setItemAsync('kv_frost_nonce_' + agreementId, JSON.stringify({ R_hex: propNonce.R_hex, k_private: propNonce.k_private, d_tweaked: propNonce.d_tweaked, message_hex: propNonce.message_hex }));
                 console.log('[FROST-R] Generated nonce R at proposal:', propNonce.R_hex.slice(0,20));
                 setContract(prev => ({ ...prev, buyerR: propNonce.R_hex }));
               } catch(e) { console.warn('[FROST-R] Proposal nonce failed:', e); }
@@ -2268,7 +2268,7 @@ function parseClipboard(raw: string): {
                 amountSompi: BigInt(immediateSendAmount),
                 privateKeyHex: wallet.privKeyHex,
                 network: wallet.network || 'testnet-10',
-                payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await AsyncStorage.setItem('kv_frost_nonce_' + agrId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in collateral TX payload:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: nonce.R_hex }).then(() => console.log('[FROST-R] R posted to TownHall')).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Payload nonce failed:', e); return ''; } })(),
+                payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await SecureStore.setItemAsync('kv_frost_nonce_' + agrId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in collateral TX payload:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: nonce.R_hex }).then(() => console.log('[FROST-R] R posted to TownHall')).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Payload nonce failed:', e); return ''; } })(),
               });
               console.log('[Neighbor] Seller collateral TX:', txResult.txId);
               await AsyncStorage.setItem('kv_frost_sent_' + agrId, String(Date.now()));
@@ -2303,11 +2303,11 @@ function parseClipboard(raw: string): {
               counterpartyPubkey: proposerPubkey,
               buyerAmountSompi: Math.floor(buyerKas * 1e8),
               sellerAmountSompi: Math.floor(sellerKas * 1e8),
-              frostR: await (async () => { try { const saved = await AsyncStorage.getItem('kv_frost_nonce_' + agrId); if (saved) { const n = JSON.parse(saved); console.log('[FROST-R] Including R in Accepted inscription:', n.R_hex?.slice(0,20)); return n.R_hex; } } catch {} return ''; })(),
+              frostR: await (async () => { try { const saved = await SecureStore.getItemAsync('kv_frost_nonce_' + agrId); if (saved) { const n = JSON.parse(saved); console.log('[FROST-R] Including R in Accepted inscription:', n.R_hex?.slice(0,20)); return n.R_hex; } } catch {} return ''; })(),
             });
             console.log('[Neighbor] Acceptance inscribed to Arweave');
             // Post R to TownHall (after accept, so party_b exists)
-            try { const saved = await AsyncStorage.getItem('kv_frost_nonce_' + agrId); if (saved) { const n = JSON.parse(saved); await postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: n.R_hex }); console.log('[FROST-R] R posted to TownHall after accept'); } } catch(e) { console.warn('[FROST-R] TownHall R post failed:', e); }
+            try { const saved = await SecureStore.getItemAsync('kv_frost_nonce_' + agrId); if (saved) { const n = JSON.parse(saved); await postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: n.R_hex }); console.log('[FROST-R] R posted to TownHall after accept'); } } catch(e) { console.warn('[FROST-R] TownHall R post failed:', e); }
             // Add to active FROST list
             addToFrostList({
               agrId: agrId,
@@ -2498,7 +2498,7 @@ function parseClipboard(raw: string): {
       // 2-round FROST: load saved nonce, get counterparty R from Arweave
       let myNonce;
       try {
-        const savedNonce = await AsyncStorage.getItem('kv_frost_nonce_' + contract.agreementId);
+        const savedNonce = await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId);
         if (savedNonce) {
           myNonce = JSON.parse(savedNonce);
           console.log('[FROST-2R] Loaded saved nonce R:', myNonce.R_hex?.slice(0,20));
@@ -2730,7 +2730,7 @@ function parseClipboard(raw: string): {
             ? `Posted to relay. Waiting for counterparty to co-sign...\n\nMethod: ${relayResult.method}`
             : 'Share this with counterparty to complete the release.'
         );
-        await AsyncStorage.removeItem('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(5);
+        await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(5);
       } else {
         Alert.alert('Error', result.error || 'Failed to create signature');
       }
@@ -2810,17 +2810,17 @@ function parseClipboard(raw: string): {
           setUserStats(newStats);
           await SecureStore.setItemAsync('kv_user_stats', JSON.stringify(newStats));
           
-          await AsyncStorage.removeItem('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
+          await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
         } else {
           Alert.alert('Error', result.error || 'Failed to broadcast');
         }
       } else {
         if (role === 'buyer') {
           setBuyerRequestedRelease(true);
-          if (sellerRequestedRelease) await AsyncStorage.removeItem('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
+          if (sellerRequestedRelease) await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
         } else {
           setSellerRequestedRelease(true);
-          if (buyerRequestedRelease) await AsyncStorage.removeItem('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
+          if (buyerRequestedRelease) await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
         }
       }
     } catch (e) {
@@ -3491,7 +3491,7 @@ function parseClipboard(raw: string): {
                         )}
                         <TouchableOpacity onPress={async () => { 
                           // Generate KV proposal clipboard format
-                          const buyerR_saved = await (async () => { try { const s = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); return s ? JSON.parse(s).R_hex || '' : ''; } catch { return ''; } })();
+                          const buyerR_saved = await (async () => { try { const s = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || '')); return s ? JSON.parse(s).R_hex || '' : ''; } catch { return ''; } })();
                           const shareText = generateProposal({
                             agrId: contract.agreementId || '',
                             buyerAddress: myAddress || '',
@@ -3617,10 +3617,10 @@ function parseClipboard(raw: string): {
                     </View>
                     
                     <View style={{ backgroundColor: "#eef2ff", borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: "#a5b4fc" }}>
-                      <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
+                      <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
                       <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My Verification</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
+                    <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
                       <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce (Buyer)</Text>
                     </TouchableOpacity>
                     <Text style={{ fontSize: 13, fontWeight: "bold", color: "#3730a3", marginBottom: 6 }}>Paste Seller Verification</Text>
@@ -3784,7 +3784,7 @@ function parseClipboard(raw: string): {
                       // Parse all s values + reattach template
                       const cpAllS2: string[] = []; for (let si = 64; si < sigBytes.length; si += 64) { cpAllS2.push(sigBytes.slice(si, si + 64)); }
                       const buyerSig = cpAllS2.length > 0 ? { R_agg_x_hex: sigBytes.slice(0, 64), s_hex: cpAllS2.join('') + (txTemplateB64_2 ? '|' + txTemplateB64_2 : '') } : undefined;
-                      const myNonceJson = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || ''));
+                      const myNonceJson = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || ''));
                       if (!myNonceJson || !buyerR) { Alert.alert('Missing Data', 'Nonce or buyer R not found. Try again.'); setIsLoading(false); return; }
                       // Covenant safety: verify all outputs are pure P2PK
                       if (txTemplateB64_2) {
@@ -3805,7 +3805,7 @@ function parseClipboard(raw: string): {
                       if (result.success && result.txId) {
                         console.log('[Seller-Release] Release TX:', result.txId);
                         setContract(prev => ({ ...prev, releaseTxId: result.txId }));
-                        await AsyncStorage.removeItem('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
+                        await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
                         Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...');
                       } else { Alert.alert('Failed', result.error || 'Co-sign failed'); }
                     } catch (e) { Alert.alert('Error', String(e)); }
@@ -3828,7 +3828,7 @@ function parseClipboard(raw: string): {
                 onPress={async () => {
                   try {
                     // Clipboard imported statically
-                    const myR = await (async () => { try { const s = await AsyncStorage.getItem('kv_frost_nonce_' + (contract.agreementId || '')); if (s) return JSON.parse(s).R_hex || ''; } catch {} return ''; })(); await Clipboard.setStringAsync('AGR: ' + (contract.agreementId || '') + '\nR: ' + myR + '\nSIG: ' + (contract.partialReleaseTx || '') + '\nSeller: press Check for Release');
+                    const myR = await (async () => { try { const s = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || '')); if (s) return JSON.parse(s).R_hex || ''; } catch {} return ''; })(); await Clipboard.setStringAsync('AGR: ' + (contract.agreementId || '') + '\nR: ' + myR + '\nSIG: ' + (contract.partialReleaseTx || '') + '\nSeller: press Check for Release');
                     Alert.alert('Copied', 'Send this to the seller so they can release funds');
                   } catch {}
                 }}>
