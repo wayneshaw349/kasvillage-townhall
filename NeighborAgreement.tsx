@@ -1037,9 +1037,9 @@ function parseClipboard(raw: string): {
   const result: any = { isEncrypted: false };
   
   // KV proposal format: KV|AGR_...|addr|addr|...
-  if (v.startsWith('KV|')) {
-    result.kvProposal = v;
-    const parts = v.split('|');
+  const kvIdx = v.indexOf('KV|'); if (kvIdx >= 0) {
+    const kvLine = v.substring(kvIdx).split('\n')[0].replace(/\s*Sent from my iPhone.*$/i, '').trim(); result.kvProposal = kvLine;
+    const parts = kvLine.split('|');
     if (parts[1]) result.agrId = parts[1];
     if (parts[7]) result.buyerR = parts[7];
     return result;
@@ -1358,6 +1358,7 @@ function parseClipboard(raw: string): {
                 pubkey: myPubkey || '',
                 amount_sompi: Math.floor((role === 'buyer' ? contract.itemPriceKas : contract.sellerCommitmentKas) * 1e8),
                 description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
+            frostCounter: contract.frostData?.frostCounter || 0,
                 network: 'testnet-10',
                 status: 'Agreed',
                 signature: 'agreed_auto_' + Date.now(),
@@ -2221,6 +2222,13 @@ function parseClipboard(raw: string): {
           // Seller L1 loop: same algorithm as buyer, no relay dependency
           let frostData: any = null;
           const _sApi = frostNetwork.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+          // Use buyer's counter if provided in proposal (avoids counter divergence)
+          const buyerCounter = (agreement as any)?.frostCounter ?? (agreement as any)?.KVFrostCounter;
+          if (buyerCounter !== undefined && buyerCounter !== null) {
+            const directFrost = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: buyerCounter });
+            frostData = directFrost;
+            console.log('[Seller-Counter] Using buyer counter:', buyerCounter, directFrost.address.slice(0,30));
+          } else {
           for (let _sc = 0; _sc < 10; _sc++) {
             const _sCand = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: _sc });
             try {
@@ -2233,6 +2241,7 @@ function parseClipboard(raw: string): {
             } catch { frostData = _sCand; break; }
           }
           if (!frostData) frostData = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: 0 });
+          }
           console.log('[Neighbor] Inbox FROST address:', frostData.address);
           // === CANONICAL AUTO-SEND: each party finds their pubkey + amount ===
           // Proposer pubkey = KV-Pubkey, Acceptor pubkey = KV-Counterparty
@@ -2881,10 +2890,10 @@ function parseClipboard(raw: string): {
                         Alert.alert("Release Key Detected", "Buyer release info saved. Go to Release Funds to complete.");
                         return;
                       }
-                      if (v.startsWith("KV|")) {
+                      const kvStart = v.indexOf("KV|"); if (kvStart >= 0) {
                         try {
                           const { parseProposal } = require("./kv_proposal");
-                          const parsed = parseProposal(v);
+                          const kvClean = v.substring(kvStart).split("\n")[0].replace(/\s*Sent from my iPhone.*$/i, "").trim(); const parsed = parseProposal(kvClean);
                           if (parsed) {
                             console.log("[Seller-Paste] Parsed KV proposal:", parsed.agrId, parsed.description);
                             Alert.alert("Proposal Found", "Item: " + (parsed.description || "N/A") + "\nAmount: " + (Number(parsed.buyerAmountSompi || 0)/1e8) + " KAS\nCode: " + (parsed.verificationCode || ""), [
@@ -2895,7 +2904,7 @@ function parseClipboard(raw: string): {
                                 if (match) { handleAcceptFromInbox(match); }
                                 else {
                                   // Direct accept from clipboard data
-                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.sellerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } };
+                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.sellerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } , frostCounter: parsed.frostCounter };
                                   handleAcceptFromInbox(fakeAgr);
                                 }
                               }}

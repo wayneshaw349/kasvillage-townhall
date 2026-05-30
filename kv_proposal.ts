@@ -36,6 +36,7 @@ export interface KVProposal {
   network: string;
   buyerR: string;
   verificationCode: string;
+  frostCounter?: number;
   description: string;
   utxoTag?: string;           // buyer's committed UTXO key (txId:index)
   buyerPubkey?: string | null;
@@ -56,6 +57,7 @@ export function generateProposal(params: {
   description: string;
 }): string {
   const desc = (params.description || 'Agreement').replace(/[|\n\r]/g, ' ').trim();
+  if (params.frostCounter !== undefined) parts.push(String(params.frostCounter));
   return ['KV', params.agrId, params.buyerAddress, params.sellerAddress,
     params.buyerAmountSompi.toString(), params.sellerAmountSompi.toString(),
     params.network, params.buyerR, params.verificationCode, desc].join('|');
