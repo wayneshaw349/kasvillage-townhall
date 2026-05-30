@@ -129,6 +129,26 @@ import { getUserStats } from './wallet_registration_v2';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 
+import {
+  STEPS,
+  K_DESTROY_STEPS,
+  buyerBuildTemplate,
+  sellerSignTemplate,
+  buyerAggregate,
+  parseTemplate,
+  parseResponse,
+  encodeTemplate,
+  encodeResponse,
+  verifyTemplate,
+  deriveAggregateKey,
+  deriveAddress,
+  verificationCode as computeVerificationCode,
+  computeAgrId,
+  buildTxBody,
+  MIN_FEE_SOMPI,
+  SUBNETWORK_NATIVE,
+} from './canonical_agreement_steps';
+
 declare var global: any;
 const AGR_SESSION_KEY = 'kv_agreement_session';
 
@@ -1113,24 +1133,103 @@ function parseClipboard(raw: string): {
   
   // Restore session if app was closed mid-agreement
   useEffect(() => {
-    (async () => { const _v = await AsyncStorage.getItem('kv_frost_v').catch(() => null); if (!_v) { console.log('[Restore] Skip - FLUSH-V2 pending'); return; } const session = await loadAgreementSession();
-      if (session && session.step > 1) {
-        console.log('[Neighbor] Restoring session at step', session.step);
-        // Detect corrupted session: buyer === seller means wrong FROST address
-        if (session.contract?.buyerPubkey && session.contract?.sellerPubkey && 
-            session.contract.buyerPubkey === session.contract.sellerPubkey) {
-          console.warn('[Neighbor] CORRUPTED SESSION: buyer === seller, clearing');
-          clearAgreementSession().then(() => {}); // fire-and-forget
+    (async () => {
+      const _v = await AsyncStorage.getItem('kv_frost_v').catch(() => null);
+      if (!_v) { console.log('[Restore] Skip - FLUSH-V2 pending'); return; }
+      
+      // ARWEAVE-BASED RESTORE: inbox is the source of truth
+      try {
+        const wallet = await loadMainWallet();
+        if (!wallet) return;
+        const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+        const dataPart = wallet.address.split(':')[1];
+        const data5bit = Array.from(dataPart).map((c: string) => CHARSET.indexOf(c));
+        const result: number[] = [];
+        let buff = 0, bits = 0;
+        for (const d of data5bit) { buff = (buff << 5) | d; bits += 5; while (bits >= 8) { bits -= 8; result.push((buff >> bits) & 0xff); } }
+        let myPubkey = '';
+        if (result[0] === 0x00 && result.length >= 33) {
+          const xOnly = result.slice(1, 33);
+          myPubkey = '02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+        }
+        if (!myPubkey) return;
+
+        // Query Arweave for my active agreements
+        const arAll = await queryAgreementsFromArweave({ network: 'testnet-10' });
+        const myActive = arAll.filter((a: any) => {
+          const pk = a.pubkey || a.partyA?.pubkey || '';
+          const cp = a.counterpartyPubkey || a.KVCounterparty || '';
+          const status = (a.status || '').toLowerCase();
+          return (pk.startsWith(myPubkey.slice(0, 16)) || cp.startsWith(myPubkey.slice(0, 16))) &&
+                 (status === 'proposed' || status === 'accepted' || status === 'agreed' || status === 'agreed-send');
+        });
+
+        if (myActive.length === 0) {
+          console.log('[Arweave-Restore] No active agreements found');
           return;
         }
-        setStep(session.step);
-        setRole(session.role);
-        setAgreementType(session.agreementType);
-        setContract(session.contract);
-        setBuyerLocked(session.buyerLocked);
-        setSellerLocked(session.sellerLocked);
-        if (session.counterpartyAddress) setCounterpartyAddress(session.counterpartyAddress);
-        if (session.counterpartyKaspaAddr) setCounterpartyKaspaAddr(session.counterpartyKaspaAddr);
+
+        // Find most recent by checking L1 FROST balance
+        const apiBase = wallet.network?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+        let bestMatch: any = null;
+        let bestStep = 0;
+
+        for (const agr of myActive.slice(0, 5)) {
+          const frostAddr = agr.frostAddress || '';
+          if (!frostAddr || frostAddr.length < 20) continue;
+
+          try {
+            const balResp = await fetch(apiBase + '/addresses/' + frostAddr + '/balance');
+            if (!balResp.ok) continue;
+            const balData = await balResp.json();
+            const bal = Number(balData.balance || '0') / 1e8;
+            const buyerAmt = (agr.buyerAmountSompi || 0) / 1e8;
+            const sellerAmt = (agr.sellerAmountSompi || 0) / 1e8;
+            const expectedTotal = buyerAmt + sellerAmt;
+
+            let derivedStep = 3; // default: waiting for funding
+            if (bal >= expectedTotal && expectedTotal > 0) derivedStep = 4; // fully funded
+
+            if (derivedStep > bestStep || (derivedStep === bestStep && !bestMatch)) {
+              bestMatch = agr;
+              bestStep = derivedStep;
+            }
+            console.log('[Arweave-Restore] ', agr.agreementId?.slice(0, 12), ':', bal, 'KAS, step:', derivedStep);
+          } catch {}
+        }
+
+        if (bestMatch && bestStep >= 4) {
+          // Only auto-restore if funds are locked (step 4+)
+          const agrId = bestMatch.agreementId || bestMatch.agreement_id || '';
+          const proposerPk = bestMatch.pubkey || bestMatch.partyA?.pubkey || '';
+          const iAmProposer = proposerPk.startsWith(myPubkey.slice(0, 16));
+          const myRole = iAmProposer ? 'buyer' : 'seller';
+          const buyerPk = iAmProposer ? myPubkey : proposerPk;
+          const sellerPk = iAmProposer ? (bestMatch.counterpartyPubkey || '') : myPubkey;
+
+          console.log('[Arweave-Restore] Auto-restoring funded agreement:', agrId.slice(0, 12), 'step:', bestStep, 'role:', myRole);
+
+          setRole(myRole as any);
+          setAgreementType('trade');
+          setStep(bestStep);
+          setContract((prev: any) => ({
+            ...prev,
+            agreementId: agrId,
+            buyerPubkey: buyerPk,
+            sellerPubkey: sellerPk,
+            itemPriceKas: (bestMatch.buyerAmountSompi || 0) / 1e8,
+            sellerCommitmentKas: (bestMatch.sellerAmountSompi || 0) / 1e8,
+            itemDescription: bestMatch.description || agrId.slice(0, 12),
+            multisigAddress: bestMatch.frostAddress || '',
+            frostData: bestMatch.frostAddress ? { address: bestMatch.frostAddress, network: 'testnet-10' } : undefined,
+          }));
+          setBuyerLocked(true);
+          setSellerLocked(true);
+        } else {
+          console.log('[Arweave-Restore] No funded agreements — start fresh, use inbox');
+        }
+      } catch (e) {
+        console.warn('[Arweave-Restore] Failed:', e);
       }
     })();
   }, []);
@@ -1208,17 +1307,8 @@ function parseClipboard(raw: string): {
           } catch { updatedList.push(entry); }
         }
         setFrostActiveList(updatedList);
-        if (bal > 0n || session.step >= 3) {
-          console.log('[Background-FROST] Restoring active session');
-          setStep(session.step);
-          setRole(session.role);
-          setAgreementType(session.agreementType);
-          setContract(session.contract);
-          setBuyerLocked(session.buyerLocked);
-          setSellerLocked(session.sellerLocked);
-          if (session.counterpartyAddress) setCounterpartyAddress(session.counterpartyAddress);
-          if (session.counterpartyKaspaAddr) setCounterpartyKaspaAddr(session.counterpartyKaspaAddr);
-        }
+        // DISABLED: inbox handles session restore from Arweave
+        // if (bal > 0n || session.step >= 3) { ... }
       } catch (e) { console.warn('[Background-FROST] Check failed:', e); }
     };
     checkPendingFrost();
@@ -1572,7 +1662,7 @@ function parseClipboard(raw: string): {
             const buyerSig = cpAllS.length > 0 ? { R_agg_x_hex: sigStr.slice(0, 64), s_hex: cpAllS.join('') + (txTemplateB64 ? '|' + txTemplateB64 : '') } : undefined;
             const myNonceJson = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || ''));
             if (!myNonceJson || !buyerR) { console.warn('[PartialSig-Poll] Missing nonce or buyer R, skipping'); return; }
-            const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: wallet.address });
+            const result = { success: false, txId: null }; // DISABLED: completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: wallet.address });
             if (result.success && result.txId) {
               console.log('[PartialSig-Poll] Release TX broadcast:', result.txId);
               setContract(prev => ({ ...prev, releaseTxId: result.txId, releaseExplorerUrl: result.explorerUrl }));
@@ -2062,44 +2152,36 @@ function parseClipboard(raw: string): {
   
   // === TX TEMPLATE + DELAYED R FLOW ===
   const buildReleaseTemplate = async () => {
+    setIsLoading(true);
     try {
       const wallet = await loadMainWallet();
-      if (!wallet || !contract.frostData || !contract.agreementId) { Alert.alert('Error', 'Missing wallet or FROST data'); return; }
-      
-      // Generate k NOW (not at proposal time)
-      const myNonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: counterpartyKaspaAddr || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: wallet.privKeyHex || '' });
-      await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ R_hex: myNonce.R_hex, k_private: myNonce.k_private, d_tweaked: myNonce.d_tweaked, message_hex: myNonce.message_hex }));
-      console.log('[FROST-Template] Generated k + R:', myNonce.R_hex.slice(0,20));
-      
-      // Build TX template with R
-      const apiBase = (wallet.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+      if (!wallet?.privKeyHex || !contract.frostData || !contract.agreementId) {
+        Alert.alert('Error', 'Missing wallet or FROST data'); setIsLoading(false); return;
+      }
+      const network = wallet.network || 'testnet-10';
+      const apiBase = network.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
       const utxoResp = await fetch(apiBase + '/addresses/' + contract.frostData.address + '/utxos');
       const utxos = await utxoResp.json();
-      if (!utxos || utxos.length === 0) { Alert.alert('Error', 'No UTXOs at FROST address'); return; }
-      
-      const sortedUtxos = utxos.sort((a: any, b: any) => a.outpoint.transactionId.localeCompare(b.outpoint.transactionId));
-      const totalIn = sortedUtxos.reduce((s: bigint, u: any) => s + BigInt(u.utxoEntry.amount), 0n);
-      const buyerAmt = BigInt(Math.floor(contract.itemPriceKas * 1e8));
-      const fee = 300000n;
-      const sellerAmt = totalIn - buyerAmt - fee;
-      
-      const buyerXonly = (contract.buyerPubkey || '').slice(2);
-      const sellerXonly = (contract.sellerPubkey || '').slice(2);
-      
-      const template = {
-        u: sortedUtxos.map((u: any) => ({ t: u.outpoint.transactionId, i: u.outpoint.index, a: u.utxoEntry.amount, s: u.utxoEntry.scriptPublicKey.scriptPublicKey })),
-        o: [{ v: buyerAmt.toString(), s: '20' + buyerXonly + 'ac' }, { v: sellerAmt.toString(), s: '20' + sellerXonly + 'ac' }],
-        f: fee.toString(),
-        R: myNonce.R_hex,
-        agr: contract.agreementId,
-      };
-      const b64 = btoa(JSON.stringify(template));
-      
-      try { const CB = await import('expo-clipboard'); await CB.setStringAsync(b64); } catch { console.warn('[FROST-Template] Clipboard copy failed'); }
-      
-      Alert.alert('TX Template Copied', 'Send to seller via clipboard. Seller will respond with their R + partial signatures. Template: ' + b64.length + ' chars');
-      console.log('[FROST-Template] Template copied:', b64.length, 'chars, R included');
-    } catch (e: any) { console.error('[FROST-Template] Error:', e); Alert.alert('Error', e.message || 'Template build failed'); }
+      if (!utxos?.length) { Alert.alert('Error', 'No UTXOs at FROST address'); setIsLoading(false); return; }
+
+      // k born HERE — canonical function
+      const result = buyerBuildTemplate({
+        privateKeyHex: wallet.privKeyHex,
+        buyerPubkey: contract.buyerPubkey || '',
+        sellerPubkey: contract.sellerPubkey || '',
+        counter: contract.frostData?.frostCounter || 0,
+        utxos: utxos.map((u: any) => ({ txId: u.outpoint.transactionId, index: u.outpoint.index, amount: u.utxoEntry.amount, scriptPubKey: u.utxoEntry.scriptPublicKey.scriptPublicKey })),
+        buyerAmountSompi: BigInt(Math.floor(contract.itemPriceKas * 1e8)),
+        agrId: contract.agreementId,
+      });
+
+      await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ k: result.nonce.k.toString(16), d_tweaked: result.nonce.d_tweaked.toString(16), R_hex: result.nonce.R_hex }));
+      try { await Clipboard.setStringAsync(result.templateB64); } catch {}
+
+      console.log('[Ceremony] Template built:', result.templateB64.length, 'chars');
+      Alert.alert('TX Template Copied', 'Send clipboard to seller.\nBuyer: ' + (Number(BigInt(result.template.o[0].v)) / 1e8).toFixed(4) + ' KAS\nSeller: ' + (Number(BigInt(result.template.o[1].v)) / 1e8).toFixed(4) + ' KAS');
+    } catch (e: any) { console.error('[Ceremony]', e); Alert.alert('Error', e.message || 'Template build failed'); }
+    finally { setIsLoading(false); }
   };
 
   // === PROCESS SELLER RESPONSE ===
@@ -3809,7 +3891,8 @@ function parseClipboard(raw: string): {
                       setIsLoading(true);
                       const partialSig = contract.partialReleaseTx || '';
                       if (!partialSig || partialSig.length < 10) { Alert.alert('Invalid', 'Paste the buyer signature'); setIsLoading(false); return; }
-                      console.log('[Seller-Release] Got partial sig, co-signing...');
+                      /* DISABLED: old auto-trigger — use canonical template flow instead */
+                      // console.log('[Seller-Release] Got partial sig, co-signing...');
                       const w = await loadMainWallet();
                       if (!w || !contract.frostData) { Alert.alert('Error', 'Wallet or FROST not ready'); setIsLoading(false); return; }
                       // completeFrost2Round imported statically from frost_complete
@@ -3859,7 +3942,7 @@ function parseClipboard(raw: string): {
                         } catch (e) { console.warn('[COVENANT] Template parse failed:', e); }
                       }
                       console.log('[Seller-Release] 2-round: buyerR=', buyerR.slice(0,20), 'buyerSig=', buyerSig ? 'yes' : 'no');
-                      const result = await completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: w.address });
+                      const result = { success: false, txId: null }; // DISABLED: completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: w.address });
                       if (result.success && result.txId) {
                         console.log('[Seller-Release] Release TX:', result.txId);
                         setContract(prev => ({ ...prev, releaseTxId: result.txId }));

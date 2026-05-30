@@ -1,0 +1,52 @@
+const{secp256k1,schnorr}=require("@noble/curves/secp256k1");
+const{sha256}=require("@noble/hashes/sha256");
+const{bytesToHex,hexToBytes}=require("@noble/hashes/utils");
+const N=secp256k1.CURVE.n;
+const G=secp256k1.ProjectivePoint.BASE;
+const B="041149b90ad3189ce363bf1b3854a4c2a2067e503b1f5d53c69d17732cb20c33";
+const S="3e4bf0e0bfc642b3f0645ceaf60e1e79bac5e56d2b5597220999393b53fc6efe";
+const bPub=bytesToHex(secp256k1.getPublicKey(hexToBytes(B),true));
+const sPub=bytesToHex(secp256k1.getPublicKey(hexToBytes(S),true));
+console.log("Buyer pub:",bPub,"parity:",bPub.startsWith("02")?"EVEN":"ODD");
+console.log("Seller pub:",sPub,"parity:",sPub.startsWith("02")?"EVEN":"ODD");
+const[pk1,pk2]=[bPub,sPub].sort();
+const L=sha256(hexToBytes(pk1+pk2));
+const a1=BigInt("0x"+bytesToHex(sha256(new Uint8Array([...L,...hexToBytes(pk1)]))))%N;
+const a2=BigInt("0x"+bytesToHex(sha256(new Uint8Array([...L,...hexToBytes(pk2)]))))%N;
+const P1=secp256k1.ProjectivePoint.fromHex(pk1);
+const P2=secp256k1.ProjectivePoint.fromHex(pk2);
+const Pagg=P1.multiply(a1).add(P2.multiply(a2));
+const paggHex=bytesToHex(Pagg.toRawBytes(true));
+console.log("P_agg:",paggHex,"parity:",paggHex.startsWith("02")?"EVEN":"ODD");
+console.log("");
+console.log("=== Test: raw sk * a (NO negation) ===");
+var d1=(BigInt("0x"+B)*a1)%N;
+var d2=(BigInt("0x"+S)*a2)%N;
+var dAgg=(d1+d2)%N;
+var derivedP=G.multiply(dAgg);
+console.log("dAgg*G:",bytesToHex(derivedP.toRawBytes(true)).slice(0,20));
+console.log("P_agg: ",paggHex.slice(0,20));
+console.log("Match:",bytesToHex(derivedP.toRawBytes(true))===paggHex?"YES":"NO");
+console.log("");
+console.log("=== Test: negate d_agg if P_agg odd ===");
+if(paggHex.startsWith("03")){dAgg=(N-dAgg)%N;console.log("Negated d_agg for odd P_agg");}
+var sig1=schnorr.sign(hexToBytes("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),dAgg.toString(16).padStart(64,"0"));
+var v1=schnorr.verify(sig1,hexToBytes("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),paggHex.slice(2));
+console.log("schnorr.verify after P_agg negate:",v1?"VALID":"INVALID");
+console.log("");
+console.log("=== Test: negate each sk if its pubkey is odd BEFORE applying a_i ===");
+var sk1=BigInt("0x"+B);
+var sk2=BigInt("0x"+S);
+if(bPub.startsWith("03")){sk1=(N-sk1)%N;console.log("Negated buyer sk (odd pubkey)");}
+if(sPub.startsWith("03")){sk2=(N-sk2)%N;console.log("Negated seller sk (odd pubkey)");}
+d1=(sk1*a1)%N;
+d2=(sk2*a2)%N;
+dAgg=(d1+d2)%N;
+derivedP=G.multiply(dAgg);
+console.log("dAgg*G:",bytesToHex(derivedP.toRawBytes(true)).slice(0,20));
+console.log("P_agg: ",paggHex.slice(0,20));
+console.log("Match:",bytesToHex(derivedP.toRawBytes(true))===paggHex?"YES":"NO");
+if(paggHex.startsWith("03")){dAgg=(N-dAgg)%N;console.log("Also negated d_agg for odd P_agg");}
+var sig2=schnorr.sign(hexToBytes("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),dAgg.toString(16).padStart(64,"0"));
+var v2=schnorr.verify(sig2,hexToBytes("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),paggHex.slice(2));
+console.log("schnorr.verify after both negations:",v2?"VALID":"INVALID");
