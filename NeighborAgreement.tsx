@@ -1198,7 +1198,7 @@ function parseClipboard(raw: string): {
           } catch {}
         }
 
-        if (bestMatch && bestStep >= 4) {
+        if (false && bestMatch && bestStep >= 4) {
           // Only auto-restore if funds are locked (step 4+)
           const agrId = bestMatch.agreementId || bestMatch.agreement_id || '';
           const proposerPk = bestMatch.pubkey || bestMatch.partyA?.pubkey || '';
