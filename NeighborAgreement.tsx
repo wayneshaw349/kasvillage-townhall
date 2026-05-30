@@ -1459,164 +1459,12 @@ function parseClipboard(raw: string): {
 
   // Poll FROST address balance � auto-advance to step 4 when both confirmed
   useEffect(() => {
-    if (step !== 3 || !contract.multisigAddress) return;
-    // L1 failsafe: poll FROST balance regardless of local lock state
-    // If FROST has the expected funds, both parties sent — advance to step 4
-    const expectedBuyer = BigInt(Math.floor(contract.itemPriceKas * 1e8));
-    const expectedSeller = BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
-    const expectedTotal = expectedBuyer + expectedSeller;
-    console.log('[FROST-Poll] Expected: buyer=', Number(expectedBuyer)/1e8, 'seller=', Number(expectedSeller)/1e8, 'total=', Number(expectedTotal)/1e8);
-    if (expectedTotal <= 0n) return;
-
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const networkStr = await SecureStore.getItemAsync('kaspa_network');
-        const apiBase = networkStr?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-        const resp = await fetch(apiBase + '/addresses/' + contract.multisigAddress + '/balance');
-        if (!resp.ok || cancelled) return;
-        const data = await resp.json();
-        const frostBalance = BigInt(data.balance || '0');
-        // Check TownHall — if both confirmed, proceed to send even if Arweave hasn't indexed yet
-        try {
-          // getAgreementStatus imported statically
-          const thStatus = await getAgreementStatus(contract.agreementId || '');
-          if (thStatus && (thStatus.status === 'BothConfirmed' || thStatus.status === 'Collateralized' || thStatus.status === 'Accepted')) {
-            console.log('[FROST-Poll] TownHall status:', thStatus.status, '— both parties confirmed');
-            // If we haven't sent collateral yet, send now
-            const sentKey = 'kv_frost_sent_' + (contract.agreementId || '');
-            const alreadySent = await AsyncStorage.getItem(sentKey);
-            const iAmBuyerHere = role === 'buyer'; if (iAmBuyerHere) { console.log('[FROST-Poll] Buyer waits - seller sends first'); }
-            if (!alreadySent && contract.multisigAddress && !iAmBuyerHere) {
-              console.log('[FROST-Poll] Auto-sending collateral to FROST:', contract.multisigAddress);
-              try {
-                const wallet = await loadMainWallet();
-                if (wallet) {
-                    const myAmount = role === 'buyer' ? contract.itemPriceKas : contract.sellerCommitmentKas;
-                    const sendResult = await sendKaspaViaRest({
-                      senderAddress: wallet.address,
-                      recipientAddress: contract.multisigAddress || '',
-                      amountSompi: BigInt(Math.floor(myAmount * 1e8)),
-                      privateKeyHex: wallet.privKeyHex,
-                      network: wallet.network,
-                    });
-                    if (sendResult.txId) {
-                      await AsyncStorage.setItem(sentKey, sendResult.txId);
-                      console.log('[FROST-Poll] ✅ Collateral sent! TX:', sendResult.txId);
-                      // Record on TownHall
-                      try {
-                        // recordCollateral imported statically
-                        await recordCollateral({
-                          agreementId: contract.agreementId || '',
-                          pubkey: (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey) || '',
-                          txId: sendResult.txId,
-                          frostAddress: contract.multisigAddress,
-                        });
-                      } catch (e) { console.warn('[FROST-Poll] TownHall collateral record failed:', e); }
-                    }
-                  }
-                } catch (e) { console.warn('[FROST-Poll] Auto-send failed:', e); }
-            }
-          }
-        } catch (e) { /* TownHall check failed — fall through to balance poll */ }
-
-        // Triple-check: TownHall + L1 address + DAA
-      try {
-        const thResp = await fetch('https://kasvillage.app.runonflux.io/api/agreement/' + (contract.agreementId || ''));
-        const thData = await thResp.json();
-        const frostAddr = contract.multisigAddress || '';
-        const l1UtxoResp = await fetch(apiBase + '/addresses/' + frostAddr + '/utxos');
-        const l1Utxos = await l1UtxoResp.json();
-        const l1DaaResp = await fetch(apiBase + '/info/virtual-chain-blue-score');
-        const l1Daa = await l1DaaResp.json();
-        const pollCount = (global.__frostPollCount = (global.__frostPollCount || 0) + 1);
-      if (pollCount % 6 === 1) { console.log('[FROST-Poll] === TRIPLE CHECK ===');
-        console.log('[FROST-Poll] AgrID:', contract.agreementId);
-        console.log('[FROST-Poll] My pubkey:', (contract.buyerPubkey || contract.sellerPubkey || 'unknown').substring(0,16));
-        console.log('[FROST-Poll] PartyA pubkey (TH):', thData.partyA?.pubkey?.substring(0,16) || 'missing');
-        console.log('[FROST-Poll] PartyB pubkey (TH):', thData.partyB?.pubkey?.substring(0,16) || 'NULL');
-        console.log('[FROST-Poll] TH Status:', thData.status);
-        console.log('[FROST-Poll] TH DAA/Created:', thData.createdAt);
-        console.log('[FROST-Poll] FROST addr (TH):', (thData.frostAddress || 'not set').substring(0,40));
-        console.log('[FROST-Poll] FROST addr (local):', frostAddr.substring(0,40));
-        console.log('[FROST-Poll] L1 FROST exists:', l1Utxos.length > 0 ? 'YES (' + l1Utxos.length + ' UTXOs)' : 'NO UTXOs');
-        console.log('[FROST-Poll] L1 current DAA:', l1Daa.blueScore || 'unknown');
-        if (l1Utxos.length > 0) {
-          const firstUtxo = l1Utxos[0];
-          console.log('[FROST-Poll] L1 first UTXO DAA:', firstUtxo.utxoEntry?.blockDaaScore || 'unknown');
-          console.log('[FROST-Poll] L1 first UTXO amount:', Number(firstUtxo.utxoEntry?.amount || 0) / 1e8, 'KAS');
-        }
-        console.log('[FROST-Poll] MATCH:', 
-          frostAddr === thData.frostAddress ? 'FROST ?' : 'FROST ? (TH=' + (thData.frostAddress || 'null') + ')',
-          thData.partyB ? 'PartyB ?' : 'PartyB ?',
-          thData.partyA?.pubkey ? 'PartyA ?' : 'PartyA ?'
-        );
-        console.log('[FROST-Poll] ================='); }
-      } catch (e) { console.warn('[FROST-Poll] Triple check failed:', e); }
-      console.log('[FROST-Poll] Balance:', Number(frostBalance) / 1e8, 'KASPA, expected:', Number(expectedTotal) / 1e8);
-        if (frostBalance >= expectedTotal) {
-          console.log('[FROST-Poll] Both parties confirmed! Advancing to step 4');
-          setBuyerLocked(true);
-          setSellerLocked(true);
-          setStep(4);
-        } else if (frostBalance > 0n && frostBalance >= expectedBuyer) {
-          // At least one party sent — check if it's us or counterparty
-          console.log('[FROST-Poll] Partial balance detected:', Number(frostBalance) / 1e8, 'KASPA');
-          // If we haven't sent yet, the counterparty has — trigger our auto-send
-          const myExpected = role === 'buyer' ? expectedBuyer : expectedSeller;
-          const counterpartyExpected = role === 'buyer' ? expectedSeller : expectedBuyer;
-          const alreadySentKey = await AsyncStorage.getItem('kv_frost_sent_' + contract.agreementId);
-          const iShouldSend = !alreadySentKey && frostBalance >= counterpartyExpected && frostBalance < expectedTotal;
-          if (iShouldSend) {
-            console.log('[FROST-Poll] Counterparty sent! Triggering our auto-send...');
-            try {
-              const wallet = await loadMainWallet();
-              if (wallet && !cancelled) {
-                const myAmount = role === 'buyer' ? expectedBuyer : expectedSeller;
-                if (myAmount > 0n) {
-                  const sendResult = await sendKaspaViaRest({
-                    senderAddress: wallet.address,
-                    recipientAddress: contract.multisigAddress || '',
-                    amountSompi: myAmount,
-                    privateKeyHex: wallet.privKeyHex,
-                    network: wallet.network,
-                    payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in buyer collateral payload:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: contract.agreementId || '', pubkey: (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey) || '', frostR: nonce.R_hex }).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Buyer payload failed:', e); return ''; } })(),
-                  });
-                  if (sendResult.success) {
-                    await AsyncStorage.setItem('kv_frost_sent_' + contract.agreementId, sendResult.txId || String(Date.now()));
-                    console.log('[FROST-Poll] Our collateral sent! TX:', sendResult.txId);
-                    // Post buyer R to TownHall + Arweave
-                    if (role === 'buyer') {
-                      try {
-                        const savedNonce = await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId);
-                        if (savedNonce) {
-                          const nData = JSON.parse(savedNonce);
-                          // postFrostR imported statically
-                          // R is clipboard-only, not posted to relay
-                          console.log('[FROST-R] R is clipboard-only, not posting to TownHall');
-                          console.log('[FROST-R] Buyer R posted to TownHall:', nData.R_hex.slice(0,20));
-                        }
-                      } catch(e2) { console.warn('[FROST-R] Buyer R post failed:', e2); }
-                    }
-                    try { await markLocked(contract.agreementId || ''); } catch {}
-                    if (role === 'buyer') { setBuyerLocked(true); } else { setSellerLocked(true); }
-                    Alert.alert('Collateral Sent!', Number(myAmount) / 1e8 + ' KASPA sent to FROST.\nTX: ' + (sendResult.txId || '').slice(0, 16));
-                  } else {
-                    console.warn('[FROST-Poll] Auto-send failed:', sendResult.error);
-                    setCollateralFailed(true);
-                  }
-                }
-              }
-            } catch (e) { console.warn('[FROST-Poll] Auto-send error:', e); }
-          }
-        }
-      } catch (e) { console.warn('[FROST-Poll] Failed:', e); }
-    };
-
-    poll(); // immediate first check
-    const interval = setInterval(poll, 10000); // every 10s
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [step, contract.multisigAddress, buyerLocked, sellerLocked, contract.itemPriceKas, contract.sellerCommitmentKas]);
+    // DISABLED: PartialSig-Poll — old auto-cosign path
+    // Seller now signs via canonical sellerSignTemplate at step 5 (clipboard)
+    if (step === 4 && role === 'seller') {
+      console.log('[PartialSig-Poll] DISABLED — use canonical template flow at step 5');
+    }
+  }, [step, contract.agreementId, role, contract.buyerPubkey]);
 
   // Poll Arweave for counterparty's partial sig on step 4
   useEffect(() => {
@@ -2604,282 +2452,17 @@ function parseClipboard(raw: string): {
   };
   
   const handleConfirmDelivery = async () => {
-    if (isLoading) { console.log('[FROST-2R] Already processing, skipping duplicate call'); return; }
-    if (!canonicalCanCreatePartialSig(role || '', step)) {
-      console.warn('[Canonical] BLOCKED: only buyer can create partial sig at step 4, got role:', role, 'step:', step);
-      Alert.alert('Not Allowed', 'Only the buyer can confirm delivery and create the release key.');
-      return;
-    }
-    setIsLoading(true);
-    
-    try {
-      const wallet = await loadMainWallet();
-      if (!wallet || !contract.frostData) {
-        Alert.alert('Error', 'Wallet or FROST not configured');
-        setIsLoading(false);
-        return;
-      }
-      const privKeyHex = wallet?.privKeyHex;
-      if (!privKeyHex) { Alert.alert('Error', 'Failed to decrypt wallet'); setIsLoading(false); return; }
-      const network = wallet.network;
-      
-      const recipientAddress = role === 'buyer' 
-        ? (counterpartyAddress || contract.sellerPubkey)
-        : wallet.address;
-      
-      if (!recipientAddress) {
-        Alert.alert('Error', 'Recipient address not available');
-        setIsLoading(false);
-        return;
-      }
-      
-      const totalAmountSompi = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
-      
-      // 2-round FROST: load saved nonce, get counterparty R from Arweave
-      let myNonce;
-      try {
-        const savedNonce = await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId);
-        if (savedNonce) {
-          myNonce = JSON.parse(savedNonce);
-          console.log('[FROST-2R] Loaded saved nonce R:', myNonce.R_hex?.slice(0,20));
-        }
-      } catch {}
-      if (!myNonce) {
-        // Generate fresh nonce if not saved
-        myNonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress, amountSompi: totalAmountSompi, privateKeyHex: privKeyHex });
-        console.log('[FROST-2R] Generated fresh nonce R:', myNonce.R_hex?.slice(0,20));
-      }
-      let counterpartyR = '';
-      // Check for manually pasted R first
-      try { const manualR = await AsyncStorage.getItem('kv_manual_counterparty_r_' + contract.agreementId); if (manualR && manualR.length === 66) { counterpartyR = manualR; console.log('[FROST-2R] Using manually pasted R:', counterpartyR.slice(0,20)); } } catch {}
-      // Check TownHall for counterparty R (instant, no indexing delay)
-      try {
-        const rData = await getFrostR(contract.agreementId || '');
-        if (rData) {
-          const myR = role === 'buyer' ? rData.frost_r_a : rData.frost_r_b;
-          const cpR = role === 'buyer' ? rData.frost_r_b : rData.frost_r_a;
-          if (cpR) { counterpartyR = cpR; console.log('[FROST-2R] Found R via TownHall:', counterpartyR.slice(0,20)); }
-        }
-      } catch(e) { console.warn('[FROST-2R] TownHall R lookup failed:', e); }
-
-      // Query counterparty R from Arweave
-      // counterpartyR already set by TownHall check above
-      try {
-        // queryAgreementsFromArweave imported statically
-        const rResults = await queryAgreementsFromArweave({ status: 'Accepted' });
-        const counterMatch = rResults.find((r) => (r.agreementId || r.agreement_id) === contract.agreementId && (r.pubkey || r.KVPubkey) !== (role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey));
-        if (counterMatch?.frostR || counterMatch?.KVFrostR) {
-          counterpartyR = counterMatch.frostR || counterMatch.KVFrostR || '';
-          console.log('[FROST-2R] Found counterparty R:', counterpartyR.slice(0,20));
-        }
-      } catch(e) { console.warn('[FROST-2R] Counterparty R lookup failed:', e); }
-      // Fallback: also check Arweave tags directly
-      if (!counterpartyR) {
-        try {
-          const cpPub = role === 'buyer' ? contract.sellerPubkey : contract.buyerPubkey;
-          const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["Accepted"] }, { name: "KV-Pubkey", values: ["' + cpPub + '"] }]) { edges { node { tags { name value } } } } }';
-          // Layer 2: arweave.net (fast)
-          let arResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
-          const json = await arResp.json();
-          const tags = json?.data?.transactions?.edges?.[0]?.node?.tags || [];
-          const rTag = tags.find((t) => t.name === 'KV-FrostR');
-          if (rTag?.value) { counterpartyR = rTag.value; console.log('[FROST-2R] Found R via Goldsky:', counterpartyR.slice(0,20)); }
-        } catch(e) { console.warn('[FROST-2R] Goldsky R lookup failed:', e); }
-      }
-      // Check L1 UTXO payloads for counterparty R
-      if (!counterpartyR) {
-        try {
-          const nw = await SecureStore.getItemAsync('kaspa_network');
-          const apiBase = nw?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-          const txResp = await fetch(apiBase + '/addresses/' + contract.multisigAddress + '/full-transactions?limit=10&resolve_previous_outpoints=no');
-          const txData = await txResp.json();
-          for (const tx of txData || []) {
-            const pl = tx.payload || '';
-            if (pl && pl.length >= 66 && (pl.startsWith('02') || pl.startsWith('03'))) {
-              counterpartyR = pl;
-              console.log('[FROST-2R] Found R in L1 TX payload:', counterpartyR.slice(0,20));
-              break;
-            }
-          }
-        } catch(e) { console.warn('[FROST-2R] L1 payload check failed:', e); }
-      }
-      let result;
-      if (counterpartyR && myNonce?.R_hex) {
-        // Proper 2-round FROST
-        // Build TX to compute real Kaspa sighash for BIP340 verification
-        // computeSighash imported statically at top
-        // h2b, b2h imported statically at top
-        // === CANONICAL FROST TX ===
-        const frostAddr = contract.frostData?.address || '';
-        const frostNet = contract.frostData?.network || 'testnet-10';
-        const buyerAddr = wallet.address || '';
-        // Derive seller address from pubkey
-        // aggregateToAddress imported statically from frost_complete
-        const sellerPk = contract.sellerPubkey || '';
-        const sellerXOnly = sellerPk.length === 66 ? sellerPk.slice(2) : sellerPk;
-        const sellerAddr = aggregateToAddress('02' + sellerXOnly, frostNet);
-        const buyerAmtS = BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8));
-        const sellerAmtS = BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8));
-        // Verify FROST UTXOs are pure P2PK
-          const frostUtxos = await (async () => { try { const r = await fetch((await SecureStore.getItemAsync('kaspa_network'))?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org' + '/addresses/' + contract.frostData?.address + '/utxos'); return await r.json(); } catch { return []; } })();
-          for (const u of frostUtxos) {
-            const spk = u.utxoEntry?.scriptPublicKey?.scriptPublicKey || '';
-            if (spk && !isPureP2PK(spk)) {
-              console.error('[COVENANT] ⚠️ FROST UTXO has covenant script!');
-              const proceedBuyer = await new Promise((resolve) => Alert.alert('⚠️ Covenant Detected', 'A UTXO in the FROST address contains a non-standard script. Someone may have sent a programmed UTXO that could be clawed back.\n\nDo you want to continue?', [{ text: 'Stop (Recommended)', style: 'cancel', onPress: () => resolve(false) }, { text: 'I understand the risk', style: 'destructive', onPress: () => resolve(true) }]));
-              if (!proceedBuyer) return;
-            }
-          }
-          console.log('[FROST-Canonical] Building TX: frost=', frostAddr.slice(0,20), 'buyer=', buyerAddr.slice(0,20), 'seller=', sellerAddr.slice(0,20));
-        const canonTx = await buildCanonicalFrostTx({ frostAddress: frostAddr, buyerAddress: buyerAddr, sellerAddress: sellerAddr, buyerAmountSompi: buyerAmtS, sellerAmountSompi: sellerAmtS, network: frostNet });
-        console.log('[FROST-Canonical] UTXOs:', canonTx.inputs.length, 'Outputs:', canonTx.outputs.length, 'Total:', canonTx.totalIn.toString());
-        const allPartials: string[] = [];
-        const allSighashes: string[] = [];
-        let partialS: any;
-        for (let idx = 0; idx < canonTx.inputs.length; idx++) {
-          const sh = canonicalSighash(canonTx, idx);
-          const ps = computeFrostPartialS({ myNonce, counterpartyR_hex: counterpartyR, frostAddress: contract.frostData, sighash_hex: b2h(sh) });
-          allPartials.push(ps.s_hex);
-          allSighashes.push(b2h(sh));
-          if (idx === 0) { partialS = ps; console.log('[FROST-Canonical] R_agg_x:', ps.R_agg_x_hex.slice(0,20)); }
-          console.log('[FROST-Canonical] Input', idx, 'sighash:', b2h(sh).slice(0,20), 's:', ps.s_hex.slice(0,16));
-        }
-        // Serialize full TX template so seller builds identical TX
-        const txTemplate = { u: canonTx.utxos.map((u: any) => ({ t: u.outpoint.transactionId, i: u.outpoint.index, a: u.utxoEntry.amount, s: u.utxoEntry.scriptPublicKey.scriptPublicKey })), o: canonTx.outputs.map((o: any) => ({ v: o.value.toString(), s: b2h(o.script) })), f: canonTx.fee.toString(), h: allSighashes };
-        const templateB64 = btoa(JSON.stringify(txTemplate));
-        const sigHex = partialS.R_agg_x_hex + allPartials.join('') + '|' + templateB64;
-        console.log('[FROST-Canonical] Packed', allPartials.length, 's values + TX template (' + txTemplate.u.length + ' inputs,' + txTemplate.o.length + ' outputs)');
-        result = { success: true, partialSig: sigHex, messageHash: myNonce.message_hex };
-      } else {
-        console.warn('[FROST-2R] No counterparty R found');
-        Alert.alert('Waiting for Counterparty', 'Counterparty nonce not found yet. Wait 2-5 minutes and try again.');
-        setIsLoading(false);
-        return;
-        result = await createFrostPartialSig({ frostAddress: contract.frostData, recipientAddress, amountSompi: totalAmountSompi, privateKeyHex: privKeyHex });
-      }
-      
-      if (result.success && result.partialSig) {
-        console.log('[Neighbor] Created FROST partial signature');
-        
-        const myPubkey = await SecureStore.getItemAsync('kaspa_pubkey') || '';
-        const counterpartyPubkey = role === 'buyer' ? contract.sellerPubkey : contract.buyerPubkey;
-        
-        // Split UTXO snapshot from sig before encryption
-        let sigForEncrypt = result.partialSig;
-        let utxoSnapshotB64 = '';
-        const pipeIdx2 = sigForEncrypt.indexOf('|');
-        if (pipeIdx2 > 0) { utxoSnapshotB64 = sigForEncrypt.slice(pipeIdx2); sigForEncrypt = sigForEncrypt.slice(0, pipeIdx2); }
-        // ENCRYPT partial sig before relay
-        const encCtx = {
-          agreementId: contract.agreementId || '',
-          buyerPubkey: contract.buyerPubkey || '',
-          sellerPubkey: contract.sellerPubkey || '',
-          multisigAddress: contract.multisigAddress || '',
-          aggregatedPubkey: contract.frostData?.aggregatedPubkey || '',
-          network: contract.frostData?.network || 'testnet-10',
-          itemPriceKas: contract.itemPriceKas,
-          sellerCommitmentKas: contract.sellerCommitmentKas,
-          R_hex: '',
-        };
-        const encrypted = encryptPartialSig({
-          partialSig: sigForEncrypt,
-          myPrivKeyHex: privKeyHex,
-          counterpartyPubKeyHex: counterpartyPubkey || '',
-          ctx: encCtx,
-        });
-        // Reattach UTXO snapshot to encrypted sig
-        if (utxoSnapshotB64) { encrypted.encrypted = encrypted.encrypted + utxoSnapshotB64; }
-        console.log('[Neighbor] Partial sig ENCRYPTED for relay (utxo:', utxoSnapshotB64 ? 'yes' : 'no', ')');
-
-        const relayPayload: PartialTxPayload = {
-          agreementId: contract.agreementId || `AGR_${Date.now()}`,
-          partialTx: encrypted.encrypted,
-          senderPubkey: myPubkey,
-          recipientPubkey: counterpartyPubkey || '',
-          timestamp: Date.now(),
-        };
-        
-        const relayResult = await postPartialTx(relayPayload);
-        
-        if (relayResult.success) {
-          console.log(`[Neighbor] Partial TX posted via ${relayResult.method}: ${relayResult.url}`);
-        }
-        
-        // Inscribe partial sig to Arweave (permanent, survives TownHall restart)
-        try {
-          // inscribeAgreementToArweave imported statically
-          await inscribeAgreementToArweave({
-            agreementId: contract.agreementId || '',
-            pubkey: role === 'buyer' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''),
-            amount_sompi: Number(totalAmountSompi),
-            description: 'partial-sig',
-            network: 'testnet-10',
-            status: 'PartialSig',
-            signature: encrypted.encrypted || '', // ENCRYPTED — only counterparty can decrypt
-            counterpartyPubkey: counterpartyPubkey || '',
-            frostAddress: contract.multisigAddress || '',
-          });
-          console.log('[Neighbor] Partial sig inscribed to Arweave');
-        } catch (e) { console.warn('[Neighbor] Arweave partial sig failed:', e); }
-        // Also post to local TownHall relay (instant delivery)
-        try {
-          const townhallUrl = 'https://kasvillage.app.runonflux.io/api/agreement/partial-sig';
-          await fetch(townhallUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agreement_id: contract.agreementId || '',
-              pubkey: myPubkey,
-              partial_sig: encrypted.encrypted, // ENCRYPTED
-              recipient: recipientAddress,
-            }),
-          });
-          console.log('[Neighbor] Partial sig posted to TownHall local');
-        } catch (e) { console.warn('[Neighbor] TownHall local relay failed:', e); }
-        // Also use TownHall agreement partial-sig endpoint
-        try {
-          // submitPartialSig imported statically
-          await submitPartialSig({
-            agreementId: contract.agreementId || '',
-            pubkey: role === 'buyer' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''),
-            partialSig: result.partialSig || '',
-            recipientAddress: recipientAddress || '',
-          });
-          console.log('[Neighbor] Partial sig submitted to TownHall agreement endpoint');
-        } catch (e) { console.warn('[Neighbor] TownHall partial sig failed:', e); }
-        
-        setContract(prev => ({
-          ...prev,
-          partialReleaseTx: encrypted.encrypted,
-          releaseRecipient: recipientAddress,
-        }));
-        
-        setPaymentSent(true);
-        
-        const newStats = {
-          ...userStats,
-          successes: userStats.successes + 1,
-          xp: userStats.xp + 10,
-        };
-        setUserStats(newStats);
-        await SecureStore.setItemAsync('kv_user_stats', JSON.stringify(newStats));
-        
-        Alert.alert(
-          'Signature Created', 
-          relayResult.success 
-            ? `Posted to relay. Waiting for counterparty to co-sign...\n\nMethod: ${relayResult.method}`
-            : 'Share this with counterparty to complete the release.'
-        );
-        await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(5);
-      } else {
-        Alert.alert('Error', result.error || 'Failed to create signature');
-      }
-    } catch (e) {
-      console.error('[Neighbor] Confirm delivery error:', e);
-      Alert.alert('Error', e instanceof Error ? e.message : 'Unknown error');
-    } finally {
-      setIsLoading(false);
-    }
+    // CANONICAL: just advance to step 5 signing ceremony
+    // No partial sig creation, no relay posting, no encryption
+    // Step 5 has buildReleaseTemplate (buyer) and sellerSignTemplate (seller)
+    Alert.alert(
+      'Start Signing Ceremony',
+      'Exchange TX template with seller via clipboard.\nYour signing key (k) lives only during this process.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Start', onPress: () => setStep(5) },
+      ]
+    );
   };
   
   const handleRequestRelease = async () => {
@@ -3756,17 +3339,7 @@ function parseClipboard(raw: string): {
                       </Text>
                     </View>
                     
-                    <View style={{ backgroundColor: "#eef2ff", borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: "#a5b4fc" }}>
-                      <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
-                      <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My Verification</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={{ backgroundColor: "#059669", borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 10 }} onPress={async () => { try { const Clipboard = Clipboard; const saved = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || '')); if (saved) { const n = JSON.parse(saved); await Clipboard.setStringAsync(n.R_hex || ''); Alert.alert('Copied', 'Your R nonce copied to clipboard'); } else { Alert.alert('No Nonce', 'R nonce not generated yet'); } } catch(e) { Alert.alert('Error', String(e)); } }}>
-                      <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My R Nonce (Buyer)</Text>
-                    </TouchableOpacity>
-                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#3730a3", marginBottom: 6 }}>Paste Seller Verification</Text>
-                      <Text style={{ fontSize: 10, color: "#4338ca", marginBottom: 8 }}>Only needed if auto-detection fails. Seller sends via DM.</Text>
-                      <TextInput style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#a5b4fc", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: "monospace", color: "#1c1917" }} placeholder="02abc...def (66 hex chars)" placeholderTextColor="#a8a29e" onChangeText={async (txt) => { const p = parseClipboard(txt); const rVal = p.buyerR || p.sig || txt.trim(); if (rVal.length >= 60 && (rVal.startsWith("02") || rVal.startsWith("03"))) { await AsyncStorage.setItem("kv_manual_counterparty_r_" + (contract.agreementId || ""), rVal); console.log("[Buyer] Saved counterparty R:", rVal.slice(0,20)); } }} autoCapitalize="none" autoCorrect={false} />
-                    </View>
+                    {/* REMOVED: old R nonce exchange — canonical embeds R in template */}
                     <TouchableOpacity
                       style={[styles.successBtn, isLoading && styles.primaryBtnDisabled]}
                       onPress={handleConfirmDelivery}
@@ -3812,13 +3385,7 @@ function parseClipboard(raw: string): {
                         You'll receive {contract.itemPriceKas} KASPA + your {contract.sellerCommitmentKas} KASPA back
                       </Text>
                     </View>
-                    <View style={{ backgroundColor: "#fffbeb", borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: "#f59e0b" }}>
-                      <Text style={{ fontSize: 13, fontWeight: "bold", color: "#92400e", marginBottom: 6 }}>Your Nonce (R) ? Share with Buyer</Text>
-                      <Text style={{ fontSize: 10, color: "#b45309", marginBottom: 8 }}>If buyer cannot find your R automatically, copy and send via DM</Text>
-                      <TouchableOpacity style={{ backgroundColor: "#4f46e5", borderRadius: 8, padding: 10, alignItems: "center" }} onPress={async () => { try { const saved = await AsyncStorage.getItem("kv_frost_nonce_" + (contract.agreementId || "")); if (saved) { const n = JSON.parse(saved); const clipMod = await import("expo-clipboard"); const Clipboard = clipMod.default || clipMod; await Clipboard.setStringAsync(n.R_hex || ""); Alert.alert("Copied!", "Your R nonce copied. Send to buyer via DM."); } else { Alert.alert("No Nonce", "Nonce not found yet."); } } catch (e) { Alert.alert("Error", String(e)); } }}>
-                        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Copy My Verification</Text>
-                      </TouchableOpacity>
-                    </View>
+                    {/* REMOVED: old seller R share — canonical embeds R in template */}
                     
                     {userStats.xp >= XP_THRESHOLD_IOU_ACCESS ? (
                       <TouchableOpacity
@@ -3907,7 +3474,8 @@ function parseClipboard(raw: string): {
                       if (parsed.buyerR && parsed.buyerR.length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), parsed.buyerR); console.log('[Seller-Release] Auto-extracted R:', parsed.buyerR.slice(0,20)); }
                       // Decrypt only if encrypted, otherwise use raw
                       const decrypted = parsed.isEncrypted ? (() => { try { return decryptPartialSig({ encrypted: rawSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return rawSig; } })() : rawSig;
-                      console.log('[Seller-Release] Sig mode:', parsed.isEncrypted ? 'ENCRYPTED' : 'RAW', 'template:', txTemplateB64_2 ? 'YES' : 'NO', 'R:', parsed.buyerR ? 'YES' : 'NO');
+                      Alert.alert("Use Step 5", "Paste the TX template at Step 5 Signing Ceremony instead."); setIsLoading(false); return; // OLD PATH DISABLED
+                      // console.log('[Seller-Release] Sig mode:', parsed.isEncrypted ? 'ENCRYPTED' : 'RAW', 'template:', txTemplateB64_2 ? 'YES' : 'NO', 'R:', parsed.buyerR ? 'YES' : 'NO');
                       // Get buyer R from TownHall
                       let buyerR = parsed.buyerR || '';
                       if (!buyerR) { try { const mr = await AsyncStorage.getItem('kv_manual_counterparty_r_' + (contract.agreementId || '')); if (mr) buyerR = mr; } catch {} }
