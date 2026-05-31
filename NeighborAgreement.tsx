@@ -1695,7 +1695,9 @@ function parseClipboard(raw: string): {
             Math.floor(contract.itemPriceKas * 1e8).toString() +
             Math.floor(contract.sellerCommitmentKas * 1e8).toString() +
             network +
-            utxoTag
+            utxoTag +
+            (contract.itemDescription || '') +
+            String(Date.now())
 
 
           );
