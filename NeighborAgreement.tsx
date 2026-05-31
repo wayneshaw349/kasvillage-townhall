@@ -1322,141 +1322,90 @@ function parseClipboard(raw: string): {
   // Poll for counterparty's Agreed-Send on Arweave
   // DEBUG: log guard values — triggers auto-send
   useEffect(() => {
-    console.log('[Agreed-Send Guard]', 'step:', step, 'agrId:', contract.agreementId?.slice(0,12), 'frost:', contract.multisigAddress?.slice(0,20), 'buyer:', contract.buyerPubkey?.slice(0,16), 'seller:', contract.sellerPubkey?.slice(0,16));
-    if (step < 3 || !contract.agreementId || !contract.multisigAddress) return;
+    // Poll FROST address balance — auto-advance to step 4 when both confirmed
+    if (step !== 3 || !contract.multisigAddress || !contract.agreementId) return;
     if (!contract.buyerPubkey || !contract.sellerPubkey) return;
-    // Don't poll if already on step 4+ (both confirmed)
-    if (step >= 4) return;
 
     let cancelled = false;
-    const myPubkey = role === 'buyer' ? contract.buyerPubkey : contract.sellerPubkey;
-    const counterpartyPubkey = role === 'buyer' ? contract.sellerPubkey : contract.buyerPubkey;
+    const expectedBuyer = Math.floor(contract.itemPriceKas * 1e8);
+    const expectedSeller = Math.floor(contract.sellerCommitmentKas * 1e8);
+    const expectedTotal = expectedBuyer + expectedSeller;
+    console.log('[FROST-Poll] Expected: buyer=', expectedBuyer / 1e8, 'seller=', expectedSeller / 1e8, 'total=', expectedTotal / 1e8);
 
-    const pollAgreedSend = async () => {
+    const pollBalance = async () => {
       if (cancelled) return;
-      console.log('[Agreed-Send Poll] Polling... role:', role, 'counterparty:', counterpartyPubkey?.slice(0,16), 'agrId:', contract.agreementId?.slice(0,12));
       try {
-        // Check Arweave for counterparty's Agreed-Send
-        if (!contract.agreementId || !contract.multisigAddress) return;
+        const networkStr = contract.frostData?.network || 'testnet-10';
+        const apiBase = networkStr.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
         
-        // First: check if WE have inscribed Agreed yet (proposer might not have)
-        const ownAgreedKey = 'kv_agreed_' + contract.agreementId;
-        const alreadyAgreed = await AsyncStorage.getItem(ownAgreedKey);
-        if (!alreadyAgreed) {
-          // Check if counterparty accepted/agreed on Arweave
-          try {
-            // queryAgreementsFromArweave imported statically
-            const allStatuses = await queryAgreementsFromArweave({ status: 'Accepted' });
-            const counterAccepted = allStatuses.find((r: any) => 
-              (r.agreementId || r.agreement_id) === contract.agreementId &&
-              (r.partyA?.pubkey || r.party_a?.pubkey || r.pubkey) === counterpartyPubkey
-            );
-            if (counterAccepted) {
-              console.log('[Agreed-Send Poll] Counterparty accepted — inscribing our Agreed');
-              await inscribeAgreementToArweave({
-                agreementId: contract.agreementId || '',
-                pubkey: myPubkey || '',
-                amount_sompi: Math.floor((role === 'buyer' ? contract.itemPriceKas : contract.sellerCommitmentKas) * 1e8),
-                description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
-            frostCounter: contract.frostData?.frostCounter || 0,
-                network: 'testnet-10',
-                status: 'Agreed',
-                signature: 'agreed_auto_' + Date.now(),
-                counterpartyPubkey: counterpartyPubkey,
-                frostAddress: contract.multisigAddress,
-              });
-              await AsyncStorage.setItem(ownAgreedKey, String(Date.now()));
-              console.log('[Agreed-Send Poll] Own Agreed inscribed to Arweave');
+        // Check FROST address balance
+        const balResp = await fetch(apiBase + '/addresses/' + contract.multisigAddress + '/balance');
+        if (!balResp.ok || cancelled) return;
+        const balData = await balResp.json();
+        const balance = Number(balData.balance || '0');
+
+        if (balance >= expectedTotal && expectedTotal > 0) {
+          console.log('[FROST-Poll] Balance:', balance / 1e8, 'KASPA, expected:', expectedTotal / 1e8);
+          console.log('[FROST-Poll] Both parties confirmed! Advancing to step 4');
+          if (!cancelled) {
+            setBuyerLocked(true);
+            setSellerLocked(true);
+            setStep(4);
+            // Update FROST active list
+            updateFrostEntry(contract.agreementId || '', { step: 4 });
+          }
+          return;
+        }
+
+        // Partial balance: one party sent, auto-send ours if needed
+        if (balance > 0 && balance < expectedTotal) {
+          console.log('[FROST-Poll] Partial balance:', balance / 1e8, 'KASPA');
+          
+          // Check if WE need to send
+          const myExpected = role === 'buyer' ? expectedBuyer : expectedSeller;
+          const otherExpected = role === 'buyer' ? expectedSeller : expectedBuyer;
+          
+          // If other party sent their part, auto-send ours
+          if (balance >= otherExpected && myExpected > 0) {
+            const sentKey = 'kv_frost_poll_sent_' + contract.agreementId;
+            const alreadySent = await AsyncStorage.getItem(sentKey);
+            if (!alreadySent && !cancelled) {
+              try {
+                const wallet = await loadMainWallet();
+                if (!wallet || cancelled) return;
+                console.log('[FROST-Poll] Counterparty sent! Auto-sending', myExpected / 1e8, 'KASPA');
+                const sendResult = await sendKaspaViaRest({
+                  senderAddress: wallet.address,
+                  recipientAddress: contract.multisigAddress || '',
+                  amountSompi: BigInt(myExpected),
+                  privateKeyHex: wallet.privKeyHex,
+                  network: wallet.network || 'testnet-10',
+                });
+                if (sendResult.success) {
+                  await AsyncStorage.setItem(sentKey, sendResult.txId || String(Date.now()));
+                  console.log('[FROST-Poll] Auto-sent! TX:', sendResult.txId);
+                  if (role === 'buyer') { setBuyerLocked(true); setContract(prev => ({ ...prev, buyerLockTxId: sendResult.txId })); }
+                  else { setSellerLocked(true); setContract(prev => ({ ...prev, sellerLockTxId: sendResult.txId })); }
+                  // Record on TownHall
+                  recordCollateral({ agreementId: contract.agreementId || '', pubkey: wallet.address, txId: sendResult.txId || '', frostAddress: contract.multisigAddress || '' }).catch(() => {});
+                  // Merkle proof
+                  uploadPerTxProof({ txId: sendResult.txId || '', txIndex: 0, amountSompi: BigInt(myExpected), scriptPubKey: '', daaScore: 0, txType: 'collateral', balanceAfter: 0, agreementId: contract.agreementId, uploadFn: async (data, tags) => { const r = await uploadToIrys(data, tags); return r.txId || ''; }, network: 'testnet' }).catch(() => {});
+                } else {
+                  console.warn('[FROST-Poll] Auto-send failed:', sendResult.error);
+                }
+              } catch (e) { console.warn('[FROST-Poll] Auto-send error:', e); }
             }
-          } catch (e) { console.warn('[Agreed-Send Poll] Agreed check failed:', e); }
-        }
-        const found = await queryCounterpartyAgreed({
-          agreementId: contract.agreementId,
-          counterpartyPubkey: counterpartyPubkey || '',
-          myPubkey: myPubkey || '',
-          frostAddress: contract.multisigAddress,
-        });
-        if (!found || cancelled) return;
-
-        console.log('[Agreed-Send Poll] Counterparty Agreed-Send detected for', contract.agreementId, '- checking if already sent...');
-
-        // Inscribe our own Agreed-Send if not already done
-        const ownAgreedSendKey = 'kv_agreed_send_' + contract.agreementId;
-        const alreadySent = await AsyncStorage.getItem(ownAgreedSendKey);
-        if (!alreadySent) {
-          try {
-            await inscribeAgreementToArweave({
-              agreementId: contract.agreementId || '',
-              pubkey: myPubkey || '',
-              amount_sompi: Math.floor((role === 'buyer' ? contract.itemPriceKas : contract.sellerCommitmentKas) * 1e8),
-              description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
-              network: 'testnet-10',
-              status: 'Agreed-Send',
-              signature: 'agreed_send_' + Date.now(),
-              counterpartyPubkey: counterpartyPubkey,
-              frostAddress: contract.multisigAddress || '',
-              frostRHash: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: contract.frostData, recipientAddress: contract.releaseRecipient || counterpartyKaspaAddr || contract.multisigAddress || '', amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)), privateKeyHex: (await loadMainWallet())?.privKeyHex || '' }); await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ R_hex: nonce.R_hex, k_private: nonce.k_private, d_tweaked: nonce.d_tweaked, message_hex: nonce.message_hex })); console.log('[FROST-R] Generated nonce R:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: contract.agreementId || '', pubkey: myPubkey || '', frostR: nonce.R_hex }).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Nonce generation failed:', e); return ''; } })(),
-            });
-            await AsyncStorage.setItem(ownAgreedKey, String(Date.now()));
-            console.log('[Agreed-Send Poll] Own Agreed-Send inscribed');
-          } catch (e) { console.warn('[Agreed-Send Poll] Inscription failed:', e); }
-        }
-
-        // Auto-send to FROST
-        try {
-          const wallet = await loadMainWallet();
-          if (!wallet || cancelled) return;
-          const myAmount = role === 'buyer'
-            ? BigInt(Math.floor(contract.itemPriceKas * 1e8))
-            : BigInt(Math.floor(contract.sellerCommitmentKas * 1e8));
-          if (myAmount <= 0n) return;
-
-          // Check if we already sent (idempotent)
-          const sentKey = 'kv_frost_sent_' + contract.agreementId;
-          const alreadyFrostSent = await AsyncStorage.getItem(sentKey);
-          if (alreadyFrostSent) {
-            console.log('[Agreed-Send Poll] Already sent to FROST, skipping');
-            return;
           }
-
-          console.log('[Agreed-Send Poll] Sending', Number(myAmount) / 1e8, 'KASPA to FROST:', contract.multisigAddress);
-          const sendResult = await sendKaspaViaRest({
-            senderAddress: wallet.address,
-            recipientAddress: contract.multisigAddress || '',
-            amountSompi: myAmount,
-            privateKeyHex: wallet.privKeyHex,
-            network: wallet.network,
-          });
-
-          if (sendResult.success) {
-            await AsyncStorage.setItem(sentKey, sendResult.txId || String(Date.now()));
-            console.log('[Agreed-Send Poll] FROST TX confirmed:', sendResult.txId);
-            try { await markLocked(contract.agreementId || ''); } catch {}
-            // Merkle proof (fire-and-forget)
-            uploadPerTxProof({
-              txId: sendResult.txId || '', txIndex: 0, amountSompi: myAmount,
-              scriptPubKey: '', daaScore: 0, txType: 'collateral', balanceAfter: 0,
-              agreementId: contract.agreementId,
-              uploadFn: async (data, tags) => { const r = await uploadToIrys(data, tags); return r.txId || ''; },
-              network: 'testnet',
-            }).catch(() => {});
-            recordCollateral({ agreementId: contract.agreementId || '', pubkey: wallet.address, txId: sendResult.txId || '', frostAddress: contract.multisigAddress || '' }).catch(() => {});
-            if (role === 'buyer') { setBuyerLocked(true); setContract(prev => ({ ...prev, buyerLockTxId: sendResult.txId })); }
-            else { setSellerLocked(true); setContract(prev => ({ ...prev, sellerLockTxId: sendResult.txId })); }
-            Alert.alert('Collateral Sent!', Number(myAmount) / 1e8 + ' KASPA locked to FROST.\nTX: ' + (sendResult.txId || '').slice(0, 16) + '...');
-          } else {
-            console.warn('[Agreed-Send Poll] Send failed:', sendResult.error);
-            Alert.alert('Auto-Send Failed', sendResult.error || 'Will retry on next poll.');
-          }
-        } catch (e) { console.warn('[Agreed-Send Poll] Auto-send error:', e); }
-      } catch (e) { console.warn('[Agreed-Send Poll] Error:', e); }
+        } else {
+          console.log('[FROST-Poll] Balance:', balance / 1e8, 'KASPA, expected:', expectedTotal / 1e8);
+        }
+      } catch (e) { console.warn('[FROST-Poll] Error:', e); }
     };
 
-    // Poll every 30 seconds (Arweave indexing takes 5-30 min)
-    pollAgreedSend(); // immediate first check
-    const interval = setInterval(pollAgreedSend, 30000);
+    pollBalance();
+    const interval = setInterval(pollBalance, 10000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [step, contract.agreementId, contract.multisigAddress, contract.buyerPubkey, contract.sellerPubkey, role]);
+  }, [step, contract.agreementId, contract.multisigAddress, role, contract.buyerPubkey, contract.sellerPubkey, contract.itemPriceKas, contract.sellerCommitmentKas])
 
   // Poll FROST address balance � auto-advance to step 4 when both confirmed
   useEffect(() => {
