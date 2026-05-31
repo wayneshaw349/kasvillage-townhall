@@ -2256,9 +2256,25 @@ function parseClipboard(raw: string): {
           if (immediateSendAmount > 0 && wallet.privKeyHex) {
             const frostSentKey = 'kv_frost_sent_' + agrId;
             const alreadyFrostSent = await AsyncStorage.getItem(frostSentKey);
-            if (alreadyFrostSent) {
-              console.log('[Neighbor] Already sent to FROST for', agrId, '- skipping');
-            } else try {
+            // L1 IDEMPOTENT GUARD: check actual FROST balance instead of stale AsyncStorage flag
+        const _frostAddr = contract.multisigAddress || contract.frostData?.address || '';
+        if (_frostAddr && _frostAddr.length > 20) {
+          try {
+            const _apiBase = (contract.frostData?.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+            const _balResp = await fetch(_apiBase + '/addresses/' + _frostAddr + '/balance');
+            if (_balResp.ok) {
+              const _balData = await _balResp.json();
+              const _frostBal = Number(_balData.balance || '0') / 1e8;
+              const _myAmt = role === 'seller' ? contract.sellerCommitmentKas : contract.itemPriceKas;
+              if (_frostBal >= _myAmt) {
+                console.log('[L1-Guard] FROST already has', _frostBal, 'KAS >= my', _myAmt, '— skip send');
+                // Don't return — let polling continue to detect full funding
+              } else {
+                console.log('[L1-Guard] FROST has', _frostBal, 'KAS < my', _myAmt, '— will send');
+              }
+            }
+          } catch (e) { console.warn('[L1-Guard] Balance check failed, proceeding:', e); }
+        } else try {
               console.log('[Neighbor] Seller auto-sending', immediateSendAmount / 1e8, 'KASPA to FROST');
               // sendKaspaViaRest is already imported/available in this scope
               const txResult = await sendKaspaViaRest({
@@ -2270,7 +2286,7 @@ function parseClipboard(raw: string): {
                 payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await SecureStore.setItemAsync('kv_frost_nonce_' + agrId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in collateral TX payload:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: nonce.R_hex }).then(() => console.log('[FROST-R] R posted to TownHall')).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Payload nonce failed:', e); return ''; } })(),
               });
               console.log('[Neighbor] Seller collateral TX:', txResult.txId);
-              await AsyncStorage.setItem('kv_frost_sent_' + agrId, String(Date.now()));
+              // DISABLED: await AsyncStorage.setItem('kv_frost_sent_' + agrId, String(Date.now())); // L1 is source of truth
             } catch (e) { console.warn('[Neighbor] Seller auto-send failed (poll will retry):', e); }
           }
 
