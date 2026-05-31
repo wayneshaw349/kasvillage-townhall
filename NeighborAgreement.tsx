@@ -1101,6 +1101,7 @@ function parseClipboard(raw: string): {
   const [sellerRequestedRelease, setSellerRequestedRelease] = useState(false);
   const [proposedSplit, setProposedSplit] = useState({ buyerGets: 0, sellerGets: 0 });
   const [isLoading, setIsLoading] = useState(false);
+  const [sellerResponseB64, setSellerResponseB64] = useState('');
   const [collateralFailed, setCollateralFailed] = useState(false);
   const [counterpartyAddress, setCounterpartyAddress] = useState<string | null>(null);
   const [counterpartyKaspaAddr, setCounterpartyKaspaAddr] = useState<string>('');
@@ -1338,28 +1339,40 @@ function parseClipboard(raw: string): {
         const networkStr = contract.frostData?.network || 'testnet-10';
         const apiBase = networkStr.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
         
-        // Check FROST address balance
-        const balResp = await fetch(apiBase + '/addresses/' + contract.multisigAddress + '/balance');
-        if (!balResp.ok || cancelled) return;
-        const balData = await balResp.json();
-        const balance = Number(balData.balance || '0');
+        // Check FROST UTXOs (not balance — blocks stale-fund false positive)
+        const utxoResp = await fetch(apiBase + '/addresses/' + contract.multisigAddress + '/utxos');
+        if (!utxoResp.ok || cancelled) return;
+        const frostUtxos = await utxoResp.json();
+        if (!Array.isArray(frostUtxos)) return;
+        const balance = frostUtxos.reduce((sum, u) => sum + Number(u.utxoEntry?.amount || '0'), 0);
+        const utxoCount = frostUtxos.length;
 
         if (balance >= expectedTotal && expectedTotal > 0) {
-          console.log('[FROST-Poll] Balance:', balance / 1e8, 'KASPA, expected:', expectedTotal / 1e8);
-          console.log('[FROST-Poll] Both parties confirmed! Advancing to step 4');
+          // GUARD: exactly 2 UTXOs (buyer + seller collateral)
+          if (utxoCount !== 2) {
+            console.log('[FROST-Poll] Balance:', balance / 1e8, 'but', utxoCount, 'UTXOs (need 2) — stale funds, skipping');
+            return;
+          }
+          // GUARD: amounts must match expected buyer/seller ±5%
+          const sortedA = frostUtxos.map(u => Number(u.utxoEntry?.amount || '0')).sort((a, b) => a - b);
+          const sortedE = [expectedBuyer, expectedSeller].sort((a, b) => a - b);
+          if (Math.abs(sortedA[0] - sortedE[0]) > sortedE[0] * 0.05 || Math.abs(sortedA[1] - sortedE[1]) > sortedE[1] * 0.05) {
+            console.log('[FROST-Poll] UTXOs', sortedA.map(a => a / 1e8), '!= expected', sortedE.map(a => a / 1e8), '— mismatch, skipping');
+            return;
+          }
+          console.log('[FROST-Poll] Balance:', balance / 1e8, 'UTXOs:', utxoCount, '✓ amounts match — advancing to step 4');
           if (!cancelled) {
             setBuyerLocked(true);
             setSellerLocked(true);
             setStep(4);
-            // Update FROST active list
             updateFrostEntry(contract.agreementId || '', { step: 4 });
           }
           return;
         }
 
         // Partial balance: one party sent, auto-send ours if needed
-        if (balance > 0 && balance < expectedTotal) {
-          console.log('[FROST-Poll] Partial balance:', balance / 1e8, 'KASPA');
+        if (balance > 0 && balance < expectedTotal && utxoCount >= 1) {
+          console.log('[FROST-Poll] Partial balance:', balance / 1e8, 'UTXOs:', utxoCount);
           
           // Check if WE need to send
           const myExpected = role === 'buyer' ? expectedBuyer : expectedSeller;
@@ -1658,7 +1671,7 @@ function parseClipboard(raw: string): {
           // L1 check: find first clean FROST address (counter 0,1,2...)
           let frostData: any = null;
           const _frostApi = network.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-          for (let _n = 0; _n < 10; _n++) {
+          for (let _n = 0; _n < 25; _n++) {
             const _candidate = deriveFrostAddressLocal({ pubkeyA: contract.buyerPubkey, pubkeyB: contract.sellerPubkey, network, agreementId, frostCounter: _n });
             try {
               const _br = await fetch(_frostApi + '/addresses/' + _candidate.address + '/balance');
@@ -1934,6 +1947,7 @@ function parseClipboard(raw: string): {
             status: 'Proposed',
             arweave_tx_id: edge.node.id,
             frostAddress: tm['KV-FrostAddress'] || '',
+            frostCounter: tm['KV-FrostCounter'] !== undefined ? parseInt(tm['KV-FrostCounter']) : undefined,
             partyA: { pubkey: tm['KV-Pubkey'] || '', amount_sompi: parseInt(tm['KV-Amount'] || '0') },
           });
         }
@@ -1991,49 +2005,58 @@ function parseClipboard(raw: string): {
       let pastedText = '';
       try { const CB = await import('expo-clipboard'); pastedText = await CB.getStringAsync() || ''; } catch { console.warn('[FROST-Template] Clipboard read failed'); }
       if (!pastedText) { Alert.alert('Error', 'Nothing in clipboard'); return; }
-      
-      const resp = JSON.parse(atob(pastedText));
-      if (!resp.R || !resp.s) { Alert.alert('Error', 'Invalid seller response - missing R or signatures'); return; }
-      
-      console.log('[FROST-Template] Seller R:', resp.R.slice(0,20), 'partials:', resp.s.length);
-      
-      // Store seller R + partials for the signing flow
-      await SecureStore.setItemAsync('kv_frost_seller_resp_' + contract.agreementId, JSON.stringify(resp));
-      Alert.alert('Seller Response Received', 'R + ' + resp.s.length + ' partial signatures. Broadcasting release TX...');
-      
-      // Aggregate buyer + seller partial sigs → broadcast to L1
-      try {
-        const nonceJson = await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId);
-        if (!nonceJson) { Alert.alert('Error', 'Buyer nonce not found'); return; }
-        const savedNonce = JSON.parse(nonceJson);
-        const nonce = { k: BigInt('0x' + savedNonce.k), d_tweaked: BigInt('0x' + savedNonce.d_tweaked), R_hex: savedNonce.R_hex };
-        
-        // Need the original template — load from SecureStore
-        const tmplJson = await SecureStore.getItemAsync('kv_frost_template_' + contract.agreementId);
-        const template = tmplJson ? JSON.parse(tmplJson) : null;
-        if (!template) { Alert.alert('Error', 'Original template not found — rebuild template first'); return; }
-        
-        const aggResult = buyerAggregate({ nonce, buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', counter: contract.frostData?.frostCounter || 0, template, sellerResponse: resp });
-        if ('error' in aggResult) { Alert.alert('Aggregation Failed', aggResult.error); return; }
-        
-        console.log('[Ceremony-Buyer] Aggregated', aggResult.signatures.length, 'sigs. Broadcasting...');
-        const wallet = await loadMainWallet();
-        const submitBase = (wallet?.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-        const submitResp = await fetch(submitBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(aggResult.txBody) });
-        
-        if (submitResp.ok) {
-          const txId = (await submitResp.json()).transactionId || '';
-          console.log('[Ceremony-Buyer] Release TX:', txId);
-          await SecureStore.deleteItemAsync('kv_frost_nonce_' + contract.agreementId).catch(() => {});
-          setContract(prev => ({ ...prev, releaseTxId: txId }));
-          setStep(7);
-          Alert.alert('Funds Released!', 'TX: ' + txId.slice(0, 16) + '...');
-        } else { Alert.alert('L1 Failed', (await submitResp.text()).slice(0, 200)); }
-      } catch (ae) { console.error('[Ceremony-Buyer] Aggregate error:', ae); Alert.alert('Error', String(ae)); } (uses existing completeFrost2Round flow)
-    } catch (e: any) { console.error('[FROST-Template] Response error:', e); Alert.alert('Error', 'Invalid response: ' + (e.message || '')); }
+
+      const resp = parseResponse(pastedText);
+      if (!resp || !resp.R || !resp.s || !Array.isArray(resp.s)) {
+        Alert.alert('Error', 'Invalid seller response — expected base64 with R + partial sigs');
+        return;
+      }
+
+      console.log('[Ceremony-Buyer] Seller R:', resp.R.slice(0,20), 'partials:', resp.s.length);
+
+      const nonceJson = await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId);
+      if (!nonceJson) { Alert.alert('Error', 'Buyer nonce not found — did you build the template first?'); return; }
+      const savedNonce = JSON.parse(nonceJson);
+      const nonce = { k: BigInt('0x' + savedNonce.k), d_tweaked: BigInt('0x' + savedNonce.d_tweaked), R_hex: savedNonce.R_hex };
+
+      const tmplJson = await SecureStore.getItemAsync('kv_frost_template_' + contract.agreementId);
+      if (!tmplJson) { Alert.alert('Error', 'Original template not found — rebuild template first'); return; }
+      const template = JSON.parse(tmplJson);
+
+      const aggResult = buyerAggregate({
+        nonce,
+        buyerPubkey: contract.buyerPubkey || '',
+        sellerPubkey: contract.sellerPubkey || '',
+        counter: contract.frostData?.frostCounter || 0,
+        template,
+        sellerResponse: resp,
+      });
+
+      if ('error' in aggResult) { Alert.alert('Aggregation Failed', aggResult.error); return; }
+
+      console.log('[Ceremony-Buyer] Aggregated', aggResult.signatures.length, 'sigs. Broadcasting...');
+      const wallet = await loadMainWallet();
+      const submitBase = (wallet?.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+      const submitResp = await fetch(submitBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(aggResult.txBody) });
+
+      if (submitResp.ok) {
+        const txId = (await submitResp.json()).transactionId || '';
+        console.log('[Ceremony-Buyer] Release TX:', txId);
+        await SecureStore.deleteItemAsync('kv_frost_nonce_' + contract.agreementId).catch(() => {});
+        await SecureStore.deleteItemAsync('kv_frost_template_' + contract.agreementId).catch(() => {});
+        setContract(prev => ({ ...prev, releaseTxId: txId }));
+        setStep(7);
+        Alert.alert('Funds Released!', 'TX: ' + txId.slice(0, 16) + '...');
+      } else {
+        Alert.alert('L1 Failed', (await submitResp.text()).slice(0, 200));
+      }
+    } catch (e: any) {
+      console.error('[Ceremony-Buyer] Error:', e);
+      Alert.alert('Error', e.message || String(e));
+    }
   };
 
-  const handleAcceptFromInbox = async (agreement: any) => {
+const handleAcceptFromInbox = async (agreement: any) => {
     const _agrId = agreement.agreementId || agreement.agreement_id || '';
     if (acceptingId) { console.log('[Neighbor] Already accepting', acceptingId); return; }
     console.log('[Neighbor] Agree tapped:', _agrId);
@@ -2142,6 +2165,14 @@ function parseClipboard(raw: string): {
       }
       console.log('[Canonical-DEBUG] normalized:', JSON.stringify({ agr: normalized.agreementId, pub: normalized.pubkey?.slice(0,16), cp: normalized.counterpartyPubkey?.slice(0,16), amt: normalized.amount_sompi, buyer: normalized.buyerAmountSompi, seller: normalized.sellerAmountSompi }));
       const canon = canonicalVerify(normalized, myPubkey || ''); // sync — no await needed
+
+      // FIX: canonicalVerify returns negative seller when total=0; override from Arweave tags
+      if (canon.sellerAmountSompi <= 0 && normalized.sellerAmountSompi > 0) {
+        canon.sellerAmountSompi = normalized.sellerAmountSompi;
+        canon.buyerAmountSompi = normalized.buyerAmountSompi;
+        canon.totalAmountSompi = normalized.buyerAmountSompi + normalized.sellerAmountSompi;
+        console.log('[Canonical-Fix] Overrode negative amounts from Arweave tags: buyer=' + canon.buyerAmountSompi + ' seller=' + canon.sellerAmountSompi);
+      }
       console.log('[Canonical] Module result:', JSON.stringify({ role: canon.role, buyer: canon.buyerAmountSompi / 1e8, seller: canon.sellerAmountSompi / 1e8, total: canon.totalAmountSompi / 1e8, frost: canon.frostAddress?.slice(0,25) }));
       // Override role from canonical
       setRole(canon.role as any);
@@ -2202,14 +2233,46 @@ function parseClipboard(raw: string): {
           // Seller L1 loop: same algorithm as buyer, no relay dependency
           let frostData: any = null;
           const _sApi = frostNetwork.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+          // FROST REUSE: if Arweave/TownHall has frostAddress with funds, find matching counter
+          let agrFrostAddr = agreement.frostAddress || '';
+          if (!agrFrostAddr || agrFrostAddr.length < 20) {
+            try {
+              const _fGql = '{ transactions(first: 1, tags: [{ name: "KV-AgreementId", values: ["' + agrId + '"] }, { name: "KV-Status", values: ["Proposed"] }]) { edges { node { tags { name value } } } } }';
+              const _fResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: _fGql }) });
+              const _fJson = await _fResp.json();
+              const _fTags = _fJson?.data?.transactions?.edges?.[0]?.node?.tags;
+              if (_fTags) { const _fm: any = {}; _fTags.forEach((t: any) => { _fm[t.name] = t.value; }); if (_fm['KV-FrostAddress']) { agrFrostAddr = _fm['KV-FrostAddress']; console.log('[Seller-Reuse] Got frostAddress from Arweave proposal:', agrFrostAddr.slice(0, 30)); } }
+            } catch (e) { console.warn('[Seller-Reuse] Arweave frost query failed:', e); }
+          }
+          if (agrFrostAddr && agrFrostAddr.length > 20) {
+            try {
+              const _reuseResp = await fetch(_sApi + '/addresses/' + agrFrostAddr + '/utxos');
+              if (_reuseResp.ok) {
+                const _reuseUtxos = await _reuseResp.json();
+                if (Array.isArray(_reuseUtxos) && _reuseUtxos.length >= 1) {
+                  // Find which counter produces this address
+                  for (let _rc = 0; _rc < 25; _rc++) {
+                    const _rcFrost = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: _rc });
+                    if (_rcFrost.address === agrFrostAddr) {
+                      frostData = _rcFrost;
+                      console.log('[Seller-Reuse] FROST reused from Arweave, counter:', _rc, agrFrostAddr.slice(0,30), 'UTXOs:', _reuseUtxos.length);
+                      break;
+                    }
+                  }
+                }
+              }
+            } catch (e) { console.warn('[Seller-Reuse] Check failed:', e); }
+          }
           // Use buyer's counter if provided in proposal (avoids counter divergence)
           const buyerCounter = (agreement as any)?.frostCounter ?? (agreement as any)?.KVFrostCounter;
-          if (buyerCounter !== undefined && buyerCounter !== null) {
+          if (frostData) {
+            console.log('[Seller-Reuse] Skipping L1 scan — already have FROST from Arweave');
+          } else if (buyerCounter !== undefined && buyerCounter !== null) {
             const directFrost = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: buyerCounter });
             frostData = directFrost;
             console.log('[Seller-Counter] Using buyer counter:', buyerCounter, directFrost.address.slice(0,30));
           } else {
-          for (let _sc = 0; _sc < 10; _sc++) {
+          for (let _sc = 0; _sc < 25; _sc++) {
             const _sCand = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: _sc });
             try {
               const _sbr = await fetch(_sApi + '/addresses/' + _sCand.address + '/balance');
@@ -2231,7 +2294,21 @@ function parseClipboard(raw: string): {
           const mySendAmount = sendsFirst ? canonicalSendAmount(canon) : 0;
           console.log('[Neighbor] Auto-send check: sendsFirst=', sendsFirst, 'mySendAmount=', mySendAmount / 1e8, 'role:', canon.role, 'myPubkey=', myPubkey?.slice(0,16), 'proposer=', agrProposerPubkey?.slice(0,16));
           const immediateSendAmount = mySendAmount;
-          if (immediateSendAmount > 0 && wallet.privKeyHex) {
+          // Skip auto-send if FROST already has funds (re-accept scenario)
+          let _skipSend = false;
+          if (frostData?.address) {
+            try {
+              const _chkResp = await fetch(_sApi + '/addresses/' + frostData.address + '/balance');
+              if (_chkResp.ok) {
+                const _chkBal = Number((await _chkResp.json()).balance || '0');
+                if (_chkBal >= immediateSendAmount) {
+                  console.log('[Seller-Reuse] FROST already has', _chkBal / 1e8, 'KAS >= my', immediateSendAmount / 1e8, '— skip send');
+                  _skipSend = true;
+                }
+              }
+            } catch {}
+          }
+          if (immediateSendAmount > 0 && wallet.privKeyHex && !_skipSend) {
             const frostSentKey = 'kv_frost_sent_' + agrId;
             const alreadyFrostSent = await AsyncStorage.getItem(frostSentKey);
             // L1 IDEMPOTENT GUARD: check actual FROST balance instead of stale AsyncStorage flag
@@ -3390,6 +3467,12 @@ function parseClipboard(raw: string): {
                         You'll receive {contract.itemPriceKas} KASPA + your {contract.sellerCommitmentKas} KASPA back
                       </Text>
                     </View>
+                    <TouchableOpacity
+                      onPress={() => setStep(5)}
+                      style={{ backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 12 }}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Go to Signing Ceremony (Step 5)</Text>
+                    </TouchableOpacity>
                     {/* REMOVED: old seller R share — canonical embeds R in template */}
                     
                     {userStats.xp >= XP_THRESHOLD_IOU_ACCESS ? (
@@ -3543,8 +3626,18 @@ function parseClipboard(raw: string): {
                       <TouchableOpacity onPress={buildReleaseTemplate} style={{ backgroundColor: '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Build TX Template (generates k + R)'}</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={processSellerResponse} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 14, alignItems: 'center' }}>
-                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Paste Seller Response'}</Text>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#4f46e5', marginTop: 4, marginBottom: 4 }}>Paste Seller Response</Text>
+                      <TextInput
+                        style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', minHeight: 60, marginBottom: 8 }}
+                        placeholder="Paste seller response here (base64)..."
+                        placeholderTextColor="#a8a29e"
+                        multiline
+                        onChangeText={(txt) => { const v = txt.trim(); if (v.length > 20) setSellerResponseB64(v); }}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      <TouchableOpacity onPress={async () => { if (sellerResponseB64 && sellerResponseB64.length > 20) { try { await Clipboard.setStringAsync(sellerResponseB64); } catch {} } processSellerResponse(); }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 14, alignItems: 'center' }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Process Seller Response'}</Text>
                       </TouchableOpacity>
                       <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center' }}>{'k lives only during this signing ceremony (~seconds)'}</Text>
                     </>
@@ -3564,11 +3657,8 @@ function parseClipboard(raw: string): {
                             setIsLoading(true);
                             const wallet = await loadMainWallet();
                             if (!wallet) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
-                            
-                            // Parse and sign
                             const tmpl = parseTemplate(v);
                             if (!tmpl) { Alert.alert('Error', 'Invalid template format'); setIsLoading(false); return; }
-                            
                             const result = sellerSignTemplate({
                               privateKeyHex: wallet.privKeyHex,
                               sellerPubkey: contract.sellerPubkey || '',
@@ -3576,23 +3666,10 @@ function parseClipboard(raw: string): {
                               counter: contract.frostData?.frostCounter || 0,
                               template: tmpl,
                             });
-                            
-                            if ('error' in result) {
-                              Alert.alert('Verification Failed', result.error);
-                              setIsLoading(false);
-                              return;
-                            }
-                            
-                            // Copy response to clipboard
+                            if ('error' in result) { Alert.alert('Verification Failed', result.error); setIsLoading(false); return; }
                             try { await Clipboard.setStringAsync(result.responseB64); } catch {}
-                            
                             console.log('[Ceremony-Seller] Signed! Response:', result.responseB64.length, 'chars');
-                            console.log('[Ceremony-Seller] My amount:', Number(result.verification.myAmount) / 1e8, 'KAS');
-                            Alert.alert(
-                              'Signed! Response Copied',
-                              'Your co-signature is on the clipboard.\nSend it back to the buyer.\n\nYour share: ' + (Number(result.verification.myAmount) / 1e8).toFixed(4) + ' KAS',
-                              [{ text: 'OK' }]
-                            );
+                            Alert.alert('Signed! Response Copied', 'Send clipboard back to buyer.\nYour share: ' + (Number(result.verification.myAmount) / 1e8).toFixed(4) + ' KAS');
                           } catch (e) {
                             console.error('[Ceremony-Seller] Error:', e);
                             Alert.alert('Error', e instanceof Error ? e.message : 'Sign failed');
@@ -3606,6 +3683,14 @@ function parseClipboard(raw: string): {
                     </>
                   )}
                 </View>
+                      {sellerResponseB64 ? (
+                        <TouchableOpacity
+                          onPress={async () => { try { await Clipboard.setStringAsync(sellerResponseB64); Alert.alert('Copied!', 'Send this to the buyer.'); } catch {} }}
+                          style={{ backgroundColor: '#059669', borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 8 }}
+                        >
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Copy Response & Send to Buyer</Text>
+                        </TouchableOpacity>
+                      ) : null}
             <View style={{ backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#86efac' }}>
               <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>? Delivery Confirmed ? Send to Seller</Text>
               <Text style={{ fontSize: 11, color: '#15803d' }}>AGR ID: {contract.agreementId}</Text>

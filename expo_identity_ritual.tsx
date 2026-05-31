@@ -4551,123 +4551,257 @@ function generateQuestionBank(recipe: AvatarRecipe, colorMixHistory: ColorMix[])
   // Harder for bots: requires reasoning about personality, not data lookup
   // ============================================================================
   
-  // Class → personality response mapping
-  const CLASS_RESPONSES: Record<string, { personality: string; responses: Record<string, string> }> = {
-    Warrior: { personality: 'brave and direct', responses: {
-      ambush: 'Draw their weapon and fight head-on',
-      stranger: 'Stand guard and protect the group',
-      treasure: 'Claim it as a battle trophy',
-      betrayal: 'Challenge the traitor to combat',
-      darkness: 'March forward without hesitation',
+  // Class → personality response mapping (24 classes, expanded)
+  // ALGORITHM: correct = class synonym behavior, wrong = other classes' responses (antonym)
+  const CLASS_RESPONSES: Record<string, { personality: string; synonyms: string[]; responses: Record<string, string> }> = {
+    Warrior: { personality: 'brave, direct, fearless',
+      synonyms: ['courageous', 'bold', 'valiant', 'gallant', 'heroic', 'daring', 'fierce', 'resolute', 'steadfast', 'unflinching'],
+      responses: {
+        ambush: 'Draw their weapon and charge head-on into battle',
+        stranger: 'Stand guard and protect the group with their blade',
+        treasure: 'Claim it as a hard-won battle trophy',
+        betrayal: 'Challenge the traitor to single combat',
+        darkness: 'March forward without hesitation, weapon drawn',
     }},
-    Mage: { personality: 'scholarly and analytical', responses: {
-      ambush: 'Cast a protective barrier spell',
-      stranger: 'Sense their magical aura first',
-      treasure: 'Study it for enchantments before touching',
-      betrayal: 'Unravel the truth with divination magic',
-      darkness: 'Conjure light and analyze the surroundings',
+    Mage: { personality: 'scholarly, analytical, intellectual',
+      synonyms: ['studious', 'wise', 'cerebral', 'learned', 'arcane', 'calculating', 'methodical', 'perceptive', 'observant', 'sagacious'],
+      responses: {
+        ambush: 'Cast a protective barrier spell around the party',
+        stranger: 'Sense their magical aura before approaching',
+        treasure: 'Study it for enchantments before touching anything',
+        betrayal: 'Unravel the truth using divination magic',
+        darkness: 'Conjure arcane light and analyze the surroundings',
     }},
-    Rogue: { personality: 'cunning and stealthy', responses: {
-      ambush: 'Disappear into the shadows and flank them',
-      stranger: 'Pick their pocket to learn their secrets',
-      treasure: 'Check it for traps before taking it',
-      betrayal: 'Vanish and plot revenge from the shadows',
-      darkness: 'Move silently and use the dark as cover',
+    Rogue: { personality: 'cunning, stealthy, opportunistic',
+      synonyms: ['sly', 'crafty', 'devious', 'sneaky', 'shrewd', 'resourceful', 'wily', 'elusive', 'slippery', 'quick-witted'],
+      responses: {
+        ambush: 'Disappear into the shadows and flank the attackers',
+        stranger: 'Pick their pocket to learn who they really are',
+        treasure: 'Check it for traps before pocketing the gold',
+        betrayal: 'Vanish and plot cunning revenge from the shadows',
+        darkness: 'Move silently, using the dark as perfect cover',
     }},
-    Healer: { personality: 'compassionate and selfless', responses: {
-      ambush: 'Shield the wounded and heal allies',
-      stranger: 'Offer aid and tend to their wounds',
-      treasure: 'Share it with those in need',
-      betrayal: 'Forgive them and try to understand why',
-      darkness: 'Pray for guidance and radiate inner light',
+    Healer: { personality: 'compassionate, selfless, nurturing',
+      synonyms: ['caring', 'gentle', 'merciful', 'kind', 'empathetic', 'benevolent', 'tender', 'generous', 'warm-hearted', 'devoted'],
+      responses: {
+        ambush: 'Shield the wounded and heal injured allies first',
+        stranger: 'Rush to offer aid and tend to their wounds',
+        treasure: 'Share it with those who need it most',
+        betrayal: 'Forgive them and try to understand their pain',
+        darkness: 'Pray for guidance and radiate soothing inner light',
     }},
-    Ranger: { personality: 'resourceful and nature-bound', responses: {
-      ambush: 'Use the terrain for tactical advantage',
-      stranger: 'Track their footprints to learn their path',
-      treasure: 'Leave it — nature provides what is needed',
-      betrayal: 'Retreat to the wilderness and regroup',
-      darkness: 'Listen to the sounds of the wild for guidance',
+    Ranger: { personality: 'resourceful, nature-bound, self-reliant',
+      synonyms: ['outdoorsy', 'wild', 'survivalist', 'tracker', 'woodsman', 'observant', 'patient', 'adaptive', 'independent', 'vigilant'],
+      responses: {
+        ambush: 'Use the terrain and trees for tactical advantage',
+        stranger: 'Track their footprints to learn where they came from',
+        treasure: 'Leave it — nature provides everything needed',
+        betrayal: 'Retreat deep into the wilderness to regroup',
+        darkness: 'Listen to the sounds of the wild for guidance',
     }},
-    Paladin: { personality: 'righteous and honorable', responses: {
-      ambush: 'Raise their shield and call for divine aid',
-      stranger: 'Offer protection in the name of their oath',
-      treasure: 'Donate it to the temple or the poor',
-      betrayal: 'Seek justice through a fair trial',
-      darkness: 'Invoke holy light to banish the shadows',
+    Paladin: { personality: 'righteous, honorable, just',
+      synonyms: ['noble', 'virtuous', 'holy', 'devout', 'principled', 'dutiful', 'chivalrous', 'unwavering', 'faithful', 'protective'],
+      responses: {
+        ambush: 'Raise their holy shield and call for divine aid',
+        stranger: 'Offer sworn protection in the name of their oath',
+        treasure: 'Donate it to the temple or give it to the poor',
+        betrayal: 'Seek justice through a fair and honorable trial',
+        darkness: 'Invoke holy light to banish the shadows',
     }},
-    Necromancer: { personality: 'dark and calculating', responses: {
-      ambush: 'Raise the fallen to fight for them',
-      stranger: 'Probe their mind for useful information',
-      treasure: 'Bind it with dark enchantments',
-      betrayal: 'Curse the traitor with a hex',
-      darkness: 'Embrace it — darkness is their domain',
+    Necromancer: { personality: 'dark, calculating, power-hungry',
+      synonyms: ['sinister', 'macabre', 'ruthless', 'manipulative', 'morbid', 'cold', 'ambitious', 'forbidden', 'occult', 'merciless'],
+      responses: {
+        ambush: 'Raise the fallen dead to fight as their army',
+        stranger: 'Probe their mind for useful secrets and weakness',
+        treasure: 'Bind it with dark enchantments for later use',
+        betrayal: 'Curse the traitor with a devastating hex',
+        darkness: 'Embrace it — darkness is their natural domain',
     }},
-    Bard: { personality: 'charismatic and creative', responses: {
-      ambush: 'Talk their way out or charm the attackers',
-      stranger: 'Sing a song to earn their trust',
-      treasure: 'Write a ballad about the discovery',
-      betrayal: 'Compose a scathing song about the traitor',
-      darkness: 'Play music to lift everyone\'s spirits',
+    Bard: { personality: 'charismatic, creative, persuasive',
+      synonyms: ['charming', 'witty', 'eloquent', 'artistic', 'entertaining', 'silver-tongued', 'flamboyant', 'theatrical', 'inspiring', 'social'],
+      responses: {
+        ambush: 'Talk their way out or charm the attackers with song',
+        stranger: 'Sing a soothing song to earn their trust',
+        treasure: 'Write an epic ballad about the discovery',
+        betrayal: 'Compose a scathing song to shame the traitor publicly',
+        darkness: 'Play uplifting music to lift everyone\'s spirits',
     }},
-    Monk: { personality: 'disciplined and spiritual', responses: {
-      ambush: 'Deflect attacks with precise martial arts',
-      stranger: 'Meditate to read their intentions',
-      treasure: 'Reflect on whether attachment serves them',
-      betrayal: 'Seek inner peace and let go of anger',
-      darkness: 'Find stillness and trust their training',
+    Monk: { personality: 'disciplined, spiritual, centered',
+      synonyms: ['serene', 'peaceful', 'balanced', 'contemplative', 'patient', 'mindful', 'ascetic', 'focused', 'harmonious', 'enlightened'],
+      responses: {
+        ambush: 'Deflect attacks with precise, flowing martial arts',
+        stranger: 'Meditate briefly to read their true intentions',
+        treasure: 'Reflect on whether material attachment serves them',
+        betrayal: 'Seek inner peace and release all anger within',
+        darkness: 'Find perfect stillness and trust their training',
     }},
-    Berserker: { personality: 'fierce and unstoppable', responses: {
-      ambush: 'Charge in headfirst with a battle cry',
-      stranger: 'Intimidate them into submission',
-      treasure: 'Smash it open with brute force',
-      betrayal: 'Fly into a rage and destroy everything',
-      darkness: 'Roar into the void and keep moving',
+    Berserker: { personality: 'fierce, unstoppable, raging',
+      synonyms: ['savage', 'furious', 'wild', 'relentless', 'brutal', 'explosive', 'uncontrollable', 'primal', 'wrathful', 'destructive'],
+      responses: {
+        ambush: 'Charge in headfirst with a thunderous battle cry',
+        stranger: 'Intimidate them into immediate submission',
+        treasure: 'Smash it open with raw brute force',
+        betrayal: 'Fly into a blind rage and destroy everything nearby',
+        darkness: 'Roar into the void and keep charging forward',
     }},
-    Assassin: { personality: 'cold and precise', responses: {
-      ambush: 'Strike first from an unseen position',
-      stranger: 'Observe from a distance and study weaknesses',
-      treasure: 'Take it silently and leave no trace',
-      betrayal: 'Eliminate the traitor without emotion',
-      darkness: 'Become one with the darkness',
+    Assassin: { personality: 'cold, precise, lethal',
+      synonyms: ['ruthless', 'silent', 'deadly', 'efficient', 'detached', 'methodical', 'surgical', 'clinical', 'shadowy', 'merciless'],
+      responses: {
+        ambush: 'Strike first from a completely unseen position',
+        stranger: 'Observe from a distance, studying every weakness',
+        treasure: 'Take it silently, leaving absolutely no trace',
+        betrayal: 'Eliminate the traitor swiftly and without emotion',
+        darkness: 'Become perfectly one with the darkness',
     }},
-    Druid: { personality: 'wild and nature-connected', responses: {
-      ambush: 'Shapeshift into a predator and attack',
-      stranger: 'Commune with nearby animals to judge them',
-      treasure: 'Return it to the earth where it belongs',
-      betrayal: 'Let the vines of the forest bind the traitor',
-      darkness: 'Call upon the moon and starlight',
+    Druid: { personality: 'wild, nature-connected, primal',
+      synonyms: ['earthy', 'organic', 'ancient', 'mystical', 'feral', 'natural', 'shapeshifting', 'rooted', 'cyclical', 'animalistic'],
+      responses: {
+        ambush: 'Shapeshift into a fierce predator and counter-attack',
+        stranger: 'Commune with nearby animals to judge their character',
+        treasure: 'Return it to the earth where it truly belongs',
+        betrayal: 'Let the vines of the forest bind the traitor tight',
+        darkness: 'Call upon moonlight and starlight to guide the way',
+    }},
+    Ninja: { personality: 'swift, secretive, disciplined',
+      synonyms: ['agile', 'silent', 'shadowy', 'precise', 'elusive', 'covert', 'acrobatic', 'vigilant', 'deadly', 'unseen'],
+      responses: {
+        ambush: 'Vanish in a smoke bomb and strike from above',
+        stranger: 'Blend into the crowd and observe their contacts',
+        treasure: 'Map the area, take it without triggering alarms',
+        betrayal: 'Disappear completely, then strike when least expected',
+        darkness: 'Navigate silently using trained spatial awareness',
+    }},
+    Merchant: { personality: 'shrewd, persuasive, opportunistic',
+      synonyms: ['savvy', 'deal-making', 'haggling', 'enterprising', 'diplomatic', 'materialistic', 'well-connected', 'pragmatic', 'transactional', 'negotiating'],
+      responses: {
+        ambush: 'Negotiate a deal — offer gold for safe passage',
+        stranger: 'Assess their value and offer a business proposition',
+        treasure: 'Appraise every piece and plan the best resale price',
+        betrayal: 'Cut them off from all trade networks permanently',
+        darkness: 'Light a costly torch — good equipment is worth it',
+    }},
+    Scholar: { personality: 'curious, methodical, knowledge-seeking',
+      synonyms: ['bookish', 'inquisitive', 'rational', 'academic', 'researching', 'detail-oriented', 'logical', 'investigative', 'pedantic', 'thorough'],
+      responses: {
+        ambush: 'Recall historical tactics to find the best escape route',
+        stranger: 'Ask them questions and document their story carefully',
+        treasure: 'Catalog every artifact and research their origins',
+        betrayal: 'Analyze the evidence to understand the full conspiracy',
+        darkness: 'Pull out a journal and map the dungeon methodically',
+    }},
+    Samurai: { personality: 'honorable, disciplined, loyal',
+      synonyms: ['devoted', 'duty-bound', 'stoic', 'precise', 'traditional', 'dignified', 'respectful', 'code-following', 'masterful', 'unwavering'],
+      responses: {
+        ambush: 'Draw their katana in one fluid, decisive strike',
+        stranger: 'Bow respectfully and offer aid with quiet dignity',
+        treasure: 'Present it to their lord as a tribute of honor',
+        betrayal: 'Demand the traitor restore their honor or face the blade',
+        darkness: 'Walk calmly with perfect posture, trusting their senses',
+    }},
+    Alchemist: { personality: 'experimental, inventive, volatile',
+      synonyms: ['scientific', 'mixing', 'transformative', 'creative', 'unstable', 'curious', 'transmuting', 'brewing', 'explosive', 'innovative'],
+      responses: {
+        ambush: 'Throw a smoke bomb or explosive potion at the attackers',
+        stranger: 'Check their condition and brew a healing elixir',
+        treasure: 'Test the gold for purity and transmutation potential',
+        betrayal: 'Slip a slow-acting truth serum into their drink',
+        darkness: 'Mix phosphorus ingredients to create a glowing solution',
+    }},
+    Knight: { personality: 'chivalrous, protective, steadfast',
+      synonyms: ['gallant', 'armored', 'loyal', 'courageous', 'sworn', 'shielding', 'resolute', 'noble', 'defending', 'unbreakable'],
+      responses: {
+        ambush: 'Form a defensive line and shield the vulnerable',
+        stranger: 'Pledge to escort them safely to the nearest village',
+        treasure: 'Guard it until the rightful owner can be found',
+        betrayal: 'Strip them of their rank and banish them from the order',
+        darkness: 'Lead the group forward, shield raised against the unknown',
+    }},
+    Sorcerer: { personality: 'powerful, intuitive, elemental',
+      synonyms: ['mystical', 'raw', 'channeling', 'innate', 'overwhelming', 'wild-magic', 'instinctive', 'untamed', 'surging', 'volatile'],
+      responses: {
+        ambush: 'Unleash a raw blast of elemental energy at the threat',
+        stranger: 'Feel the magical currents around them for danger',
+        treasure: 'Channel its latent energy to amplify their own power',
+        betrayal: 'Let raw magical fury surge through them uncontrolled',
+        darkness: 'Summon crackling elemental light from pure willpower',
+    }},
+    Shaman: { personality: 'spiritual, ancestral, connected',
+      synonyms: ['tribal', 'ritualistic', 'prophetic', 'otherworldly', 'communing', 'visionary', 'totemic', 'healing', 'ancient', 'spirit-walking'],
+      responses: {
+        ambush: 'Call upon ancestor spirits to shield and guide them',
+        stranger: 'Read their spirit aura to sense if they carry evil',
+        treasure: 'Perform a ritual to determine if it is blessed or cursed',
+        betrayal: 'Consult the ancestors to reveal the traitor\'s true nature',
+        darkness: 'Enter a spirit trance to see beyond the physical dark',
+    }},
+    Templar: { personality: 'zealous, militant, devout',
+      synonyms: ['crusading', 'fanatical', 'purifying', 'armored-faith', 'smiting', 'righteous-fury', 'consecrated', 'sworn', 'relentless', 'cleansing'],
+      responses: {
+        ambush: 'Charge with holy fervor, smiting the enemy with faith',
+        stranger: 'Demand they prove they are not servants of darkness',
+        treasure: 'Claim it for the holy order and purify it with prayer',
+        betrayal: 'Declare them a heretic and pursue divine punishment',
+        darkness: 'March forward chanting prayers that burn away shadow',
+    }},
+    Hunter: { personality: 'patient, tracking, predatory',
+      synonyms: ['stalking', 'waiting', 'alert', 'precise', 'camouflaged', 'targeting', 'keen-eyed', 'persistent', 'trapping', 'focused'],
+      responses: {
+        ambush: 'Set a counter-trap and pick off attackers one by one',
+        stranger: 'Read their tracks and scent to know where they\'ve been',
+        treasure: 'Mark the location and return when it\'s safe to claim',
+        betrayal: 'Track the traitor relentlessly across any terrain',
+        darkness: 'Rely on sharpened senses — hearing, smell, and instinct',
+    }},
+    Summoner: { personality: 'commanding, bonded, otherworldly',
+      synonyms: ['conjuring', 'pact-bound', 'controlling', 'dimensional', 'familiar-linked', 'channeling', 'creature-master', 'ethereal', 'invoking', 'allied'],
+      responses: {
+        ambush: 'Summon a powerful creature to defend and counter-attack',
+        stranger: 'Send a familiar spirit to investigate them safely',
+        treasure: 'Summon a guardian entity to protect and transport it',
+        betrayal: 'Summon a binding entity to hold the traitor accountable',
+        darkness: 'Call forth a luminous spirit familiar to light the path',
+    }},
+    Warlock: { personality: 'pact-bound, dark-powered, cunning',
+      synonyms: ['demonic', 'forbidden', 'cursing', 'bargaining', 'eldritch', 'corrupted', 'powerful', 'tempting', 'shadow-dealing', 'hexing'],
+      responses: {
+        ambush: 'Unleash eldritch blasts of dark patron energy',
+        stranger: 'Sense if they bear any marks of otherworldly pacts',
+        treasure: 'Offer it to their patron in exchange for greater power',
+        betrayal: 'Invoke their patron\'s wrath to curse the traitor\'s bloodline',
+        darkness: 'See perfectly — their patron\'s gift includes darkvision',
     }},
   };
-  
-  // Scenario templates
-  const SCENARIOS: { key: string; question: string; fakePool: string[] }[] = [
-    { key: 'ambush', question: 'Your {race} {class} is ambushed on a forest road. What do they do?',
-      fakePool: ['Run away screaming', 'Sit down and cry', 'Start a campfire', 'Fall asleep', 'Count the trees', 'Ask for directions', 'Take a selfie', 'Write a letter home', 'Start dancing', 'Play dead', 'Hug the attacker', 'Offer them food', 'Start singing', 'Build a shelter', 'Read a book', 'Climb a tree', 'Dig a hole', 'Wave a white flag', 'Start juggling'] },
-    { key: 'stranger', question: 'A wounded stranger collapses at your {class}\'s feet. What\'s their first instinct?',
-      fakePool: ['Ignore them completely', 'Rob them', 'Run the other way', 'Take a nap', 'Start arguing', 'Ask for payment first', 'Lecture them about safety', 'Call a meeting', 'Write a report', 'Take their shoes', 'Sell them something', 'Challenge them to a duel', 'Ask for their autograph', 'Complain about it', 'Pretend they didn\'t see', 'Start cooking', 'Do nothing', 'Walk away slowly', 'Demand identification'] },
-    { key: 'treasure', question: 'Your avatar finds an ancient chest of gold in a cave. How do they react?',
-      fakePool: ['Eat the gold', 'Throw it in a river', 'Bury it deeper', 'Set it on fire', 'Ignore it entirely', 'Leave a polite note', 'Sit on it like a dragon', 'Try to return it to Amazon', 'Use it as a pillow', 'Paint it a different color', 'Donate it to a museum', 'Fill it with rocks instead', 'Take only one coin', 'Complain about the weight', 'Melt it into a statue', 'Hide it in their hat', 'Mail it somewhere', 'Trade it for food', 'Give it to a random stranger'] },
-    { key: 'betrayal', question: 'A trusted ally has betrayed your {class}. How do they respond?',
-      fakePool: ['Send them a thank you card', 'Pretend nothing happened', 'Invite them to dinner', 'Start a book club', 'Move to another kingdom', 'Write them a poem', 'Become best friends again', 'Start a support group', 'Take a vacation', 'Adopt a pet instead', 'Change their name', 'Throw a party', 'Build a wall', 'Take up painting', 'Go back to school', 'Start a business together', 'Ask their mother', 'Hire a lawyer', 'Join a different guild'] },
-    { key: 'darkness', question: 'Your {race} enters a pitch-black dungeon. No light anywhere. What now?',
-      fakePool: ['Go back to bed', 'Start whistling loudly', 'Clap to see if echo works', 'Order a pizza', 'Call for room service', 'Redecorate the dungeon', 'Set up a tent', 'Take a bath', 'Start knitting', 'Practice yoga', 'Count to a thousand', 'Draw a map of nothing', 'Complain to management', 'Look for WiFi', 'Start a podcast', 'Do jumping jacks', 'Have a snack', 'Write in their journal', 'Organize inventory'] },
+
+  // Scenario templates (no fakePool — wrong answers come from other classes)
+  const SCENARIO_KEYS: { key: string; question: string }[] = [
+    { key: 'ambush', question: '{name} the {personality} {class} is ambushed on a forest road. What do they do?' },
+    { key: 'stranger', question: 'A wounded stranger collapses at {name}\'s feet. As a {personality} {class}, what\'s their first instinct?' },
+    { key: 'treasure', question: '{name} finds an ancient chest of gold in a cave. As a {personality} {class}, how do they react?' },
+    { key: 'betrayal', question: 'A trusted ally has betrayed {name}. As a {personality} {class}, how do they respond?' },
+    { key: 'darkness', question: '{name} the {personality} {class} enters a pitch-black dungeon. No light. What now?' },
   ];
-  
+
   if (recipe.class && CLASS_RESPONSES[recipe.class]) {
     const classData = CLASS_RESPONSES[recipe.class];
-    
-    SCENARIOS.forEach(scenario => {
+
+    SCENARIO_KEYS.forEach(scenario => {
       const correctResponse = classData.responses[scenario.key];
       if (!correctResponse) return;
-      
-      // Build question with race/class substitution
+
+      // Question includes personality hint so player can reason about it
       const questionText = scenario.question
+        .replace('{name}', recipe.name || 'Your character')
         .replace('{race}', recipe.race || 'character')
-        .replace('{class}', recipe.class || 'adventurer');
-      
-      // Pick 19 fakes from the pool
-      const fakes = shuffle(scenario.fakePool).slice(0, 19);
-      
+        .replace('{class}', recipe.class || 'adventurer')
+        .replace('{personality}', classData.personality);
+
+      // Wrong answers = other classes' correct responses for SAME scenario
+      const otherResponses = Object.entries(CLASS_RESPONSES)
+        .filter(([cls]) => cls !== recipe.class)
+        .map(([_, data]) => data.responses[scenario.key])
+        .filter(Boolean);
+      const fakes = shuffle(otherResponses).slice(0, 4);
+
       questions.push({
         question: questionText,
         correctAnswer: correctResponse,
@@ -4676,7 +4810,7 @@ function generateQuestionBank(recipe: AvatarRecipe, colorMixHistory: ColorMix[])
       });
     });
   }
-  
+
   // Race-based personality questions
   const RACE_SITUATIONS: { question: string; responses: Record<string, string>; fakePool: string[] }[] = [
     { question: 'Your avatar\'s homeland is under attack. As a {race}, what\'s their natural response?',
@@ -9100,7 +9234,7 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
         console.warn('[PhaseAnchor] Avatar SVG save failed (non-fatal):', svgErr.message);
       }
 
-      // Arweave upload � permanent avatar backup (non-blocking)
+      // Arweave upload � permanent avatar backup (non-blocking)
       try {
         console.log("[PhaseAnchor] Starting Arweave upload...");
         const arTags: ArweaveTag[] = [
