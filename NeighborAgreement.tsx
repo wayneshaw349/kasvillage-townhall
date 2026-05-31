@@ -1366,7 +1366,8 @@ function parseClipboard(raw: string): {
           const otherExpected = role === 'buyer' ? expectedSeller : expectedBuyer;
           
           // If other party sent their part, auto-send ours
-          if (balance >= otherExpected && myExpected > 0) {
+          // Only BUYER auto-sends from poll. Seller already sent from handleAcceptFromInbox.
+          if (role === 'buyer' && balance >= otherExpected && myExpected > 0) {
             const sentKey = 'kv_frost_poll_sent_' + contract.agreementId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
             if (!alreadySent && !cancelled) {
@@ -2000,7 +2001,35 @@ function parseClipboard(raw: string): {
       await SecureStore.setItemAsync('kv_frost_seller_resp_' + contract.agreementId, JSON.stringify(resp));
       Alert.alert('Seller Response Received', 'R + ' + resp.s.length + ' partial signatures. Broadcasting release TX...');
       
-      // TODO: aggregate and broadcast (uses existing completeFrost2Round flow)
+      // Aggregate buyer + seller partial sigs → broadcast to L1
+      try {
+        const nonceJson = await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId);
+        if (!nonceJson) { Alert.alert('Error', 'Buyer nonce not found'); return; }
+        const savedNonce = JSON.parse(nonceJson);
+        const nonce = { k: BigInt('0x' + savedNonce.k), d_tweaked: BigInt('0x' + savedNonce.d_tweaked), R_hex: savedNonce.R_hex };
+        
+        // Need the original template — load from SecureStore
+        const tmplJson = await SecureStore.getItemAsync('kv_frost_template_' + contract.agreementId);
+        const template = tmplJson ? JSON.parse(tmplJson) : null;
+        if (!template) { Alert.alert('Error', 'Original template not found — rebuild template first'); return; }
+        
+        const aggResult = buyerAggregate({ nonce, buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', counter: contract.frostData?.frostCounter || 0, template, sellerResponse: resp });
+        if ('error' in aggResult) { Alert.alert('Aggregation Failed', aggResult.error); return; }
+        
+        console.log('[Ceremony-Buyer] Aggregated', aggResult.signatures.length, 'sigs. Broadcasting...');
+        const wallet = await loadMainWallet();
+        const submitBase = (wallet?.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+        const submitResp = await fetch(submitBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(aggResult.txBody) });
+        
+        if (submitResp.ok) {
+          const txId = (await submitResp.json()).transactionId || '';
+          console.log('[Ceremony-Buyer] Release TX:', txId);
+          await SecureStore.deleteItemAsync('kv_frost_nonce_' + contract.agreementId).catch(() => {});
+          setContract(prev => ({ ...prev, releaseTxId: txId }));
+          setStep(7);
+          Alert.alert('Funds Released!', 'TX: ' + txId.slice(0, 16) + '...');
+        } else { Alert.alert('L1 Failed', (await submitResp.text()).slice(0, 200)); }
+      } catch (ae) { console.error('[Ceremony-Buyer] Aggregate error:', ae); Alert.alert('Error', String(ae)); } (uses existing completeFrost2Round flow)
     } catch (e: any) { console.error('[FROST-Template] Response error:', e); Alert.alert('Error', 'Invalid response: ' + (e.message || '')); }
   };
 
@@ -3509,13 +3538,73 @@ function parseClipboard(raw: string): {
             
 <>
                 <View style={{ marginBottom: 16, gap: 8 }}>
-                  <TouchableOpacity onPress={buildReleaseTemplate} style={{ backgroundColor: '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Build TX Template (generates k + R)'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={processSellerResponse} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 14, alignItems: 'center' }}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Paste Seller Response'}</Text>
-                  </TouchableOpacity>
-                  <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center' }}>{'k lives only during this signing ceremony (~seconds)'}</Text>
+                  {role === 'buyer' ? (
+                    <>
+                      <TouchableOpacity onPress={buildReleaseTemplate} style={{ backgroundColor: '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Build TX Template (generates k + R)'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={processSellerResponse} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 14, alignItems: 'center' }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Paste Seller Response'}</Text>
+                      </TouchableOpacity>
+                      <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center' }}>{'k lives only during this signing ceremony (~seconds)'}</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e40af', marginBottom: 4 }}>Paste Buyer Template</Text>
+                      <Text style={{ fontSize: 11, color: '#4338ca', marginBottom: 8 }}>The buyer sends a TX template. Paste it below to co-sign.</Text>
+                      <TextInput
+                        style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', minHeight: 60, marginBottom: 8 }}
+                        placeholder="Paste buyer template here (base64)..."
+                        placeholderTextColor="#a8a29e"
+                        multiline
+                        onChangeText={async (txt) => {
+                          const v = txt.trim();
+                          if (v.length < 20) return;
+                          try {
+                            setIsLoading(true);
+                            const wallet = await loadMainWallet();
+                            if (!wallet) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
+                            
+                            // Parse and sign
+                            const tmpl = parseTemplate(v);
+                            if (!tmpl) { Alert.alert('Error', 'Invalid template format'); setIsLoading(false); return; }
+                            
+                            const result = sellerSignTemplate({
+                              privateKeyHex: wallet.privKeyHex,
+                              sellerPubkey: contract.sellerPubkey || '',
+                              buyerPubkey: contract.buyerPubkey || '',
+                              counter: contract.frostData?.frostCounter || 0,
+                              template: tmpl,
+                            });
+                            
+                            if ('error' in result) {
+                              Alert.alert('Verification Failed', result.error);
+                              setIsLoading(false);
+                              return;
+                            }
+                            
+                            // Copy response to clipboard
+                            try { await Clipboard.setStringAsync(result.responseB64); } catch {}
+                            
+                            console.log('[Ceremony-Seller] Signed! Response:', result.responseB64.length, 'chars');
+                            console.log('[Ceremony-Seller] My amount:', Number(result.verification.myAmount) / 1e8, 'KAS');
+                            Alert.alert(
+                              'Signed! Response Copied',
+                              'Your co-signature is on the clipboard.\nSend it back to the buyer.\n\nYour share: ' + (Number(result.verification.myAmount) / 1e8).toFixed(4) + ' KAS',
+                              [{ text: 'OK' }]
+                            );
+                          } catch (e) {
+                            console.error('[Ceremony-Seller] Error:', e);
+                            Alert.alert('Error', e instanceof Error ? e.message : 'Sign failed');
+                          } finally { setIsLoading(false); }
+                        }}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      {isLoading && <ActivityIndicator color="#4f46e5" />}
+                      <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center' }}>{'Seller k is born and destroyed within the sign call (~ms)'}</Text>
+                    </>
+                  )}
                 </View>
             <View style={{ backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#86efac' }}>
               <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>? Delivery Confirmed ? Send to Seller</Text>
