@@ -1102,6 +1102,7 @@ function parseClipboard(raw: string): {
   const [proposedSplit, setProposedSplit] = useState({ buyerGets: 0, sellerGets: 0 });
   const [isLoading, setIsLoading] = useState(false);
   const [sellerResponseB64, setSellerResponseB64] = useState('');
+  const [templateBuilt, setTemplateBuilt] = useState(false);
   const [collateralFailed, setCollateralFailed] = useState(false);
   const [counterpartyAddress, setCounterpartyAddress] = useState<string | null>(null);
   const [counterpartyKaspaAddr, setCounterpartyKaspaAddr] = useState<string>('');
@@ -1227,7 +1228,49 @@ function parseClipboard(raw: string): {
           setBuyerLocked(true);
           setSellerLocked(true);
         } else {
-          console.log('[Arweave-Restore] No funded agreements — start fresh, use inbox');
+          
+        // Populate Active Agreements list from Arweave scan (no auto-restore)
+        const arweaveEntries = [];
+        for (const agr of myActive) {
+          const agrId = agr.agreementId || agr.agreement_id || '';
+          const frostAddr = agr.frostAddress || '';
+          const proposerPk = agr.pubkey || agr.partyA?.pubkey || '';
+          const iAmProposer = proposerPk.startsWith(myPubkey.slice(0, 16));
+          const buyerAmt = (agr.buyerAmountSompi || 0) / 1e8;
+          const sellerAmt = (agr.sellerAmountSompi || 0) / 1e8;
+          
+          // Check L1 balance to determine step
+          let derivedStep = 3;
+          let bal = 0;
+          if (frostAddr && frostAddr.length > 20) {
+            try {
+              const bResp = await fetch(apiBase + '/addresses/' + frostAddr + '/balance');
+              if (bResp.ok) {
+                bal = Number((await bResp.json()).balance || '0') / 1e8;
+                if (bal >= (buyerAmt + sellerAmt) && (buyerAmt + sellerAmt) > 0) derivedStep = 4;
+              }
+            } catch {}
+          }
+          
+          arweaveEntries.push({
+            agrId,
+            frostAddr,
+            role: iAmProposer ? 'buyer' : 'seller',
+            step: derivedStep,
+            buyerAmount: buyerAmt,
+            sellerAmount: sellerAmt,
+            buyerPubkey: iAmProposer ? myPubkey : proposerPk,
+            sellerPubkey: iAmProposer ? (agr.counterpartyPubkey || '') : myPubkey,
+            description: agr.description || agrId.slice(0, 12),
+            createdAt: Date.now(),
+          });
+        }
+        if (arweaveEntries.length > 0) {
+          console.log('[Arweave-List] Populating', arweaveEntries.length, 'active agreements');
+          setFrostActiveList(arweaveEntries);
+        }
+
+        console.log('[Arweave-Restore] No funded agreements — start fresh, use inbox');
         }
       } catch (e) {
         console.warn('[Arweave-Restore] Failed:', e);
@@ -1479,7 +1522,13 @@ function parseClipboard(raw: string): {
               console.log('[PartialSig-Poll] Release TX broadcast:', result.txId);
               setContract(prev => ({ ...prev, releaseTxId: result.txId, releaseExplorerUrl: result.explorerUrl }));
               await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
-              Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\nFunds returned to your wallet.');
+              
+        // VERIFY k destruction
+        const _kCheck = await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId);
+        const _tCheck = await SecureStore.getItemAsync('kv_frost_template_' + contract.agreementId);
+        console.log('[K-DESTROY] nonce:', _kCheck ? 'STILL EXISTS' : 'DESTROYED');
+        console.log('[K-DESTROY] template:', _tCheck ? 'STILL EXISTS' : 'DESTROYED');
+Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\nFunds returned to your wallet.');
             } else {
               console.warn('[PartialSig-Poll] Broadcast failed:', result.error);
             }
@@ -1991,9 +2040,11 @@ function parseClipboard(raw: string): {
       });
 
       await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ k: result.nonce.k.toString(16), d_tweaked: result.nonce.d_tweaked.toString(16), R_hex: result.nonce.R_hex }));
+      await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(result.template));
       try { await Clipboard.setStringAsync(result.templateB64); } catch {}
 
       console.log('[Ceremony] Template built:', result.templateB64.length, 'chars');
+      setTemplateBuilt(true);
       Alert.alert('TX Template Copied', 'Send clipboard to seller.\nBuyer: ' + (Number(BigInt(result.template.o[0].v)) / 1e8).toFixed(4) + ' KAS\nSeller: ' + (Number(BigInt(result.template.o[1].v)) / 1e8).toFixed(4) + ' KAS');
     } catch (e: any) { console.error('[Ceremony]', e); Alert.alert('Error', e.message || 'Template build failed'); }
     finally { setIsLoading(false); }
@@ -2002,8 +2053,8 @@ function parseClipboard(raw: string): {
   // === PROCESS SELLER RESPONSE ===
   const processSellerResponse = async () => {
     try {
-      let pastedText = '';
-      try { const CB = await import('expo-clipboard'); pastedText = await CB.getStringAsync() || ''; } catch { console.warn('[FROST-Template] Clipboard read failed'); }
+      let pastedText = sellerResponseB64 || '';
+      if (!pastedText) { try { const CB = await import('expo-clipboard'); pastedText = await CB.getStringAsync() || ''; } catch {} }
       if (!pastedText) { Alert.alert('Error', 'Nothing in clipboard'); return; }
 
       const resp = parseResponse(pastedText);
@@ -2033,6 +2084,32 @@ function parseClipboard(raw: string): {
       });
 
       if ('error' in aggResult) { Alert.alert('Aggregation Failed', aggResult.error); return; }
+      // [FROST-DEBUG-AGG] Granular ceremony logging (testnet only)
+      console.log('[FROST-DEBUG-AGG] Inputs:', aggResult.txBody?.transaction?.inputs?.length);
+      console.log('[FROST-DEBUG-AGG] Outputs:', aggResult.txBody?.transaction?.outputs?.length);
+      for (let di = 0; di < (aggResult.signatures || []).length; di++) {
+        const sig = aggResult.signatures[di];
+        console.log('[FROST-DEBUG-AGG] Sig[' + di + ']:', sig?.slice(0, 40) + '...');
+      }
+      // Log each input's script and sig
+      const txInputs = aggResult.txBody?.transaction?.inputs || [];
+      for (let di = 0; di < txInputs.length; di++) {
+        const inp = txInputs[di];
+        console.log('[FROST-DEBUG-AGG] Input[' + di + '] prevTx:', inp?.previousOutpoint?.transactionId?.slice(0, 16));
+        console.log('[FROST-DEBUG-AGG] Input[' + di + '] sigScript:', inp?.signatureScript?.slice(0, 40));
+        console.log('[FROST-DEBUG-AGG] Input[' + di + '] sigLen:', (inp?.signatureScript || '').length / 2, 'bytes');
+      }
+      const txOutputs = aggResult.txBody?.transaction?.outputs || [];
+      for (let di = 0; di < txOutputs.length; di++) {
+        const out = txOutputs[di];
+        console.log('[FROST-DEBUG-AGG] Output[' + di + '] amount:', out?.amount, 'script:', out?.scriptPublicKey?.scriptPublicKey?.slice(0, 20));
+      }
+      console.log('[FROST-DEBUG-AGG] Template R:', template?.R?.slice(0, 40));
+      console.log('[FROST-DEBUG-AGG] Seller R:', resp?.R?.slice(0, 40));
+      console.log('[FROST-DEBUG-AGG] Buyer pubkey:', contract.buyerPubkey?.slice(0, 20));
+      console.log('[FROST-DEBUG-AGG] Seller pubkey:', contract.sellerPubkey?.slice(0, 20));
+      console.log('[FROST-DEBUG-AGG] FROST addr:', contract.frostData?.address?.slice(0, 30));
+
 
       console.log('[Ceremony-Buyer] Aggregated', aggResult.signatures.length, 'sigs. Broadcasting...');
       const wallet = await loadMainWallet();
@@ -2044,11 +2121,139 @@ function parseClipboard(raw: string): {
         console.log('[Ceremony-Buyer] Release TX:', txId);
         await SecureStore.deleteItemAsync('kv_frost_nonce_' + contract.agreementId).catch(() => {});
         await SecureStore.deleteItemAsync('kv_frost_template_' + contract.agreementId).catch(() => {});
+        
+        // === RELEASE INSCRIPTION + FULL MERKLE PROOF (same as direct TX) ===
+        try {
+          const _rWallet = await loadMainWallet();
+          if (_rWallet) {
+            const _rCharset = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+            const _rDp = _rWallet.address.split(':')[1];
+            const _rD5 = Array.from(_rDp).map((c) => _rCharset.indexOf(c));
+            const _rRb = []; let _rBf = 0, _rBi = 0;
+            for (const d of _rD5) { _rBf = (_rBf << 5) | d; _rBi += 5; while (_rBi >= 8) { _rBi -= 8; _rRb.push((_rBf >> _rBi) & 0xff); } }
+            const _rMyPk = _rRb[0] === 0x00 && _rRb.length >= 33 ? '02' + _rRb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join('') : '';
+            const _rApiBase = (_rWallet.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+            // Fetch actual TX from L1 for full proof data
+            let _rDaaScore = 0;
+            let _rScriptPubKey = '';
+            let _rBalanceAfter = 0;
+            try {
+              // Get DAA score
+              const _rDaaResp = await fetch(_rApiBase + '/info/virtual-chain-blue-score');
+              if (_rDaaResp.ok) { const _rDaaData = await _rDaaResp.json(); _rDaaScore = _rDaaData.blueScore || 0; }
+              // Get output scriptPubKeys from the release TX
+              await new Promise(r => setTimeout(r, 2000)); // wait for L1 propagation
+              const _rTxResp = await fetch(_rApiBase + '/transactions/' + txId);
+              if (_rTxResp.ok) {
+                const _rTxData = await _rTxResp.json();
+                const _rOutputs = _rTxData.outputs || [];
+                _rScriptPubKey = _rOutputs[0]?.scriptPublicKey?.scriptPublicKey || '';
+                console.log('[KV-Release] TX fetched:', _rOutputs.length, 'outputs, daa:', _rDaaScore);
+              }
+              // Get buyer balance after release
+              const _rBalResp = await fetch(_rApiBase + '/addresses/' + _rWallet.address + '/balance');
+              if (_rBalResp.ok) { _rBalanceAfter = Number((await _rBalResp.json()).balance || '0'); }
+            } catch (e) { console.warn('[KV-Release] L1 fetch failed (non-fatal):', e); }
+            // Arweave inscription with full lifecycle
+            await inscribeAgreementToArweave({
+              agreementId: contract.agreementId || '',
+              pubkey: _rMyPk,
+              amount_sompi: Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8),
+              description: contract.itemDescription || '',
+              network: _rWallet.network || 'testnet-10',
+              status: 'Released',
+              frostAddress: contract.multisigAddress || '',
+              signature: 'release_' + txId,
+              counterpartyPubkey: contract.sellerPubkey || '',
+              buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
+              sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
+            });
+            console.log('[KV-Release] inscribed to Arweave');
+            // Full merkle proof with L1 data (same as direct TX)
+            await uploadPerTxProof({
+              txId: txId,
+              txIndex: 0,
+              amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)),
+              scriptPubKey: _rScriptPubKey,
+              daaScore: _rDaaScore,
+              txType: 'release',
+              balanceAfter: _rBalanceAfter,
+              agreementId: contract.agreementId,
+              uploadFn: async (data, tags) => { const r = await uploadToIrys(data, tags); return r.txId || ''; },
+              network: 'testnet',
+            });
+            console.log('[KV-Release] Merkle proof with L1 data uploaded');
+          }
+        } catch (e) { console.warn('[KV-Release] Inscription failed (non-fatal):', e); }
+        
+        // === RELEASE INSCRIPTION + FULL MERKLE PROOF (same as direct TX) ===
+        try {
+          const _rWallet = await loadMainWallet();
+          if (_rWallet) {
+            const _rCharset = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+            const _rDp = _rWallet.address.split(':')[1];
+            const _rD5 = Array.from(_rDp).map((c) => _rCharset.indexOf(c));
+            const _rRb = []; let _rBf = 0, _rBi = 0;
+            for (const d of _rD5) { _rBf = (_rBf << 5) | d; _rBi += 5; while (_rBi >= 8) { _rBi -= 8; _rRb.push((_rBf >> _rBi) & 0xff); } }
+            const _rMyPk = _rRb[0] === 0x00 && _rRb.length >= 33 ? '02' + _rRb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join('') : '';
+            const _rApiBase = (_rWallet.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+            // Fetch actual TX from L1 for full proof data
+            let _rDaaScore = 0;
+            let _rScriptPubKey = '';
+            let _rBalanceAfter = 0;
+            try {
+              // Get DAA score
+              const _rDaaResp = await fetch(_rApiBase + '/info/virtual-chain-blue-score');
+              if (_rDaaResp.ok) { const _rDaaData = await _rDaaResp.json(); _rDaaScore = _rDaaData.blueScore || 0; }
+              // Get output scriptPubKeys from the release TX
+              await new Promise(r => setTimeout(r, 2000)); // wait for L1 propagation
+              const _rTxResp = await fetch(_rApiBase + '/transactions/' + txId);
+              if (_rTxResp.ok) {
+                const _rTxData = await _rTxResp.json();
+                const _rOutputs = _rTxData.outputs || [];
+                _rScriptPubKey = _rOutputs[0]?.scriptPublicKey?.scriptPublicKey || '';
+                console.log('[KV-Release] TX fetched:', _rOutputs.length, 'outputs, daa:', _rDaaScore);
+              }
+              // Get buyer balance after release
+              const _rBalResp = await fetch(_rApiBase + '/addresses/' + _rWallet.address + '/balance');
+              if (_rBalResp.ok) { _rBalanceAfter = Number((await _rBalResp.json()).balance || '0'); }
+            } catch (e) { console.warn('[KV-Release] L1 fetch failed (non-fatal):', e); }
+            // Arweave inscription with full lifecycle
+            await inscribeAgreementToArweave({
+              agreementId: contract.agreementId || '',
+              pubkey: _rMyPk,
+              amount_sompi: Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8),
+              description: contract.itemDescription || '',
+              network: _rWallet.network || 'testnet-10',
+              status: 'Released',
+              frostAddress: contract.multisigAddress || '',
+              signature: 'release_' + txId,
+              counterpartyPubkey: contract.sellerPubkey || '',
+              buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
+              sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
+            });
+            console.log('[KV-Release] inscribed to Arweave');
+            // Full merkle proof with L1 data (same as direct TX)
+            await uploadPerTxProof({
+              txId: txId,
+              txIndex: 0,
+              amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)),
+              scriptPubKey: _rScriptPubKey,
+              daaScore: _rDaaScore,
+              txType: 'release',
+              balanceAfter: _rBalanceAfter,
+              agreementId: contract.agreementId,
+              uploadFn: async (data, tags) => { const r = await uploadToIrys(data, tags); return r.txId || ''; },
+              network: 'testnet',
+            });
+            console.log('[KV-Release] Merkle proof with L1 data uploaded');
+          }
+        } catch (e) { console.warn('[KV-Release] Inscription failed (non-fatal):', e); }
         setContract(prev => ({ ...prev, releaseTxId: txId }));
         setStep(7);
         Alert.alert('Funds Released!', 'TX: ' + txId.slice(0, 16) + '...');
       } else {
-        Alert.alert('L1 Failed', (await submitResp.text()).slice(0, 200));
+        const l1Error = await submitResp.text(); console.log('[FROST-L1-REJECT]', l1Error.slice(0, 500)); Alert.alert('L1 Failed', l1Error.slice(0, 300));
       }
     } catch (e: any) {
       console.error('[Ceremony-Buyer] Error:', e);
@@ -2685,7 +2890,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
           </View>
           <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", paddingVertical: 4, gap: 6 }}>
             <TouchableOpacity onPress={() => { if (step > 1) { setStep(1); } else { onClose(); } }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#2563eb", fontSize: 12, fontWeight: "bold" }}>{"< Back"}</Text></TouchableOpacity>
-            <TouchableOpacity onPress={async () => { await clearAgreementSession(); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setRole(null); setAgreementType(null); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, itemDescription: "", stipulations: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "", expiryHours: 24 }); Alert.alert("Cleared", "Session reset"); }} style={{ padding: 8, backgroundColor: "#fee2e2", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "bold" }}>Reset</Text></TouchableOpacity>
+            <TouchableOpacity onPress={async () => { await clearAgreementSession(); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setRole(null); setAgreementType(null); setTemplateBuilt(false); setTemplateBuilt(false); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, itemDescription: "", stipulations: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "", expiryHours: 24 }); Alert.alert("Cleared", "Session reset"); }} style={{ padding: 8, backgroundColor: "#fee2e2", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "bold" }}>Reset</Text></TouchableOpacity>
             <TouchableOpacity onPress={async () => { const keys = await AsyncStorage.getAllKeys(); const kvKeys = keys.filter((k) => k.startsWith("kv_") || k.startsWith("frost_") || k.startsWith("FROST_")); await AsyncStorage.multiRemove(kvKeys); await AsyncStorage.removeItem("kv_agreement_session"); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, description: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "" }); Alert.alert("Cleared", "All FROST state cleared (" + kvKeys.length + " keys)"); }} style={{ padding: 8, backgroundColor: "#fef3c7", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#92400e", fontSize: 10, fontWeight: "bold" }}>Clear All</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => { setShowBalanceSheet(true); }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text></TouchableOpacity>
           </View>
@@ -2723,33 +2928,113 @@ const handleAcceptFromInbox = async (agreement: any) => {
             {/* Step 1: Create */}
             {step === 1 && !agreementType && (
               <View>
-                {frostActiveList.length > 0 && (
-                  <View style={{ marginBottom: 12 }}>
-                    <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e1b4b', marginBottom: 8 }}>Active Agreements</Text>
-                    {frostActiveList.map((entry, idx) => (
-                      <TouchableOpacity key={idx} style={{ backgroundColor: entry.step >= 4 ? '#f0fdf4' : '#eff6ff', borderRadius: 8, padding: 10, marginBottom: 6, borderWidth: 1, borderColor: entry.step >= 4 ? '#86efac' : '#93c5fd' }}
-                        onPress={async () => {
-                          const session = await loadAgreementSession();
-                          if (session?.contract?.agreementId === entry.agrId) {
-                            setStep(session.step); setRole(session.role); setAgreementType(session.agreementType);
-                            setContract(session.contract); setBuyerLocked(session.buyerLocked); setSellerLocked(session.sellerLocked);
-                          } else {
-                            Alert.alert('Switch Agreement', 'Load ' + entry.agrId.slice(0,12) + '?\nThis will switch your active session.', [
-                              { text: 'Cancel' },
-                              { text: 'Load', onPress: async () => {
-                                // Save minimal session to restore
-                                await saveAgreementSession({ step: entry.step, role: entry.role, agreementType: 'trade', contract: { agreementId: entry.agrId, multisigAddress: entry.frostAddr, itemPriceKas: entry.buyerAmount, sellerCommitmentKas: entry.sellerAmount, buyerPubkey: entry.buyerPubkey, sellerPubkey: entry.sellerPubkey, itemDescription: entry.description, stipulations: '', expiryHours: 24 }, buyerLocked: entry.step >= 4, sellerLocked: entry.step >= 4, counterpartyAddress: null, counterpartyKaspaAddr: '', savedAt: Date.now() });
-                                setStep(entry.step); setRole(entry.role); setContract({ agreementId: entry.agrId, multisigAddress: entry.frostAddr, itemPriceKas: entry.buyerAmount, sellerCommitmentKas: entry.sellerAmount, buyerPubkey: entry.buyerPubkey, sellerPubkey: entry.sellerPubkey, itemDescription: entry.description, stipulations: '', expiryHours: 24 });
-                              }},
-                            ]);
+                {/* RESUME AGREEMENT — pick role + paste AGR ID */}
+                <View style={{ marginBottom: 12, backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#93c5fd' }}>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e40af', marginBottom: 8 }}>Resume Agreement</Text>
+                  <TextInput
+                    style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#93c5fd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, fontFamily: 'monospace', color: '#1c1917', marginBottom: 10 }}
+                    placeholder="Paste AGR_ID here..."
+                    placeholderTextColor="#a8a29e"
+                    value={manualAgrId}
+                    onChangeText={setManualAgrId}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity
+                      style={{ flex: 1, backgroundColor: '#059669', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                      disabled={!manualAgrId || manualAgrId.length < 6}
+                      onPress={async () => {
+                        if (!manualAgrId || manualAgrId.length < 6) return;
+                        setIsLoading(true);
+                        try {
+                          const wallet = await loadMainWallet();
+                          if (!wallet) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
+                          const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+                          const dp = wallet.address.split(':')[1];
+                          const d5 = Array.from(dp).map((c) => CHARSET.indexOf(c));
+                          const rb = []; let bf = 0, bi = 0;
+                          for (const d of d5) { bf = (bf << 5) | d; bi += 5; while (bi >= 8) { bi -= 8; rb.push((bf >> bi) & 0xff); } }
+                          const myPk = rb[0] === 0x00 && rb.length >= 33 ? '02' + rb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join('') : '';
+                          // Look up from Arweave
+                          const all = await queryAgreementsFromArweave({ network: 'testnet-10' });
+                          const match = all.find((a) => (a.agreementId || a.agreement_id) === manualAgrId);
+                          if (!match) { Alert.alert('Not Found', 'AGR ID not found on Arweave'); setIsLoading(false); return; }
+                          const frostAddr = match.frostAddress || '';
+                          const buyerAmt = (match.buyerAmountSompi || 0) / 1e8;
+                          const sellerAmt = (match.sellerAmountSompi || 0) / 1e8;
+                          const proposerPk = match.pubkey || match.partyA?.pubkey || '';
+                          const counterPk = match.counterpartyPubkey || '';
+                          const iAmProposer = proposerPk.startsWith(myPk.slice(0, 16));
+                          // Check L1 balance for step
+                          let derivedStep = 3;
+                          if (frostAddr && frostAddr.length > 20) {
+                            try {
+                              const api = wallet.network?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+                              const br = await fetch(api + '/addresses/' + frostAddr + '/balance');
+                              if (br.ok) { const bd = await br.json(); if (Number(bd.balance || '0') / 1e8 >= buyerAmt + sellerAmt && buyerAmt + sellerAmt > 0) derivedStep = 4; }
+                            } catch {}
                           }
-                        }}>
-                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: entry.step >= 4 ? '#166534' : '#1d4ed8' }}>{entry.description || entry.agrId.slice(0,12)} ? {entry.role}</Text>
-                        <Text style={{ fontSize: 10, color: '#78716c' }}>Buyer: {entry.buyerAmount} / Seller: {entry.sellerAmount} KASPA ? Step {entry.step}</Text>
-                      </TouchableOpacity>
-                    ))}
+                          // ROLE = BUYER
+                          setRole('buyer');
+                          setAgreementType('trade');
+                          setContract({ agreementId: manualAgrId, multisigAddress: frostAddr, itemPriceKas: buyerAmt, sellerCommitmentKas: sellerAmt, buyerPubkey: iAmProposer ? myPk : proposerPk, sellerPubkey: iAmProposer ? counterPk : myPk, itemDescription: match.description || manualAgrId.slice(0,12), stipulations: '', expiryHours: 24, frostData: frostAddr ? (() => { let _fc = 0; try { for (let _i = 0; _i < 25; _i++) { const _a = deriveAggregateKey(iAmProposer ? myPk : proposerPk, iAmProposer ? counterPk : myPk, _i); const _ad = deriveAddress(_a.aggXOnly, 'testnet-10'); if (_ad === frostAddr) { _fc = _i; console.log('[Resume] Counter recovered:', _i); break; } } } catch(e) { console.warn('[Resume] Counter scan failed:', e); } return { address: frostAddr, network: 'testnet-10', frostCounter: _fc }; })() : undefined });
+                          if (derivedStep >= 4) { setBuyerLocked(true); setSellerLocked(true); }
+                          setStep(derivedStep);
+                          console.log('[Resume] Loaded as BUYER, step:', derivedStep, 'frost:', frostAddr?.slice(0,25));
+                        } catch (e) { Alert.alert('Error', String(e)); }
+                        finally { setIsLoading(false); }
+                      }}
+                    >
+                      {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{'\u{1F6D2} Load as Buyer'}</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{ flex: 1, backgroundColor: '#2563eb', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                      disabled={!manualAgrId || manualAgrId.length < 6}
+                      onPress={async () => {
+                        if (!manualAgrId || manualAgrId.length < 6) return;
+                        setIsLoading(true);
+                        try {
+                          const wallet = await loadMainWallet();
+                          if (!wallet) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
+                          const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+                          const dp = wallet.address.split(':')[1];
+                          const d5 = Array.from(dp).map((c) => CHARSET.indexOf(c));
+                          const rb = []; let bf = 0, bi = 0;
+                          for (const d of d5) { bf = (bf << 5) | d; bi += 5; while (bi >= 8) { bi -= 8; rb.push((bf >> bi) & 0xff); } }
+                          const myPk = rb[0] === 0x00 && rb.length >= 33 ? '02' + rb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join('') : '';
+                          const all = await queryAgreementsFromArweave({ network: 'testnet-10' });
+                          const match = all.find((a) => (a.agreementId || a.agreement_id) === manualAgrId);
+                          if (!match) { Alert.alert('Not Found', 'AGR ID not found on Arweave'); setIsLoading(false); return; }
+                          const frostAddr = match.frostAddress || '';
+                          const buyerAmt = (match.buyerAmountSompi || 0) / 1e8;
+                          const sellerAmt = (match.sellerAmountSompi || 0) / 1e8;
+                          const proposerPk = match.pubkey || match.partyA?.pubkey || '';
+                          const counterPk = match.counterpartyPubkey || '';
+                          const iAmProposer = proposerPk.startsWith(myPk.slice(0, 16));
+                          let derivedStep = 3;
+                          if (frostAddr && frostAddr.length > 20) {
+                            try {
+                              const api = wallet.network?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+                              const br = await fetch(api + '/addresses/' + frostAddr + '/balance');
+                              if (br.ok) { const bd = await br.json(); if (Number(bd.balance || '0') / 1e8 >= buyerAmt + sellerAmt && buyerAmt + sellerAmt > 0) derivedStep = 4; }
+                            } catch {}
+                          }
+                          // ROLE = SELLER
+                          setRole('seller');
+                          setAgreementType('trade');
+                          setContract({ agreementId: manualAgrId, multisigAddress: frostAddr, itemPriceKas: buyerAmt, sellerCommitmentKas: sellerAmt, buyerPubkey: iAmProposer ? myPk : proposerPk, sellerPubkey: iAmProposer ? counterPk : myPk, itemDescription: match.description || manualAgrId.slice(0,12), stipulations: '', expiryHours: 24, frostData: frostAddr ? (() => { let _fc = 0; try { for (let _i = 0; _i < 25; _i++) { const _a = deriveAggregateKey(iAmProposer ? myPk : proposerPk, iAmProposer ? counterPk : myPk, _i); const _ad = deriveAddress(_a.aggXOnly, 'testnet-10'); if (_ad === frostAddr) { _fc = _i; console.log('[Resume] Counter recovered:', _i); break; } } } catch(e) { console.warn('[Resume] Counter scan failed:', e); } return { address: frostAddr, network: 'testnet-10', frostCounter: _fc }; })() : undefined });
+                          if (derivedStep >= 4) { setBuyerLocked(true); setSellerLocked(true); }
+                          setStep(derivedStep);
+                          console.log('[Resume] Loaded as SELLER, step:', derivedStep, 'frost:', frostAddr?.slice(0,25));
+                        } catch (e) { Alert.alert('Error', String(e)); }
+                        finally { setIsLoading(false); }
+                      }}
+                    >
+                      {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{'\u{1F3EA} Load as Seller'}</Text>}
+                    </TouchableOpacity>
                   </View>
-                )}
+                </View>
                 <Text style={{ fontSize: rs.font(16), fontWeight: 'bold', color: COLORS.indigo900, marginBottom: 12, textAlign: 'center' }}>What type of agreement?</Text>
                 <TouchableOpacity
                   onPress={() => { setAgreementType('simple'); setRole('buyer'); }}
@@ -3623,8 +3908,8 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 <View style={{ marginBottom: 16, gap: 8 }}>
                   {role === 'buyer' ? (
                     <>
-                      <TouchableOpacity onPress={buildReleaseTemplate} style={{ backgroundColor: '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
-                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Build TX Template (generates k + R)'}</Text>
+                      <TouchableOpacity onPress={buildReleaseTemplate} disabled={templateBuilt} style={{ backgroundColor: templateBuilt ? '#9ca3af' : '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{templateBuilt ? 'Template Built ✓ (paste response below)' : 'Build TX Template (generates k + R)'}</Text>
                       </TouchableOpacity>
                       <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#4f46e5', marginTop: 4, marginBottom: 4 }}>Paste Seller Response</Text>
                       <TextInput

@@ -794,7 +794,7 @@ export function buyerBuildTemplate(params: {
   nonce: FrostNonce;
   sighashes: string[];
 } {
-  const fee = params.fee || MIN_FEE_SOMPI;
+  const fee = params.fee || BigInt(params.utxos.length * 157000 + 2 * 500 + 5400);
 
   // Generate nonce (k born)
   const nonce = generateNonce(
