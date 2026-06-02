@@ -562,20 +562,12 @@ const VerificationCodeDisplay: React.FC<VerificationCodeProps> = ({ code, onConf
       <Text style={verifyStyles.checkItem}>✓ Confirm they see the same code</Text>
     </View>
     
-    {agreementType === 'collateral' ? (
-                        <TouchableOpacity
-                          onPress={() => { setReleaseMode('cancel'); setTemplateBuilt(false); setStep(5); }}
-                          style={{ backgroundColor: '#7c3aed', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 }}>
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>🔓 Return Collateral</Text>
-                          <Text style={{ color: '#e9d5ff', fontSize: 11, marginTop: 4 }}>Both parties sign to release locked funds back</Text>
-                        </TouchableOpacity>
-                      ) : (
-                        <TouchableOpacity style={verifyStyles.confirmBtn} onPress={onConfirmed}>
+    <TouchableOpacity style={verifyStyles.confirmBtn} onPress={onConfirmed}>
       <Text style={verifyStyles.confirmBtnText}>✓ Codes Match - Continue</Text>
     </TouchableOpacity>
     
     <Text style={verifyStyles.warning}>
-      ⚠️ If codes DON'T match, STOP! Someone may be intercepting.
+      ⚠️ If codes DON't match, STOP! Someone may be intercepting.
     </Text>
   </View>
 );
@@ -2796,7 +2788,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
         { text: 'Keep Agreement', style: 'cancel' },
         { text: 'Start Cancellation', onPress: () => {
           setReleaseMode('cancel');
-          setTemplateBuilt(false); setReleaseMode('release');
+          setTemplateBuilt(false);
           setStep(5);
         }},
       ]
@@ -2850,7 +2842,6 @@ const handleAcceptFromInbox = async (agreement: any) => {
               <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1c1917" }}>Neighbor Agreement</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={{ padding: 4 }}><Text style={{ fontSize: 20, color: "#78716c" }}>×</Text></TouchableOpacity>
-                      )}
           </View>
           <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", paddingVertical: 4, gap: 6 }}>
             <TouchableOpacity onPress={() => { if (step > 1) { setStep(1); } else { onClose(); } }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#2563eb", fontSize: 12, fontWeight: "bold" }}>{"< Back"}</Text></TouchableOpacity>
