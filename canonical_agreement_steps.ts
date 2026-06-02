@@ -183,13 +183,14 @@ export const P2PK_SCRIPT_LENGTH = 68;         // 20{32bytes}ac = 68 hex chars
  * Compute binding hash L from sorted pubkeys + optional counter.
  * Uses hexToBytes (NOT TextEncoder) — proven on L1.
  */
-export function computeL(pk1: string, pk2: string, counter?: number): Uint8Array {
+export function computeL(pk1: string, pk2: string, counter?: number, agreementId?: string): Uint8Array {
   const counterBytes =
     counter && counter > 0
       ? new TextEncoder().encode(String(counter))
       : new Uint8Array(0);
+  const agrBytes = agreementId ? new TextEncoder().encode(agreementId) : new Uint8Array(0);
   return sha256(
-    new Uint8Array([...hexToBytes(pk1), ...hexToBytes(pk2), ...counterBytes])
+    new Uint8Array([...hexToBytes(pk1), ...hexToBytes(pk2), ...agrBytes, ...counterBytes])
   );
 }
 
@@ -210,7 +211,8 @@ export function bindingCoefficient(L: Uint8Array, pk: string): bigint {
 export function deriveAggregateKey(
   pubkeyA: string,
   pubkeyB: string,
-  counter?: number
+  counter?: number,
+  agreementId?: string
 ): {
   aggPubkey: string;  // compressed hex (02/03 + 32 bytes)
   aggXOnly: string;   // x-only hex (32 bytes)
@@ -221,7 +223,7 @@ export function deriveAggregateKey(
   L: Uint8Array;
 } {
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
-  const L = computeL(pk1, pk2, counter);
+  const L = computeL(pk1, pk2, counter, agreementId);
   const a1 = bindingCoefficient(L, pk1);
   const a2 = bindingCoefficient(L, pk2);
 
@@ -424,10 +426,11 @@ export function generateNonce(
   privateKeyHex: string,
   pubkeyA: string,
   pubkeyB: string,
-  counter?: number
+  counter?: number,
+  agreementId?: string
 ): FrostNonce {
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
-  const L = computeL(pk1, pk2, counter);
+  const L = computeL(pk1, pk2, counter, agreementId);
   const myPub = bytesToHex(secp256k1.getPublicKey(hexToBytes(privateKeyHex), true));
   const myCoeff = bindingCoefficient(L, myPub === pk1 ? pk1 : pk2);
 
@@ -435,7 +438,7 @@ export function generateNonce(
   let d = mod(BigInt('0x' + privateKeyHex) * myCoeff, N);
 
   // BIP340 parity: negate d if aggregate key has odd y
-  const agg = deriveAggregateKey(pubkeyA, pubkeyB, counter);
+  const agg = deriveAggregateKey(pubkeyA, pubkeyB, counter, agreementId);
   const aggBytes = hexToBytes(agg.aggPubkey);
   if (aggBytes[0] === 0x03) d = mod(N - d, N);
 

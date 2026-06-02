@@ -2960,7 +2960,49 @@ const handleAcceptFromInbox = async (agreement: any) => {
                           const all = await queryAgreementsFromArweave({ network: 'testnet-10' });
                           const match = all.find((a) => (a.agreementId || a.agreement_id) === manualAgrId);
                           if (!match) { Alert.alert('Not Found', 'AGR ID not found on Arweave'); setIsLoading(false); return; }
-                          const frostAddr = match.frostAddress || '';
+                          let frostAddr = match.frostAddress || '';
+                          // [Resume-FrostFix] If frostAddress missing, query Arweave tags directly
+                          if (!frostAddr || frostAddr.length < 20) {
+                            try {
+                              const _fGql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + manualAgrId + '"] }], sort: HEIGHT_DESC) { edges { node { tags { name value } } } } }';
+                              const _fResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: _fGql }) });
+                              const _fJson = await _fResp.json();
+                              for (const _edge of (_fJson?.data?.transactions?.edges || [])) {
+                                const _tags = {};
+                                (_edge?.node?.tags || []).forEach(t => { _tags[t.name] = t.value; });
+                                if (_tags['KV-FrostAddress'] && _tags['KV-FrostAddress'].length > 20) {
+                                  frostAddr = _tags['KV-FrostAddress'];
+                                  console.log('[Resume-FrostFix] Got FROST addr from Arweave tag:', frostAddr.slice(0, 30));
+                                  break;
+                                }
+                              }
+                            } catch (e) { console.warn('[Resume-FrostFix] Arweave query failed:', e); }
+                          }
+                          if (!frostAddr || frostAddr.length < 20) {
+                            // Derive FROST address from pubkeys (both available from Arweave)
+                            try {
+                              const _bPk = match.pubkey || match.partyA?.pubkey || '';
+                              const _cPk = match.counterpartyPubkey || match.KVCounterparty || '';
+                              if (_bPk && _cPk) {
+                                for (let _dc = 0; _dc < 25; _dc++) {
+                                  const _da = deriveAggregateKey(_bPk, _cPk, _dc);
+                                  const _dAddr = deriveAddress(_da.aggXOnly, 'testnet-10');
+                                  const _dApi = wallet.network?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+                                  try {
+                                    const _dBr = await fetch(_dApi + '/addresses/' + _dAddr + '/balance');
+                                    if (_dBr.ok) {
+                                      const _dBal = Number((await _dBr.json()).balance || '0');
+                                      if (_dBal > 0) { frostAddr = _dAddr; console.log('[Resume-Derive] Found funded FROST at counter', _dc, ':', _dAddr.slice(0, 30), _dBal / 1e8, 'KAS'); break; }
+                                    }
+                                  } catch {}
+                                }
+                              }
+                            } catch (e) { console.warn('[Resume-Derive] Failed:', e); }
+                            if (!frostAddr || frostAddr.length < 20) {
+                              Alert.alert('Missing FROST Address', 'Could not find or derive FROST address. Check pubkeys and try again.');
+                              setIsLoading(false); return;
+                            }
+                          }
                           const buyerAmt = (match.buyerAmountSompi || 0) / 1e8;
                           const sellerAmt = (match.sellerAmountSompi || 0) / 1e8;
                           const proposerPk = match.pubkey || match.partyA?.pubkey || '';
@@ -3006,7 +3048,49 @@ const handleAcceptFromInbox = async (agreement: any) => {
                           const all = await queryAgreementsFromArweave({ network: 'testnet-10' });
                           const match = all.find((a) => (a.agreementId || a.agreement_id) === manualAgrId);
                           if (!match) { Alert.alert('Not Found', 'AGR ID not found on Arweave'); setIsLoading(false); return; }
-                          const frostAddr = match.frostAddress || '';
+                          let frostAddr = match.frostAddress || '';
+                          // [Resume-FrostFix] If frostAddress missing, query Arweave tags directly
+                          if (!frostAddr || frostAddr.length < 20) {
+                            try {
+                              const _fGql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + manualAgrId + '"] }], sort: HEIGHT_DESC) { edges { node { tags { name value } } } } }';
+                              const _fResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: _fGql }) });
+                              const _fJson = await _fResp.json();
+                              for (const _edge of (_fJson?.data?.transactions?.edges || [])) {
+                                const _tags = {};
+                                (_edge?.node?.tags || []).forEach(t => { _tags[t.name] = t.value; });
+                                if (_tags['KV-FrostAddress'] && _tags['KV-FrostAddress'].length > 20) {
+                                  frostAddr = _tags['KV-FrostAddress'];
+                                  console.log('[Resume-FrostFix] Got FROST addr from Arweave tag:', frostAddr.slice(0, 30));
+                                  break;
+                                }
+                              }
+                            } catch (e) { console.warn('[Resume-FrostFix] Arweave query failed:', e); }
+                          }
+                          if (!frostAddr || frostAddr.length < 20) {
+                            // Derive FROST address from pubkeys (both available from Arweave)
+                            try {
+                              const _bPk = match.pubkey || match.partyA?.pubkey || '';
+                              const _cPk = match.counterpartyPubkey || match.KVCounterparty || '';
+                              if (_bPk && _cPk) {
+                                for (let _dc = 0; _dc < 25; _dc++) {
+                                  const _da = deriveAggregateKey(_bPk, _cPk, _dc);
+                                  const _dAddr = deriveAddress(_da.aggXOnly, 'testnet-10');
+                                  const _dApi = wallet.network?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+                                  try {
+                                    const _dBr = await fetch(_dApi + '/addresses/' + _dAddr + '/balance');
+                                    if (_dBr.ok) {
+                                      const _dBal = Number((await _dBr.json()).balance || '0');
+                                      if (_dBal > 0) { frostAddr = _dAddr; console.log('[Resume-Derive] Found funded FROST at counter', _dc, ':', _dAddr.slice(0, 30), _dBal / 1e8, 'KAS'); break; }
+                                    }
+                                  } catch {}
+                                }
+                              }
+                            } catch (e) { console.warn('[Resume-Derive] Failed:', e); }
+                            if (!frostAddr || frostAddr.length < 20) {
+                              Alert.alert('Missing FROST Address', 'Could not find or derive FROST address. Check pubkeys and try again.');
+                              setIsLoading(false); return;
+                            }
+                          }
                           const buyerAmt = (match.buyerAmountSompi || 0) / 1e8;
                           const sellerAmt = (match.sellerAmountSompi || 0) / 1e8;
                           const proposerPk = match.pubkey || match.partyA?.pubkey || '';
