@@ -138,6 +138,7 @@ import {
   parseTemplate,
   parseResponse,
   encodeTemplate,
+  generateNonce,
   encodeResponse,
   verifyTemplate,
   deriveAggregateKey,
@@ -145,6 +146,9 @@ import {
   verificationCode as computeVerificationCode,
   computeAgrId,
   buildTxBody,
+  buildReleaseTemplate as buildReleaseTemplateFn,
+  computeReleaseOutputs,
+  ReleaseMode,
   MIN_FEE_SOMPI,
   SUBNETWORK_NATIVE,
 } from './canonical_agreement_steps';
@@ -1103,6 +1107,7 @@ function parseClipboard(raw: string): {
   const [isLoading, setIsLoading] = useState(false);
   const [sellerResponseB64, setSellerResponseB64] = useState('');
   const [templateBuilt, setTemplateBuilt] = useState(false);
+  const [releaseMode, setReleaseMode] = useState<ReleaseMode>('release');
   const [collateralFailed, setCollateralFailed] = useState(false);
   const [counterpartyAddress, setCounterpartyAddress] = useState<string | null>(null);
   const [counterpartyKaspaAddr, setCounterpartyKaspaAddr] = useState<string>('');
@@ -2029,6 +2034,29 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
       if (!utxos?.length) { Alert.alert('Error', 'No UTXOs at FROST address'); setIsLoading(false); return; }
 
       // k born HERE — canonical function
+      // Cancel/Split mode: use buildReleaseTemplateFn with multiple outputs
+      if (releaseMode === 'cancel' || releaseMode === 'split') {
+        const _bx = (contract.buyerPubkey || '').length === 66 ? (contract.buyerPubkey || '').slice(2) : (contract.buyerPubkey || '');
+        const _sx = (contract.sellerPubkey || '').length === 66 ? (contract.sellerPubkey || '').slice(2) : (contract.sellerPubkey || '');
+        const _nonce = generateNonce(wallet.privKeyHex, contract.buyerPubkey || '', contract.sellerPubkey || '', contract.frostData?.frostCounter || 0);
+        const { template: _cTmpl, description: _cDesc } = buildReleaseTemplateFn({
+          utxos: utxos.map((u) => ({ txId: u.outpoint.transactionId, index: u.outpoint.index, amount: u.utxoEntry.amount, scriptPubKey: u.utxoEntry.scriptPublicKey.scriptPublicKey })),
+          partyA_xOnly: _bx, partyB_xOnly: _sx,
+          partyA_depositSompi: BigInt(Math.floor(contract.itemPriceKas * 1e8)),
+          partyB_depositSompi: BigInt(Math.floor(contract.sellerCommitmentKas * 1e8)),
+          mode: releaseMode,
+          R_hex: _nonce.R_hex, agrId: contract.agreementId || '',
+        });
+        await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ k: _nonce.k.toString(16), d_tweaked: _nonce.d_tweaked.toString(16), R_hex: _nonce.R_hex }));
+        await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(_cTmpl));
+        const _b64 = encodeTemplate(_cTmpl);
+        try { await Clipboard.setStringAsync(_b64); } catch {}
+        setTemplateBuilt(true);
+        console.log('[Ceremony] ' + releaseMode + ' template built:', _b64.length, 'chars,', _cDesc);
+        Alert.alert('Template Copied (' + releaseMode + ')', _cDesc + '\nOutputs: ' + _cTmpl.o.length + '\n\nSend to counterparty.');
+        setIsLoading(false);
+        return;
+      }
       const result = buyerBuildTemplate({
         privateKeyHex: wallet.privKeyHex,
         buyerPubkey: contract.buyerPubkey || '',
@@ -2753,94 +2781,21 @@ const handleAcceptFromInbox = async (agreement: any) => {
   };
   
   const handleRequestRelease = async () => {
-    setIsLoading(true);
-    
-    try {
-      if (!contract.partialReleaseTx && contract.agreementId) {
-        const payload = await fetchPartialTx(contract.agreementId);
-        if (payload && payload.partialTx) {
-          setContract(prev => ({ ...prev, partialReleaseTx: payload.partialTx }));
-        }
-      }
-      
-      const partialTx = contract.partialReleaseTx || (await fetchPartialTx(contract.agreementId || ''))?.partialTx;
-      
-      if (partialTx && contract.frostData) {
-        const releaseWallet = await loadMainWallet();
-        if (!releaseWallet) {
-          Alert.alert('Error', 'Wallet not configured');
-          setIsLoading(false);
-          return;
-        }
-        const privKeyHex = releaseWallet.privKeyHex;
-        const network = releaseWallet.network;
-        
-        const result = await completeFrostAndBroadcast({
-          frostAddress: contract.frostData!,
-          myPrivateKeyHex: privKeyHex,
-          recipientAddress: contract.releaseRecipient || '',
-          amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n,
-          counterpartyPartialSig: partialTx,
-        });
-        
-        if (result.success && result.txId) {
-          console.log('[Neighbor] ✓ Release TX broadcast:', result.txId);
-          // Merkle archive: per-TX proof for release (fire-and-forget)
-          uploadPerTxProof({
-            txId: result.txId || '',
-            txIndex: 0,
-            amountSompi: BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n,
-            scriptPubKey: '',
-            daaScore: 0,
-            txType: 'release',
-            balanceAfter: 0,
-            agreementId: contract.agreementId,
-            uploadFn: async (data, tags) => {
-              const r = await uploadToIrys(data, tags);
-              return r.txId || '';
-            },
-            network: 'testnet',
-          }).catch(e => console.warn('[Neighbor] Release merkle proof failed (non-fatal):', e));
-          
-          if (contract.agreementId) {
-            await clearPartialTx(contract.agreementId);
-          }
-          
-          setContract(prev => ({
-            ...prev,
-            releaseTxId: result.txId,
-            releaseExplorerUrl: result.explorerUrl,
-          }));
-          
-          const newStats = {
-            ...userStats,
-            successes: userStats.successes + 1,
-            xp: userStats.xp + 10,
-          };
-          setUserStats(newStats);
-          await SecureStore.setItemAsync('kv_user_stats', JSON.stringify(newStats));
-          
-          await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
-        } else {
-          Alert.alert('Error', result.error || 'Failed to broadcast');
-        }
-      } else {
-        if (role === 'buyer') {
-          setBuyerRequestedRelease(true);
-          if (sellerRequestedRelease) await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
-        } else {
-          setSellerRequestedRelease(true);
-          if (buyerRequestedRelease) await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
-        }
-      }
-    } catch (e) {
-      console.error('[Neighbor] Release error:', e);
-      Alert.alert('Error', e instanceof Error ? e.message : 'Unknown error');
-    } finally {
-      setIsLoading(false);
-    }
+    Alert.alert(
+      'Cancel Agreement',
+      'Both parties must sign to cancel.\nEach receives their original collateral back (minus proportional fee).\n\nParty A gets: ~' + contract.itemPriceKas + ' KAS\nParty B gets: ~' + contract.sellerCommitmentKas + ' KAS',
+      [
+        { text: 'Keep Agreement', style: 'cancel' },
+        { text: 'Start Cancellation', onPress: () => {
+          setReleaseMode('cancel');
+          setTemplateBuilt(false); setReleaseMode('release');
+          setStep(5);
+        }},
+      ]
+    );
   };
-  
+
+
   const handleEnterDispute = () => {
     const newStats = {
       ...userStats,
@@ -3992,6 +3947,12 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 <View style={{ marginBottom: 16, gap: 8 }}>
                   {role === 'buyer' ? (
                     <>
+                      {/* Release mode banner */}
+                      <View style={{ backgroundColor: releaseMode === 'cancel' ? '#fef3c7' : releaseMode === 'split' ? '#fef2f2' : '#f0fdf4', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: releaseMode === 'cancel' ? '#f59e0b' : releaseMode === 'split' ? '#fca5a5' : '#86efac' }}>
+                        <Text style={{ fontSize: 12, fontWeight: 'bold', color: releaseMode === 'cancel' ? '#92400e' : releaseMode === 'split' ? '#991b1b' : '#166534' }}>
+                          {releaseMode === 'cancel' ? '↩ Cancellation — each party receives their collateral back' : releaseMode === 'split' ? '⚖ Settlement — custom split' : '✓ Release — payment transfers to seller'}
+                        </Text>
+                      </View>
                       <TouchableOpacity onPress={buildReleaseTemplate} disabled={templateBuilt} style={{ backgroundColor: templateBuilt ? '#9ca3af' : '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{templateBuilt ? 'Template Built ✓ (paste response below)' : 'Build TX Template (generates k + R)'}</Text>
                       </TouchableOpacity>
