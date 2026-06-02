@@ -2850,7 +2850,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   const [storedAvatar, setStoredAvatar] = useState<any>({});
   const [filledTraits, setFilledTraits] = useState(0);
   const [missingTraits, setMissingTraits] = useState<string[]>([]);
-  const [hasPassport, setHasPassport] = useState(false);
+  const [hasPassport, setHasPassport] = useState(true) /* DEV BYPASS */;
   
   // Active view tab
   const [activeView, setActiveView] = useState('brand');
