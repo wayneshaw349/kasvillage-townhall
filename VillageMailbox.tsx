@@ -31,6 +31,8 @@ import {
 } from 'react-native';
 import Svg, { Rect, Defs, Pattern, Line } from 'react-native-svg';
 import * as SecureStore from 'expo-secure-store';
+import * as Clipboard from 'expo-clipboard';
+import { Alert } from 'react-native';
 import {
   Search,
   PlayCircle,
@@ -717,7 +719,50 @@ export default function VillageMailbox() {
 
   // Render item
   const renderItem = ({ item, index }: { item: any; index: number }) => {
-    const onPress = () => console.log('Open:', item.id);
+    const onPress = () => {
+      // Route based on section type
+      if (section === 'storefronts' && item.primaryLink) {
+        Linking.openURL(item.primaryLink.startsWith('http') ? item.primaryLink : 'https://' + item.primaryLink);
+      } else if (section === 'dapps') {
+        // DApps, games, websites — video demo + live URL
+        const videoLink = item.videoUrl || '';
+        const appLink = item.gameUrl || item.primaryLink || '';
+        if (videoLink && appLink) {
+          Alert.alert(item.name || 'App', 'Watch the demo or open the app?', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: '🎬 Watch Demo', onPress: () => Linking.openURL(videoLink.startsWith('http') ? videoLink : 'https://' + videoLink) },
+            { text: '🚀 Open App', onPress: () => Linking.openURL(appLink.startsWith('http') ? appLink : 'https://' + appLink) },
+          ]);
+        } else {
+          const link = videoLink || appLink;
+          if (link) Linking.openURL(link.startsWith('http') ? link : 'https://' + link);
+          else Alert.alert('No Link', 'No demo or app URL set.');
+        }
+      } else if (section === 'academics') {
+        const videoLink = item.videoUrl || '';
+        const repoLink = item.repositoryUrl || '';
+        if (videoLink && repoLink) {
+          Alert.alert(item.title || 'Research', 'Watch the explainer or view the paper?', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: '🎬 Video Explainer', onPress: () => Linking.openURL(videoLink.startsWith('http') ? videoLink : 'https://' + videoLink) },
+            { text: '📄 View Paper', onPress: () => Linking.openURL(repoLink.startsWith('http') ? repoLink : 'https://' + repoLink) },
+          ]);
+        } else {
+          const link = videoLink || repoLink;
+          if (link) Linking.openURL(link.startsWith('http') ? link : 'https://' + link);
+          else Alert.alert('Research', item.title || 'No link available');
+        }
+      } else if (section === 'coupons') {
+        // Copy coupon code
+        try { Clipboard.setString(item.code || item.title || ''); Alert.alert('Coupon Copied!', (item.code || item.title) + ' — use at checkout in a Neighbor Agreement'); } catch { Alert.alert('Coupon', item.title || item.code || 'No code'); }
+      } else if (section === 'services') {
+        const svcLink = item.contactChannel || item.primaryLink || '';
+        if (svcLink) Linking.openURL(svcLink.startsWith('http') ? svcLink : 'https://' + svcLink);
+        else Alert.alert('Service', item.title || 'No contact info');
+      } else {
+        Alert.alert('Details', item.name || item.storeName || item.title || 'No details');
+      }
+    };
     
     switch (section) {
       case 'dapps': return <DAppCard item={item} onPress={onPress} />;
@@ -766,7 +811,7 @@ export default function VillageMailbox() {
         {/* Header */}
         <View style={mainStyles.header}>
           <Text style={mainStyles.headerTitle}>📬 Village Mailbox</Text>
-          <Text style={mainStyles.headerSubtitle}>Verified listings only</Text>
+          <Text style={mainStyles.headerSubtitle}>Discover stores, DApps & research — tap to visit</Text>
         </View>
 
         {/* Section Tabs */}

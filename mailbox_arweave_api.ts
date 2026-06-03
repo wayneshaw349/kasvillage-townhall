@@ -282,7 +282,7 @@ export async function fetchDApps(cursor?: string): Promise<FetchResult<DAppEntry
       transactions(
         tags: [
           { name: "App-Name", values: ["${KV_APP_NAME}"] }
-          { name: "Type", values: ["KV_DAPP_V1"] }
+          { name: "KV-Type", values: ["DApp"] }
         ]
         ${pagination}
         sort: HEIGHT_DESC
@@ -309,21 +309,21 @@ export async function fetchDApps(cursor?: string): Promise<FetchResult<DAppEntry
     const id = edge.node.id;
     return {
       id,
-      name: getTagValue(tags, 'DApp-Name') ?? 'Unknown',
-      description: getTagValue(tags, 'Description') ?? '',
-      category: getTagValue(tags, 'Category') ?? 'Other',
+      name: getTagValue(tags, 'KV-DAppName') ?? 'Unknown',
+      description: getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description') ?? '',
+      category: getTagValue(tags, 'KV-Category') ?? 'Other',
       board: (getTagValue(tags, 'Board') as Board) ?? 'Incubator',
       arweaveTx: id,
-      ownerPubkey: getTagValue(tags, 'Owner-Pubkey') ?? '',
-      templateVerified: getTagValue(tags, 'Template-Verified') === 'true',
+      ownerPubkey: getTagValue(tags, 'KV-Owner') ?? '',
+      templateVerified: getTagValue(tags, 'KV-SDKHash') !== null,
       townhall: {
-        verified: getTagValue(tags, 'Verified') === 'true',
+        verified: getTagValue(tags, 'KV-SDKHash') !== null,
         verifiedAt: edge.node.block?.timestamp,
-        verificationTx: getTagValue(tags, 'Verification-TX'),
-        apt: getTagValue(tags, 'APT-Alias'),
+        verificationTx: id,
+        apt: getTagValue(tags, 'KV-Owner'),
       },
       createdAt: edge.node.block?.timestamp ?? 0,
-      xpCommitment: parseInt(getTagValue(tags, 'XP-Commitment') ?? '0', 10),
+      xpCommitment: parseInt(getTagValue(tags, 'KV-XPStake') ?? '0', 10),
     };
   });
 
@@ -350,7 +350,7 @@ export async function fetchStorefronts(cursor?: string): Promise<FetchResult<Sto
       transactions(
         tags: [
           { name: "App-Name", values: ["${KV_APP_NAME}"] }
-          { name: "Type", values: ["KV_STOREFRONT_V1"] }
+          { name: "KV-Type", values: ["Storefront"] }
         ]
         ${pagination}
         sort: HEIGHT_DESC
@@ -377,21 +377,22 @@ export async function fetchStorefronts(cursor?: string): Promise<FetchResult<Sto
     const id = edge.node.id;
     return {
       id,
-      storeName: getTagValue(tags, 'Brand-Name') ?? 'Unknown Store',
-      description: getTagValue(tags, 'Tagline') ?? '',
-      category: getTagValue(tags, 'Category') ?? 'General',
+      storeName: getTagValue(tags, 'KV-StoreName') ?? 'Unknown Store',
+      description: getTagValue(tags, 'KV-Category') ?? '',
+      category: getTagValue(tags, 'KV-Category') ?? 'General',
       arweaveTx: id,
-      ownerPubkey: getTagValue(tags, 'Owner-Pubkey') ?? '',
+      ownerPubkey: getTagValue(tags, 'KV-Owner') ?? '',
+      primaryLink: getTagValue(tags, 'KV-PrimaryLink') ?? '',
       logoArweaveTx: getTagValue(tags, 'Logo-TX'),
       townhall: {
-        verified: getTagValue(tags, 'Verified') === 'true',
+        verified: true, // published = verified
         verifiedAt: edge.node.block?.timestamp,
         verificationTx: getTagValue(tags, 'Verification-TX'),
         apt: getTagValue(tags, 'APT-Alias'),
       },
       createdAt: edge.node.block?.timestamp ?? 0,
-      productCount: parseInt(getTagValue(tags, 'Product-Count') ?? '0', 10),
-      rating: parseFloat(getTagValue(tags, 'Rating') ?? '0') || undefined,
+      productCount: parseInt(getTagValue(tags, 'KV-ProductCount') ?? '0', 10),
+      rating: parseFloat(getTagValue(tags, 'KV-Rating') ?? '0') || undefined,
     };
   });
 
@@ -418,7 +419,7 @@ export async function fetchCoupons(cursor?: string): Promise<FetchResult<CouponE
       transactions(
         tags: [
           { name: "App-Name", values: ["${KV_APP_NAME}"] }
-          { name: "Type", values: ["KV_COUPON_V1"] }
+          { name: "KV-Type", values: ["Coupon"] }
         ]
         ${pagination}
         sort: HEIGHT_DESC
@@ -448,14 +449,14 @@ export async function fetchCoupons(cursor?: string): Promise<FetchResult<CouponE
     return {
       id,
       title: getTagValue(tags, 'Coupon-Title') ?? 'Coupon',
-      description: getTagValue(tags, 'Description') ?? '',
+      description: getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description') ?? '',
       discount: getTagValue(tags, 'Discount') ?? 'DEAL',
       arweaveTx: id,
       ownerPubkey: getTagValue(tags, 'Owner-Pubkey') ?? '',
       storeName: getTagValue(tags, 'Store-Name') ?? 'Unknown Store',
       expiresAt: expiresAt || now + 7 * 24 * 60 * 60 * 1000,
       createdAt: edge.node.block?.timestamp ?? 0,
-      category: getTagValue(tags, 'Category') ?? 'General',
+      category: getTagValue(tags, 'KV-Category') ?? 'General',
       townhall: {
         verified: getTagValue(tags, 'Verified') === 'true',
         verifiedAt: edge.node.block?.timestamp,
@@ -487,7 +488,7 @@ export async function fetchAcademics(cursor?: string): Promise<FetchResult<Acade
       transactions(
         tags: [
           { name: "App-Name", values: ["${KV_APP_NAME}"] }
-          { name: "Type", values: ["KV_ACADEMIC_V1"] }
+          { name: "KV-Type", values: ["Abstract"] }
         ]
         ${pagination}
         sort: HEIGHT_DESC
@@ -515,7 +516,7 @@ export async function fetchAcademics(cursor?: string): Promise<FetchResult<Acade
     return {
       id,
       title: getTagValue(tags, 'Academic-Title') ?? 'Academic Profile',
-      description: getTagValue(tags, 'Description') ?? '',
+      description: getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description') ?? '',
       institution: getTagValue(tags, 'Institution') ?? 'Unknown',
       field: getTagValue(tags, 'Field') ?? 'General',
       arweaveTx: id,
@@ -555,7 +556,7 @@ export async function fetchServices(cursor?: string): Promise<FetchResult<Servic
       transactions(
         tags: [
           { name: "App-Name", values: ["${KV_APP_NAME}"] }
-          { name: "Type", values: ["KV_SERVICE_V1"] }
+          { name: "KV-Type", values: ["Service"] }
         ]
         ${pagination}
         sort: HEIGHT_DESC
@@ -584,8 +585,8 @@ export async function fetchServices(cursor?: string): Promise<FetchResult<Servic
     return {
       id,
       title: getTagValue(tags, 'Service-Title') ?? 'Service',
-      description: getTagValue(tags, 'Description') ?? '',
-      category: (getTagValue(tags, 'Category') as ServiceCategory) ?? 'Other',
+      description: getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description') ?? '',
+      category: (getTagValue(tags, 'KV-Category') as ServiceCategory) ?? 'Other',
       arweaveTx: id,
       ownerPubkey: getTagValue(tags, 'Owner-Pubkey') ?? '',
       priceSompi: priceSompiRaw ? parseInt(priceSompiRaw, 10) : undefined,
