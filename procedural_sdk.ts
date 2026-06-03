@@ -1106,6 +1106,7 @@ export interface ScanResult {
     patternsChecked: number;
     whitelistApplied: number;
     blockedCount: number;
+    sdkImportFound?: boolean;
   };
 }
 

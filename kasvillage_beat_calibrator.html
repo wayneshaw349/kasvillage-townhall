@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KasVillage Beat Calibrator</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Outfit:wght@300;600;900&display=swap');
+
+:root {
+  --bg: #0A0A0F;
+  --surface: #12121A;
+  --surface2: #1A1A26;
+  --border: #2A2A3A;
+  --text: #E8E8F0;
+  --dim: #666680;
+  --accent: #FFD700;
+  --hit-perfect: #00FF88;
+  --hit-good: #44AAFF;
+  --hit-ok: #FFAA00;
+  --hit-miss: #FF2244;
+  --parry: #FF00FF;
+  --enemy-beat: #FF4444;
+  --player-beat: #44FF88;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  overflow: hidden;
+  height: 100vh;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 16px;
+  gap: 12px;
+}
+
+/* ─── HEADER ─── */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 900;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--accent), #FF6600);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.phase-label {
+  font-size: 11px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+/* ─── BEAT VISUALIZER ─── */
+.beat-viz {
+  height: 120px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.beat-track {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--border);
+  transform: translateY(-50%);
+}
+
+.beat-target {
+  position: absolute;
+  top: 50%;
+  left: 15%;
+  width: 4px;
+  height: 60px;
+  background: var(--accent);
+  transform: translateY(-50%);
+  border-radius: 2px;
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
+}
+
+.beat-target::before {
+  content: 'HIT';
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--accent);
+  letter-spacing: 1px;
+}
+
+.beat-window {
+  position: absolute;
+  top: 50%;
+  height: 50px;
+  background: rgba(255, 215, 0, 0.06);
+  border-left: 1px dashed rgba(255, 215, 0, 0.2);
+  border-right: 1px dashed rgba(255, 215, 0, 0.2);
+  transform: translateY(-50%);
+}
+
+canvas#beatCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── TAP AREA ─── */
+.tap-area {
+  flex: 1;
+  min-height: 140px;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s;
+  position: relative;
+  overflow: hidden;
+}
+
+.tap-area:active, .tap-area.flash {
+  border-color: var(--accent);
+  background: var(--surface2);
+}
+
+.tap-area.flash-perfect { border-color: var(--hit-perfect); background: rgba(0, 255, 136, 0.05); }
+.tap-area.flash-good { border-color: var(--hit-good); background: rgba(68, 170, 255, 0.05); }
+.tap-area.flash-ok { border-color: var(--hit-ok); background: rgba(255, 170, 0, 0.05); }
+.tap-area.flash-miss { border-color: var(--hit-miss); background: rgba(255, 34, 68, 0.05); }
+
+.tap-instruction {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 600;
+  font-size: 20px;
+  color: var(--dim);
+  pointer-events: none;
+}
+
+.tap-result {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 900;
+  font-size: 36px;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(1.5);
+  transition: opacity 0.15s, transform 0.15s;
+  position: absolute;
+}
+
+.tap-result.show {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* ─── STATS GRID ─── */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.stat-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  text-align: center;
+}
+
+.stat-value {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 900;
+  font-size: 20px;
+}
+
+.stat-label {
+  font-size: 8px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+
+/* ─── CONTROLS ─── */
+.controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.control-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 120px;
+}
+
+.control-label {
+  font-size: 9px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.control-value {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--accent);
+  min-width: 50px;
+  text-align: right;
+}
+
+input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  min-width: 60px;
+}
+
+select, button {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--accent); }
+button.active { background: var(--accent); color: var(--bg); }
+
+/* ─── LATENCY PANEL ─── */
+.latency-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.latency-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.latency-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s, background 0.3s;
+}
+
+/* ─── HISTORY ─── */
+.history {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+  height: 40px;
+  overflow: hidden;
+}
+
+.history-bar {
+  width: 4px;
+  border-radius: 2px;
+  transition: height 0.2s;
+}
+
+/* ─── ENEMY BEAT INDICATOR ─── */
+.enemy-bar {
+  height: 3px;
+  background: var(--surface);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.enemy-pulse {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 0%;
+  background: var(--enemy-beat);
+  border-radius: 2px;
+  transition: width 0.05s linear;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div class="title">BEAT CALIBRATOR</div>
+    <div class="phase-label" id="phaseLabel">PHASE 1: LATENCY PING</div>
+  </div>
+
+  <!-- Enemy beat bar -->
+  <div class="enemy-bar">
+    <div class="enemy-pulse" id="enemyPulse"></div>
+  </div>
+
+  <!-- Beat visualizer -->
+  <div class="beat-viz">
+    <div class="beat-track"></div>
+    <div class="beat-target" id="beatTarget"></div>
+    <div class="beat-window" id="beatWindow"></div>
+    <canvas id="beatCanvas"></canvas>
+  </div>
+
+  <!-- Tap area -->
+  <div class="tap-area" id="tapArea">
+    <div class="tap-instruction" id="tapInstruction">TAP TO START</div>
+    <div class="tap-result" id="tapResult"></div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat-box">
+      <div class="stat-value" id="statBpm">120</div>
+      <div class="stat-label">BPM</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value" id="statAccuracy">--</div>
+      <div class="stat-label">Accuracy</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value" id="statLatency">--</div>
+      <div class="stat-label">Latency</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value" id="statWindow">200</div>
+      <div class="stat-label">Window ms</div>
+    </div>
+  </div>
+
+  <!-- History bars -->
+  <div class="history" id="history"></div>
+
+  <!-- Latency panel -->
+  <div class="latency-panel">
+    <div class="control-label">OFFSET</div>
+    <div class="latency-bar">
+      <div class="latency-fill" id="latencyFill" style="width: 50%; background: var(--hit-good);"></div>
+    </div>
+    <div class="control-value" id="latencyValue">0ms</div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="control-group">
+      <div class="control-label">BPM</div>
+      <input type="range" id="bpmSlider" min="60" max="200" value="120">
+      <div class="control-value" id="bpmValue">120</div>
+    </div>
+    <div class="control-group">
+      <div class="control-label">WINDOW</div>
+      <input type="range" id="windowSlider" min="80" max="350" value="200">
+      <div class="control-value" id="windowValue">200ms</div>
+    </div>
+    <div class="control-group">
+      <div class="control-label">ENEMY</div>
+      <select id="enemyRhythm">
+        <option value="hiphop">Hip-Hop (0.66x)</option>
+        <option value="rnb">R&B (0.5x)</option>
+        <option value="trap">Trap (1.33x)</option>
+        <option value="dnb">DnB (1.5x)</option>
+        <option value="reggaeton">Reggaeton (0.75x)</option>
+        <option value="jazz">Jazz (0.85x swing)</option>
+        <option value="dance">Dance/EDM (1.0x offset)</option>
+        <option value="rock">Rock (0.88x driving)</option>
+        <option value="reggae">Reggae (0.5x offbeat)</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <button id="btnReset">RESET</button>
+      <button id="btnAutoCalibrate">AUTO-CAL</button>
+      <button id="btnExport">EXPORT</button>
+    </div>
+  </div>
+
+  <!-- Latency simulation controls -->
+  <div class="controls">
+    <div class="control-group">
+      <div class="control-label">SIM</div>
+      <select id="latencySim">
+        <option value="none">No Latency (Synthetic)</option>
+        <option value="wifi" selected>Spotify WiFi (~180ms)</option>
+        <option value="cellular">Spotify Cellular (~280ms)</option>
+        <option value="bt_earbuds">+ BT Earbuds (+150ms)</option>
+        <option value="bt_speaker">+ BT Speaker (+200ms)</option>
+        <option value="worst">Worst Case (~450ms)</option>
+        <option value="custom">Custom</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <div class="control-label">API</div>
+      <input type="range" id="apiLatencySlider" min="0" max="400" value="150">
+      <div class="control-value" id="apiLatencyValue">150ms</div>
+    </div>
+    <div class="control-group">
+      <div class="control-label">AUDIO</div>
+      <input type="range" id="audioLatencySlider" min="0" max="250" value="15">
+      <div class="control-value" id="audioLatencyValue">15ms</div>
+    </div>
+    <div class="control-group">
+      <div class="control-label">DRIFT</div>
+      <input type="range" id="driftSlider" min="0" max="100" value="30">
+      <div class="control-value" id="driftValue">±30ms</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// SIMULATED SPOTIFY ANALYSIS DATA
+// ============================================================================
+
+function generateSpotifyAnalysis(bpm, durationSec = 30) {
+  const beatInterval = 60 / bpm;
+  const beats = [];
+  const bars = [];
+  const sections = [];
+
+  // Generate beats with slight human-like variance
+  let t = 0;
+  let beatNum = 0;
+  while (t < durationSec) {
+    const variance = (Math.random() - 0.5) * 0.008; // ±4ms human variance
+    beats.push({
+      start: t + variance,
+      duration: beatInterval,
+      confidence: 0.8 + Math.random() * 0.2,
+    });
+    t += beatInterval;
+    beatNum++;
+
+    // Bars every 4 beats
+    if (beatNum % 4 === 0) {
+      bars.push({
+        start: t - beatInterval * 4,
+        duration: beatInterval * 4,
+        confidence: 0.9,
+      });
+    }
+  }
+
+  // Sections — simulate verse/chorus/drop
+  const sectionDur = durationSec / 3;
+  sections.push(
+    { start: 0, duration: sectionDur, confidence: 0.9, loudness: -12, tempo: bpm, tempo_confidence: 0.9, key: 0, key_confidence: 0.5, mode: 1, mode_confidence: 0.5, time_signature: 4, time_signature_confidence: 0.9 },
+    { start: sectionDur, duration: sectionDur, confidence: 0.9, loudness: -6, tempo: bpm * 1.02, tempo_confidence: 0.8, key: 7, key_confidence: 0.4, mode: 0, mode_confidence: 0.6, time_signature: 4, time_signature_confidence: 0.9 },
+    { start: sectionDur * 2, duration: sectionDur, confidence: 0.9, loudness: -4, tempo: bpm, tempo_confidence: 0.9, key: 0, key_confidence: 0.5, mode: 1, mode_confidence: 0.5, time_signature: 4, time_signature_confidence: 0.9 },
+  );
+
+  return {
+    beats,
+    bars,
+    sections,
+    track: {
+      tempo: bpm,
+      duration: durationSec,
+      time_signature: 4,
+      energy: 0.6 + Math.random() * 0.3,
+      valence: Math.random(),
+      danceability: 0.5 + Math.random() * 0.4,
+    },
+  };
+}
+
+// ============================================================================
+// ENGINE STATE
+// ============================================================================
+
+const state = {
+  // Player beat
+  bpm: 120,
+  beatInterval: 500, // ms
+  beatWindow: 200, // ms (total window, ±100ms)
+  songPosition: 0, // ms
+  lastBeatTime: 0,
+  nextBeatTime: 0,
+  beatCount: 0,
+  onBeat: false,
+
+  // Enemy beat
+  enemyBpm: 80,
+  enemyBeatInterval: 750,
+  enemyLastBeat: 0,
+  enemyNextBeat: 0,
+  enemyOnBeat: false,
+  enemySwing: 0,
+  enemySwungBeat: false,
+  enemyPhaseOffset: 0.25,
+
+  // Calibration
+  latencyOffset: 0, // ms — positive = player is late, negative = early
+  tapTimestamps: [],
+  hitResults: [],
+  autoCalibrating: false,
+  autoCalSamples: [],
+
+  // Stats
+  totalTaps: 0,
+  perfectCount: 0,
+  goodCount: 0,
+  okCount: 0,
+  missCount: 0,
+  avgAccuracy: 0,
+  currentStreak: 0,
+  maxStreak: 0,
+
+  // Timing
+  running: false,
+  startTime: 0,
+  lastFrame: 0,
+  analysis: null,
+
+  // Audio
+  audioCtx: null,
+
+  // ── Spotify Latency Simulation ──
+  sim: {
+    enabled: true,
+    // API poll latency (time to get progress_ms from Spotify)
+    apiLatencyMs: 150,
+    apiLatencyJitter: 80,        // ±jitter on each poll
+    // Audio output latency (speaker/earbuds)
+    audioOutputMs: 15,
+    audioOutputJitter: 5,
+    // Drift between polls (position goes stale)
+    driftPerSecondMs: 30,        // max drift between 2s polls
+    // Compound effect on beat timing
+    currentDriftMs: 0,           // current accumulated drift
+    lastPollTime: 0,             // when we last "polled Spotify"
+    pollInterval: 2000,          // poll every 2s like real game
+    reportedPosition: 0,         // what Spotify "told us" last poll
+    // Simulated audio delay on tick sound
+    pendingTicks: [],            // { playAt: timestamp }
+    // Stats
+    totalApiCalls: 0,
+    avgApiLatency: 0,
+    maxDrift: 0,
+    driftHistory: [],
+  },
+};
+
+// ============================================================================
+// ENEMY RHYTHM CONFIG
+// ============================================================================
+
+const ENEMY_RHYTHMS = {
+  hiphop:    { ratio: 0.66, swing: 0.15, offset: 0.25 },
+  rnb:       { ratio: 0.5,  swing: 0.2,  offset: 0.33 },
+  trap:      { ratio: 1.33, swing: 0.0,  offset: 0.5  },
+  dnb:       { ratio: 1.5,  swing: 0.0,  offset: 0.1  },
+  reggaeton: { ratio: 0.75, swing: 0.0,  offset: 0.125 },
+  jazz:      { ratio: 0.85, swing: 0.33, offset: 0.42 },
+  dance:     { ratio: 1.0,  swing: 0.0,  offset: 0.5  },
+  rock:      { ratio: 0.88, swing: 0.08, offset: 0.18 },
+  reggae:    { ratio: 0.5,  swing: 0.25, offset: 0.5  },
+};
+
+// ============================================================================
+// LATENCY SIMULATION PRESETS
+// ============================================================================
+
+const LATENCY_PRESETS = {
+  none:       { api: 0,   apiJitter: 0,  audio: 0,   audioJitter: 0, drift: 0   },
+  wifi:       { api: 150, apiJitter: 80, audio: 15,  audioJitter: 5, drift: 30  },
+  cellular:   { api: 250, apiJitter: 120, audio: 15, audioJitter: 5, drift: 50  },
+  bt_earbuds: { api: 150, apiJitter: 80, audio: 150, audioJitter: 40, drift: 30 },
+  bt_speaker: { api: 150, apiJitter: 80, audio: 200, audioJitter: 50, drift: 30 },
+  worst:      { api: 300, apiJitter: 150, audio: 200, audioJitter: 60, drift: 80 },
+  custom:     { api: 150, apiJitter: 80, audio: 15,  audioJitter: 5, drift: 30  },
+};
+
+function applyLatencyPreset(name) {
+  const p = LATENCY_PRESETS[name] || LATENCY_PRESETS.wifi;
+  state.sim.apiLatencyMs = p.api;
+  state.sim.apiLatencyJitter = p.apiJitter;
+  state.sim.audioOutputMs = p.audio;
+  state.sim.audioOutputJitter = p.audioJitter;
+  state.sim.driftPerSecondMs = p.drift;
+  state.sim.enabled = name !== 'none';
+
+  document.getElementById('apiLatencySlider').value = p.api;
+  document.getElementById('apiLatencyValue').textContent = p.api + 'ms';
+  document.getElementById('audioLatencySlider').value = p.audio;
+  document.getElementById('audioLatencyValue').textContent = p.audio + 'ms';
+  document.getElementById('driftSlider').value = p.drift;
+  document.getElementById('driftValue').textContent = '±' + p.drift + 'ms';
+}
+
+/**
+ * Simulate Spotify API poll — returns "reported position" with latency.
+ * In real life: you call fetchPlaybackState(), wait 100-300ms,
+ * get back progress_ms which was already stale when Spotify sent it.
+ */
+function simulateSpotifyPoll(realElapsed) {
+  const sim = state.sim;
+  sim.totalApiCalls++;
+
+  // API round-trip latency (randomized)
+  const apiDelay = sim.apiLatencyMs + (Math.random() - 0.5) * sim.apiLatencyJitter * 2;
+
+  // Spotify's reported position is stale by ~half the API latency
+  // (it was accurate when Spotify serialized the response)
+  const staleness = apiDelay * 0.5 + Math.random() * 30;
+
+  // The position Spotify reports
+  sim.reportedPosition = realElapsed - staleness;
+  sim.lastPollTime = realElapsed;
+
+  // Track stats
+  sim.avgApiLatency = sim.avgApiLatency * 0.9 + apiDelay * 0.1;
+
+  return { reportedPosition: sim.reportedPosition, apiDelay, staleness };
+}
+
+/**
+ * Calculate current drift — how far our game clock has drifted
+ * from Spotify's actual position since last poll.
+ */
+function calculateDrift(realElapsed) {
+  const sim = state.sim;
+  if (!sim.enabled) return 0;
+
+  const timeSincePoll = realElapsed - sim.lastPollTime;
+
+  // Drift accumulates linearly between polls
+  // Real Spotify: audio might speed up/slow down slightly,
+  // network jitter means polls aren't exactly 2s apart
+  const baseDrift = (timeSincePoll / 1000) * sim.driftPerSecondMs;
+  const jitter = (Math.random() - 0.5) * sim.driftPerSecondMs * 0.3;
+  sim.currentDriftMs = baseDrift + jitter;
+
+  // Track max drift
+  if (Math.abs(sim.currentDriftMs) > sim.maxDrift) {
+    sim.maxDrift = Math.abs(sim.currentDriftMs);
+  }
+
+  return sim.currentDriftMs;
+}
+
+/**
+ * Get the "perceived" beat time — what the game THINKS the beat time is
+ * after all latency layers are applied.
+ */
+function getPerceivedBeatTime(realBeatTime, realElapsed) {
+  const sim = state.sim;
+  if (!sim.enabled) return realBeatTime;
+
+  // 1. Drift since last poll
+  const drift = calculateDrift(realElapsed);
+
+  // 2. Audio output delay (the tick sound arrives late)
+  const audioDelay = sim.audioOutputMs + (Math.random() - 0.5) * sim.audioOutputJitter;
+
+  // The beat the player HEARS is shifted by drift + audio delay
+  return realBeatTime + drift + audioDelay;
+}
+
+/**
+ * Play a tick sound with simulated audio output latency.
+ */
+function playTickWithLatency(freq, dur, vol) {
+  const sim = state.sim;
+  if (!sim.enabled || sim.audioOutputMs < 5) {
+    playTick(freq, dur, vol);
+    return;
+  }
+
+  const delay = sim.audioOutputMs + (Math.random() - 0.5) * sim.audioOutputJitter;
+  setTimeout(() => playTick(freq, dur, vol), Math.max(0, delay));
+}
+
+function getAudio() {
+  if (!state.audioCtx) {
+    try { state.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch { return null; }
+  }
+  return state.audioCtx;
+}
+
+function playTick(freq = 1000, dur = 0.03, vol = 0.08) {
+  const ctx = getAudio();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.frequency.value = freq;
+  osc.type = 'sine';
+  gain.gain.setValueAtTime(vol, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + dur);
+}
+
+function playHit(type) {
+  const ctx = getAudio();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const sounds = {
+    perfect: { freq: 1200, dur: 0.1, vol: 0.15, slide: 400 },
+    good:    { freq: 800, dur: 0.08, vol: 0.12, slide: 200 },
+    ok:      { freq: 600, dur: 0.06, vol: 0.1, slide: 0 },
+    miss:    { freq: 200, dur: 0.15, vol: 0.1, slide: -200 },
+  };
+  const s = sounds[type] || sounds.miss;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.frequency.setValueAtTime(s.freq, now);
+  if (s.slide) osc.frequency.linearRampToValueAtTime(s.freq + s.slide, now + s.dur);
+  osc.type = type === 'miss' ? 'sawtooth' : 'sine';
+  gain.gain.setValueAtTime(s.vol, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + s.dur);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + s.dur);
+}
+
+function playEnemyTick() {
+  playTick(300, 0.04, 0.05);
+}
+
+// ============================================================================
+// INIT
+// ============================================================================
+
+const tapArea = document.getElementById('tapArea');
+const tapInstruction = document.getElementById('tapInstruction');
+const tapResult = document.getElementById('tapResult');
+const beatCanvas = document.getElementById('beatCanvas');
+const ctx = beatCanvas.getContext('2d');
+const bpmSlider = document.getElementById('bpmSlider');
+const windowSlider = document.getElementById('windowSlider');
+const enemySelect = document.getElementById('enemyRhythm');
+
+function resizeCanvas() {
+  const parent = beatCanvas.parentElement;
+  beatCanvas.width = parent.clientWidth;
+  beatCanvas.height = parent.clientHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// ============================================================================
+// UPDATE BPM / WINDOW
+// ============================================================================
+
+function updateBpm(bpm) {
+  state.bpm = bpm;
+  state.beatInterval = 60000 / bpm;
+  state.analysis = generateSpotifyAnalysis(bpm);
+  document.getElementById('statBpm').textContent = bpm;
+  document.getElementById('bpmValue').textContent = bpm;
+  updateEnemyRhythm();
+}
+
+function updateWindow(ms) {
+  state.beatWindow = ms;
+  document.getElementById('statWindow').textContent = ms;
+  document.getElementById('windowValue').textContent = ms + 'ms';
+  updateBeatWindowViz();
+}
+
+function updateEnemyRhythm() {
+  const rhythm = ENEMY_RHYTHMS[enemySelect.value];
+  state.enemyBpm = Math.round(state.bpm * rhythm.ratio);
+  state.enemyBeatInterval = 60000 / state.enemyBpm;
+  state.enemySwing = rhythm.swing;
+  state.enemyPhaseOffset = rhythm.offset;
+}
+
+function updateBeatWindowViz() {
+  const target = document.getElementById('beatTarget');
+  const window = document.getElementById('beatWindow');
+  const vizWidth = beatCanvas.width;
+  const targetX = vizWidth * 0.15;
+  const halfWindow = (state.beatWindow / 2 / state.beatInterval) * vizWidth * 0.5;
+  window.style.left = (targetX - halfWindow) + 'px';
+  window.style.width = (halfWindow * 2) + 'px';
+}
+
+bpmSlider.addEventListener('input', (e) => updateBpm(parseInt(e.target.value)));
+windowSlider.addEventListener('input', (e) => updateWindow(parseInt(e.target.value)));
+enemySelect.addEventListener('change', updateEnemyRhythm);
+
+// ============================================================================
+// BEAT DOTS — scrolling across the visualizer
+// ============================================================================
+
+const dots = []; // { x, time, hit, type }
+
+function spawnDot(beatTime) {
+  dots.push({ x: 1.0, time: beatTime, hit: false, type: 'player' });
+}
+
+function spawnEnemyDot(beatTime) {
+  dots.push({ x: 1.0, time: beatTime, hit: false, type: 'enemy' });
+}
+
+// ============================================================================
+// TAP HANDLER
+// ============================================================================
+
+function handleTap(e) {
+  e.preventDefault();
+  if (!state.running) {
+    startSession();
+    return;
+  }
+
+  const now = performance.now() - state.startTime;
+  // Adjust for both user latency AND simulated Spotify latency
+  const adjusted = now - state.latencyOffset;
+  state.totalTaps++;
+
+  // When sim is active, beats are perceived with drift + audio delay
+  // Player taps are measured against the PERCEIVED beat, not the real one
+  const perceivedLast = getPerceivedBeatTime(state.lastBeatTime, now);
+  const perceivedNext = getPerceivedBeatTime(state.nextBeatTime, now);
+
+  const timeSinceLast = adjusted - perceivedLast;
+  const timeToNext = perceivedNext - adjusted;
+  const closest = Math.abs(timeSinceLast) < Math.abs(timeToNext) ? timeSinceLast : -timeToNext;
+  const absClosest = Math.abs(closest);
+
+  const halfWindow = state.beatWindow / 2;
+  let type, color;
+
+  if (absClosest <= halfWindow * 0.25) {
+    type = 'PERFECT'; color = 'var(--hit-perfect)';
+    state.perfectCount++;
+    state.currentStreak++;
+    playHit('perfect');
+  } else if (absClosest <= halfWindow * 0.6) {
+    type = 'GOOD'; color = 'var(--hit-good)';
+    state.goodCount++;
+    state.currentStreak++;
+    playHit('good');
+  } else if (absClosest <= halfWindow) {
+    type = 'OK'; color = 'var(--hit-ok)';
+    state.okCount++;
+    state.currentStreak++;
+    playHit('ok');
+  } else {
+    type = 'MISS'; color = 'var(--hit-miss)';
+    state.missCount++;
+    state.currentStreak = 0;
+    playHit('miss');
+  }
+
+  if (state.currentStreak > state.maxStreak) state.maxStreak = state.currentStreak;
+
+  // Store result
+  const result = {
+    time: now,
+    offset: closest,
+    absOffset: absClosest,
+    type,
+    accuracy: absClosest <= halfWindow ? 1 - (absClosest / halfWindow) : 0,
+  };
+  state.hitResults.push(result);
+
+  // Auto-calibration sample
+  if (state.autoCalibrating) {
+    state.autoCalSamples.push(closest);
+  }
+
+  // Flash
+  showResult(type, color);
+  addHistory(result);
+  updateStats();
+
+  // Mark nearest dot as hit
+  for (const d of dots) {
+    if (d.type === 'player' && !d.hit && Math.abs(d.time - adjusted) < halfWindow) {
+      d.hit = true;
+      d.hitType = type.toLowerCase();
+      break;
+    }
+  }
+}
+
+tapArea.addEventListener('mousedown', handleTap);
+tapArea.addEventListener('touchstart', handleTap, { passive: false });
+document.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  if (e.key === ' ' || e.key === 'Enter' || e.key.length === 1) handleTap(e);
+});
+
+// ============================================================================
+// VISUAL FEEDBACK
+// ============================================================================
+
+function showResult(text, color) {
+  tapResult.textContent = text;
+  tapResult.style.color = color;
+  tapResult.classList.add('show');
+
+  const flashClass = 'flash-' + text.toLowerCase();
+  tapArea.classList.add(flashClass);
+
+  setTimeout(() => {
+    tapResult.classList.remove('show');
+    tapArea.classList.remove(flashClass);
+  }, 200);
+
+  tapInstruction.style.display = 'none';
+}
+
+function addHistory(result) {
+  const container = document.getElementById('history');
+  const bar = document.createElement('div');
+  bar.className = 'history-bar';
+  const h = Math.max(4, result.accuracy * 38 + 2);
+  bar.style.height = h + 'px';
+  const colors = { PERFECT: 'var(--hit-perfect)', GOOD: 'var(--hit-good)', OK: 'var(--hit-ok)', MISS: 'var(--hit-miss)' };
+  bar.style.background = colors[result.type];
+  container.appendChild(bar);
+  if (container.children.length > 80) container.removeChild(container.firstChild);
+}
+
+function updateStats() {
+  const total = state.totalTaps;
+  if (total === 0) return;
+
+  const acc = state.hitResults.reduce((s, r) => s + r.accuracy, 0) / total;
+  state.avgAccuracy = acc;
+  document.getElementById('statAccuracy').textContent = Math.round(acc * 100) + '%';
+
+  // Average offset = latency estimate
+  const recent = state.hitResults.slice(-20);
+  const avgOffset = recent.reduce((s, r) => s + r.offset, 0) / recent.length;
+  document.getElementById('statLatency').textContent = Math.round(avgOffset) + 'ms';
+
+  // Latency bar
+  const fill = document.getElementById('latencyFill');
+  const normalized = (avgOffset + 200) / 400; // -200 to +200 → 0 to 1
+  fill.style.width = Math.max(5, Math.min(95, normalized * 100)) + '%';
+  fill.style.background = Math.abs(avgOffset) < 30 ? 'var(--hit-perfect)' :
+    Math.abs(avgOffset) < 60 ? 'var(--hit-good)' : 'var(--hit-miss)';
+  document.getElementById('latencyValue').textContent = Math.round(state.latencyOffset) + 'ms';
+}
+
+// ============================================================================
+// SESSION
+// ============================================================================
+
+function startSession() {
+  state.running = true;
+  state.startTime = performance.now();
+  state.songPosition = 0;
+  state.lastBeatTime = 0;
+  state.nextBeatTime = state.beatInterval;
+  state.beatCount = 0;
+  state.analysis = generateSpotifyAnalysis(state.bpm);
+  state.enemyLastBeat = state.enemyBeatInterval * state.enemyPhaseOffset;
+  state.enemyNextBeat = state.enemyLastBeat + state.enemyBeatInterval;
+  dots.length = 0;
+
+  tapInstruction.textContent = 'TAP ON BEAT';
+  document.getElementById('phaseLabel').textContent = 'CALIBRATING — TAP TO THE GREEN BEATS';
+
+  requestAnimationFrame(gameLoop);
+}
+
+function resetSession() {
+  state.running = false;
+  state.totalTaps = 0;
+  state.perfectCount = 0;
+  state.goodCount = 0;
+  state.okCount = 0;
+  state.missCount = 0;
+  state.hitResults = [];
+  state.currentStreak = 0;
+  state.maxStreak = 0;
+  dots.length = 0;
+  document.getElementById('history').innerHTML = '';
+  document.getElementById('statAccuracy').textContent = '--';
+  document.getElementById('statLatency').textContent = '--';
+  tapInstruction.textContent = 'TAP TO START';
+  tapInstruction.style.display = '';
+  document.getElementById('phaseLabel').textContent = 'READY';
+  // Reset sim stats
+  state.sim.currentDriftMs = 0;
+  state.sim.lastPollTime = 0;
+  state.sim.reportedPosition = 0;
+  state.sim.totalApiCalls = 0;
+  state.sim.avgApiLatency = 0;
+  state.sim.maxDrift = 0;
+  state.sim.driftHistory = [];
+}
+
+// ============================================================================
+// AUTO-CALIBRATE
+// ============================================================================
+
+function startAutoCalibrate() {
+  state.autoCalibrating = true;
+  state.autoCalSamples = [];
+  document.getElementById('btnAutoCalibrate').classList.add('active');
+  document.getElementById('phaseLabel').textContent = 'AUTO-CAL — TAP 20 BEATS NATURALLY';
+
+  if (!state.running) startSession();
+}
+
+function checkAutoCalComplete() {
+  if (state.autoCalSamples.length >= 20) {
+    // Calculate median offset
+    const sorted = [...state.autoCalSamples].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    state.latencyOffset = Math.round(median);
+    state.autoCalibrating = false;
+    document.getElementById('btnAutoCalibrate').classList.remove('active');
+    document.getElementById('latencyValue').textContent = state.latencyOffset + 'ms';
+    document.getElementById('phaseLabel').textContent = `CALIBRATED — OFFSET: ${state.latencyOffset}ms`;
+  }
+}
+
+// ============================================================================
+// EXPORT DATA
+// ============================================================================
+
+function exportData() {
+  const sim = state.sim;
+  const data = {
+    calibration: {
+      latencyOffset: state.latencyOffset,
+      beatWindow: state.beatWindow,
+      bpm: state.bpm,
+      avgAccuracy: state.avgAccuracy,
+      totalSamples: state.totalTaps,
+      perfectRate: state.totalTaps > 0 ? (state.perfectCount / state.totalTaps) : 0,
+      goodRate: state.totalTaps > 0 ? (state.goodCount / state.totalTaps) : 0,
+      missRate: state.totalTaps > 0 ? (state.missCount / state.totalTaps) : 0,
+      maxStreak: state.maxStreak,
+    },
+    latencySimulation: {
+      preset: document.getElementById('latencySim').value,
+      enabled: sim.enabled,
+      apiLatencyMs: sim.apiLatencyMs,
+      apiLatencyJitter: sim.apiLatencyJitter,
+      audioOutputMs: sim.audioOutputMs,
+      audioOutputJitter: sim.audioOutputJitter,
+      driftPerSecondMs: sim.driftPerSecondMs,
+      // Measured during session
+      measuredAvgApiLatency: Math.round(sim.avgApiLatency),
+      measuredMaxDrift: Math.round(sim.maxDrift),
+      totalApiPolls: sim.totalApiCalls,
+      // Compound latency = what the player actually experienced
+      compoundLatency: Math.round(sim.apiLatencyMs * 0.5 + sim.audioOutputMs + sim.driftPerSecondMs),
+    },
+    enemyRhythm: {
+      type: enemySelect.value,
+      bpm: state.enemyBpm,
+      swing: state.enemySwing,
+      phaseOffset: state.enemyPhaseOffset,
+    },
+    spotifyAnalysisFormat: state.analysis,
+    hitResults: state.hitResults.slice(-50),
+    driftHistory: sim.driftHistory.slice(-30),
+    recommendation: {
+      // Adjust beat window based on compound latency
+      beatWindow: Math.round(
+        (state.avgAccuracy > 0.7 ? state.beatWindow : state.beatWindow * 1.2)
+        + (sim.enabled ? sim.driftPerSecondMs * 0.5 : 0) // widen for drift
+      ),
+      latencyOffset: state.latencyOffset,
+      audioCompensation: Math.round(sim.audioOutputMs),
+      driftTolerance: Math.round(sim.maxDrift),
+      // Recommended poll interval based on drift
+      pollIntervalMs: sim.maxDrift > 50 ? 1000 : 2000,
+      difficulty: state.avgAccuracy > 0.8 ? 'hard' : state.avgAccuracy > 0.6 ? 'normal' : 'easy',
+      // Recommended sync correction threshold
+      syncCorrectionThreshold: Math.round(sim.maxDrift * 1.5),
+    },
+    device: {
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      touchScreen: 'ontouchstart' in window,
+      timestamp: new Date().toISOString(),
+    },
+  };
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `kasvillage_calibration_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  document.getElementById('phaseLabel').textContent = 'EXPORTED — PASTE INTO GAME CONFIG';
+}
+
+document.getElementById('btnReset').addEventListener('click', resetSession);
+document.getElementById('btnAutoCalibrate').addEventListener('click', startAutoCalibrate);
+document.getElementById('btnExport').addEventListener('click', exportData);
+
+// Latency sim controls
+document.getElementById('latencySim').addEventListener('change', (e) => {
+  applyLatencyPreset(e.target.value);
+});
+document.getElementById('apiLatencySlider').addEventListener('input', (e) => {
+  state.sim.apiLatencyMs = parseInt(e.target.value);
+  state.sim.apiLatencyJitter = Math.round(state.sim.apiLatencyMs * 0.5);
+  document.getElementById('apiLatencyValue').textContent = e.target.value + 'ms';
+  document.getElementById('latencySim').value = 'custom';
+});
+document.getElementById('audioLatencySlider').addEventListener('input', (e) => {
+  state.sim.audioOutputMs = parseInt(e.target.value);
+  state.sim.audioOutputJitter = Math.round(state.sim.audioOutputMs * 0.3);
+  document.getElementById('audioLatencyValue').textContent = e.target.value + 'ms';
+  document.getElementById('latencySim').value = 'custom';
+});
+document.getElementById('driftSlider').addEventListener('input', (e) => {
+  state.sim.driftPerSecondMs = parseInt(e.target.value);
+  document.getElementById('driftValue').textContent = '±' + e.target.value + 'ms';
+  document.getElementById('latencySim').value = 'custom';
+});
+
+// ============================================================================
+// GAME LOOP
+// ============================================================================
+
+function gameLoop(now) {
+  if (!state.running) return;
+
+  const elapsed = now - state.startTime;
+  state.songPosition = elapsed;
+
+  // ── Spotify poll simulation (every 2 seconds) ──
+  if (state.sim.enabled && elapsed - state.sim.lastPollTime >= state.sim.pollInterval) {
+    const poll = simulateSpotifyPoll(elapsed);
+    // Sync correction (like real syncToPlayback)
+    const drift = Math.abs(elapsed - poll.reportedPosition);
+    if (drift > 100) {
+      // Large drift — hard snap (simulates real behavior)
+      state.sim.driftHistory.push({ time: elapsed, drift, corrected: true });
+    }
+    state.sim.driftHistory.push({ time: elapsed, drift: state.sim.currentDriftMs, corrected: false });
+  }
+
+  // ── Player beat check (with latency simulation) ──
+  const perceivedTime = state.sim.enabled ? elapsed + calculateDrift(elapsed) : elapsed;
+
+  if (elapsed >= state.nextBeatTime) {
+    state.lastBeatTime = state.nextBeatTime;
+    state.beatCount++;
+
+    // Use analysis beats if available (with variance)
+    if (state.analysis && state.beatCount < state.analysis.beats.length) {
+      state.nextBeatTime = state.analysis.beats[state.beatCount].start * 1000;
+    } else {
+      state.nextBeatTime = state.lastBeatTime + state.beatInterval;
+    }
+
+    state.onBeat = true;
+    // Tick sound arrives with audio output latency
+    playTickWithLatency(1000, 0.03, 0.06);
+    spawnDot(state.lastBeatTime);
+  } else {
+    state.onBeat = false;
+  }
+
+  // ── Enemy beat check ──
+  const enemyInterval = state.enemySwungBeat
+    ? state.enemyBeatInterval * (1 + state.enemySwing)
+    : state.enemyBeatInterval * (1 - state.enemySwing * 0.5);
+
+  if (elapsed >= state.enemyNextBeat) {
+    state.enemyLastBeat = state.enemyNextBeat;
+    state.enemyNextBeat = state.enemyLastBeat + enemyInterval;
+    state.enemyOnBeat = true;
+    state.enemySwungBeat = !state.enemySwungBeat;
+    playTickWithLatency(300, 0.04, 0.05);
+    spawnEnemyDot(state.enemyLastBeat);
+  } else {
+    state.enemyOnBeat = false;
+  }
+
+  // ── Enemy pulse bar ──
+  const enemyProgress = (elapsed - state.enemyLastBeat) / enemyInterval;
+  document.getElementById('enemyPulse').style.width = Math.min(100, enemyProgress * 100) + '%';
+
+  // ── Auto-cal check ──
+  if (state.autoCalibrating) checkAutoCalComplete();
+
+  // ── Render ──
+  renderBeatViz(elapsed);
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================================
+// RENDER BEAT VISUALIZER
+// ============================================================================
+
+function renderBeatViz(elapsed) {
+  const w = beatCanvas.width;
+  const h = beatCanvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const targetX = w * 0.15;
+  const speed = w * 0.8 / state.beatInterval; // pixels per ms
+
+  // Remove old dots
+  while (dots.length > 0 && dots[0].x < -0.1) dots.shift();
+
+  // Update and draw dots
+  for (const d of dots) {
+    const age = elapsed - d.time;
+    d.x = (targetX + (d.time - elapsed + state.latencyOffset) * speed * 0.001 * state.beatInterval) / w;
+
+    const px = d.x * w;
+    if (px < -20 || px > w + 20) continue;
+
+    const cy = h / 2;
+
+    if (d.type === 'enemy') {
+      // Enemy dots — red, smaller, on lower track
+      ctx.beginPath();
+      ctx.arc(px, cy + 15, 5, 0, Math.PI * 2);
+      ctx.fillStyle = d.hit ? '#882222' : 'var(--enemy-beat)';
+      ctx.globalAlpha = d.hit ? 0.3 : 0.6;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      // Player dots
+      const radius = d.hit ? 8 : 6;
+      ctx.beginPath();
+      ctx.arc(px, cy - 5, radius, 0, Math.PI * 2);
+
+      if (d.hit) {
+        const colors = { perfect: '#00FF88', good: '#44AAFF', ok: '#FFAA00', miss: '#FF2244' };
+        ctx.fillStyle = colors[d.hitType] || '#888';
+        ctx.globalAlpha = 0.8;
+      } else {
+        ctx.fillStyle = '#44FF88';
+        ctx.globalAlpha = 0.5;
+      }
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Glow on approaching dots
+      if (!d.hit && px > targetX - 50 && px < targetX + 100) {
+        ctx.beginPath();
+        ctx.arc(px, cy - 5, 12, 0, Math.PI * 2);
+        ctx.strokeStyle = '#44FF8844';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Beat flash
+  if (state.onBeat) {
+    ctx.fillStyle = 'rgba(68, 255, 136, 0.08)';
+    ctx.fillRect(0, 0, w, h);
+  }
+  if (state.enemyOnBeat) {
+    ctx.fillStyle = 'rgba(255, 68, 68, 0.05)';
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
+// ============================================================================
+// INIT
+// ============================================================================
+
+updateBpm(120);
+updateWindow(200);
+updateEnemyRhythm();
+updateBeatWindowViz();
+applyLatencyPreset('wifi'); // Default: Spotify over WiFi
+</script>
+
+</body>
+</html>

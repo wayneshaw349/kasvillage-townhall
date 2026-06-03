@@ -13,6 +13,17 @@ import {
   AnimationPose,
 } from './kasvillage_avatar_engine';
 
+import {
+  CameraState,
+  createCameraState,
+  updateCamera,
+  autoCameraTrigger,
+  getCameraAngleIndex,
+  getAvatarAngleForCamera,
+  getCameraTransform,
+  getCameraMode,
+} from './kasvillage_camera_system';
+
 // Re-export the PhysicsState type locally for enemies
 interface EnemyPhysics {
   x: number;
@@ -857,10 +868,21 @@ export interface GameState {
   playerHp: number;
   playerMaxHp: number;
   playerBlocking: boolean;
+  playerDodging: boolean;
+  playerDodgeDir: 'left' | 'right' | null;
+  playerJumping: boolean;
+  playerGrounded: boolean;
+  camera: CameraState;
   gameTime: number;
   gameOver: boolean;
   victory: boolean;
   trialTime: number;     // seconds elapsed for time trial
+  /** Set true for one frame when any enemy dies */
+  _enemyDiedThisFrame: boolean;
+  /** Set true for one frame when boss spawns */
+  _bossEnteredThisFrame: boolean;
+  /** Set true for one frame when combo breaks */
+  _comboBrokeThisFrame: boolean;
 }
 
 export function createGameState(bpm: number): GameState {
@@ -877,10 +899,18 @@ export function createGameState(bpm: number): GameState {
     playerHp: 100,
     playerMaxHp: 100,
     playerBlocking: false,
+    playerDodging: false,
+    playerDodgeDir: null,
+    playerJumping: false,
+    playerGrounded: true,
+    camera: createCameraState(),
     gameTime: 0,
     gameOver: false,
     victory: false,
     trialTime: 0,
+    _enemyDiedThisFrame: false,
+    _bossEnteredThisFrame: false,
+    _comboBrokeThisFrame: false,
   };
 }
 
@@ -903,6 +933,7 @@ export function tickGame(state: GameState, dt: number): void {
       if (enemy) {
         state.activeEnemies.push(enemy);
         state.spawnedIds.add(spawn.enemyId);
+        if (enemy.type === 'boss') state._bossEnteredThisFrame = true;
       }
     }
   }
@@ -911,6 +942,7 @@ export function tickGame(state: GameState, dt: number): void {
   if (state.combo.comboActive &&
       state.gameTime - state.combo.lastInputTime > state.combo.chainTimeout) {
     forceBreakCombo(state.combo);
+    state._comboBrokeThisFrame = true;
   }
 
   // Update all active enemies
@@ -937,10 +969,12 @@ export function tickGame(state: GameState, dt: number): void {
       if (state.playerBlocking) {
         // Player blocked — no damage but combo breaks
         forceBreakCombo(state.combo);
+        state._comboBrokeThisFrame = true;
       } else {
         // Player hit
         state.playerHp -= action.damage || 10;
         forceBreakCombo(state.combo);
+        state._comboBrokeThisFrame = true;
         if (state.playerHp <= 0) {
           state.playerHp = 0;
           state.gameOver = true;
@@ -949,12 +983,37 @@ export function tickGame(state: GameState, dt: number): void {
     }
   }
 
-  // Remove dead enemies
+  // Remove dead enemies (track if any died this frame)
+  const prevAliveCount = state.activeEnemies.length;
   state.activeEnemies = state.activeEnemies.filter(e => e.state !== 'dead');
+  state._enemyDiedThisFrame = state.activeEnemies.length < prevAliveCount;
 
   // Victory check — all enemies spawned and dead
   if (state.spawnedIds.size === state.board.enemies.length && state.activeEnemies.length === 0) {
     state.victory = true;
     state.gameOver = true;
   }
+
+  // --- Camera auto-trigger from game state ---
+  autoCameraTrigger(state.camera, {
+    isJumping: state.playerJumping,
+    isGrounded: state.playerGrounded,
+    isDodging: state.playerDodging,
+    dodgeDirection: state.playerDodgeDir,
+    isBlocking: state.playerBlocking,
+    comboChain: state.combo.chainLength,
+    comboActive: state.combo.comboActive,
+    comboBroke: state._comboBrokeThisFrame,
+    enemyJustDied: state._enemyDiedThisFrame,
+    bossEntered: state._bossEnteredThisFrame,
+    victory: state.victory,
+  }, state.gameTime);
+
+  // Tick camera lerp/shake/freeze
+  updateCamera(state.camera, dt);
+
+  // Reset per-frame flags
+  state._enemyDiedThisFrame = false;
+  state._bossEnteredThisFrame = false;
+  state._comboBrokeThisFrame = false;
 }

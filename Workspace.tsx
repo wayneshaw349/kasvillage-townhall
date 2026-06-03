@@ -161,6 +161,7 @@ const COLORS = {
   blue50: '#eff6ff',
   blue100: '#dbeafe',
   blue200: '#bfdbfe',
+  blue300: '#93c5fd',
   blue500: '#3b82f6',
   blue600: '#2563eb',
   blue700: '#1d4ed8',
@@ -1412,7 +1413,11 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
     timestamp: number;
     viewCount: number;
     questionCount: number;
-    questionPrice: number; // KAS per question (0 = first question free)
+    questionPrice: number;
+    discipline?: string;
+    videoUrl?: string;
+    qaChannel?: string;
+    qaHandle?: string;
   }
   
   interface QAItem {
@@ -2011,7 +2016,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                           }} style={{ marginTop: 10 }}>
                             <Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>📎 View Repository</Text>
                           </TouchableOpacity>
-                          {selectedAbstract.videoUrl ? <TouchableOpacity onPress={() => Linking.openURL(selectedAbstract.videoUrl)} style={{ marginTop: 6 }}><Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>🎬 Watch Video Explainer</Text></TouchableOpacity> : null}
+                          {selectedAbstract.videoUrl ? <TouchableOpacity onPress={() => Linking.openURL(selectedAbstract.videoUrl!)} style={{ marginTop: 6 }}><Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>🎬 Watch Video Explainer</Text></TouchableOpacity> : null}
                           {selectedAbstract.qaChannel && selectedAbstract.qaHandle ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, backgroundColor: '#fef3c7', borderRadius: 8, padding: 8 }}><Text style={{ fontSize: 11, color: '#92400e' }}>💬 Questions via {selectedAbstract.qaChannel}: <Text style={{ fontWeight: 'bold' }}>{selectedAbstract.qaHandle}</Text></Text></View> : null}
                         </View>
                         
@@ -2324,7 +2329,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       placeholder="0"
                       keyboardType="numeric"
                       value={researcherProfile?.question_price?.toString() || ''}
-                      onChangeText={(t) => setResearcherProfile((p) => p ? ({ ...p, question_price: parseFloat(t) || 0 }) : p)}
+                      onChangeText={(t) => setResearcherProfile((p: any) => p ? ({ ...p, question_price: parseFloat(t) || 0 }) : p)}
                     />
                     <Text style={acStyles.priceLabel}>KASPA</Text>
                   </View>
@@ -2458,15 +2463,14 @@ const acStyles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(120,96,72,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: rs.s(16),
+    justifyContent: 'flex-end',
   },
   modal: {
     backgroundColor: COLORS.cardBg,
-    borderRadius: rs.s(24),
+    borderTopLeftRadius: rs.s(24),
+    borderTopRightRadius: rs.s(24),
     width: '100%',
-    maxHeight: '90%',
+    height: '85%',
     overflow: 'hidden',
   },
   header: {
@@ -3826,7 +3830,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                           <Text style={{ fontSize: rs.font(10), color: COLORS.stone500 }}>{row.score}%</Text>
                         </View>
                         <View style={{ height: rs.s(8), backgroundColor: COLORS.stone200, borderRadius: 4, overflow: 'hidden' }}>
-                          <View style={{ height: '100%', width: row.score + '%', backgroundColor: row.color, borderRadius: 4 }} />
+                          <View style={{ height: '100%', width: (row.score + '%') as any, backgroundColor: row.color, borderRadius: 4 }} />
                         </View>
                         <Text style={{ fontSize: rs.font(8), color: COLORS.stone400, marginTop: 1 }}>{row.tip}</Text>
                       </View>
@@ -3950,10 +3954,15 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               <Text style={{ fontSize: rs.font(10), color: '#b91c1c', marginBottom: rs.s(8) }}>Your DApp MUST import from at least one KasVillage SDK module. No SDK import = scan fails.</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(4) }}>
                 {['procedural_sdk', 'avatar_engine', 'canvas_renderer', 'audio_ui', 'game_v1', 'game_input', 'environments', 'particles', 'item_library', 'wallet_bridge'].map(m => (
-                  <View key={m} style={{ backgroundColor: '#fff', paddingHorizontal: rs.s(6), paddingVertical: rs.s(2), borderRadius: rs.s(4), borderWidth: 1, borderColor: '#fca5a5' }}>
-                    <Text style={{ fontSize: rs.font(8), fontFamily: 'monospace', color: '#991b1b' }}>{m}</Text>
-                  </View>
+                  <TouchableOpacity key={m} onPress={() => {
+                    const importLine = "import { " + m + " } from '@kasvillage/sdk/" + m + "';\nimport { procedural_sdk } from '@kasvillage/sdk/procedural_sdk';";
+                    Clipboard.setStringAsync(importLine);
+                    Alert.alert('Copied!', m + ' import copied to clipboard.\n\nprocedural_sdk auto-included.\n\nPaste into Claude Code.');
+                  }} style={{ backgroundColor: '#fff', paddingHorizontal: rs.s(8), paddingVertical: rs.s(4), borderRadius: rs.s(6), borderWidth: 1, borderColor: '#fca5a5' }} activeOpacity={0.6}>
+                    <Text style={{ fontSize: rs.font(9), fontFamily: 'monospace', color: '#991b1b' }}>📋 {m}</Text>
+                  </TouchableOpacity>
                 ))}
+              <Text style={{ fontSize: rs.font(8), color: '#b91c1c', marginTop: rs.s(4), fontStyle: 'italic' }}>Tap any module → copies import + procedural_sdk to clipboard</Text>
               </View>
               <Text style={{ fontSize: rs.font(9), color: '#b91c1c', marginTop: rs.s(6) }}>Use kvFetch() instead of raw fetch() — blocks image responses at runtime.</Text>
             </View>
