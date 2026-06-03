@@ -310,7 +310,7 @@ export async function fetchDApps(cursor?: string): Promise<FetchResult<DAppEntry
     return {
       id,
       name: getTagValue(tags, 'KV-DAppName') ?? 'Unknown',
-      description: getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description') ?? '',
+      description: (getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description')) ?? '',
       category: getTagValue(tags, 'KV-Category') ?? 'Other',
       board: (getTagValue(tags, 'Board') as Board) ?? 'Incubator',
       arweaveTx: id,
@@ -449,7 +449,7 @@ export async function fetchCoupons(cursor?: string): Promise<FetchResult<CouponE
     return {
       id,
       title: getTagValue(tags, 'Coupon-Title') ?? 'Coupon',
-      description: getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description') ?? '',
+      description: (getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description')) ?? '',
       discount: getTagValue(tags, 'Discount') ?? 'DEAL',
       arweaveTx: id,
       ownerPubkey: getTagValue(tags, 'Owner-Pubkey') ?? '',
@@ -516,7 +516,7 @@ export async function fetchAcademics(cursor?: string): Promise<FetchResult<Acade
     return {
       id,
       title: getTagValue(tags, 'Academic-Title') ?? 'Academic Profile',
-      description: getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description') ?? '',
+      description: (getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description')) ?? '',
       institution: getTagValue(tags, 'Institution') ?? 'Unknown',
       field: getTagValue(tags, 'Field') ?? 'General',
       arweaveTx: id,
@@ -585,7 +585,7 @@ export async function fetchServices(cursor?: string): Promise<FetchResult<Servic
     return {
       id,
       title: getTagValue(tags, 'Service-Title') ?? 'Service',
-      description: getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description') ?? '',
+      description: (getTagValue(tags, 'KV-Description') || getTagValue(tags, 'Description')) ?? '',
       category: (getTagValue(tags, 'KV-Category') as ServiceCategory) ?? 'Other',
       arweaveTx: id,
       ownerPubkey: getTagValue(tags, 'Owner-Pubkey') ?? '',

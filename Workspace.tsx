@@ -23,12 +23,12 @@ import {
   TextInput,
   Alert,
   Linking,
-  Clipboard,
   ActivityIndicator,
   Modal,
 } from 'react-native';
 import Svg, { Rect, Defs, Pattern, Line, G, Path } from 'react-native-svg';
 import * as SecureStore from 'expo-secure-store';
+import * as Clipboard from 'expo-clipboard';
 import * as Crypto from 'expo-crypto';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
@@ -881,7 +881,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                 <View style={{ backgroundColor: COLORS.stone50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(16), borderWidth: 1, borderColor: COLORS.stone200 }}>
                   <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.stone800, marginBottom: rs.s(6) }}>📋 Paste DApp Code for SDK Scan</Text>
                   <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginBottom: rs.s(8) }}>
-                    The SDK scanner checks for image uploads, realistic faces, eval(), iframes, and {IMAGE_BYPASS_PATTERNS.length}+ violation patterns.
+                    The SDK scanner checks for image uploads, realistic faces, eval(), iframes, and 53+ violation patterns.
                   </Text>
                   <TextInput
                     style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.stone300, borderRadius: rs.s(8), padding: rs.s(10), fontSize: rs.font(10), fontFamily: 'monospace', color: COLORS.stone700, minHeight: rs.s(120), textAlignVertical: 'top' }}
@@ -1788,7 +1788,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
   };
   
   const copyMagicLink = () => {
-    Clipboard.setString(magicLink);
+    Clipboard.setStringAsync(magicLink);
     Alert.alert('Copied!', 'Link copied! Email this to yourself, then paste the raw headers back here.');
   };
   
@@ -1862,6 +1862,21 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       questionPrice: 0, // Researcher can set later
     };
     await saveAbstract(newAbstract);
+    // Inscribe to Arweave
+    try {
+      const { uploadToIrys } = await import('./arweave_upload');
+      await uploadToIrys(JSON.stringify(newAbstract), [
+        { name: 'App-Name', value: 'KasVillage' },
+        { name: 'KV-Type', value: 'Abstract' },
+        { name: 'KV-AbstractId', value: newAbstract.id },
+        { name: 'KV-Domain', value: newAbstract.institutionDomain },
+        { name: 'KV-Discipline', value: abstractDiscipline },
+        { name: 'KV-VideoUrl', value: abstractVideoUrl },
+        { name: 'KV-QAChannel', value: qaChannel },
+        { name: 'Content-Type', value: 'application/json' },
+      ]);
+      console.log('[Academic] Abstract inscribed to Arweave');
+    } catch (e) { console.warn('[Academic] Arweave failed:', e); }
     
     Alert.alert('Success!', `Abstract published!\nID: ${newAbstract.id}\n\nFirst question from any user is FREE. You can set a price for follow-up questions in your profile.`);
     setAbstractTitle('');
@@ -2155,7 +2170,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     <View style={{ backgroundColor: COLORS.blue50, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: COLORS.blue200, alignItems: 'center' }}>
                       <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.blue800, marginBottom: 8 }}>Your verification code:</Text>
                       <Text selectable style={{ fontSize: 36, fontWeight: '900', fontFamily: 'monospace', color: COLORS.amber900, letterSpacing: 6 }}>{magicLink || '------'}</Text>
-                      <TouchableOpacity onPress={() => { const code = Math.floor(100000 + Math.random() * 900000).toString(); setMagicLink(code); Clipboard.setString(code); Alert.alert('Code Ready!', code + ' copied. Paste it in your email subject line.'); }} style={{ backgroundColor: COLORS.amber600, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 24, marginTop: 10 }}>
+                      <TouchableOpacity onPress={() => { const code = Math.floor(100000 + Math.random() * 900000).toString(); setMagicLink(code); Clipboard.setStringAsync(code); Alert.alert('Code Ready!', code + ' copied. Paste it in your email subject line.'); }} style={{ backgroundColor: COLORS.amber600, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 24, marginTop: 10 }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{magicLink ? 'Copy Code Again' : 'Generate Code'}</Text>
                       </TouchableOpacity>
                     </View>
@@ -2308,15 +2323,28 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       style={acStyles.priceInput}
                       placeholder="0"
                       keyboardType="numeric"
+                      value={researcherProfile?.question_price?.toString() || ''}
+                      onChangeText={(t) => setResearcherProfile((p) => p ? ({ ...p, question_price: parseFloat(t) || 0 }) : p)}
                     />
                     <Text style={acStyles.priceLabel}>KASPA</Text>
                   </View>
+                  {!researcherProfile && <Text style={{ fontSize: rs.font(10), color: COLORS.red600, marginTop: rs.s(4) }}>Verify .edu email first in Submit tab</Text>}
+                  {researcherProfile && <TouchableOpacity onPress={async () => {
+                    const price = researcherProfile.question_price || 0;
+                    const updated = abstractsList.map(a => a.researcherId === researcherProfile.researcher_id ? { ...a, questionPrice: price } : a);
+                    setAbstractsList(updated);
+                    await SecureStore.setItemAsync('kv_abstracts', JSON.stringify(updated));
+                    Alert.alert('Saved', 'Question price set to ' + price + ' KAS');
+                  }} style={{ backgroundColor: COLORS.green600, borderRadius: rs.s(8), paddingVertical: rs.s(8), alignItems: 'center', marginTop: rs.s(8) }}><Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(12) }}>Save Price</Text></TouchableOpacity>}
                 </View>
                 
                 <View style={acStyles.serviceBox}>
                   <Text style={acStyles.serviceTitle}>📚 Tutoring & Consulting</Text>
                   <Text style={acStyles.serviceSubtitle}>
-                    Offer code auditing, tutoring, analytics, consulting services.
+                    Offer code auditing, tutoring, analytics, consulting services. Contact via your chosen QA channel.
+                  </Text>
+                  <Text style={{ fontSize: rs.font(11), color: COLORS.stone600, marginBottom: rs.s(8) }}>
+                    Buyers contact you through the channel you set in your abstract submission (Telegram, Instagram DM, Signal, Email, or Nostr).
                   </Text>
                   <View style={acStyles.priceRow}>
                     <TextInput
@@ -2951,6 +2979,24 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     loadConfig();
   }, []);
 
+  // Auto-save config to SecureStore on changes (persists across sessions)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const cfg = {
+          brandName, storeDescription, storeCategory, logoUrl, logoShape,
+          bannerStyle, bannerRecipe, coupons, socialLinks, commChannels,
+          selectedFont: { id: selectedFont.id, name: selectedFont.name },
+          selectedLayout: { id: selectedLayout.id, name: selectedLayout.name },
+          stash,
+          hostId, updatedAt: Date.now(),
+        };
+        await SecureStore.setItemAsync('storefront_' + hostId, JSON.stringify(cfg));
+      } catch {}
+    }, 1000); // debounce 1s
+    return () => clearTimeout(timer);
+  }, [brandName, storeDescription, storeCategory, logoUrl, logoShape, bannerStyle, bannerRecipe, coupons, socialLinks, commChannels, selectedFont, selectedLayout, stash]);
+
   // Load avatar data on mount
   useEffect(() => {
     const loadAvatar = async () => {
@@ -3102,7 +3148,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   };
 
   const handleCopyTemplate = async () => {
-    Clipboard.setString(DAPP_TEMPLATE_CODE);
+    Clipboard.setStringAsync(DAPP_TEMPLATE_CODE);
     Alert.alert('Copied!', 'DApp template copied to clipboard!');
   };
   
@@ -3270,17 +3316,22 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 note="Only moderated platform links allowed for safety."
               />
               
-              <Text style={inputStyles.label}>Logo Style</Text>
-              <View style={wsStyles.toggleRow}>
-                {(['round', 'square'] as const).map(shape => (
+              <Text style={inputStyles.label}>Logo Shape Preview</Text>
+              <View style={{ flexDirection: 'row', gap: rs.s(16), marginBottom: rs.s(12), alignItems: 'center' }}>
+                {([
+                  { id: 'round' as const, label: 'Circle', radius: 999 },
+                  { id: 'square' as const, label: 'Rounded Square', radius: rs.s(12) },
+                ] as const).map(shape => (
                   <TouchableOpacity
-                    key={shape}
-                    style={[wsStyles.toggleBtn, logoShape === shape && wsStyles.toggleBtnActive]}
-                    onPress={() => setLogoShape(shape)}
+                    key={shape.id}
+                    onPress={() => setLogoShape(shape.id)}
+                    style={{ alignItems: 'center', opacity: logoShape === shape.id ? 1 : 0.4 }}
                   >
-                    <Text style={[wsStyles.toggleBtnText, logoShape === shape && wsStyles.toggleBtnTextActive]}>
-                      {shape}
-                    </Text>
+                    <View style={{ width: rs.s(64), height: rs.s(64), borderRadius: shape.radius, backgroundColor: logoShape === shape.id ? COLORS.amber200 : COLORS.stone200, borderWidth: logoShape === shape.id ? 3 : 1, borderColor: logoShape === shape.id ? COLORS.amber600 : COLORS.stone300, justifyContent: 'center', alignItems: 'center', marginBottom: rs.s(4) }}>
+                      <Text style={{ fontSize: rs.font(24) }}>{logoUrl ? '🖼' : '📷'}</Text>
+                    </View>
+                    <Text style={{ fontSize: rs.font(11), fontWeight: logoShape === shape.id ? 'bold' : 'normal', color: logoShape === shape.id ? COLORS.amber900 : COLORS.stone500 }}>{shape.label}</Text>
+                    {logoShape === shape.id && <Text style={{ fontSize: rs.font(9), color: COLORS.amber600 }}>✓ Selected</Text>}
                   </TouchableOpacity>
                 ))}
               </View>
@@ -3320,14 +3371,18 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 How buyers can contact you to discuss purchases
               </Text>
               {COMMUNICATION_CHANNELS.map(channel => (
-                <View key={channel.id} style={wsStyles.socialRow}>
-                  <Text style={wsStyles.socialIcon}>{channel.icon}</Text>
+                <View key={channel.id} style={{ backgroundColor: COLORS.stone50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(8) }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(8), marginBottom: rs.s(6) }}>
+                    <Text style={{ fontSize: rs.font(20) }}>{channel.icon}</Text>
+                    <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: COLORS.stone800 }}>{channel.label}</Text>
+                  </View>
                   <TextInput
-                    style={wsStyles.socialInput}
+                    style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.stone200, borderRadius: rs.s(8), paddingHorizontal: rs.s(12), paddingVertical: rs.s(10), fontSize: rs.font(13), color: COLORS.stone700 }}
                     value={commChannels[channel.id] || ''}
                     onChangeText={(text) => setCommChannels({ ...commChannels, [channel.id]: text })}
                     placeholder={channel.placeholder}
                     placeholderTextColor={COLORS.stone400}
+                    autoCapitalize="none"
                   />
                 </View>
               ))}
@@ -3365,9 +3420,40 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           </SectionCard>
         )}
         
-        {/* Fonts Tab — Graffiti Banner Builder */}
+        {/* Fonts Tab — Banner Styles + Graffiti Builder */}
         {activeView === 'fonts' && (
           <View>
+            {/* Font Style Selector */}
+            <SectionCard title="🔤 Banner Text Style">
+              <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(12) }}>Choose how your store name renders on the banner</Text>
+              <View style={{ gap: rs.s(8), marginBottom: rs.s(8) }}>
+                {[
+                  { id: 'clean', label: 'Clean Modern', weight: '400', spacing: 0, transform: 'none', preview: brandName || 'MY STORE' },
+                  { id: 'bold', label: 'Bold Impact', weight: '900', spacing: 2, transform: 'uppercase', preview: (brandName || 'MY STORE').toUpperCase() },
+                  { id: 'elegant', label: 'Elegant Serif', weight: '300', spacing: 4, transform: 'capitalize', preview: brandName || 'My Store' },
+                  { id: 'retro', label: 'Retro Block', weight: '800', spacing: 6, transform: 'uppercase', preview: (brandName || 'MY STORE').toUpperCase() },
+                  { id: 'graffiti', label: '🎨 Graffiti (advanced)', weight: '900', spacing: 0, transform: 'uppercase', preview: bannerRecipe.text || 'HOOD' },
+                ].map(font => (
+                  <TouchableOpacity key={font.id} onPress={() => setSelectedFont({ id: font.id, name: font.label, fontFamily: 'System' })}
+                    style={{ backgroundColor: selectedFont.id === font.id ? COLORS.amber50 : '#fff', borderWidth: 2, borderColor: selectedFont.id === font.id ? COLORS.amber500 : COLORS.stone200, borderRadius: rs.s(12), padding: rs.s(14), overflow: 'hidden' }}>
+                    <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: selectedFont.id === font.id ? COLORS.amber800 : COLORS.stone500, marginBottom: rs.s(4) }}>{font.label}</Text>
+                    {font.id === 'graffiti' ? (
+                      <View style={{ backgroundColor: bannerRecipe.bgColor || '#fafaf9', borderRadius: rs.s(8), padding: rs.s(8), alignItems: 'center' }}>
+                        <Text style={{ fontSize: rs.font(22), fontWeight: '900', color: bannerRecipe.fillColor || '#d97706', letterSpacing: 4, textShadowColor: bannerRecipe.shadowColor || '#78350f', textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 1 }}>{font.preview}</Text>
+                      </View>
+                    ) : (
+                      <View style={{ backgroundColor: bannerStyle.bg === 'crest' ? '#44403c' : bannerStyle.bg, borderRadius: rs.s(8), padding: rs.s(10), alignItems: 'center' }}>
+                        <Text style={{ fontSize: rs.font(20), fontWeight: font.weight as any, color: bannerStyle.text || '#fff', letterSpacing: font.spacing, textTransform: font.transform as any }}>{font.preview}</Text>
+                      </View>
+                    )}
+                    {selectedFont.id === font.id && <Text style={{ fontSize: rs.font(9), color: COLORS.amber600, marginTop: rs.s(4) }}>✓ Active</Text>}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </SectionCard>
+
+            {/* Graffiti Builder — only visible when graffiti font selected */}
+            {selectedFont.id === 'graffiti' && (
             <SectionCard title="🎨 Graffiti Banner Builder">
               <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(12) }}>
                 Create your store banner. Recipe saved to Arweave — renders on any device.
@@ -3522,6 +3608,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 Recipe is ~200 bytes on Arweave — renders SVG on any device from the recipe
               </Text>
             </SectionCard>
+            )}
           </View>
         )}
         
@@ -3540,7 +3627,82 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                       <Text style={{ fontSize: rs.font(14), fontWeight: 'bold', color: COLORS.stone800 }}>{item.name}</Text>
                       {item.description ? <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginTop: 2 }} numberOfLines={1}>{item.description}</Text> : null}
                       <Text style={{ fontSize: rs.font(11), color: COLORS.amber700, marginTop: rs.s(2) }}>
-                        {item.dollarPrice > 0 ? '
+                        {item.dollarPrice > 0 ? `$${item.dollarPrice.toFixed(2)} USD` : ''} {item.kaspaPrice > 0 ? `${item.kaspaPrice} KAS` : 'Price TBD'}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: rs.s(12) }}>
+                      <TouchableOpacity onPress={() => handleEditItem(item)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Edit3 size={rs.s(16)} color={COLORS.blue600} />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleDeleteItem(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Trash2 size={rs.s(16)} color={COLORS.red600} />
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: rs.s(24) }}>
+                  <ShoppingBag size={rs.s(32)} color={COLORS.amber300} />
+                  <Text style={{ fontSize: rs.font(13), color: COLORS.amber600, fontStyle: 'italic', marginTop: rs.s(8) }}>No items yet</Text>
+                </View>
+              )}
+              <TouchableOpacity style={wsStyles.addItemBtn} onPress={() => { setEditingItem(null); setItemForm({ name: '', description: '', dollarPrice: '', kaspaPrice: '', socialUrl: '' }); setShowItemForm(true); }}>
+                <Plus size={rs.s(16)} color={COLORS.white} />
+                <Text style={wsStyles.addItemBtnText}>Add New Item</Text>
+              </TouchableOpacity>
+            </SectionCard>
+        {/* Item Form Modal */}
+            <Modal visible={showItemForm} animationType="slide" transparent>
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: rs.s(20) }}>
+                <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(20), maxHeight: '85%' }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs.s(16) }}>
+                    <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.amber900 }}>{editingItem ? '✏️ Edit Item' : '➕ New Item'}</Text>
+                    <TouchableOpacity onPress={() => { setShowItemForm(false); setEditingItem(null); }}>
+                      <X size={rs.s(20)} color={COLORS.stone500} />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView>
+                    <InputField label="Item Name" value={itemForm.name} onChangeText={(t) => setItemForm(prev => ({ ...prev, name: t }))} placeholder="e.g. Silver Eagle Coin" />
+                    <InputField label="Description (optional)" value={itemForm.description} onChangeText={(t) => setItemForm(prev => ({ ...prev, description: t }))} placeholder="Condition, year, details..." multiline />
+                    <View style={{ flexDirection: 'row', gap: rs.s(10) }}>
+                      <View style={{ flex: 1 }}>
+                        <InputField label="Price (USD)" value={itemForm.dollarPrice} onChangeText={(t) => setItemForm(prev => ({ ...prev, dollarPrice: t }))} placeholder="0.00" keyboardType="numeric" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <InputField label="Price (KAS)" value={itemForm.kaspaPrice} onChangeText={(t) => setItemForm(prev => ({ ...prev, kaspaPrice: t }))} placeholder="0" keyboardType="numeric" />
+                      </View>
+                    </View>
+                    <View style={{ backgroundColor: COLORS.blue50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(12), borderWidth: 1, borderColor: COLORS.blue200 }}>
+                      <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.blue800, marginBottom: rs.s(4) }}>📸 Direct Post Link</Text>
+                      <Text style={{ fontSize: rs.font(10), color: COLORS.blue600, marginBottom: rs.s(8) }}>Link to this item on Instagram, Pinterest, Etsy, TikTok, eBay, or Facebook. Buyers tap → opens your post.</Text>
+                      <TextInput
+                        style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.blue300, borderRadius: rs.s(10), paddingHorizontal: rs.s(12), paddingVertical: rs.s(10), fontSize: rs.font(12), color: COLORS.stone800, fontFamily: 'monospace' }}
+                        value={itemForm.socialUrl}
+                        onChangeText={(t) => setItemForm(prev => ({ ...prev, socialUrl: t }))}
+                        placeholder="https://instagram.com/p/ABC123..."
+                        placeholderTextColor={COLORS.stone400}
+                        keyboardType="url"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(6), marginTop: rs.s(8) }}>
+                        {['📸 Instagram', '📌 Pinterest', '🛍️ Etsy', '🎵 TikTok', '🏷️ eBay', '📘 Facebook'].map(p => (
+                          <View key={p} style={{ backgroundColor: COLORS.stone100, paddingHorizontal: rs.s(8), paddingVertical: rs.s(3), borderRadius: rs.s(6) }}>
+                            <Text style={{ fontSize: rs.font(9), color: COLORS.stone500 }}>{p}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                    <TouchableOpacity onPress={handleSaveItem}
+                      style={{ backgroundColor: COLORS.green600, borderRadius: rs.s(12), paddingVertical: rs.s(14), alignItems: 'center', marginTop: rs.s(8) }}>
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>{editingItem ? 'Save Changes' : 'Add Item'}</Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                </View>
+              </View>
+            </Modal>
+          </View>
+        )}
         
         {/* Coupons Tab */}
         {activeView === 'coupons' && (
@@ -3822,601 +3984,58 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           </SectionCard>
         )}
         
-        {/* Preview Tab */}
+        {/* Preview Tab — What Buyers See */}
         {activeView === 'preview' && (
-          <SectionCard title="Storefront Preview">
-            <Text style={{ fontSize: rs.font(13), color: COLORS.stone600, textAlign: 'center', paddingVertical: rs.s(16) }}>
-              Your storefront banner is shown above.{String.fromCharCode(10)}
-              Tap "Visit Storefront" to open your social page.{String.fromCharCode(10)}
-              Tap "Publish" to inscribe config to Arweave.
-            </Text>
-            <View style={{ backgroundColor: COLORS.amber50, borderRadius: rs.s(8), padding: rs.s(10), marginTop: rs.s(8) }}>
-              <Text style={{ fontSize: rs.font(10), color: COLORS.amber700, textAlign: 'center' }}>
-                Buyers see your banner on KasVillage → tap an item → directed to your Instagram/Pinterest/Etsy listing
-              </Text>
-            </View>
-          </SectionCard>
-        )}
-        
-        {/* Bottom padding */}
-        <View style={{ height: rs.s(100) }} />
-      </ScrollView>
-      
-      {/* Modals */}
-      <QualityGateModal
-        visible={showQualityGate}
-        onClose={() => setShowQualityGate(false)}
-        onVerified={(m) => {
-          Alert.alert('DApp Verified', `"${m.name}" will appear in KasVillage wallet`);
-          onOpenDApp?.(m);
-        }}
-        userXp={userXp}
-      />
-      
-      <AcademicPanel
-        visible={showAcademicPanel}
-        onClose={() => setShowAcademicPanel(false)}
-      />
-    </WorkspaceBackgroundWrapper>
-  );
-};
-
-const wsStyles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    padding: rs.s(16),
-    paddingTop: rs.s(24),
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: rs.s(16),
-  },
-  headerTitle: {
-    fontSize: rs.font(24),
-    fontWeight: '900',
-    color: COLORS.amber900,
-  },
-  xpBadge: {
-    backgroundColor: COLORS.amber100,
-    paddingHorizontal: rs.s(12),
-    paddingVertical: rs.s(6),
-    borderRadius: rs.s(12),
-  },
-  xpBadgeText: {
-    fontSize: rs.font(12),
-    fontWeight: 'bold',
-    color: COLORS.amber800,
-  },
-  toolbar: {
-    marginBottom: rs.s(16),
-  },
-  toolbarContent: {
-    backgroundColor: COLORS.amber200,
-    borderRadius: rs.s(12),
-    padding: rs.s(4),
-    gap: rs.s(4),
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    gap: rs.s(8),
-  },
-  toggleBtn: {
-    flex: 1,
-    paddingVertical: rs.s(10),
-    backgroundColor: COLORS.stone50,
-    borderRadius: rs.s(8),
-    alignItems: 'center',
-  },
-  toggleBtnActive: {
-    backgroundColor: COLORS.amber50,
-    borderWidth: 2,
-    borderColor: COLORS.amber600,
-  },
-  toggleBtnText: {
-    fontSize: rs.font(12),
-    fontWeight: 'bold',
-    color: COLORS.stone400,
-    textTransform: 'capitalize',
-  },
-  toggleBtnTextActive: {
-    color: COLORS.amber900,
-  },
-  socialRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: rs.s(12),
-    backgroundColor: COLORS.stone50,
-    borderRadius: rs.s(12),
-    padding: rs.s(12),
-    marginBottom: rs.s(8),
-  },
-  socialIcon: {
-    fontSize: rs.font(24),
-  },
-  socialInput: {
-    flex: 1,
-    fontSize: rs.font(12),
-    color: COLORS.stone700,
-  },
-  commNote: {
-    fontSize: rs.font(11),
-    color: COLORS.stone600,
-    marginBottom: rs.s(12),
-  },
-  commTip: {
-    fontSize: rs.font(10),
-    color: COLORS.amber700,
-    backgroundColor: COLORS.amber50,
-    borderRadius: rs.s(8),
-    padding: rs.s(8),
-    marginTop: rs.s(8),
-  },
-  layoutSubtitle: {
-    fontSize: rs.font(12),
-    color: COLORS.stone600,
-    marginBottom: rs.s(16),
-  },
-  layoutGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: rs.s(12),
-  },
-  layoutCard: {
-    width: '47%',
-    backgroundColor: COLORS.cardBg,
-    borderRadius: rs.s(12),
-    padding: rs.s(12),
-    borderWidth: 2,
-    borderColor: COLORS.stone200,
-  },
-  layoutCardActive: {
-    borderColor: COLORS.amber600,
-    backgroundColor: COLORS.amber50,
-  },
-  layoutName: {
-    fontSize: rs.font(13),
-    fontWeight: 'bold',
-    color: COLORS.stone800,
-    marginBottom: rs.s(4),
-  },
-  layoutDesc: {
-    fontSize: rs.font(10),
-    color: COLORS.stone500,
-    marginBottom: rs.s(12),
-  },
-  layoutPreview: {
-    flexDirection: 'row',
-    gap: rs.s(4),
-    height: rs.s(32),
-  },
-  layoutPreviewBox: {
-    flex: 1,
-    backgroundColor: COLORS.stone200,
-    borderRadius: rs.s(4),
-  },
-  fontGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: rs.s(8),
-  },
-  fontCard: {
-    width: '48%',
-    backgroundColor: COLORS.cardBg,
-    borderRadius: rs.s(12),
-    padding: rs.s(12),
-    borderWidth: 2,
-    borderColor: COLORS.stone100,
-  },
-  fontCardActive: {
-    borderColor: COLORS.amber600,
-    backgroundColor: COLORS.amber50,
-  },
-  fontLabel: {
-    fontSize: rs.font(9),
-    fontWeight: 'bold',
-    color: COLORS.stone400,
-    textTransform: 'uppercase',
-    marginBottom: rs.s(4),
-  },
-  fontPreview: {
-    fontSize: rs.font(18),
-    color: COLORS.stone800,
-  },
-  sectionSubtitle: {
-    fontSize: rs.font(12),
-    color: COLORS.stone600,
-    marginBottom: rs.s(12),
-  },
-  itemCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardBg,
-    borderRadius: rs.s(12),
-    padding: rs.s(14),
-    marginBottom: rs.s(8),
-    borderWidth: 1,
-    borderColor: COLORS.amber200,
-  },
-  itemName: {
-    fontSize: rs.font(14),
-    fontWeight: 'bold',
-    color: COLORS.stone800,
-  },
-  itemPrice: {
-    fontSize: rs.font(11),
-    color: COLORS.stone500,
-    marginTop: rs.s(2),
-  },
-  itemActions: {
-    flexDirection: 'row',
-    gap: rs.s(16),
-  },
-  emptyText: {
-    fontSize: rs.font(13),
-    color: COLORS.amber600,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    paddingVertical: rs.s(24),
-  },
-  addItemBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: rs.s(8),
-    backgroundColor: COLORS.blue600,
-    borderRadius: rs.s(12),
-    paddingVertical: rs.s(14),
-  },
-  addItemBtnText: {
-    fontSize: rs.font(14),
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
-  complianceNotice: {
-    backgroundColor: COLORS.red50,
-    borderWidth: 1,
-    borderColor: COLORS.red200,
-    borderRadius: rs.s(12),
-    padding: rs.s(12),
-    marginBottom: rs.s(12),
-  },
-  complianceText: {
-    fontSize: rs.font(11),
-    color: COLORS.red700,
-  },
-  ideBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: rs.s(8),
-    backgroundColor: COLORS.blue600,
-    borderRadius: rs.s(12),
-    paddingVertical: rs.s(14),
-    marginBottom: rs.s(12),
-  },
-  ideBtnText: {
-    fontSize: rs.font(14),
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
-  publishBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: rs.s(8),
-    backgroundColor: COLORS.green600,
-    borderRadius: rs.s(12),
-    paddingVertical: rs.s(14),
-    marginBottom: rs.s(12),
-  },
-  publishBtnText: {
-    fontSize: rs.font(14),
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
-  bookShelfBtn: {
-    borderWidth: 1,
-    borderColor: COLORS.indigo300,
-    backgroundColor: COLORS.indigo50,
-    borderRadius: rs.s(12),
-    paddingVertical: rs.s(12),
-    alignItems: 'center',
-    marginBottom: rs.s(16),
-  },
-  bookShelfBtnText: {
-    fontSize: rs.font(13),
-    fontWeight: 'bold',
-    color: COLORS.indigo800,
-  },
-  templateBox: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius: rs.s(12),
-    padding: rs.s(14),
-    borderWidth: 1,
-    borderColor: COLORS.purple200,
-  },
-  templateTitle: {
-    fontSize: rs.font(11),
-    fontWeight: 'bold',
-    color: COLORS.purple800,
-    textTransform: 'uppercase',
-    marginBottom: rs.s(4),
-  },
-  templateSubtitle: {
-    fontSize: rs.font(10),
-    color: COLORS.stone500,
-    marginBottom: rs.s(12),
-  },
-  copyTemplateBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: rs.s(8),
-    backgroundColor: COLORS.purple100,
-    borderRadius: rs.s(8),
-    paddingVertical: rs.s(10),
-  },
-  copyTemplateBtnText: {
-    fontSize: rs.font(11),
-    fontWeight: 'bold',
-    color: COLORS.purple800,
-  },
-  academicBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: rs.s(8),
-    backgroundColor: COLORS.indigo600,
-    borderRadius: rs.s(12),
-    paddingVertical: rs.s(14),
-  },
-  academicBtnText: {
-    fontSize: rs.font(14),
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
-  previewHero: {
-    padding: rs.s(32),
-    borderRadius: rs.s(12),
-    alignItems: 'center',
-    marginBottom: rs.s(16),
-  },
-  previewHeroTitle: {
-    fontSize: rs.font(24),
-    fontWeight: '900',
-    color: COLORS.white,
-    marginBottom: rs.s(4),
-  },
-  previewHeroSubtitle: {
-    fontSize: rs.font(12),
-    color: COLORS.white,
-    opacity: 0.9,
-  },
-  previewSocialRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: rs.s(24),
-  },
-  previewSocialIcon: {
-    fontSize: rs.font(28),
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: rs.s(12),
-    marginTop: rs.s(16),
-  },
-  visitBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: rs.s(8),
-    backgroundColor: COLORS.stone800,
-    borderRadius: rs.s(12),
-    paddingVertical: rs.s(14),
-  },
-  visitBtnText: {
-    fontSize: rs.font(14),
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
-  saveBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: rs.s(8),
-    backgroundColor: COLORS.green600,
-    borderRadius: rs.s(12),
-    paddingVertical: rs.s(14),
-  },
-  saveBtnText: {
-    fontSize: rs.font(14),
-    fontWeight: 'bold',
-    color: COLORS.white,
-  },
-  publishNote: {
-    fontSize: rs.font(10),
-    color: COLORS.stone500,
-    textAlign: 'center',
-    marginTop: rs.s(8),
-  },
-});
-
-export default Workspace; + item.dollarPrice.toFixed(2) + ' • ' : ''}{item.kaspaPrice > 0 ? item.kaspaPrice + ' KAS' : 'Price TBD'}
-                      </Text>
-                      <Text style={{ fontSize: rs.font(9), color: COLORS.blue500, marginTop: 2 }} numberOfLines={1}>
-                        {item.socialUrl ? '↗ ' + item.socialUrl.replace('https://', '').slice(0, 40) + '...' : 'No link'}
-                      </Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: rs.s(12) }}>
-                      <TouchableOpacity onPress={() => handleEditItem(item)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                        <Edit3 size={rs.s(16)} color={COLORS.blue600} />
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleDeleteItem(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                        <Trash2 size={rs.s(16)} color={COLORS.red600} />
-                      </TouchableOpacity>
-                    </View>
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <View style={{ alignItems: 'center', paddingVertical: rs.s(24) }}>
-                  <ShoppingBag size={rs.s(32)} color={COLORS.amber300} />
-                  <Text style={{ fontSize: rs.font(13), color: COLORS.amber600, fontStyle: 'italic', marginTop: rs.s(8) }}>No items yet. Add your first product!</Text>
-                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone400, marginTop: rs.s(4) }}>Each item links to your Instagram/Pinterest post — no platform fees, no middleman</Text>
-                </View>
-              )}
+          <View>
+            <SectionCard title="👁 What Buyers See">
+              <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginBottom: rs.s(12) }}>This is how your store appears in the Mailbox feed</Text>
               
-              <TouchableOpacity
-                style={wsStyles.addItemBtn}
-                onPress={() => { setEditingItem(null); setItemForm({ name: '', description: '', dollarPrice: '', kaspaPrice: '', socialUrl: '' }); setShowItemForm(true); }}
-              >
-                <Plus size={rs.s(16)} color={COLORS.white} />
-                <Text style={wsStyles.addItemBtnText}>Add New Item</Text>
-              </TouchableOpacity>
-            </SectionCard>
-
-            {/* Item Form Modal */}
-            <Modal visible={showItemForm} animationType="slide" transparent>
-              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: rs.s(20) }}>
-                <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(20), maxHeight: '85%' }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs.s(16) }}>
-                    <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.amber900 }}>{editingItem ? '✏️ Edit Item' : '➕ New Item'}</Text>
-                    <TouchableOpacity onPress={() => { setShowItemForm(false); setEditingItem(null); }}>
-                      <X size={rs.s(20)} color={COLORS.stone500} />
-                    </TouchableOpacity>
-                  </View>
-                  <ScrollView>
-                    <InputField label="Item Name" value={itemForm.name} onChangeText={(t) => setItemForm(prev => ({ ...prev, name: t }))} placeholder="e.g. Silver Eagle Coin" />
-                    <InputField label="Description (optional)" value={itemForm.description} onChangeText={(t) => setItemForm(prev => ({ ...prev, description: t }))} placeholder="Condition, year, details..." multiline />
-                    <View style={{ flexDirection: 'row', gap: rs.s(10) }}>
-                      <View style={{ flex: 1 }}>
-                        <InputField label="Price (USD)" value={itemForm.dollarPrice} onChangeText={(t) => setItemForm(prev => ({ ...prev, dollarPrice: t }))} placeholder="0.00" keyboardType="numeric" />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <InputField label="Price (KAS)" value={itemForm.kaspaPrice} onChangeText={(t) => setItemForm(prev => ({ ...prev, kaspaPrice: t }))} placeholder="0" keyboardType="numeric" />
-                      </View>
-                    </View>
-                    <View style={{ backgroundColor: COLORS.blue50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(12), borderWidth: 1, borderColor: COLORS.blue200 }}>
-                      <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.blue800, marginBottom: rs.s(4) }}>📸 Direct Post Link</Text>
-                      <Text style={{ fontSize: rs.font(10), color: COLORS.blue600, marginBottom: rs.s(8) }}>
-                        Paste the link to this item's photo on Instagram, Pinterest, or Etsy.{String.fromCharCode(10)}Buyers tap the item → opens this exact post.
+              {/* Storefront Card Preview */}
+              <View style={{ backgroundColor: '#fff', borderRadius: rs.s(16), borderWidth: 1, borderColor: COLORS.stone200, overflow: 'hidden', marginBottom: rs.s(16) }}>
+                {/* Banner */}
+                <View style={{ backgroundColor: bannerStyle.bg === 'crest' ? '#44403c' : bannerStyle.bg, padding: rs.s(20), alignItems: 'center' }}>
+                  <Text style={{ fontSize: rs.font(22), fontWeight: '900', color: bannerStyle.text || '#fff' }}>{brandName || 'Your Store'}</Text>
+                  {storeDescription ? <Text style={{ fontSize: rs.font(10), color: bannerStyle.text || '#fff', opacity: 0.8, marginTop: rs.s(4) }} numberOfLines={2}>{storeDescription}</Text> : null}
+                </View>
+                
+                {/* Social Icons Row */}
+                {Object.keys(socialLinks).filter(k => socialLinks[k]).length > 0 && (
+                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: rs.s(16), paddingVertical: rs.s(8), backgroundColor: COLORS.stone50 }}>
+                    {Object.entries(socialLinks).filter(([, v]) => v).map(([k]) => (
+                      <Text key={k} style={{ fontSize: rs.font(20) }}>
+                        {k === 'instagram' ? '📸' : k === 'tiktok' ? '🎵' : k === 'etsy' ? '🛍️' : k === 'pinterest' ? '📌' : k === 'youtube' ? '▶️' : k === 'facebook' ? '📘' : '🔗'}
                       </Text>
-                      <TextInput
-                        style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.blue300, borderRadius: rs.s(10), paddingHorizontal: rs.s(12), paddingVertical: rs.s(10), fontSize: rs.font(12), color: COLORS.stone800, fontFamily: 'monospace' }}
-                        value={itemForm.socialUrl}
-                        onChangeText={(t) => setItemForm(prev => ({ ...prev, socialUrl: t }))}
-                        placeholder="https://instagram.com/p/ABC123..."
-                        placeholderTextColor={COLORS.stone400}
-                        keyboardType="url"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                      />
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(6), marginTop: rs.s(8) }}>
-                        {['📸 Instagram', '📌 Pinterest', '🛍️ Etsy', '🎵 TikTok', '🏷️ eBay'].map(p => (
-                          <View key={p} style={{ backgroundColor: COLORS.stone100, paddingHorizontal: rs.s(8), paddingVertical: rs.s(3), borderRadius: rs.s(6) }}>
-                            <Text style={{ fontSize: rs.font(9), color: COLORS.stone500 }}>{p}</Text>
-                          </View>
-                        ))}
+                    ))}
+                  </View>
+                )}
+                
+                {/* Items Preview */}
+                <View style={{ padding: rs.s(12) }}>
+                  {stash.length > 0 ? stash.slice(0, 3).map(item => (
+                    <View key={item.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: rs.s(8), borderBottomWidth: 1, borderBottomColor: COLORS.stone100 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: COLORS.stone800 }}>{item.name}</Text>
+                        <Text style={{ fontSize: rs.font(10), color: COLORS.stone400 }}>{item.platform || 'social'}</Text>
                       </View>
+                      <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.amber700 }}>
+                        {item.kaspaPrice > 0 ? `${item.kaspaPrice} KAS` : item.dollarPrice > 0 ? `${item.dollarPrice.toFixed(2)}` : 'Price TBD'}
+                      </Text>
                     </View>
-                    <TouchableOpacity onPress={handleSaveItem}
-                      style={{ backgroundColor: COLORS.green600, borderRadius: rs.s(12), paddingVertical: rs.s(14), alignItems: 'center', marginTop: rs.s(8) }}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>{editingItem ? 'Save Changes' : 'Add Item'}</Text>
-                    </TouchableOpacity>
-                  </ScrollView>
+                  )) : (
+                    <Text style={{ fontSize: rs.font(11), color: COLORS.stone400, textAlign: 'center', paddingVertical: rs.s(12) }}>No items yet — add items in the Items tab</Text>
+                  )}
+                  {stash.length > 3 && <Text style={{ fontSize: rs.font(10), color: COLORS.amber600, textAlign: 'center', marginTop: rs.s(4) }}>+{stash.length - 3} more items</Text>}
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: rs.s(12), paddingVertical: rs.s(8), backgroundColor: COLORS.stone50 }}>
+                  <Text style={{ fontSize: rs.font(9), color: COLORS.stone400 }}>{stash.length} items • {coupons.length} coupons</Text>
+                  <Text style={{ fontSize: rs.font(9), color: COLORS.green600, fontWeight: 'bold' }}>✓ SDK Compliant</Text>
                 </View>
               </View>
-            </Modal>
+              <View style={{ backgroundColor: COLORS.amber50, borderRadius: rs.s(8), padding: rs.s(10) }}>
+                <Text style={{ fontSize: rs.font(10), color: COLORS.amber700, textAlign: 'center' }}>Tap "Publish" to make this live on Arweave.</Text>
+              </View>
+            </SectionCard>
           </View>
-        )}
-        
-        {/* DApps Tab */}
-        {activeView === 'dapps' && (
-          <SectionCard title="DApp & Game Management">
-            <Text style={wsStyles.sectionSubtitle}>
-              DApps are posted by YOU directly to Arweave. KasVillage verifies for display visibility only.
-            </Text>
-            
-            <View style={wsStyles.complianceNotice}>
-              <Text style={wsStyles.complianceText}>
-                <Text style={{ fontWeight: 'bold' }}>⚠️ Compliance:</Text> Prohibited content apps are restricted and auto-rejected by protocol.
-              </Text>
-            </View>
-            
-            {/* Claude Code Link */}
-            <TouchableOpacity
-              style={wsStyles.ideBtn}
-              onPress={() => Linking.openURL('https://claude.ai/code')}
-            >
-              <Code size={rs.s(16)} color={COLORS.white} />
-              <Text style={wsStyles.ideBtnText}>Open Claude Code</Text>
-            </TouchableOpacity>
-            
-            {/* Quality Gate */}
-            <TouchableOpacity
-              style={wsStyles.publishBtn}
-              onPress={() => setShowQualityGate(true)}
-            >
-              <ShieldCheck size={rs.s(16)} color={COLORS.white} />
-              <Text style={wsStyles.publishBtnText}>Verify DApp for Display</Text>
-            </TouchableOpacity>
-            
-            {/* Book Shelf */}
-            <TouchableOpacity
-              style={wsStyles.bookShelfBtn}
-              onPress={() => setShowAcademicPanel(true)}
-            >
-              <Text style={wsStyles.bookShelfBtnText}>📚 Book Shelf (Academic Research P2P)</Text>
-            </TouchableOpacity>
-            
-            {/* Template */}
-            <View style={wsStyles.templateBox}>
-              <Text style={wsStyles.templateTitle}>DApp Template</Text>
-              <Text style={wsStyles.templateSubtitle}>Copy the integration template to start building:</Text>
-              <TouchableOpacity style={wsStyles.copyTemplateBtn} onPress={handleCopyTemplate}>
-                <Code size={rs.s(14)} color={COLORS.purple800} />
-                <Text style={wsStyles.copyTemplateBtnText}>Copy Integration Template</Text>
-              </TouchableOpacity>
-            </View>
-          </SectionCard>
-        )}
-        
-        {/* Academic Tab */}
-        {activeView === 'academic' && (
-          <SectionCard title="📚 Academic Research">
-            <Text style={wsStyles.sectionSubtitle}>
-              Privacy-preserving academic exchange. Verify via .edu email, publish abstracts, offer consulting.
-            </Text>
-            <TouchableOpacity
-              style={wsStyles.academicBtn}
-              onPress={() => setShowAcademicPanel(true)}
-            >
-              <FileText size={rs.s(16)} color={COLORS.white} />
-              <Text style={wsStyles.academicBtnText}>Open Research Shelf</Text>
-            </TouchableOpacity>
-          </SectionCard>
-        )}
-        
-        {/* Preview Tab */}
-        {activeView === 'preview' && (
-          <SectionCard title="Storefront Preview">
-            <Text style={{ fontSize: rs.font(13), color: COLORS.stone600, textAlign: 'center', paddingVertical: rs.s(16) }}>
-              Your storefront banner is shown above.{String.fromCharCode(10)}
-              Tap "Visit Storefront" to open your social page.{String.fromCharCode(10)}
-              Tap "Publish" to inscribe config to Arweave.
-            </Text>
-            <View style={{ backgroundColor: COLORS.amber50, borderRadius: rs.s(8), padding: rs.s(10), marginTop: rs.s(8) }}>
-              <Text style={{ fontSize: rs.font(10), color: COLORS.amber700, textAlign: 'center' }}>
-                Buyers see your banner on KasVillage → tap an item → directed to your Instagram/Pinterest/Etsy listing
-              </Text>
-            </View>
-          </SectionCard>
         )}
         
         {/* Bottom padding */}
