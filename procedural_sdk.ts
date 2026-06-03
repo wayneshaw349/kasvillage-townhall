@@ -506,6 +506,24 @@ export function renderAvatar(avatar: GeneratedCharacter | UserAvatarPlugin, opti
 // SDK VERSION & HASH
 // ============================================================================
 
+// Required SDK module imports — DApps MUST import at least one
+export const REQUIRED_SDK_IMPORTS = [
+  'procedural_sdk',
+  'kasvillage_avatar_engine',
+  'kasvillage_canvas_renderer',
+  'kasvillage_audio_ui',
+  'kasvillage_game_v1',
+  'kasvillage_game_input_paint',
+  'kasvillage_environments',
+  'kasvillage_particles',
+  'kasvillage_item_library',
+  'kasvillage_shape_dictionary',
+  'kasvillage_detail_engine',
+  'kasvillage_skia_adapter',
+  'kasvillage_wallet_bridge',
+  'kasvillage_vscode_sdk',
+];
+
 export const SDK_VERSION = '2.0.0';
 export const SDK_TEMPLATE_HASH = bytesToHex(sha256(new TextEncoder().encode('KASVILLAGE_PROCEDURAL_SDK_V2_USER_AVATAR_PLUGIN')));
 
@@ -1314,6 +1332,21 @@ export function scanDAppCode(code: string, registeredDomains: string[] = []): Sc
     if (/OffscreenCanvas|getContext/.test(line)) { whitelistApplied++; }
   }
 
+  // SDK IMPORT REQUIREMENT — must use at least one KasVillage module
+  const hasSDKImport = REQUIRED_SDK_IMPORTS.some(mod => 
+    code.includes("from './" + mod + "'") || code.includes("from '" + mod + "'") ||
+    code.includes('from "./' + mod + '"') || code.includes('from "' + mod + '"') ||
+    code.includes("from '@kasvillage/") || code.includes("require('./" + mod + "')")
+  );
+  if (!hasSDKImport) {
+    violations.push({ line: 1, pattern: 'missing_sdk_import', code: '(entire file)', severity: 'critical' });
+    warnings.push({ line: 1, pattern: 'sdk_required', code: '', note: 'DApps must import from at least one KasVillage SDK module. Build with the SDK — not around it.' });
+  } else { whitelistApplied++; }
+  // Warn if using raw fetch without kvFetch
+  if ((code.match(/[^a-zA-Z]fetch\s*\(/g)?.length || 0) > 0 && !code.includes('kvFetch')) {
+    warnings.push({ line: 0, pattern: 'raw_fetch_without_kvFetch', code: '', note: 'Use kvFetch() from SDK instead of raw fetch(). kvFetch blocks image responses at runtime.' });
+  }
+
   return {
     passed: violations.length === 0,
     violations,
@@ -1323,6 +1356,7 @@ export function scanDAppCode(code: string, registeredDomains: string[] = []): Sc
       patternsChecked: lines.filter(l => l.trim() && !l.trim().startsWith('//')).length,
       whitelistApplied,
       blockedCount: violations.length,
+      sdkImportFound: hasSDKImport,
     }
   };
 }

@@ -3783,6 +3783,18 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             </TouchableOpacity>
             
             {/* Template */}
+            <View style={{ backgroundColor: '#fef2f2', borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(12), borderWidth: 1, borderColor: '#fca5a5' }}>
+              <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: '#991b1b', marginBottom: rs.s(6) }}>⚠️ Required SDK Modules</Text>
+              <Text style={{ fontSize: rs.font(10), color: '#b91c1c', marginBottom: rs.s(8) }}>Your DApp MUST import from at least one KasVillage SDK module. No SDK import = scan fails.</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(4) }}>
+                {['procedural_sdk', 'avatar_engine', 'canvas_renderer', 'audio_ui', 'game_v1', 'game_input', 'environments', 'particles', 'item_library', 'wallet_bridge'].map(m => (
+                  <View key={m} style={{ backgroundColor: '#fff', paddingHorizontal: rs.s(6), paddingVertical: rs.s(2), borderRadius: rs.s(4), borderWidth: 1, borderColor: '#fca5a5' }}>
+                    <Text style={{ fontSize: rs.font(8), fontFamily: 'monospace', color: '#991b1b' }}>{m}</Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={{ fontSize: rs.font(9), color: '#b91c1c', marginTop: rs.s(6) }}>Use kvFetch() instead of raw fetch() — blocks image responses at runtime.</Text>
+            </View>
             <View style={wsStyles.templateBox}>
               <Text style={wsStyles.templateTitle}>DApp Template</Text>
               <Text style={wsStyles.templateSubtitle}>Copy the integration template to start building:</Text>
