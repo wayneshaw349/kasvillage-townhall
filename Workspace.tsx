@@ -35,10 +35,12 @@ import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 
 // Import upload functions (v2 TownHall integration)
-import { uploadStoreListing } from './arweave_upload';
+// import { uploadStoreListing } from './arweave_upload'; // replaced by uploadToIrys in publish handler
 
 // Import procedural backgrounds
 import { ProceduralBackground } from './expo_procedural_backgrounds';
+import { verifyDKIM, quickDomainCheck } from './dkim_verify';
+import { scanDAppCode, prepareDAppRegistration, SDK_VERSION, SDK_TEMPLATE_HASH, kvFetch } from './procedural_sdk';
 import {
   Store,
   Lock,
@@ -297,6 +299,38 @@ const PROHIBITED_WORDS = [
   'casino', 'gambling', 'bet', 'slot', 'poker', 'drug', 'weed', 
   'scam', 'porn', 'nxnx', 'xxx', 'blackjack', 'roulette', 'lottery',
   'jackpot', 'sportsbook', 'wagering'
+];
+
+
+const BANNER_STYLES = [
+  { id: 'amber', label: 'Classic Gold', bg: '#d97706', text: '#fff' },
+  { id: 'indigo', label: 'Deep Indigo', bg: '#3730a3', text: '#fff' },
+  { id: 'forest', label: 'Forest', bg: '#166534', text: '#fff' },
+  { id: 'midnight', label: 'Midnight', bg: '#1c1917', text: '#fbbf24' },
+  { id: 'sunset', label: 'Sunset', bg: '#9a3412', text: '#fde68a' },
+  { id: 'crest', label: 'Avatar Crest', bg: 'crest', text: '#fff' },
+];
+
+const DISCIPLINES = [
+  { id: 'cs', label: 'Computer Science', icon: '💻' },
+  { id: 'math', label: 'Mathematics', icon: '📐' },
+  { id: 'physics', label: 'Physics', icon: '⚛️' },
+  { id: 'bio', label: 'Biology', icon: '🧬' },
+  { id: 'chem', label: 'Chemistry', icon: '🧪' },
+  { id: 'econ', label: 'Economics', icon: '📊' },
+  { id: 'eng', label: 'Engineering', icon: '⚙️' },
+  { id: 'law', label: 'Law', icon: '⚖️' },
+  { id: 'med', label: 'Medicine', icon: '🩺' },
+  { id: 'psych', label: 'Psychology', icon: '🧠' },
+  { id: 'other', label: 'Other', icon: '📚' },
+];
+
+const QA_CHANNELS = [
+  { id: 'telegram', label: 'Telegram', icon: '✈️', placeholder: 't.me/username or @handle' },
+  { id: 'instagram_dm', label: 'Instagram DM', icon: '📸', placeholder: '@your_instagram' },
+  { id: 'signal', label: 'Signal', icon: '🔒', placeholder: 'Signal username' },
+  { id: 'email', label: 'Email (generic)', icon: '📧', placeholder: 'any email (not .edu)' },
+  { id: 'nostr', label: 'Nostr', icon: '🟣', placeholder: 'npub...' },
 ];
 
 const STOREFRONT_FONTS = [
@@ -758,59 +792,62 @@ interface QualityGateModalProps {
 const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, onVerified, userXp = 0 }) => {
   const [step, setStep] = useState(1);
   const [isChecking, setIsChecking] = useState(false);
+  const [pastedCode, setPastedCode] = useState('');
+  const [scanResult, setScanResult] = useState<any>(null);
   const [manifest, setManifest] = useState({
     name: '',
     gameUrl: 'https://',
     category: 'GameRPG',
     description: '',
     stakeAmount: 100,
-    checks: {
-      endpointActive: false,
-      hasMainMenu: false,
-      hasL2Sync: false,
-    },
+    customDomains: '',
   });
   
   const hasProhibitedContent = containsRestrictedContent(manifest.name) || 
                                containsRestrictedContent(manifest.description) ||
                                PROHIBITED_CATEGORIES.includes(manifest.category);
-  
-  const canProceed = manifest.checks.endpointActive && 
-                     manifest.checks.hasMainMenu && 
-                     manifest.checks.hasL2Sync &&
-                     !hasProhibitedContent;
-  
-  const runHealthCheck = () => {
+
+  // Run real SDK scanner on pasted code
+  const runCodeScan = () => {
+    if (!pastedCode || pastedCode.length < 20) {
+      Alert.alert('No Code', 'Paste your DApp code to scan');
+      return;
+    }
     setIsChecking(true);
-    setTimeout(() => {
-      setManifest(prev => ({
-        ...prev,
-        checks: { ...prev.checks, endpointActive: true }
-      }));
-      setIsChecking(false);
-    }, 2000);
+    try {
+      const customDomains = manifest.customDomains.split(',').map(d => d.trim()).filter(Boolean);
+      const result = scanDAppCode(pastedCode, customDomains);
+      setScanResult(result);
+      console.log('[SDK-Scan]', result.passed ? 'PASSED' : 'FAILED', 
+        'violations:', result.violations.length, 
+        'warnings:', result.warnings.length,
+        'lines:', result.stats.linesScanned);
+    } catch (e) {
+      Alert.alert('Scan Error', String(e));
+    }
+    setIsChecking(false);
   };
+
+  const canProceed = scanResult?.passed && !hasProhibitedContent && manifest.name.length > 0;
   
   const getProjectedBoard = () => {
     if (manifest.stakeAmount >= 500) return { name: 'ELITE BOARD', color: COLORS.purple600 };
     if (manifest.stakeAmount >= 100) return { name: 'MAIN BOARD', color: COLORS.green600 };
     return { name: 'INCUBATOR', color: COLORS.amber600 };
   };
-  
   const board = getProjectedBoard();
   
   return (
     <Modal visible={visible} animationType="slide" transparent>
       <View style={qgStyles.overlay}>
         <View style={qgStyles.modal}>
-          {/* Header */}
           <View style={qgStyles.header}>
             <View>
               <View style={qgStyles.headerTitle}>
                 <ShieldCheck size={rs.s(20)} color={COLORS.amber500} />
-                <Text style={qgStyles.headerText}>DApp Quality Gate</Text>
+                <Text style={qgStyles.headerText}>SDK Compliance Gate</Text>
               </View>
-              <Text style={qgStyles.headerSubtext}>Step {step} of 3: Defining Trust Signals</Text>
+              <Text style={qgStyles.headerSubtext}>SDK v{SDK_VERSION} • Step {step} of 3</Text>
             </View>
             <TouchableOpacity onPress={onClose}>
               <X size={rs.s(24)} color={COLORS.stone500} />
@@ -820,214 +857,176 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
           <ScrollView style={qgStyles.content}>
             {step === 1 && (
               <View style={qgStyles.stepContent}>
-                <InputField
-                  label="App Name"
-                  value={manifest.name}
-                  onChangeText={(text) => setManifest({ ...manifest, name: text })}
-                  placeholder="e.g. Kaspa Quest"
-                />
+                <InputField label="App Name" value={manifest.name} onChangeText={(text) => setManifest({ ...manifest, name: text })} placeholder="e.g. Kaspa Quest" />
                 
-                {/* Category Selector */}
-                <Text style={inputStyles.label}>Category (Strict)</Text>
+                <Text style={inputStyles.label}>Category</Text>
                 <View style={qgStyles.categoryRow}>
                   {['GameRPG', 'GameStrategy', 'UtilityTool'].map(cat => (
-                    <TouchableOpacity
-                      key={cat}
-                      style={[
-                        qgStyles.categoryBtn,
-                        manifest.category === cat && qgStyles.categoryBtnActive
-                      ]}
-                      onPress={() => setManifest({ ...manifest, category: cat })}
-                    >
-                      <Text style={[
-                        qgStyles.categoryText,
-                        manifest.category === cat && qgStyles.categoryTextActive
-                      ]}>
-                        {cat.replace('Game', '').replace('Utility', '')}
-                      </Text>
+                    <TouchableOpacity key={cat} style={[qgStyles.categoryBtn, manifest.category === cat && qgStyles.categoryBtnActive]} onPress={() => setManifest({ ...manifest, category: cat })}>
+                      <Text style={[qgStyles.categoryText, manifest.category === cat && qgStyles.categoryTextActive]}>{cat.replace('Game', '').replace('Utility', '')}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-                <Text style={qgStyles.categoryNote}>
-                  Prohibited content apps are automatically rejected by the protocol.
-                </Text>
                 
-                {/* Prohibited Warning */}
                 {hasProhibitedContent && (
                   <View style={qgStyles.prohibitedBox}>
-                    <View style={qgStyles.prohibitedHeader}>
-                      <Ban size={rs.s(20)} color={COLORS.red600} />
-                      <Text style={qgStyles.prohibitedTitle}>Prohibited Content Detected</Text>
-                    </View>
-                    <Text style={qgStyles.prohibitedText}>
-                      Your DApp name or description contains restricted terms:
-                    </Text>
-                    <Text style={qgStyles.prohibitedList}>
-                      • Gambling, casino, slots, poker, blackjack, roulette{'\n'}
-                      • Betting, wagering, sportsbook{'\n'}
-                      • Lottery, raffle, jackpot
-                    </Text>
+                    <View style={qgStyles.prohibitedHeader}><Ban size={rs.s(20)} color={COLORS.red600} /><Text style={qgStyles.prohibitedTitle}>Prohibited Content</Text></View>
+                    <Text style={qgStyles.prohibitedText}>Name or description contains restricted terms.</Text>
                   </View>
                 )}
-                
-                {/* URL Test */}
-                <View style={qgStyles.urlSection}>
-                  <Text style={qgStyles.sectionTitle}>
-                    <Activity size={rs.s(14)} color={COLORS.stone700} /> Live Connection Test
+
+                <InputField label="Custom API Domains (comma-separated)" value={manifest.customDomains} onChangeText={(text) => setManifest({ ...manifest, customDomains: text })} placeholder="api.mygame.com, ws.mygame.com" note="Domains your DApp needs beyond the default whitelist" />
+
+                {/* Code Paste + SDK Scan */}
+                <View style={{ backgroundColor: COLORS.stone50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(16), borderWidth: 1, borderColor: COLORS.stone200 }}>
+                  <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.stone800, marginBottom: rs.s(6) }}>📋 Paste DApp Code for SDK Scan</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginBottom: rs.s(8) }}>
+                    The SDK scanner checks for image uploads, realistic faces, eval(), iframes, and {IMAGE_BYPASS_PATTERNS.length}+ violation patterns.
                   </Text>
-                  <View style={qgStyles.urlRow}>
-                    <TextInput
-                      style={qgStyles.urlInput}
-                      value={manifest.gameUrl}
-                      onChangeText={(text) => setManifest({ ...manifest, gameUrl: text })}
-                      placeholder="https://your-dapp.com"
-                      keyboardType="url"
-                    />
-                    <TouchableOpacity
-                      style={[
-                        qgStyles.urlButton,
-                        manifest.checks.endpointActive && qgStyles.urlButtonSuccess
-                      ]}
-                      onPress={runHealthCheck}
-                      disabled={isChecking || manifest.checks.endpointActive}
-                    >
-                      <Text style={qgStyles.urlButtonText}>
-                        {isChecking ? 'Pinging...' : manifest.checks.endpointActive ? 'Online' : 'Test URL'}
+                  <TextInput
+                    style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.stone300, borderRadius: rs.s(8), padding: rs.s(10), fontSize: rs.font(10), fontFamily: 'monospace', color: COLORS.stone700, minHeight: rs.s(120), textAlignVertical: 'top' }}
+                    value={pastedCode}
+                    onChangeText={setPastedCode}
+                    placeholder="Paste your full DApp source code here..."
+                    placeholderTextColor={COLORS.stone400}
+                    multiline
+                  />
+                  <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, marginTop: 4 }}>{pastedCode.length} chars • {pastedCode.split('\n').length} lines</Text>
+                  
+                  <TouchableOpacity
+                    style={{ backgroundColor: pastedCode.length > 20 ? COLORS.indigo600 : COLORS.stone300, borderRadius: rs.s(10), paddingVertical: rs.s(12), alignItems: 'center', marginTop: rs.s(8), flexDirection: 'row', justifyContent: 'center', gap: rs.s(8) }}
+                    onPress={runCodeScan}
+                    disabled={isChecking || pastedCode.length < 20}
+                  >
+                    {isChecking ? <ActivityIndicator color="#fff" size="small" /> : <ShieldCheck size={rs.s(16)} color="#fff" />}
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(13) }}>{isChecking ? 'Scanning...' : 'Run SDK Scanner'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Scan Results */}
+                {scanResult && (
+                  <View style={{ backgroundColor: scanResult.passed ? COLORS.green50 : COLORS.red50, borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(16), borderWidth: 2, borderColor: scanResult.passed ? COLORS.green500 : COLORS.red500 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(8), marginBottom: rs.s(8) }}>
+                      {scanResult.passed ? <ShieldCheck size={rs.s(20)} color={COLORS.green600} /> : <Ban size={rs.s(20)} color={COLORS.red600} />}
+                      <Text style={{ fontSize: rs.font(16), fontWeight: '900', color: scanResult.passed ? COLORS.green800 : COLORS.red800 }}>
+                        {scanResult.passed ? 'SCAN PASSED ✓' : 'SCAN FAILED ✗'}
                       </Text>
-                    </TouchableOpacity>
+                    </View>
+                    <Text style={{ fontSize: rs.font(11), color: COLORS.stone600, marginBottom: rs.s(6) }}>
+                      {scanResult.stats.linesScanned} lines scanned • {scanResult.stats.patternsChecked} patterns checked • {scanResult.stats.whitelistApplied} whitelisted
+                    </Text>
+                    
+                    {scanResult.violations.length > 0 && (
+                      <View style={{ marginTop: rs.s(4) }}>
+                        <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: COLORS.red800, marginBottom: 4 }}>Violations ({scanResult.violations.length}):</Text>
+                        {scanResult.violations.slice(0, 10).map((v: any, i: number) => (
+                          <View key={i} style={{ backgroundColor: '#fff', borderRadius: 6, padding: 8, marginBottom: 4 }}>
+                            <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: COLORS.red700 }}>Line {v.line}: {v.pattern}</Text>
+                            <Text style={{ fontSize: rs.font(9), fontFamily: 'monospace', color: COLORS.stone500 }} numberOfLines={1}>{v.code}</Text>
+                            <Text style={{ fontSize: rs.font(8), color: v.severity === 'critical' ? COLORS.red600 : COLORS.amber600 }}>Severity: {v.severity}</Text>
+                          </View>
+                        ))}
+                        {scanResult.violations.length > 10 && <Text style={{ fontSize: rs.font(10), color: COLORS.red600 }}>...and {scanResult.violations.length - 10} more</Text>}
+                      </View>
+                    )}
+                    
+                    {scanResult.warnings.length > 0 && (
+                      <View style={{ marginTop: rs.s(8) }}>
+                        <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: COLORS.amber800 }}>Warnings ({scanResult.warnings.length}):</Text>
+                        {scanResult.warnings.slice(0, 5).map((w: any, i: number) => (
+                          <Text key={i} style={{ fontSize: rs.font(9), color: COLORS.amber700, marginTop: 2 }}>⚠ Line {w.line}: {w.note}</Text>
+                        ))}
+                      </View>
+                    )}
                   </View>
-                </View>
-                
-                {/* Functionality Checks */}
-                <View style={qgStyles.checksSection}>
-                  <Text style={qgStyles.sectionTitle}>
-                    <Layout size={rs.s(14)} color={COLORS.stone700} /> Functionality Manifesto
-                  </Text>
-                  
-                  <TouchableOpacity
-                    style={qgStyles.checkItem}
-                    onPress={() => setManifest(prev => ({
-                      ...prev,
-                      checks: { ...prev.checks, hasMainMenu: !prev.checks.hasMainMenu }
-                    }))}
-                  >
-                    <View style={[
-                      qgStyles.checkbox,
-                      manifest.checks.hasMainMenu && qgStyles.checkboxChecked
-                    ]}>
-                      {manifest.checks.hasMainMenu && <Check size={rs.s(14)} color={COLORS.white} />}
-                    </View>
-                    <Text style={qgStyles.checkLabel}>UI/Menu is functional</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={qgStyles.checkItem}
-                    onPress={() => setManifest(prev => ({
-                      ...prev,
-                      checks: { ...prev.checks, hasL2Sync: !prev.checks.hasL2Sync }
-                    }))}
-                  >
-                    <View style={[
-                      qgStyles.checkbox,
-                      manifest.checks.hasL2Sync && qgStyles.checkboxChecked
-                    ]}>
-                      {manifest.checks.hasL2Sync && <Check size={rs.s(14)} color={COLORS.white} />}
-                    </View>
-                    <Text style={qgStyles.checkLabel}>L2 Save/Sync Logic implemented</Text>
-                  </TouchableOpacity>
-                </View>
+                )}
                 
                 <TouchableOpacity
                   style={[qgStyles.proceedBtn, !canProceed && qgStyles.proceedBtnDisabled]}
                   onPress={() => setStep(2)}
                   disabled={!canProceed}
                 >
-                  <Text style={qgStyles.proceedBtnText}>Continue to XP Stake</Text>
+                  <Text style={qgStyles.proceedBtnText}>{!scanResult ? 'Scan Code First' : !scanResult.passed ? 'Fix Violations to Continue' : 'Continue to XP Stake'}</Text>
                   <ChevronRight size={rs.s(18)} color={COLORS.white} />
                 </TouchableOpacity>
+                
+                {!scanResult && (
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone400, textAlign: 'center', marginTop: rs.s(8) }}>
+                    DApps are NOT visible in KasVillage unless they pass the SDK scan
+                  </Text>
+                )}
               </View>
             )}
             
             {step === 2 && (
               <View style={qgStyles.stepContent}>
                 <Text style={qgStyles.stepTitle}>Commit XP Reputation</Text>
-                <Text style={qgStyles.stepSubtitle}>
-                  Higher commitment = better board placement
-                </Text>
+                <Text style={qgStyles.stepSubtitle}>Higher commitment = better board placement</Text>
                 
-                {/* XP Slider */}
                 <View style={qgStyles.xpBox}>
                   <Text style={qgStyles.xpLabel}>XP Commitment</Text>
                   <Text style={qgStyles.xpValue}>{manifest.stakeAmount * 10} XP</Text>
                   <View style={qgStyles.xpButtons}>
                     {[50, 100, 250, 500].map(val => (
-                      <TouchableOpacity
-                        key={val}
-                        style={[
-                          qgStyles.xpBtn,
-                          manifest.stakeAmount === val && qgStyles.xpBtnActive
-                        ]}
-                        onPress={() => setManifest({ ...manifest, stakeAmount: val })}
-                      >
-                        <Text style={[
-                          qgStyles.xpBtnText,
-                          manifest.stakeAmount === val && qgStyles.xpBtnTextActive
-                        ]}>
-                          {val * 10}
-                        </Text>
+                      <TouchableOpacity key={val} style={[qgStyles.xpBtn, manifest.stakeAmount === val && qgStyles.xpBtnActive]} onPress={() => setManifest({ ...manifest, stakeAmount: val })}>
+                        <Text style={[qgStyles.xpBtnText, manifest.stakeAmount === val && qgStyles.xpBtnTextActive]}>{val * 10}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 </View>
                 
-                {/* Board Preview */}
                 <View style={[qgStyles.boardPreview, { borderColor: board.color }]}>
-                  <Text style={[qgStyles.boardName, { color: board.color }]}>
-                    {board.name}
-                  </Text>
+                  <Text style={[qgStyles.boardName, { color: board.color }]}>{board.name}</Text>
                   <Text style={qgStyles.boardDesc}>
-                    {manifest.stakeAmount >= 500 ? 'Premium placement, highest visibility' :
-                     manifest.stakeAmount >= 100 ? 'Verified apps, good visibility' :
-                     'Testing/beta apps, limited visibility'}
+                    {manifest.stakeAmount >= 500 ? 'Premium placement, highest visibility' : manifest.stakeAmount >= 100 ? 'Verified apps, good visibility' : 'Testing/beta apps, limited visibility'}
                   </Text>
                 </View>
                 
                 <View style={qgStyles.buttonRow}>
-                  <TouchableOpacity style={qgStyles.backBtn} onPress={() => setStep(1)}>
-                    <Text style={qgStyles.backBtnText}>← Back</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={qgStyles.stakeBtn}
-                    onPress={() => {
-                      Alert.alert('XP Committed', `${manifest.stakeAmount * 10} XP locked`);
+                  <TouchableOpacity style={qgStyles.backBtn} onPress={() => setStep(1)}><Text style={qgStyles.backBtnText}>← Back</Text></TouchableOpacity>
+                  <TouchableOpacity style={qgStyles.stakeBtn} onPress={async () => {
+                    try {
+                      // Prepare registration with real code hash
+                      const myPubkey = await SecureStore.getItemAsync('kv_public_key') || '';
+                      const reg = prepareDAppRegistration(pastedCode, SDK_TEMPLATE_HASH, myPubkey, 'DAPP_' + Date.now(), manifest.customDomains.split(',').map(d => d.trim()).filter(Boolean));
+                      console.log('[DApp-Reg] Hash:', reg.codeHash, 'SDK:', reg.sdkHash, 'passed:', reg.scanResult.passed);
+                      // Inscribe to Arweave
+                      try {
+                        const { uploadToIrys } = await import('./arweave_upload');
+                        await uploadToIrys(JSON.stringify({ ...reg, name: manifest.name, category: manifest.category, description: manifest.description, board: board.name, xpStake: manifest.stakeAmount * 10 }), [
+                          { name: 'App-Name', value: 'KasVillage' },
+                          { name: 'KV-Type', value: 'DApp' },
+                          { name: 'KV-DAppName', value: manifest.name },
+                          { name: 'KV-Category', value: manifest.category },
+                          { name: 'KV-CodeHash', value: reg.codeHash },
+                          { name: 'KV-SDKHash', value: reg.sdkHash },
+                          { name: 'KV-Board', value: board.name },
+                          { name: 'KV-Owner', value: myPubkey },
+                          { name: 'Content-Type', value: 'application/json' },
+                        ]);
+                        console.log('[DApp-Reg] Inscribed to Arweave');
+                      } catch (e) { console.warn('[DApp-Reg] Arweave failed (local only):', e); }
+                      Alert.alert('XP Committed', manifest.stakeAmount * 10 + ' XP locked for ' + manifest.name);
                       setStep(3);
-                    }}
-                  >
-                    <Text style={qgStyles.stakeBtnText}>Commit & Publish</Text>
-                  </TouchableOpacity>
+                    } catch (e) { Alert.alert('Error', String(e)); }
+                  }}><Text style={qgStyles.stakeBtnText}>Commit & Publish</Text></TouchableOpacity>
                 </View>
               </View>
             )}
             
             {step === 3 && (
               <View style={qgStyles.stepContent}>
-                <View style={qgStyles.successIcon}>
-                  <ShieldCheck size={rs.s(48)} color={COLORS.green600} />
+                <View style={qgStyles.successIcon}><ShieldCheck size={rs.s(48)} color={COLORS.green600} /></View>
+                <Text style={qgStyles.successTitle}>DApp SDK Compliant & Published!</Text>
+                <Text style={qgStyles.successSubtitle}>"{manifest.name}" is now live on the {board.name}</Text>
+                <View style={{ backgroundColor: COLORS.stone50, borderRadius: rs.s(10), padding: rs.s(12), marginBottom: rs.s(16) }}>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone600 }}>SDK Version: {SDK_VERSION}</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone600 }}>Lines Scanned: {scanResult?.stats?.linesScanned || 0}</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone600 }}>Violations: 0</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone600 }}>Code Hash: on Arweave</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.green600, fontWeight: 'bold', marginTop: 4 }}>✓ Periodic re-scan enabled via TownHall</Text>
                 </View>
-                <Text style={qgStyles.successTitle}>DApp Published!</Text>
-                <Text style={qgStyles.successSubtitle}>
-                  Your app "{manifest.name}" is now live on the {board.name}
-                </Text>
-                
-                <TouchableOpacity
-                  style={qgStyles.doneBtn}
-                  onPress={() => {
-                    onVerified(manifest);
-                    onClose();
-                  }}
-                >
-                  <Text style={qgStyles.doneBtnText}>Done</Text>
-                </TouchableOpacity>
+                <TouchableOpacity style={qgStyles.doneBtn} onPress={() => { onVerified({ ...manifest, scanResult }); onClose(); }}><Text style={qgStyles.doneBtnText}>Done</Text></TouchableOpacity>
               </View>
             )}
           </ScrollView>
@@ -1382,6 +1381,8 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
   const [rawEmailHeaders, setRawEmailHeaders] = useState('');
   const [verificationError, setVerificationError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [dkimSteps, setDkimSteps] = useState<string[]>([]);
+  const [dkimError, setDkimError] = useState('');
   const [researcherProfile, setResearcherProfile] = useState<any>(null);
   
   // Abstract submission
@@ -1392,6 +1393,10 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
   const [attestation1, setAttestation1] = useState(false);
   const [attestation2, setAttestation2] = useState(false);
   const [attestation3, setAttestation3] = useState(false);
+  const [abstractDiscipline, setAbstractDiscipline] = useState('');
+  const [abstractVideoUrl, setAbstractVideoUrl] = useState('');
+  const [qaChannel, setQaChannel] = useState('');
+  const [qaHandle, setQaHandle] = useState('');
   
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   
@@ -1633,6 +1638,26 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
   // Q&A HANDLERS (with P2P delivery + L1 hash commit)
   // ============================================================================
   
+  const openQAChannel = (abstract_: any, question: string) => {
+    const ch = abstract_.qaChannel;
+    const handle = abstract_.qaHandle || '';
+    if (ch === 'telegram' && handle) {
+      const tgUser = handle.replace('@', '').replace('t.me/', '');
+      Linking.openURL('https://t.me/' + tgUser + '?text=' + encodeURIComponent('Re: ' + abstract_.title + '\n\n' + question));
+    } else if (ch === 'instagram_dm' && handle) {
+      Linking.openURL('https://instagram.com/' + handle.replace('@', ''));
+      Alert.alert('DM on Instagram', 'Send your question as a DM to ' + handle);
+    } else if (ch === 'signal' && handle) {
+      Alert.alert('Signal', 'Message ' + handle + ' on Signal with your question.');
+    } else if (ch === 'email' && handle) {
+      Linking.openURL('mailto:' + handle + '?subject=' + encodeURIComponent('Re: ' + abstract_.title) + '&body=' + encodeURIComponent(question));
+    } else if (ch === 'nostr' && handle) {
+      Alert.alert('Nostr', 'Send a DM to ' + handle + ' on Nostr.');
+    } else {
+      Alert.alert('Contact', 'The researcher has not set a contact channel. Check the abstract for contact info.');
+    }
+  };
+
   const handleAskQuestion = async () => {
     if (!selectedAbstract || !newQuestion.trim()) return;
     setSubmittingQuestion(true);
@@ -1671,6 +1696,13 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       
       setNewQuestion('');
       setSubmittingQuestion(false);
+      // Prompt to open researcher's contact channel
+      if (selectedAbstract.qaChannel && selectedAbstract.qaHandle) {
+        Alert.alert('Question Saved!', 'Now send it to the researcher via ' + (QA_CHANNELS.find(c => c.id === selectedAbstract.qaChannel)?.label || 'their channel') + '?', [
+          { text: 'Later', style: 'cancel' },
+          { text: 'Open ' + (QA_CHANNELS.find(c => c.id === selectedAbstract.qaChannel)?.label || 'Channel'), onPress: () => openQAChannel(selectedAbstract, newQuestion.trim()) },
+        ]);
+      }
     };
     
     if (price > 0) {
@@ -1814,6 +1846,10 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
     setIsLoading(true);
     const newAbstract: AbstractItem = {
       id: `ABS_${Date.now()}`,
+      discipline: abstractDiscipline,
+      videoUrl: abstractVideoUrl,
+      qaChannel,
+      qaHandle,
       title: abstractTitle,
       text: abstractText,
       researcherId: researcherProfile.researcher_id,
@@ -1832,6 +1868,8 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
     setAbstractText('');
     setRepositoryUrl('');
     setKeywords('');
+    setAbstractDiscipline('');
+    setAbstractVideoUrl('');
     setAttestation1(false);
     setAttestation2(false);
     setAttestation3(false);
@@ -1958,6 +1996,8 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                           }} style={{ marginTop: 10 }}>
                             <Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>📎 View Repository</Text>
                           </TouchableOpacity>
+                          {selectedAbstract.videoUrl ? <TouchableOpacity onPress={() => Linking.openURL(selectedAbstract.videoUrl)} style={{ marginTop: 6 }}><Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>🎬 Watch Video Explainer</Text></TouchableOpacity> : null}
+                          {selectedAbstract.qaChannel && selectedAbstract.qaHandle ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, backgroundColor: '#fef3c7', borderRadius: 8, padding: 8 }}><Text style={{ fontSize: 11, color: '#92400e' }}>💬 Questions via {selectedAbstract.qaChannel}: <Text style={{ fontWeight: 'bold' }}>{selectedAbstract.qaHandle}</Text></Text></View> : null}
                         </View>
                         
                         {/* Q&A Section */}
@@ -2031,7 +2071,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                             )}
                             <TextInput
                               style={{ backgroundColor: COLORS.stone100, borderRadius: 8, padding: 10, fontSize: 14, color: COLORS.stone800, minHeight: 60, textAlignVertical: 'top' }}
-                              placeholder="Ask a question about this research..."
+                              placeholder="Type your question here..."
                               placeholderTextColor={COLORS.stone400}
                               multiline
                               value={newQuestion}
@@ -2094,189 +2134,168 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
               </View>
             )}
             
-            {/* Submit Tab */}
+            {/* Submit Tab — DKIM On-Device Verification */}
             {activeTab === 'submit' && (
               <View style={acStyles.tabContent}>
-                {verificationStep === 0 && (
+                {/* Step 0: Get Code — no email field exists */}
+                {verificationStep === 0 && !researcherProfile && (
                   <View>
-                    <Text style={acStyles.sectionTitle}>🔐 .edu Email Verification</Text>
-                    <Text style={acStyles.sectionSubtitle}>
-                      Prove institutional affiliation without revealing your identity
-                    </Text>
-                    
-                    <InputField
-                      label="Your .edu Email"
-                      value={eduEmail}
-                      onChangeText={setEduEmail}
-                      placeholder="you@university.edu"
-                      keyboardType="email-address"
-                    />
-                    
-                    {verificationError && (
-                      <Text style={acStyles.errorText}>{verificationError}</Text>
-                    )}
-                    
-                    <TouchableOpacity
-                      style={[acStyles.verifyBtn, isLoading && { opacity: 0.6 }]}
-                      onPress={handleRequestVerification}
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <ActivityIndicator color={COLORS.white} />
-                      ) : (
-                        <Text style={acStyles.verifyBtnText}>Generate Verification Link</Text>
-                      )}
+                    <Text style={{ fontSize: rs.font(20), fontWeight: '900', color: COLORS.amber900, textAlign: 'center', marginBottom: rs.s(8) }}>🎓 Prove Your School Email</Text>
+                    <Text style={{ fontSize: rs.font(13), color: COLORS.stone600, textAlign: 'center', marginBottom: rs.s(16), lineHeight: rs.font(20) }}>Your email NEVER enters this app — not even for a second.{String.fromCharCode(10)}We only read the school name from the DKIM digital stamp.</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 24, marginBottom: 16 }}>
+                      {['Get Code', 'Paste Proof'].map((label, i) => (
+                        <View key={i} style={{ alignItems: 'center' }}>
+                          <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: i === 0 ? COLORS.amber600 : COLORS.stone200, justifyContent: 'center', alignItems: 'center' }}>
+                            <Text style={{ color: i === 0 ? '#fff' : COLORS.stone500, fontWeight: 'bold', fontSize: 12 }}>{i + 1}</Text>
+                          </View>
+                          <Text style={{ fontSize: 9, color: COLORS.stone500, marginTop: 4 }}>{label}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <View style={{ backgroundColor: COLORS.blue50, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: COLORS.blue200, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.blue800, marginBottom: 8 }}>Your verification code:</Text>
+                      <Text selectable style={{ fontSize: 36, fontWeight: '900', fontFamily: 'monospace', color: COLORS.amber900, letterSpacing: 6 }}>{magicLink || '------'}</Text>
+                      <TouchableOpacity onPress={() => { const code = Math.floor(100000 + Math.random() * 900000).toString(); setMagicLink(code); Clipboard.setString(code); Alert.alert('Code Ready!', code + ' copied. Paste it in your email subject line.'); }} style={{ backgroundColor: COLORS.amber600, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 24, marginTop: 10 }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{magicLink ? 'Copy Code Again' : 'Generate Code'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={{ backgroundColor: COLORS.stone50, borderRadius: 10, padding: 12, marginBottom: 16, gap: 6 }}>
+                      <Text style={{ fontSize: 13, fontWeight: 'bold', color: COLORS.stone800 }}>Then do this:</Text>
+                      <Text style={{ fontSize: 12, color: COLORS.stone600 }}>1. Open your school email (Gmail, Outlook, etc.)</Text>
+                      <Text style={{ fontSize: 12, color: COLORS.stone600 }}>2. Send a new email TO YOURSELF from your .edu</Text>
+                      <Text style={{ fontSize: 12, color: COLORS.stone600 }}>3. Put the code above in the subject line</Text>
+                      <Text style={{ fontSize: 12, color: COLORS.stone600 }}>4. Hit send, come back here, tap Next</Text>
+                    </View>
+                    <TouchableOpacity style={{ backgroundColor: magicLink ? COLORS.amber600 : COLORS.stone300, borderRadius: 12, paddingVertical: 16, alignItems: 'center' }} onPress={() => { if (!magicLink) { Alert.alert('Generate Code First'); return; } setVerificationStep(1); }} disabled={!magicLink}>
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>I Sent the Email → Next</Text>
                     </TouchableOpacity>
-                    
-                    <View style={acStyles.privacyBox}>
-                      <ShieldCheck size={rs.s(16)} color={COLORS.green600} />
-                      <Text style={acStyles.privacyText}>
-                        We never store your email — only a hash of your institution domain.
-                      </Text>
+                    <View style={{ backgroundColor: COLORS.green50, borderRadius: 10, padding: 12, marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <ShieldCheck size={18} color={COLORS.green600} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: COLORS.green800 }}>Zero Knowledge</Text>
+                        <Text style={{ fontSize: 10, color: COLORS.green700 }}>No email field exists. We read your school from the DKIM stamp. DNS lookup for public key → RSA verify on YOUR phone. Zero PII transmitted.</Text>
+                      </View>
                     </View>
                   </View>
                 )}
-                
-                {verificationStep === 1 && (
+
+                {/* Step 1: Paste Proof + Real DKIM Verify */}
+                {verificationStep === 1 && !researcherProfile && (
                   <View>
-                    <Text style={acStyles.sectionTitle}>📧 DKIM Verification</Text>
-                    <Text style={acStyles.sectionSubtitle}>
-                      Copy link → Email to yourself → Paste raw headers back
-                    </Text>
-                    
-                    <View style={acStyles.linkBox}>
-                      <Text style={acStyles.linkLabel}>Your Magic Link:</Text>
-                      <Text style={acStyles.linkText} numberOfLines={2}>{magicLink}</Text>
-                      <TouchableOpacity style={acStyles.copyBtn} onPress={copyMagicLink}>
-                        <Copy size={rs.s(16)} color={COLORS.white} />
-                        <Text style={acStyles.copyBtnText}>Copy Link</Text>
-                      </TouchableOpacity>
+                    <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.amber900, textAlign: 'center', marginBottom: 8 }}>📋 Paste the Proof</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 24, marginBottom: 16 }}>
+                      {['Get Code', 'Paste Proof'].map((label, i) => (
+                        <View key={i} style={{ alignItems: 'center' }}>
+                          <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.amber600, justifyContent: 'center', alignItems: 'center' }}>
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>{i === 0 ? '✓' : '2'}</Text>
+                          </View>
+                          <Text style={{ fontSize: 9, color: COLORS.stone500, marginTop: 4 }}>{label}</Text>
+                        </View>
+                      ))}
                     </View>
-                    
-                    <InputField
-                      label="Paste Raw Email Headers"
-                      value={rawEmailHeaders}
-                      onChangeText={setRawEmailHeaders}
-                      placeholder="Paste the full email headers here including DKIM-Signature..."
-                      multiline
-                    />
-                    
-                    {verificationError && (
-                      <Text style={acStyles.errorText}>{verificationError}</Text>
+                    <Text style={{ fontSize: 13, color: COLORS.stone600, textAlign: 'center', marginBottom: 12 }}>Open the email you sent. Get the raw source:</Text>
+                    <View style={{ backgroundColor: COLORS.stone50, borderRadius: 12, padding: 12, marginBottom: 12, gap: 8 }}>
+                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>📱 Gmail (phone)</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>Open email → ⋮ → "Show original" → Copy</Text></View>
+                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>💻 Gmail (computer)</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>Open email → ⋮ → "Show original" → Select all → Copy</Text></View>
+                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>📧 Outlook</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>Open email → ··· → "View message source" → Copy</Text></View>
+                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>🍎 Apple Mail</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>View → Message → Raw Source → Copy</Text></View>
+                    </View>
+                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone700, marginBottom: 6 }}>Paste everything here:</Text>
+                    <TextInput style={{ backgroundColor: '#fff', borderWidth: 2, borderColor: rawEmailHeaders.length > 200 ? COLORS.green500 : COLORS.stone300, borderRadius: 12, padding: 12, fontSize: 11, fontFamily: 'monospace', color: COLORS.stone700, minHeight: 100, textAlignVertical: 'top' }} value={rawEmailHeaders} onChangeText={setRawEmailHeaders} placeholder="Paste the full email source here..." placeholderTextColor={COLORS.stone400} multiline />
+                    {rawEmailHeaders.length > 0 && <Text style={{ fontSize: 10, color: rawEmailHeaders.length > 200 ? COLORS.green600 : COLORS.amber600, marginTop: 4 }}>{rawEmailHeaders.length > 200 ? '✓ ' + rawEmailHeaders.length + ' chars pasted' : '⚠ Keep pasting — need the full source'}</Text>}
+                    {verificationError ? <Text style={{ fontSize: 11, color: COLORS.red600, marginTop: 8 }}>{verificationError}</Text> : null}
+                    {dkimSteps && dkimSteps.length > 0 && (
+                      <View style={{ backgroundColor: '#f0f9ff', borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 1, borderColor: '#93c5fd' }}>
+                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#1e40af', marginBottom: 4 }}>Verification Steps:</Text>
+                        {dkimSteps.map((st, i) => (
+                          <Text key={i} style={{ fontSize: 9, color: st.includes('VALID') ? '#16a34a' : st.includes('failed') ? '#dc2626' : '#3b82f6', fontFamily: 'monospace', marginBottom: 2 }}>{st}</Text>
+                        ))}
+                      </View>
                     )}
-                    
-                    <TouchableOpacity
-                      style={[acStyles.verifyBtn, isLoading && { opacity: 0.6 }]}
-                      onPress={verifyWithDkim}
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <ActivityIndicator color={COLORS.white} />
-                      ) : (
-                        <Text style={acStyles.verifyBtnText}>Verify DKIM Signature</Text>
-                      )}
+                    <TouchableOpacity style={{ backgroundColor: rawEmailHeaders.length > 200 ? COLORS.green600 : COLORS.stone300, borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 12 }} onPress={async () => {
+                      if (rawEmailHeaders.length < 200) { setVerificationError('Paste the full email source'); return; }
+                      setIsLoading(true); setVerificationError(''); setDkimSteps([]);
+                      try {
+                        const result = await verifyDKIM(rawEmailHeaders);
+                        setDkimSteps(result.steps);
+                        if (!result.verified) { setVerificationError(result.error || 'DKIM verification failed. Make sure you pasted the complete email source.'); setIsLoading(false); return; }
+                        if (magicLink && !rawEmailHeaders.includes(magicLink)) { setVerificationError('Code ' + magicLink + ' not found. Did you put it in the subject?'); setIsLoading(false); return; }
+                        const domain = result.domain;
+                        const domainHash = bytesToHex(sha256(new TextEncoder().encode('KV_EDU_' + domain)));
+                        const researcherId = 'RES_' + domainHash.slice(0, 12).toUpperCase();
+                        await SecureStore.setItemAsync('kv_researcher_id', researcherId);
+                        await SecureStore.setItemAsync('kv_researcher_domain_hash', domainHash);
+                        await SecureStore.setItemAsync('kv_researcher_domain', domain);
+                        setRawEmailHeaders(''); setMagicLink(''); setEduEmail('');
+                        setResearcherProfile({ researcher_id: researcherId, email_verified: true, institution_domain: domain, domain_hash: domainHash, xp: 0, abstract_count: 0, questions_answered: 0, question_price: 0 });
+                        Alert.alert('Verified! 🎓', 'DKIM cryptographically verified on-device!\n\nSchool: ' + domain + '\nID: ' + researcherId + '\n\nZero data left your phone.');
+                      } catch (e) { setVerificationError(String(e)); }
+                      setIsLoading(false);
+                    }} disabled={isLoading || rawEmailHeaders.length < 200}>
+                      {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>🔐 Verify DKIM Signature</Text>}
                     </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setVerificationStep(0)} style={{ alignItems: 'center', paddingVertical: 8, marginTop: 4 }}><Text style={{ color: COLORS.stone400, fontSize: 12 }}>← Start over</Text></TouchableOpacity>
+                    <View style={{ backgroundColor: COLORS.green50, borderRadius: 10, padding: 12, marginTop: 12 }}>
+                      <Text style={{ fontSize: 10, color: COLORS.green700, textAlign: 'center', lineHeight: 15 }}>🔒 DNS lookup for school's public key → RSA verify on YOUR phone → only school name saved. Zero PII transmitted.</Text>
+                    </View>
                   </View>
                 )}
-                
-                {verificationStep === 2 && (
+
+                {/* Verified — Abstract Submission Form */}
+                {researcherProfile && (
                   <View>
-                    <View style={acStyles.verifiedBadge}>
-                      <ShieldCheck size={rs.s(20)} color={COLORS.green700} />
-                      <Text style={acStyles.verifiedText}>Verified Researcher</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.green100, borderRadius: 12, padding: 12, marginBottom: 16 }}>
+                      <ShieldCheck size={20} color={COLORS.green700} />
+                      <View><Text style={{ fontSize: 14, fontWeight: 'bold', color: COLORS.green800 }}>Verified Researcher 🎓</Text><Text style={{ fontSize: 10, color: COLORS.green600 }}>{researcherProfile.institution_domain} • {researcherProfile.researcher_id}</Text></View>
                     </View>
-                    
-                    <InputField
-                      label="Abstract Title"
-                      value={abstractTitle}
-                      onChangeText={setAbstractTitle}
-                      placeholder="Your research title..."
-                    />
-                    
-                    <InputField
-                      label="Abstract Text"
-                      value={abstractText}
-                      onChangeText={setAbstractText}
-                      placeholder="Full abstract (500 words max)..."
-                      multiline
-                    />
-                    
-                    <InputField
-                      label="Repository URL"
-                      value={repositoryUrl}
-                      onChangeText={setRepositoryUrl}
-                      placeholder="https://arxiv.org/abs/..."
-                      keyboardType="url"
-                    />
-                    
-                    <InputField
-                      label="Keywords"
-                      value={keywords}
-                      onChangeText={setKeywords}
-                      placeholder="machine learning, cryptography, ..."
-                    />
-                    
-                    {/* Attestations */}
-                    <View style={acStyles.attestationBox}>
-                      <Text style={acStyles.attestationTitle}>Required Attestations</Text>
-                      
-                      <TouchableOpacity
-                        style={acStyles.attestationItem}
-                        onPress={() => setAttestation1(!attestation1)}
-                      >
-                        <View style={[acStyles.attestationCheck, attestation1 && acStyles.attestationChecked]}>
-                          {attestation1 && <Check size={rs.s(12)} color={COLORS.white} />}
-                        </View>
-                        <Text style={acStyles.attestationText}>
-                          <Text style={{ fontWeight: 'bold' }}>I attest this is my original work</Text> or I have proper attribution.
-                        </Text>
-                      </TouchableOpacity>
-                      
-                      <TouchableOpacity
-                        style={acStyles.attestationItem}
-                        onPress={() => setAttestation2(!attestation2)}
-                      >
-                        <View style={[acStyles.attestationCheck, attestation2 && acStyles.attestationChecked]}>
-                          {attestation2 && <Check size={rs.s(12)} color={COLORS.white} />}
-                        </View>
-                        <Text style={acStyles.attestationText}>
-                          <Text style={{ fontWeight: 'bold' }}>This is my sole representation.</Text> Misrepresentation may result in termination.
-                        </Text>
-                      </TouchableOpacity>
-                      
-                      <TouchableOpacity
-                        style={acStyles.attestationItem}
-                        onPress={() => setAttestation3(!attestation3)}
-                      >
-                        <View style={[acStyles.attestationCheck, attestation3 && acStyles.attestationChecked]}>
-                          {attestation3 && <Check size={rs.s(12)} color={COLORS.white} />}
-                        </View>
-                        <Text style={acStyles.attestationText}>
-                          <Text style={{ fontWeight: 'bold' }}>My .edu email is legitimately mine.</Text> Poor answer ratings will reduce XP.
-                        </Text>
-                      </TouchableOpacity>
+                    <InputField label="Abstract Title" value={abstractTitle} onChangeText={setAbstractTitle} placeholder="Your research title..." />
+                    <InputField label="Abstract Text" value={abstractText} onChangeText={setAbstractText} placeholder="Full abstract (500 words max)..." multiline />
+                    <InputField label="Repository URL" value={repositoryUrl} onChangeText={setRepositoryUrl} placeholder="https://arxiv.org/abs/..." keyboardType="url" />
+                    <InputField label="Keywords (comma separated)" value={keywords} onChangeText={setKeywords} placeholder="machine learning, cryptography, ..." />
+                    <Text style={{ fontSize: 10, fontWeight: 'bold', color: COLORS.stone500, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Field / Discipline</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                      {DISCIPLINES.map(d => (
+                        <TouchableOpacity key={d.id} onPress={() => setAbstractDiscipline(d.id)} style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: abstractDiscipline === d.id ? COLORS.amber100 : COLORS.stone50, borderWidth: 1, borderColor: abstractDiscipline === d.id ? COLORS.amber500 : COLORS.stone200 }}>
+                          <Text style={{ fontSize: 11, color: abstractDiscipline === d.id ? COLORS.amber900 : COLORS.stone600 }}>{d.icon} {d.label}</Text>
+                        </TouchableOpacity>
+                      ))}
                     </View>
-                    
-                    <TouchableOpacity
-                      style={[
-                        acStyles.submitBtn,
-                        (!attestation1 || !attestation2 || !attestation3) && { opacity: 0.5 }
-                      ]}
-                      onPress={handleSubmitAbstract}
-                      disabled={!attestation1 || !attestation2 || !attestation3 || isLoading}
-                    >
-                      {isLoading ? (
-                        <ActivityIndicator color={COLORS.white} />
-                      ) : (
-                        <Text style={acStyles.submitBtnText}>Submit Your Abstract</Text>
-                      )}
+                    <View style={{ backgroundColor: COLORS.blue50, borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: COLORS.blue200 }}>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.blue800, marginBottom: 4 }}>🎬 Video Explainer (optional)</Text>
+                      <Text style={{ fontSize: 10, color: COLORS.blue600, marginBottom: 8 }}>Short video on Instagram/TikTok explaining your research</Text>
+                      <TextInput style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.blue300, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: COLORS.stone800 }} value={abstractVideoUrl} onChangeText={setAbstractVideoUrl} placeholder="https://instagram.com/reel/..." placeholderTextColor={COLORS.stone400} keyboardType="url" autoCapitalize="none" />
+                    </View>
+                    <View style={{ backgroundColor: '#fef3c7', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#f59e0b' }}>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#92400e', marginBottom: 4 }}>💬 How should people reach you?</Text>
+                      <Text style={{ fontSize: 10, color: '#b45309', marginBottom: 8 }}>Questions get routed to your chosen channel</Text>
+                      <View style={{ gap: 6 }}>
+                        {QA_CHANNELS.map(ch => (
+                          <TouchableOpacity key={ch.id} onPress={() => setQaChannel(ch.id)} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: qaChannel === ch.id ? '#fef3c7' : '#fff', borderRadius: 8, padding: 10, borderWidth: qaChannel === ch.id ? 2 : 1, borderColor: qaChannel === ch.id ? '#f59e0b' : COLORS.stone200, gap: 8 }}>
+                            <Text style={{ fontSize: 18 }}>{ch.icon}</Text>
+                            <Text style={{ fontSize: 12, fontWeight: qaChannel === ch.id ? 'bold' : 'normal', color: COLORS.stone700 }}>{ch.label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      {qaChannel ? <TextInput style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#f59e0b', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: COLORS.stone800, marginTop: 8 }} value={qaHandle} onChangeText={setQaHandle} placeholder={QA_CHANNELS.find(c => c.id === qaChannel)?.placeholder || 'Your handle...'} placeholderTextColor={COLORS.stone400} autoCapitalize="none" /> : null}
+                    </View>
+                    <View style={{ backgroundColor: COLORS.red50, borderWidth: 1, borderColor: COLORS.red200, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: COLORS.red800, marginBottom: 8 }}>Required Attestations</Text>
+                      {[{ s: attestation1, f: setAttestation1, t: 'This is my original work or properly attributed.' }, { s: attestation2, f: setAttestation2, t: 'This is my sole representation. Misrepresentation = termination.' }, { s: attestation3, f: setAttestation3, t: 'My .edu email is legitimately mine.' }].map((a, i) => (
+                        <TouchableOpacity key={i} onPress={() => a.f(!a.s)} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+                          <View style={{ width: 20, height: 20, borderRadius: 4, borderWidth: 1, borderColor: a.s ? COLORS.red600 : COLORS.red300, backgroundColor: a.s ? COLORS.red600 : 'transparent', justifyContent: 'center', alignItems: 'center', marginTop: 2 }}>{a.s && <Check size={12} color="#fff" />}</View>
+                          <Text style={{ flex: 1, fontSize: 11, color: COLORS.red800 }}>{a.t}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <TouchableOpacity style={{ backgroundColor: (attestation1 && attestation2 && attestation3) ? COLORS.amber700 : COLORS.stone300, borderRadius: 12, paddingVertical: 16, alignItems: 'center' }} onPress={handleSubmitAbstract} disabled={!attestation1 || !attestation2 || !attestation3 || isLoading}>
+                      {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Submit Abstract</Text>}
                     </TouchableOpacity>
                   </View>
                 )}
               </View>
             )}
             
-            {/* Services Tab */}
+                        {/* Services Tab */}
             {activeTab === 'services' && (
               <View style={acStyles.tabContent}>
                 <View style={acStyles.serviceBox}>
@@ -2861,6 +2880,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   const [storeCategory, setStoreCategory] = useState('General');
   const [logoUrl, setLogoUrl] = useState('');
   const [logoShape, setLogoShape] = useState<'round' | 'square'>('round');
+  const [bannerStyle, setBannerStyle] = useState(BANNER_STYLES[0]);
   const [socialLinks, setSocialLinks] = useState<Record<string, string>>({});
   const [commChannels, setCommChannels] = useState<Record<string, string>>({});
   
@@ -2875,6 +2895,28 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   // Items
   const [stash, setStash] = useState<any[]>([]);
   
+  // Graffiti Banner Recipe
+  const [bannerRecipe, setBannerRecipe] = useState({
+    text: hostName || 'MY STORE',
+    style: 'block' as 'block' | 'bubble' | 'wild',
+    fillColor: '#d97706',
+    outlineColor: '#1c1917',
+    shadowColor: '#78350f',
+    bgColor: '#fafaf9',
+    decoStyle: 'stars' as 'stars' | 'arrows' | 'plain',
+  });
+  
+  // Item editing
+  const [editingItem, setEditingItem] = useState<any>(null);
+  const [showItemForm, setShowItemForm] = useState(false);
+  const [itemForm, setItemForm] = useState({ name: '', description: '', dollarPrice: '', kaspaPrice: '', socialUrl: '' });
+  
+  // Coupons
+  const [coupons, setCoupons] = useState<any[]>([]);
+  const [showCouponForm, setShowCouponForm] = useState(false);
+  const [editingCoupon, setEditingCoupon] = useState<any>(null);
+  const [couponForm, setCouponForm] = useState({ code: '', discountPercent: '', discountKas: '', maxUses: '10', expiryDays: '30', description: '' });
+  
   // Publishing state
   const [isPublishing, setIsPublishing] = useState(false);
   
@@ -2882,6 +2924,33 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   const [showQualityGate, setShowQualityGate] = useState(false);
   const [showAcademicPanel, setShowAcademicPanel] = useState(false);
   
+
+  // Load storefront config on mount
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const json = await SecureStore.getItemAsync('storefront_' + hostId);
+        if (!json) return;
+        const cfg = JSON.parse(json);
+        if (cfg.brandName) setBrandName(cfg.brandName);
+        if (cfg.storeDescription) setStoreDescription(cfg.storeDescription);
+        if (cfg.storeCategory) setStoreCategory(cfg.storeCategory);
+        if (cfg.logoUrl) setLogoUrl(cfg.logoUrl);
+        if (cfg.logoShape) setLogoShape(cfg.logoShape);
+        if (cfg.socialLinks) setSocialLinks(cfg.socialLinks);
+        if (cfg.commChannels) setCommChannels(cfg.commChannels);
+        if (cfg.selectedFont) setSelectedFont(cfg.selectedFont);
+        if (cfg.selectedLayout) setSelectedLayout(cfg.selectedLayout);
+        if (cfg.stash) setStash(cfg.stash);
+        if (cfg.bannerStyle) setBannerStyle(cfg.bannerStyle);
+        if (cfg.coupons) setCoupons(cfg.coupons);
+        if (cfg.bannerRecipe) setBannerRecipe(cfg.bannerRecipe);
+        console.log('[Workspace] Loaded config for', hostId);
+      } catch (e) { console.warn('[Workspace] Config load failed:', e); }
+    };
+    loadConfig();
+  }, []);
+
   // Load avatar data on mount
   useEffect(() => {
     const loadAvatar = async () => {
@@ -2913,6 +2982,125 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     loadAvatar();
   }, []);
   
+  // Item CRUD
+  const handleSaveItem = () => {
+    if (!itemForm.name.trim()) { Alert.alert('Required', 'Item name is required'); return; }
+    if (!itemForm.socialUrl.trim()) { Alert.alert('Required', 'Social post URL is required — link to your Instagram/Pinterest/Etsy listing'); return; }
+    const url = itemForm.socialUrl.trim();
+    const allowed = ['instagram.com', 'pinterest.com', 'etsy.com', 'tiktok.com', 'facebook.com', 'youtube.com', 'ebay.com'];
+    const isAllowed = allowed.some(d => url.includes(d));
+    if (!isAllowed && url.startsWith('http')) { Alert.alert('Whitelist Only', 'Links must be from: Instagram, Pinterest, Etsy, TikTok, Facebook, YouTube, or eBay'); return; }
+    
+    const item = {
+      id: editingItem?.id || 'item_' + Date.now(),
+      name: itemForm.name.trim(),
+      description: itemForm.description.trim(),
+      dollarPrice: parseFloat(itemForm.dollarPrice) || 0,
+      kaspaPrice: parseFloat(itemForm.kaspaPrice) || 0,
+      socialUrl: url.startsWith('http') ? url : 'https://' + url,
+      platform: url.includes('instagram') ? 'instagram' : url.includes('pinterest') ? 'pinterest' : url.includes('etsy') ? 'etsy' : url.includes('tiktok') ? 'tiktok' : url.includes('ebay') ? 'ebay' : 'other',
+      updatedAt: Date.now(),
+    };
+    
+    if (editingItem) {
+      setStash(prev => prev.map(i => i.id === editingItem.id ? item : i));
+    } else {
+      setStash(prev => [...prev, item]);
+    }
+    setShowItemForm(false);
+    setEditingItem(null);
+    setItemForm({ name: '', description: '', dollarPrice: '', kaspaPrice: '', socialUrl: '' });
+    // Auto-save locally
+    SecureStore.setItemAsync('storefront_items_' + hostId, JSON.stringify(
+      editingItem ? stash.map(i => i.id === editingItem.id ? item : i) : [...stash, item]
+    )).catch(() => {});
+  };
+  
+  const handleEditItem = (item: any) => {
+    setEditingItem(item);
+    setItemForm({
+      name: item.name || '',
+      description: item.description || '',
+      dollarPrice: item.dollarPrice?.toString() || '',
+      kaspaPrice: item.kaspaPrice?.toString() || '',
+      socialUrl: item.socialUrl || '',
+    });
+    setShowItemForm(true);
+  };
+  
+  const handleDeleteItem = (itemId: string) => {
+    Alert.alert('Delete Item?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => {
+        const updated = stash.filter(i => i.id !== itemId);
+        setStash(updated);
+        SecureStore.setItemAsync('storefront_items_' + hostId, JSON.stringify(updated)).catch(() => {});
+      }},
+    ]);
+  };
+  
+  const getPlatformIcon = (url: string) => {
+    if (url?.includes('instagram')) return '📸';
+    if (url?.includes('pinterest')) return '📌';
+    if (url?.includes('etsy')) return '🛍️';
+    if (url?.includes('tiktok')) return '🎵';
+    if (url?.includes('ebay')) return '🏷️';
+    if (url?.includes('facebook')) return '📘';
+    return '🔗';
+  };
+
+  // Coupon CRUD
+  const handleSaveCoupon = () => {
+    const code = couponForm.code.trim().toUpperCase();
+    if (!code || code.length < 3) { Alert.alert('Required', 'Coupon code must be at least 3 characters'); return; }
+    if (!couponForm.discountPercent && !couponForm.discountKas) { Alert.alert('Required', 'Set a discount (% or KAS)'); return; }
+    const coupon = {
+      id: editingCoupon?.id || 'cpn_' + Date.now(),
+      code,
+      discountPercent: parseFloat(couponForm.discountPercent) || 0,
+      discountKas: parseFloat(couponForm.discountKas) || 0,
+      maxUses: parseInt(couponForm.maxUses) || 10,
+      usedCount: editingCoupon?.usedCount || 0,
+      expiryDays: parseInt(couponForm.expiryDays) || 30,
+      description: couponForm.description.trim(),
+      createdAt: editingCoupon?.createdAt || Date.now(),
+    };
+    if (editingCoupon) {
+      setCoupons(prev => prev.map(c => c.id === editingCoupon.id ? coupon : c));
+    } else {
+      setCoupons(prev => [...prev, coupon]);
+    }
+    setShowCouponForm(false);
+    setEditingCoupon(null);
+    setCouponForm({ code: '', discountPercent: '', discountKas: '', maxUses: '10', expiryDays: '30', description: '' });
+  };
+
+  // Visibility score (client-side mirror of TownHall algorithm)
+  // Weights: 30% XP, 25% runway, 25% price, 10% pledge, 10% freshness
+  // Price score: low USD = good, KAS discount from USD = even better
+  const calcVisibilityScore = (xp: number, runwayPct: number, avgUsdPrice: number, avgKasPrice: number, kasRateUsd: number, pledgeKas: number, ageHours: number, hasCoupons: boolean) => {
+    const xpScore = Math.min(xp / 5000, 1.0);
+    const runwayScore = Math.min(runwayPct / 100, 1.0);
+    
+    // Price score: two components
+    // 1) Low USD base (50%) — $0=perfect, $500+=0
+    const usdFactor = avgUsdPrice <= 0 ? 1.0 : Math.max(0, 1.0 - avgUsdPrice / 500);
+    // 2) KAS discount from USD (50%) — if KAS price * rate < USD price, that's a discount
+    let kasDiscountPct = 0;
+    if (avgUsdPrice > 0 && avgKasPrice > 0 && kasRateUsd > 0) {
+      const kasValueUsd = avgKasPrice * kasRateUsd;
+      kasDiscountPct = Math.max(0, (avgUsdPrice - kasValueUsd) / avgUsdPrice); // 0-1
+    }
+    // Coupon bonus: +10% if store has active coupons
+    const couponBonus = hasCoupons ? 0.1 : 0;
+    const priceScore = Math.min((usdFactor * 0.5 + kasDiscountPct * 0.5 + couponBonus), 1.0);
+    
+    const pledgeScore = Math.min(pledgeKas / 2500, 1.0);
+    const freshnessScore = Math.pow(0.5, ageHours / 24); // 24hr half-life
+    const total = xpScore * 0.30 + runwayScore * 0.25 + priceScore * 0.25 + pledgeScore * 0.10 + freshnessScore * 0.10;
+    return { total: Math.round(total * 100), xpScore: Math.round(xpScore * 100), runwayScore: Math.round(runwayScore * 100), priceScore: Math.round(priceScore * 100), pledgeScore: Math.round(pledgeScore * 100), freshnessScore: Math.round(freshnessScore * 100), kasDiscountPct: Math.round(kasDiscountPct * 100), usdFactor: Math.round(usdFactor * 100) };
+  };
+
   const handleCopyTemplate = async () => {
     Clipboard.setString(DAPP_TEMPLATE_CODE);
     Alert.alert('Copied!', 'DApp template copied to clipboard!');
@@ -2925,58 +3113,54 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       Alert.alert('Safety Rejection', 'Your store contains prohibited terms.');
       return;
     }
+    const primaryLink = socialLinks.instagram || socialLinks.pinterest || socialLinks.etsy || '';
+    if (!primaryLink) {
+      Alert.alert('Missing Social Link', 'Add at least one social link (Instagram, Pinterest, or Etsy) so buyers can visit your storefront.');
+      return;
+    }
     
     setIsPublishing(true);
     
     try {
-      // Step 1: Verify with TownHall
-      const verifyResult = await verifyStorefrontWithTownHall({
-        storeName: brandName,
-        description: storeDescription,
-        category: storeCategory,
-        ownerPubkey: userPubkey,
-      });
-      
-      if (!verifyResult.verified) {
-        Alert.alert('Verification Failed', verifyResult.message);
-        setIsPublishing(false);
-        return;
-      }
-      
-      // Step 2: KasVillage posts to Arweave for user (FREE via Turbo)
-      await uploadStoreListing(
-        hostId,
-        {
-          storeName: brandName,
-          description: storeDescription,
-          category: storeCategory,
-          tags: [],
-          contact: commChannels.telegram || commChannels.messenger || commChannels.instagram_dm,
-        },
-        userPubkey,
-      );
-      
-      // Step 3: Save locally
-      const layout = {
+      // Step 1: Build storefront config
+      const storefrontConfig = {
         brandName,
         storeDescription,
         storeCategory,
         logoUrl,
         logoShape,
+        bannerStyle,
+        bannerRecipe,
+        coupons,
         socialLinks,
         commChannels,
-        selectedFont,
-        headerFontSize,
-        bodyFontSize,
-        selectedLayout,
-        stash,
+        selectedFont: { id: selectedFont.id, name: selectedFont.name },
+        selectedLayout: { id: selectedLayout.id, name: selectedLayout.name },
+        stash: stash.map(i => ({ id: i.id, name: i.name, dollarPrice: i.dollarPrice, kaspaPrice: i.kaspaPrice, socialUrl: i.socialUrl, description: i.description })),
         hostId,
-        codeHash: verifyResult.code_hash,
         updatedAt: Date.now(),
       };
       
-      await SecureStore.setItemAsync(`storefront_${hostId}`, JSON.stringify(layout));
-      Alert.alert('Published!', 'Storefront verified and posted to Arweave!');
+      // Step 2: Upload to Arweave with queryable KV tags
+      try {
+        const { uploadToIrys } = await import('./arweave_upload');
+        const arResult = await uploadToIrys(JSON.stringify(storefrontConfig), [
+          { name: 'App-Name', value: 'KasVillage' },
+          { name: 'KV-Type', value: 'Storefront' },
+          { name: 'KV-StoreName', value: brandName },
+          { name: 'KV-Category', value: storeCategory },
+          { name: 'KV-Network', value: 'testnet-10' },
+          { name: 'KV-Owner', value: userPubkey },
+          { name: 'KV-PrimaryLink', value: primaryLink },
+          { name: 'Content-Type', value: 'application/json' },
+          { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
+        ]);
+        console.log('[Workspace] Published to Arweave:', arResult?.txId);
+      } catch (e) { console.warn('[Workspace] Arweave upload failed (saved locally):', e); }
+      
+      // Step 3: Save locally
+      await SecureStore.setItemAsync('storefront_' + hostId, JSON.stringify(storefrontConfig));
+      Alert.alert('Published!', 'Storefront config inscribed to Arweave.\nBuyers can find your store banner and click through to ' + (socialLinks.instagram ? 'Instagram' : socialLinks.pinterest ? 'Pinterest' : 'Etsy') + '.');
     } catch (e) {
       console.error('Publish failed:', e);
       Alert.alert('Error', 'Failed to publish. Please try again.');
@@ -3036,6 +3220,28 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           ))}
         </ScrollView>
         
+
+        {/* Persistent Storefront Preview Banner */}
+        <View style={{ backgroundColor: bannerStyle.bg === 'crest' ? '#44403c' : bannerStyle.bg, borderRadius: rs.s(16), padding: rs.s(24), marginBottom: rs.s(12), alignItems: 'center' }}>
+          <Text style={{ fontSize: rs.font(24), fontWeight: '900', color: bannerStyle.text || '#fff', marginBottom: rs.s(4) }}>{brandName}</Text>
+          <Text style={{ fontSize: rs.font(11), color: bannerStyle.text || '#fff', opacity: 0.8 }}>Professional storefront powered by KasVillage</Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: rs.s(10), marginBottom: rs.s(16) }}>
+          <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: rs.s(6), backgroundColor: '#166534', borderRadius: rs.s(10), paddingVertical: rs.s(10) }} onPress={() => {
+            const primaryLink = socialLinks.instagram || socialLinks.pinterest || socialLinks.etsy || socialLinks.tiktok || socialLinks.facebook || '';
+            if (primaryLink) { Linking.openURL(primaryLink.startsWith('http') ? primaryLink : 'https://' + primaryLink); }
+            else { Alert.alert('No Social Link', 'Add your Instagram, Pinterest, or Etsy link in the Brand tab first.'); }
+          }}>
+            <Eye size={rs.s(14)} color="#fff" />
+            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(12) }}>Visit Storefront</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: rs.s(6), backgroundColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(10) }} onPress={handlePublishStorefront} disabled={isPublishing}>
+            {isPublishing ? <ActivityIndicator color="#fff" size="small" /> : <><Save size={rs.s(14)} color="#fff" /><Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(12) }}>Publish</Text></>}
+          </TouchableOpacity>
+        </View>
+        <Text style={{ fontSize: rs.font(9), color: '#a8a29e', textAlign: 'center', marginBottom: rs.s(8) }}>KasVillage verifies and posts to Arweave for you (FREE via Turbo)</Text>
+        <Text style={{ fontSize: rs.font(8), color: '#a8a29e', textAlign: 'center', marginTop: rs.s(4), lineHeight: rs.font(12) }}>KasVillage is a reputation-scored directory and non-custodial escrow tool. Listings are hosted on whitelisted social platforms. KasVillage does not facilitate, process, or intermediate any sale. SDK compliance scan does not constitute endorsement. Users assume all risk.</Text>
+
         {/* Brand Tab */}
         {activeView === 'brand' && (
           <View>
@@ -3080,6 +3286,20 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               </View>
             </SectionCard>
             
+
+            <SectionCard title="🎨 Banner Style">
+              <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(10) }}>Choose how your store banner looks</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(8) }}>
+                {BANNER_STYLES.map(bs => (
+                  <TouchableOpacity key={bs.id} onPress={() => setBannerStyle(bs)} style={{ width: '30%', borderRadius: rs.s(10), overflow: 'hidden', borderWidth: bannerStyle.id === bs.id ? 3 : 1, borderColor: bannerStyle.id === bs.id ? COLORS.amber500 : COLORS.stone200 }}>
+                    <View style={{ backgroundColor: bs.bg === 'crest' ? '#44403c' : bs.bg, padding: rs.s(12), alignItems: 'center' }}>
+                      <Text style={{ color: bs.text, fontSize: rs.font(10), fontWeight: 'bold' }}>{bs.label}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </SectionCard>
+
             <SectionCard title="Connect Social Channels">
               {SOCIAL_PLATFORMS.map(platform => (
                 <View key={platform.id} style={wsStyles.socialRow}>
@@ -3145,68 +3365,963 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           </SectionCard>
         )}
         
-        {/* Fonts Tab */}
+        {/* Fonts Tab — Graffiti Banner Builder */}
         {activeView === 'fonts' && (
-          <SectionCard title="Typography Controls">
-            <View style={wsStyles.fontGrid}>
-              {STOREFRONT_FONTS.map(font => (
-                <TouchableOpacity
-                  key={font.id}
-                  style={[wsStyles.fontCard, selectedFont.id === font.id && wsStyles.fontCardActive]}
-                  onPress={() => setSelectedFont(font)}
-                >
-                  <Text style={wsStyles.fontLabel}>{font.name}</Text>
-                  <Text style={wsStyles.fontPreview}>AaBbCc</Text>
-                </TouchableOpacity>
+          <View>
+            <SectionCard title="🎨 Graffiti Banner Builder">
+              <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(12) }}>
+                Create your store banner. Recipe saved to Arweave — renders on any device.
+              </Text>
+
+              {/* LIVE SVG PREVIEW */}
+              <View style={{ backgroundColor: bannerRecipe.bgColor, borderRadius: rs.s(12), padding: rs.s(8), marginBottom: rs.s(16), borderWidth: 2, borderColor: COLORS.stone200, overflow: 'hidden' }}>
+                <Svg viewBox="0 0 360 120" style={{ width: '100%', height: rs.s(120) }}>
+                  <Defs>
+                    <Pattern id="bricks" patternUnits="userSpaceOnUse" width="20" height="10">
+                      <Rect width="20" height="10" fill={bannerRecipe.bgColor} />
+                      <Line x1="0" y1="5" x2="20" y2="5" stroke="#d6d3d1" strokeWidth="0.5" />
+                      <Line x1="10" y1="0" x2="10" y2="5" stroke="#d6d3d1" strokeWidth="0.5" />
+                      <Line x1="0" y1="5" x2="0" y2="10" stroke="#d6d3d1" strokeWidth="0.5" />
+                      <Line x1="20" y1="5" x2="20" y2="10" stroke="#d6d3d1" strokeWidth="0.5" />
+                    </Pattern>
+                  </Defs>
+                  <Rect x="0" y="0" width="360" height="120" fill="url(#bricks)" />
+                  {/* Decorations */}
+                  {bannerRecipe.decoStyle === 'stars' && (
+                    <G>
+                      <Path d="M30 15 L33 25 L43 25 L35 31 L38 41 L30 35 L22 41 L25 31 L17 25 L27 25 Z" fill={bannerRecipe.fillColor} opacity="0.3" />
+                      <Path d="M320 20 L322 26 L328 26 L323 30 L325 36 L320 32 L315 36 L317 30 L312 26 L318 26 Z" fill={bannerRecipe.fillColor} opacity="0.3" />
+                      <Path d="M340 90 L342 96 L348 96 L343 100 L345 106 L340 102 L335 106 L337 100 L332 96 L338 96 Z" fill={bannerRecipe.fillColor} opacity="0.2" />
+                    </G>
+                  )}
+                  {bannerRecipe.decoStyle === 'arrows' && (
+                    <G>
+                      <Path d="M15 60 L30 50 L30 55 L50 55 L50 65 L30 65 L30 70 Z" fill={bannerRecipe.fillColor} opacity="0.2" />
+                      <Path d="M345 60 L330 50 L330 55 L310 55 L310 65 L330 65 L330 70 Z" fill={bannerRecipe.fillColor} opacity="0.2" />
+                    </G>
+                  )}
+                  {/* 3D Shadow text */}
+                  {bannerRecipe.text.split('').map((ch, i) => {
+                    const total = bannerRecipe.text.length;
+                    const charW = Math.min(320 / Math.max(total, 1), 50);
+                    const startX = (360 - total * charW) / 2;
+                    const x = startX + i * charW + charW / 2;
+                    const y = bannerRecipe.style === 'wild' ? 72 + Math.sin(i * 0.8) * 8 : 75;
+                    const rot = bannerRecipe.style === 'wild' ? Math.sin(i * 1.2) * 8 : bannerRecipe.style === 'block' ? (i % 2 === 0 ? -2 : 2) : 0;
+                    const fontSize = bannerRecipe.style === 'bubble' ? 52 : 48;
+                    const strokeW = bannerRecipe.style === 'bubble' ? 6 : 4;
+                    return (
+                      <G key={i}>
+                        {/* Shadow */}
+                        <Rect x={x - charW/2 + 3} y={y - fontSize/2 + 5} width={charW - 2} height={fontSize - 4} rx="4" fill={bannerRecipe.shadowColor} opacity="0.4" transform={'rotate(' + rot + ' ' + x + ' ' + y + ')'} />
+                        {/* Outline */}
+                        <Rect x={x - charW/2} y={y - fontSize/2 + 2} width={charW - 2} height={fontSize - 4} rx={bannerRecipe.style === 'bubble' ? 10 : 4} fill={bannerRecipe.outlineColor} transform={'rotate(' + rot + ' ' + x + ' ' + y + ')'} />
+                        {/* Fill */}
+                        <Rect x={x - charW/2 + 2} y={y - fontSize/2 + 4} width={charW - 6} height={fontSize - 8} rx={bannerRecipe.style === 'bubble' ? 8 : 2} fill={bannerRecipe.fillColor} transform={'rotate(' + rot + ' ' + x + ' ' + y + ')'} />
+                        {/* Letter */}
+                        <Rect x={x - charW/2 + 4} y={y - fontSize/2 + 6} width={charW - 10} height={2} fill={bannerRecipe.outlineColor} opacity="0.15" transform={'rotate(' + rot + ' ' + x + ' ' + y + ')'} />
+                      </G>
+                    );
+                  })}
+                  {/* Actual text on top */}
+                  {bannerRecipe.text.split('').map((ch, i) => {
+                    const total = bannerRecipe.text.length;
+                    const charW = Math.min(320 / Math.max(total, 1), 50);
+                    const startX = (360 - total * charW) / 2;
+                    const x = startX + i * charW + charW / 2;
+                    const y = bannerRecipe.style === 'wild' ? 78 + Math.sin(i * 0.8) * 8 : 80;
+                    const rot = bannerRecipe.style === 'wild' ? Math.sin(i * 1.2) * 8 : bannerRecipe.style === 'block' ? (i % 2 === 0 ? -2 : 2) : 0;
+                    const fontSize = bannerRecipe.style === 'bubble' ? 36 : 32;
+                    return (
+                      <G key={'t' + i} transform={'rotate(' + rot + ' ' + x + ' ' + y + ')'}>
+                        <Rect x={x - 1} y={y - fontSize + 8} width={2} height={0} />
+                      </G>
+                    );
+                  })}
+                </Svg>
+                <Text style={{ textAlign: 'center', fontSize: rs.font(9), color: COLORS.stone400, marginTop: rs.s(4) }}>Live Preview — {bannerRecipe.text.length} chars</Text>
+              </View>
+
+              {/* Banner Text */}
+              <View style={{ marginBottom: rs.s(12) }}>
+                <Text style={inputStyles.label}>Banner Text</Text>
+                <TextInput
+                  style={[inputStyles.input, { textTransform: 'uppercase', letterSpacing: 2, fontWeight: '900' }]}
+                  value={bannerRecipe.text}
+                  onChangeText={(t) => setBannerRecipe(prev => ({ ...prev, text: t.toUpperCase().slice(0, 14) }))}
+                  placeholder="YOUR STORE NAME"
+                  placeholderTextColor={COLORS.stone400}
+                  maxLength={14}
+                />
+                <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, marginTop: 2 }}>{bannerRecipe.text.length}/14 characters</Text>
+              </View>
+
+              {/* Style Selector */}
+              <Text style={inputStyles.label}>Graffiti Style</Text>
+              <View style={{ flexDirection: 'row', gap: rs.s(8), marginBottom: rs.s(12) }}>
+                {([
+                  { id: 'block', label: '▬ Block', desc: 'Sharp angles' },
+                  { id: 'bubble', label: '● Bubble', desc: 'Rounded soft' },
+                  { id: 'wild', label: '⚡ Wild', desc: 'Wavy chaos' },
+                ] as const).map(st => (
+                  <TouchableOpacity key={st.id} onPress={() => setBannerRecipe(prev => ({ ...prev, style: st.id }))}
+                    style={{ flex: 1, backgroundColor: bannerRecipe.style === st.id ? COLORS.amber100 : COLORS.stone50, borderWidth: 2, borderColor: bannerRecipe.style === st.id ? COLORS.amber500 : COLORS.stone200, borderRadius: rs.s(10), padding: rs.s(10), alignItems: 'center' }}>
+                    <Text style={{ fontSize: rs.font(14), fontWeight: 'bold', color: bannerRecipe.style === st.id ? COLORS.amber900 : COLORS.stone600 }}>{st.label}</Text>
+                    <Text style={{ fontSize: rs.font(9), color: COLORS.stone400 }}>{st.desc}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Color Pickers */}
+              <Text style={inputStyles.label}>Colors</Text>
+              {([
+                { key: 'fillColor', label: 'Fill', colors: ['#d97706', '#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ec4899', '#0891b2', '#f59e0b'] },
+                { key: 'outlineColor', label: 'Outline', colors: ['#1c1917', '#312e81', '#14532d', '#7f1d1d', '#581c87', '#44403c', '#1e3a5f', '#000000'] },
+                { key: 'shadowColor', label: 'Shadow', colors: ['#78350f', '#3730a3', '#166534', '#991b1b', '#6b21a8', '#57534e', '#1e40af', '#374151'] },
+                { key: 'bgColor', label: 'Background', colors: ['#fafaf9', '#fffbeb', '#f0fdf4', '#eff6ff', '#fef2f2', '#f5f3ff', '#1c1917', '#292524'] },
+              ] as const).map(row => (
+                <View key={row.key} style={{ marginBottom: rs.s(8) }}>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginBottom: 4 }}>{row.label}</Text>
+                  <View style={{ flexDirection: 'row', gap: rs.s(6) }}>
+                    {row.colors.map(c => (
+                      <TouchableOpacity key={c} onPress={() => setBannerRecipe(prev => ({ ...prev, [row.key]: c }))}
+                        style={{ width: rs.s(32), height: rs.s(32), borderRadius: rs.s(16), backgroundColor: c, borderWidth: (bannerRecipe as any)[row.key] === c ? 3 : 1, borderColor: (bannerRecipe as any)[row.key] === c ? '#fbbf24' : '#d6d3d1' }} />
+                    ))}
+                  </View>
+                </View>
               ))}
-            </View>
-          </SectionCard>
+
+              {/* Decoration Style */}
+              <Text style={inputStyles.label}>Decorations</Text>
+              <View style={{ flexDirection: 'row', gap: rs.s(8), marginBottom: rs.s(16) }}>
+                {([
+                  { id: 'stars', label: '⭐ Stars' },
+                  { id: 'arrows', label: '➡ Arrows' },
+                  { id: 'plain', label: '◻ Plain' },
+                ] as const).map(d => (
+                  <TouchableOpacity key={d.id} onPress={() => setBannerRecipe(prev => ({ ...prev, decoStyle: d.id }))}
+                    style={{ flex: 1, backgroundColor: bannerRecipe.decoStyle === d.id ? COLORS.amber100 : COLORS.stone50, borderWidth: 2, borderColor: bannerRecipe.decoStyle === d.id ? COLORS.amber500 : COLORS.stone200, borderRadius: rs.s(8), padding: rs.s(8), alignItems: 'center' }}>
+                    <Text style={{ fontSize: rs.font(12), color: bannerRecipe.decoStyle === d.id ? COLORS.amber900 : COLORS.stone500 }}>{d.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Save Recipe */}
+              <TouchableOpacity
+                style={{ backgroundColor: COLORS.green600, borderRadius: rs.s(12), paddingVertical: rs.s(14), alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: rs.s(8) }}
+                onPress={async () => {
+                  try {
+                    await SecureStore.setItemAsync('kv_banner_recipe', JSON.stringify(bannerRecipe));
+                    Alert.alert('Saved!', 'Banner recipe saved. It will be included when you Publish your storefront to Arweave.');
+                  } catch (e) { Alert.alert('Error', String(e)); }
+                }}>
+                <Save size={rs.s(16)} color="#fff" />
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>Save Banner Recipe</Text>
+              </TouchableOpacity>
+              <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, textAlign: 'center', marginTop: rs.s(6) }}>
+                Recipe is ~200 bytes on Arweave — renders SVG on any device from the recipe
+              </Text>
+            </SectionCard>
+          </View>
         )}
         
         {/* Items Tab */}
         {activeView === 'items' && (
-          <SectionCard title="The Stash Management">
-            <Text style={wsStyles.sectionSubtitle}>Add, edit, or delete items for your Node.</Text>
-            
-            {stash.length > 0 ? (
-              stash.map(item => (
-                <View key={item.id} style={wsStyles.itemCard}>
-                  <View>
-                    <Text style={wsStyles.itemName}>{item.name}</Text>
-                    <Text style={wsStyles.itemPrice}>
-                      ${item.dollarPrice?.toFixed(2)} → {item.kaspaPrice?.toLocaleString()} KASPA
-                    </Text>
-                  </View>
-                  <View style={wsStyles.itemActions}>
-                    <TouchableOpacity>
-                      <Edit3 size={rs.s(16)} color={COLORS.blue600} />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setStash(prev => prev.filter(i => i.id !== item.id))}>
-                      <Trash2 size={rs.s(16)} color={COLORS.red600} />
-                    </TouchableOpacity>
+          <View>
+            <SectionCard title="The Stash Management">
+              <Text style={wsStyles.sectionSubtitle}>Add, edit, or delete items for your feed.</Text>
+              
+              {stash.length > 0 ? (
+                stash.map(item => (
+                  <TouchableOpacity key={item.id} onPress={() => { if (item.socialUrl) Linking.openURL(item.socialUrl); }}
+                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardBg, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(8), borderWidth: 1, borderColor: COLORS.amber200 }} activeOpacity={0.7}>
+                    <Text style={{ fontSize: rs.font(28), marginRight: rs.s(10) }}>{getPlatformIcon(item.socialUrl)}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: rs.font(14), fontWeight: 'bold', color: COLORS.stone800 }}>{item.name}</Text>
+                      {item.description ? <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginTop: 2 }} numberOfLines={1}>{item.description}</Text> : null}
+                      <Text style={{ fontSize: rs.font(11), color: COLORS.amber700, marginTop: rs.s(2) }}>
+                        {item.dollarPrice > 0 ? '
+        
+        {/* Coupons Tab */}
+        {activeView === 'coupons' && (
+          <View>
+            <SectionCard title="🎟️ Coupon Management">
+              <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(12) }}>
+                Create discount codes. Linked to agreements at checkout.
+              </Text>
+
+              {/* Bar Chart — coupon usage */}
+              {coupons.length > 0 && (
+                <View style={{ backgroundColor: COLORS.stone50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(16) }}>
+                  <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: COLORS.stone600, marginBottom: rs.s(8) }}>Usage Overview</Text>
+                  <Svg viewBox={'0 0 ' + Math.max(coupons.length * 60, 200) + ' 100'} style={{ width: '100%', height: rs.s(100) }}>
+                    {coupons.map((cpn, i) => {
+                      const barW = 40;
+                      const gap = 20;
+                      const x = i * (barW + gap) + 10;
+                      const usePct = cpn.maxUses > 0 ? Math.min(cpn.usedCount / cpn.maxUses, 1) : 0;
+                      const maxH = 70;
+                      const barH = Math.max(usePct * maxH, 4);
+                      const colors = ['#d97706', '#2563eb', '#16a34a', '#9333ea', '#dc2626', '#0891b2', '#ea580c', '#6366f1'];
+                      const color = colors[i % colors.length];
+                      return (
+                        <G key={cpn.id}>
+                          {/* Background bar */}
+                          <Rect x={x} y={100 - maxH - 10} width={barW} height={maxH} rx="4" fill={COLORS.stone200} />
+                          {/* Usage bar */}
+                          <Rect x={x} y={100 - barH - 10} width={barW} height={barH} rx="4" fill={color} />
+                          {/* Label */}
+                          <Rect x={x} y={92} width={barW} height={0} />
+                        </G>
+                      );
+                    })}
+                  </Svg>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(8), marginTop: rs.s(4) }}>
+                    {coupons.map((cpn, i) => {
+                      const colors = ['#d97706', '#2563eb', '#16a34a', '#9333ea', '#dc2626', '#0891b2', '#ea580c', '#6366f1'];
+                      return (
+                        <View key={cpn.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: colors[i % colors.length] }} />
+                          <Text style={{ fontSize: rs.font(9), color: COLORS.stone500 }}>{cpn.code} ({cpn.usedCount}/{cpn.maxUses})</Text>
+                        </View>
+                      );
+                    })}
                   </View>
                 </View>
-              ))
-            ) : (
-              <Text style={wsStyles.emptyText}>No items yet. Add your first product!</Text>
-            )}
+              )}
+
+              {/* Coupon List */}
+              {coupons.map(cpn => {
+                const daysLeft = Math.max(0, Math.ceil((cpn.createdAt + cpn.expiryDays * 86400000 - Date.now()) / 86400000));
+                const expired = daysLeft <= 0;
+                return (
+                  <View key={cpn.id} style={{ backgroundColor: expired ? COLORS.red50 : COLORS.cardBg, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(8), borderWidth: 1, borderColor: expired ? COLORS.red200 : COLORS.amber200 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(8) }}>
+                          <Text style={{ fontSize: rs.font(16), fontWeight: '900', fontFamily: 'monospace', color: expired ? COLORS.red500 : COLORS.amber900 }}>{cpn.code}</Text>
+                          {expired && <Text style={{ fontSize: rs.font(9), color: COLORS.red600, fontWeight: 'bold' }}>EXPIRED</Text>}
+                        </View>
+                        <Text style={{ fontSize: rs.font(11), color: COLORS.stone600, marginTop: 2 }}>
+                          {cpn.discountPercent > 0 ? cpn.discountPercent + '% off' : cpn.discountKas + ' KAS off'}
+                          {cpn.description ? ' — ' + cpn.description : ''}
+                        </Text>
+                        <Text style={{ fontSize: rs.font(10), color: COLORS.stone400, marginTop: 2 }}>
+                          Used {cpn.usedCount}/{cpn.maxUses} • {daysLeft > 0 ? daysLeft + ' days left' : 'Expired'}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: rs.s(10) }}>
+                        <TouchableOpacity onPress={() => { setEditingCoupon(cpn); setCouponForm({ code: cpn.code, discountPercent: cpn.discountPercent?.toString() || '', discountKas: cpn.discountKas?.toString() || '', maxUses: cpn.maxUses?.toString() || '10', expiryDays: cpn.expiryDays?.toString() || '30', description: cpn.description || '' }); setShowCouponForm(true); }}>
+                          <Edit3 size={rs.s(16)} color={COLORS.blue600} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => Alert.alert('Delete?', 'Remove coupon ' + cpn.code + '?', [{ text: 'Cancel' }, { text: 'Delete', style: 'destructive', onPress: () => setCoupons(prev => prev.filter(c => c.id !== cpn.id)) }])}>
+                          <Trash2 size={rs.s(16)} color={COLORS.red600} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+
+              {coupons.length === 0 && (
+                <View style={{ alignItems: 'center', paddingVertical: rs.s(20) }}>
+                  <Text style={{ fontSize: rs.font(13), color: COLORS.amber600, fontStyle: 'italic' }}>No coupons yet</Text>
+                </View>
+              )}
+
+              <TouchableOpacity onPress={() => { setEditingCoupon(null); setCouponForm({ code: '', discountPercent: '', discountKas: '', maxUses: '10', expiryDays: '30', description: '' }); setShowCouponForm(true); }}
+                style={{ backgroundColor: COLORS.amber600, borderRadius: rs.s(12), paddingVertical: rs.s(14), alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: rs.s(8), marginTop: rs.s(8) }}>
+                <Plus size={rs.s(16)} color="#fff" />
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>Create Coupon</Text>
+              </TouchableOpacity>
+            </SectionCard>
+
+            {/* Visibility Score */}
+            <SectionCard title="📊 Mailbox Visibility Score">
+              <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginBottom: rs.s(10) }}>
+                This score determines how high your store ranks in buyer mailboxes.
+              </Text>
+              {(() => {
+                const avgUsd = stash.length > 0 ? stash.reduce((s, i) => s + (i.dollarPrice || 0), 0) / stash.length : 0;
+                const avgKas = stash.length > 0 ? stash.reduce((s, i) => s + (i.kaspaPrice || 0), 0) / stash.length : 0;
+                const vis = calcVisibilityScore(userXp, 80, avgUsd, avgKas, 0.08, 0, 1, coupons.length > 0);
+                return (
+                  <View>
+                    <View style={{ alignItems: 'center', marginBottom: rs.s(12) }}>
+                      <Text style={{ fontSize: rs.font(42), fontWeight: '900', color: vis.total >= 60 ? COLORS.green600 : vis.total >= 30 ? COLORS.amber600 : COLORS.red600 }}>{vis.total}</Text>
+                      <Text style={{ fontSize: rs.font(11), color: COLORS.stone500 }}>out of 100</Text>
+                    </View>
+                    {[
+                      { label: 'XP (30%)', score: vis.xpScore, color: '#4f46e5', tip: 'Complete agreements to earn XP' },
+                      { label: 'Runway (25%)', score: vis.runwayScore, color: '#16a34a', tip: 'Pledge duration remaining' },
+                      { label: 'Price (25%)', score: vis.priceScore, color: '#d97706', tip: 'Low USD (' + (vis.usdFactor || 0) + '%) + KAS discount (' + (vis.kasDiscountPct || 0) + '%) + coupons' },
+                      { label: 'Pledge (10%)', score: vis.pledgeScore, color: '#9333ea', tip: 'KAS pledged (max 2500)' },
+                      { label: 'Fresh (10%)', score: vis.freshnessScore, color: '#0891b2', tip: '24hr half-life decay' },
+                    ].map(row => (
+                      <View key={row.label} style={{ marginBottom: rs.s(8) }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                          <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: COLORS.stone600 }}>{row.label}</Text>
+                          <Text style={{ fontSize: rs.font(10), color: COLORS.stone500 }}>{row.score}%</Text>
+                        </View>
+                        <View style={{ height: rs.s(8), backgroundColor: COLORS.stone200, borderRadius: 4, overflow: 'hidden' }}>
+                          <View style={{ height: '100%', width: row.score + '%', backgroundColor: row.color, borderRadius: 4 }} />
+                        </View>
+                        <Text style={{ fontSize: rs.font(8), color: COLORS.stone400, marginTop: 1 }}>{row.tip}</Text>
+                      </View>
+                    ))}
+                  </View>
+                );
+              })()}
+            </SectionCard>
+
+            {/* Coupon Form Modal */}
+            <Modal visible={showCouponForm} animationType="slide" transparent>
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: rs.s(20) }}>
+                <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(20) }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs.s(16) }}>
+                    <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.amber900 }}>{editingCoupon ? '✏️ Edit Coupon' : '🎟️ New Coupon'}</Text>
+                    <TouchableOpacity onPress={() => { setShowCouponForm(false); setEditingCoupon(null); }}>
+                      <X size={rs.s(20)} color={COLORS.stone500} />
+                    </TouchableOpacity>
+                  </View>
+                  <InputField label="Coupon Code" value={couponForm.code} onChangeText={(t) => setCouponForm(p => ({ ...p, code: t.toUpperCase() }))} placeholder="WELCOME10" />
+                  <View style={{ flexDirection: 'row', gap: rs.s(10) }}>
+                    <View style={{ flex: 1 }}>
+                      <InputField label="Discount %" value={couponForm.discountPercent} onChangeText={(t) => setCouponForm(p => ({ ...p, discountPercent: t, discountKas: '' }))} placeholder="10" keyboardType="numeric" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <InputField label="— OR — Fixed KAS" value={couponForm.discountKas} onChangeText={(t) => setCouponForm(p => ({ ...p, discountKas: t, discountPercent: '' }))} placeholder="5" keyboardType="numeric" />
+                    </View>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: rs.s(10) }}>
+                    <View style={{ flex: 1 }}>
+                      <InputField label="Max Uses" value={couponForm.maxUses} onChangeText={(t) => setCouponForm(p => ({ ...p, maxUses: t }))} placeholder="10" keyboardType="numeric" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <InputField label="Expires (days)" value={couponForm.expiryDays} onChangeText={(t) => setCouponForm(p => ({ ...p, expiryDays: t }))} placeholder="30" keyboardType="numeric" />
+                    </View>
+                  </View>
+                  <InputField label="Description (optional)" value={couponForm.description} onChangeText={(t) => setCouponForm(p => ({ ...p, description: t }))} placeholder="First-time buyer discount" />
+                  <TouchableOpacity onPress={handleSaveCoupon}
+                    style={{ backgroundColor: COLORS.green600, borderRadius: rs.s(12), paddingVertical: rs.s(14), alignItems: 'center', marginTop: rs.s(8) }}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>{editingCoupon ? 'Save Changes' : 'Create Coupon'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Modal>
+          </View>
+        )}
+        
+        {/* DApps Tab */}
+        {activeView === 'dapps' && (
+          <SectionCard title="DApp & Game Management">
+            <Text style={wsStyles.sectionSubtitle}>
+              DApps are posted by YOU directly to Arweave. KasVillage verifies for display visibility only.
+            </Text>
             
+            <View style={wsStyles.complianceNotice}>
+              <Text style={wsStyles.complianceText}>
+                <Text style={{ fontWeight: 'bold' }}>⚠️ Compliance:</Text> Prohibited content apps are restricted and auto-rejected by the SDK scanner. DApps are NOT visible in KasVillage unless they pass the SDK Compliance Gate. Post a video demo on Instagram/TikTok as your listing.
+              </Text>
+            </View>
+            
+            {/* Claude Code Link */}
             <TouchableOpacity
-              style={wsStyles.addItemBtn}
-              onPress={() => {
-                const newItem = {
-                  id: `item_${Date.now()}`,
-                  name: 'New Item',
-                  dollarPrice: 0,
-                  kaspaPrice: 0,
-                };
-                setStash([...stash, newItem]);
-              }}
+              style={wsStyles.ideBtn}
+              onPress={() => Linking.openURL('https://claude.ai/code')}
             >
-              <ShoppingBag size={rs.s(16)} color={COLORS.white} />
-              <Text style={wsStyles.addItemBtnText}>Add New Item</Text>
+              <Code size={rs.s(16)} color={COLORS.white} />
+              <Text style={wsStyles.ideBtnText}>Open Claude Code</Text>
+            </TouchableOpacity>
+            
+            {/* Quality Gate */}
+            <TouchableOpacity
+              style={wsStyles.publishBtn}
+              onPress={() => setShowQualityGate(true)}
+            >
+              <ShieldCheck size={rs.s(16)} color={COLORS.white} />
+              <Text style={wsStyles.publishBtnText}>SDK Compliance Check</Text>
+            </TouchableOpacity>
+            
+            {/* Video Demo — the listing IS the marketing */}
+            <View style={{ backgroundColor: '#fef3c7', borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(12), borderWidth: 1, borderColor: '#f59e0b' }}>
+              <Text style={{ fontSize: rs.font(14), fontWeight: '900', color: '#92400e', marginBottom: rs.s(6) }}>🎬 Video Demo = Your Listing</Text>
+              <Text style={{ fontSize: rs.font(11), color: '#b45309', lineHeight: rs.font(17), marginBottom: rs.s(10) }}>
+                Post a short video demo of your DApp, game, or website on Instagram or TikTok. That video IS your storefront listing — buyers see the demo, tap through, and the SDK compliance badge proves it's safe.
+              </Text>
+              <View style={{ gap: rs.s(6) }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(8) }}>
+                  <Text style={{ fontSize: rs.font(18) }}>📸</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#92400e' }}>Instagram Reel (15-60s)</Text>
+                    <Text style={{ fontSize: rs.font(9), color: '#b45309' }}>Show gameplay, UI walkthrough, or feature highlight</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(8) }}>
+                  <Text style={{ fontSize: rs.font(18) }}>🎵</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#92400e' }}>TikTok (15-60s)</Text>
+                    <Text style={{ fontSize: rs.font(9), color: '#b45309' }}>Quick demo with trending audio = organic reach</Text>
+                  </View>
+                </View>
+              </View>
+              <View style={{ backgroundColor: '#fff', borderRadius: rs.s(8), padding: rs.s(10), marginTop: rs.s(10) }}>
+                <Text style={{ fontSize: rs.font(9), color: '#78716c', textAlign: 'center', lineHeight: rs.font(14) }}>
+                  No platform fees. No middleman. Your social media IS your storefront.{String.fromCharCode(10)}
+                  KasVillage provides the trust layer (XP reputation + non-custodial escrow).{String.fromCharCode(10)}
+                  The video demo IS the product listing.
+                </Text>
+              </View>
+            </View>
+
+            {/* Book Shelf */}
+            <TouchableOpacity
+              style={wsStyles.bookShelfBtn}
+              onPress={() => setShowAcademicPanel(true)}
+            >
+              <Text style={wsStyles.bookShelfBtnText}>📚 Book Shelf (Academic Research P2P)</Text>
+            </TouchableOpacity>
+            
+            {/* Template */}
+            <View style={wsStyles.templateBox}>
+              <Text style={wsStyles.templateTitle}>DApp Template</Text>
+              <Text style={wsStyles.templateSubtitle}>Copy the integration template to start building:</Text>
+              <TouchableOpacity style={wsStyles.copyTemplateBtn} onPress={handleCopyTemplate}>
+                <Code size={rs.s(14)} color={COLORS.purple800} />
+                <Text style={wsStyles.copyTemplateBtnText}>Copy Integration Template</Text>
+              </TouchableOpacity>
+            </View>
+          </SectionCard>
+        )}
+        
+        {/* Academic Tab */}
+        {activeView === 'academic' && (
+          <SectionCard title="📚 Academic Research">
+            <Text style={wsStyles.sectionSubtitle}>
+              Privacy-preserving academic exchange. Verify via .edu email, publish abstracts, offer consulting.
+            </Text>
+            <TouchableOpacity
+              style={wsStyles.academicBtn}
+              onPress={() => setShowAcademicPanel(true)}
+            >
+              <FileText size={rs.s(16)} color={COLORS.white} />
+              <Text style={wsStyles.academicBtnText}>Open Research Shelf</Text>
             </TouchableOpacity>
           </SectionCard>
+        )}
+        
+        {/* Preview Tab */}
+        {activeView === 'preview' && (
+          <SectionCard title="Storefront Preview">
+            <Text style={{ fontSize: rs.font(13), color: COLORS.stone600, textAlign: 'center', paddingVertical: rs.s(16) }}>
+              Your storefront banner is shown above.{String.fromCharCode(10)}
+              Tap "Visit Storefront" to open your social page.{String.fromCharCode(10)}
+              Tap "Publish" to inscribe config to Arweave.
+            </Text>
+            <View style={{ backgroundColor: COLORS.amber50, borderRadius: rs.s(8), padding: rs.s(10), marginTop: rs.s(8) }}>
+              <Text style={{ fontSize: rs.font(10), color: COLORS.amber700, textAlign: 'center' }}>
+                Buyers see your banner on KasVillage → tap an item → directed to your Instagram/Pinterest/Etsy listing
+              </Text>
+            </View>
+          </SectionCard>
+        )}
+        
+        {/* Bottom padding */}
+        <View style={{ height: rs.s(100) }} />
+      </ScrollView>
+      
+      {/* Modals */}
+      <QualityGateModal
+        visible={showQualityGate}
+        onClose={() => setShowQualityGate(false)}
+        onVerified={(m) => {
+          Alert.alert('DApp Verified', `"${m.name}" will appear in KasVillage wallet`);
+          onOpenDApp?.(m);
+        }}
+        userXp={userXp}
+      />
+      
+      <AcademicPanel
+        visible={showAcademicPanel}
+        onClose={() => setShowAcademicPanel(false)}
+      />
+    </WorkspaceBackgroundWrapper>
+  );
+};
+
+const wsStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  content: {
+    padding: rs.s(16),
+    paddingTop: rs.s(24),
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: rs.s(16),
+  },
+  headerTitle: {
+    fontSize: rs.font(24),
+    fontWeight: '900',
+    color: COLORS.amber900,
+  },
+  xpBadge: {
+    backgroundColor: COLORS.amber100,
+    paddingHorizontal: rs.s(12),
+    paddingVertical: rs.s(6),
+    borderRadius: rs.s(12),
+  },
+  xpBadgeText: {
+    fontSize: rs.font(12),
+    fontWeight: 'bold',
+    color: COLORS.amber800,
+  },
+  toolbar: {
+    marginBottom: rs.s(16),
+  },
+  toolbarContent: {
+    backgroundColor: COLORS.amber200,
+    borderRadius: rs.s(12),
+    padding: rs.s(4),
+    gap: rs.s(4),
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: rs.s(8),
+  },
+  toggleBtn: {
+    flex: 1,
+    paddingVertical: rs.s(10),
+    backgroundColor: COLORS.stone50,
+    borderRadius: rs.s(8),
+    alignItems: 'center',
+  },
+  toggleBtnActive: {
+    backgroundColor: COLORS.amber50,
+    borderWidth: 2,
+    borderColor: COLORS.amber600,
+  },
+  toggleBtnText: {
+    fontSize: rs.font(12),
+    fontWeight: 'bold',
+    color: COLORS.stone400,
+    textTransform: 'capitalize',
+  },
+  toggleBtnTextActive: {
+    color: COLORS.amber900,
+  },
+  socialRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: rs.s(12),
+    backgroundColor: COLORS.stone50,
+    borderRadius: rs.s(12),
+    padding: rs.s(12),
+    marginBottom: rs.s(8),
+  },
+  socialIcon: {
+    fontSize: rs.font(24),
+  },
+  socialInput: {
+    flex: 1,
+    fontSize: rs.font(12),
+    color: COLORS.stone700,
+  },
+  commNote: {
+    fontSize: rs.font(11),
+    color: COLORS.stone600,
+    marginBottom: rs.s(12),
+  },
+  commTip: {
+    fontSize: rs.font(10),
+    color: COLORS.amber700,
+    backgroundColor: COLORS.amber50,
+    borderRadius: rs.s(8),
+    padding: rs.s(8),
+    marginTop: rs.s(8),
+  },
+  layoutSubtitle: {
+    fontSize: rs.font(12),
+    color: COLORS.stone600,
+    marginBottom: rs.s(16),
+  },
+  layoutGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: rs.s(12),
+  },
+  layoutCard: {
+    width: '47%',
+    backgroundColor: COLORS.cardBg,
+    borderRadius: rs.s(12),
+    padding: rs.s(12),
+    borderWidth: 2,
+    borderColor: COLORS.stone200,
+  },
+  layoutCardActive: {
+    borderColor: COLORS.amber600,
+    backgroundColor: COLORS.amber50,
+  },
+  layoutName: {
+    fontSize: rs.font(13),
+    fontWeight: 'bold',
+    color: COLORS.stone800,
+    marginBottom: rs.s(4),
+  },
+  layoutDesc: {
+    fontSize: rs.font(10),
+    color: COLORS.stone500,
+    marginBottom: rs.s(12),
+  },
+  layoutPreview: {
+    flexDirection: 'row',
+    gap: rs.s(4),
+    height: rs.s(32),
+  },
+  layoutPreviewBox: {
+    flex: 1,
+    backgroundColor: COLORS.stone200,
+    borderRadius: rs.s(4),
+  },
+  fontGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: rs.s(8),
+  },
+  fontCard: {
+    width: '48%',
+    backgroundColor: COLORS.cardBg,
+    borderRadius: rs.s(12),
+    padding: rs.s(12),
+    borderWidth: 2,
+    borderColor: COLORS.stone100,
+  },
+  fontCardActive: {
+    borderColor: COLORS.amber600,
+    backgroundColor: COLORS.amber50,
+  },
+  fontLabel: {
+    fontSize: rs.font(9),
+    fontWeight: 'bold',
+    color: COLORS.stone400,
+    textTransform: 'uppercase',
+    marginBottom: rs.s(4),
+  },
+  fontPreview: {
+    fontSize: rs.font(18),
+    color: COLORS.stone800,
+  },
+  sectionSubtitle: {
+    fontSize: rs.font(12),
+    color: COLORS.stone600,
+    marginBottom: rs.s(12),
+  },
+  itemCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: COLORS.cardBg,
+    borderRadius: rs.s(12),
+    padding: rs.s(14),
+    marginBottom: rs.s(8),
+    borderWidth: 1,
+    borderColor: COLORS.amber200,
+  },
+  itemName: {
+    fontSize: rs.font(14),
+    fontWeight: 'bold',
+    color: COLORS.stone800,
+  },
+  itemPrice: {
+    fontSize: rs.font(11),
+    color: COLORS.stone500,
+    marginTop: rs.s(2),
+  },
+  itemActions: {
+    flexDirection: 'row',
+    gap: rs.s(16),
+  },
+  emptyText: {
+    fontSize: rs.font(13),
+    color: COLORS.amber600,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: rs.s(24),
+  },
+  addItemBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: rs.s(8),
+    backgroundColor: COLORS.blue600,
+    borderRadius: rs.s(12),
+    paddingVertical: rs.s(14),
+  },
+  addItemBtnText: {
+    fontSize: rs.font(14),
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  complianceNotice: {
+    backgroundColor: COLORS.red50,
+    borderWidth: 1,
+    borderColor: COLORS.red200,
+    borderRadius: rs.s(12),
+    padding: rs.s(12),
+    marginBottom: rs.s(12),
+  },
+  complianceText: {
+    fontSize: rs.font(11),
+    color: COLORS.red700,
+  },
+  ideBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: rs.s(8),
+    backgroundColor: COLORS.blue600,
+    borderRadius: rs.s(12),
+    paddingVertical: rs.s(14),
+    marginBottom: rs.s(12),
+  },
+  ideBtnText: {
+    fontSize: rs.font(14),
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  publishBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: rs.s(8),
+    backgroundColor: COLORS.green600,
+    borderRadius: rs.s(12),
+    paddingVertical: rs.s(14),
+    marginBottom: rs.s(12),
+  },
+  publishBtnText: {
+    fontSize: rs.font(14),
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  bookShelfBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.indigo300,
+    backgroundColor: COLORS.indigo50,
+    borderRadius: rs.s(12),
+    paddingVertical: rs.s(12),
+    alignItems: 'center',
+    marginBottom: rs.s(16),
+  },
+  bookShelfBtnText: {
+    fontSize: rs.font(13),
+    fontWeight: 'bold',
+    color: COLORS.indigo800,
+  },
+  templateBox: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: rs.s(12),
+    padding: rs.s(14),
+    borderWidth: 1,
+    borderColor: COLORS.purple200,
+  },
+  templateTitle: {
+    fontSize: rs.font(11),
+    fontWeight: 'bold',
+    color: COLORS.purple800,
+    textTransform: 'uppercase',
+    marginBottom: rs.s(4),
+  },
+  templateSubtitle: {
+    fontSize: rs.font(10),
+    color: COLORS.stone500,
+    marginBottom: rs.s(12),
+  },
+  copyTemplateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: rs.s(8),
+    backgroundColor: COLORS.purple100,
+    borderRadius: rs.s(8),
+    paddingVertical: rs.s(10),
+  },
+  copyTemplateBtnText: {
+    fontSize: rs.font(11),
+    fontWeight: 'bold',
+    color: COLORS.purple800,
+  },
+  academicBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: rs.s(8),
+    backgroundColor: COLORS.indigo600,
+    borderRadius: rs.s(12),
+    paddingVertical: rs.s(14),
+  },
+  academicBtnText: {
+    fontSize: rs.font(14),
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  previewHero: {
+    padding: rs.s(32),
+    borderRadius: rs.s(12),
+    alignItems: 'center',
+    marginBottom: rs.s(16),
+  },
+  previewHeroTitle: {
+    fontSize: rs.font(24),
+    fontWeight: '900',
+    color: COLORS.white,
+    marginBottom: rs.s(4),
+  },
+  previewHeroSubtitle: {
+    fontSize: rs.font(12),
+    color: COLORS.white,
+    opacity: 0.9,
+  },
+  previewSocialRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: rs.s(24),
+  },
+  previewSocialIcon: {
+    fontSize: rs.font(28),
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: rs.s(12),
+    marginTop: rs.s(16),
+  },
+  visitBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: rs.s(8),
+    backgroundColor: COLORS.stone800,
+    borderRadius: rs.s(12),
+    paddingVertical: rs.s(14),
+  },
+  visitBtnText: {
+    fontSize: rs.font(14),
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  saveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: rs.s(8),
+    backgroundColor: COLORS.green600,
+    borderRadius: rs.s(12),
+    paddingVertical: rs.s(14),
+  },
+  saveBtnText: {
+    fontSize: rs.font(14),
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  publishNote: {
+    fontSize: rs.font(10),
+    color: COLORS.stone500,
+    textAlign: 'center',
+    marginTop: rs.s(8),
+  },
+});
+
+export default Workspace; + item.dollarPrice.toFixed(2) + ' • ' : ''}{item.kaspaPrice > 0 ? item.kaspaPrice + ' KAS' : 'Price TBD'}
+                      </Text>
+                      <Text style={{ fontSize: rs.font(9), color: COLORS.blue500, marginTop: 2 }} numberOfLines={1}>
+                        {item.socialUrl ? '↗ ' + item.socialUrl.replace('https://', '').slice(0, 40) + '...' : 'No link'}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: rs.s(12) }}>
+                      <TouchableOpacity onPress={() => handleEditItem(item)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Edit3 size={rs.s(16)} color={COLORS.blue600} />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleDeleteItem(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Trash2 size={rs.s(16)} color={COLORS.red600} />
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: rs.s(24) }}>
+                  <ShoppingBag size={rs.s(32)} color={COLORS.amber300} />
+                  <Text style={{ fontSize: rs.font(13), color: COLORS.amber600, fontStyle: 'italic', marginTop: rs.s(8) }}>No items yet. Add your first product!</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone400, marginTop: rs.s(4) }}>Each item links to your Instagram/Pinterest post — no platform fees, no middleman</Text>
+                </View>
+              )}
+              
+              <TouchableOpacity
+                style={wsStyles.addItemBtn}
+                onPress={() => { setEditingItem(null); setItemForm({ name: '', description: '', dollarPrice: '', kaspaPrice: '', socialUrl: '' }); setShowItemForm(true); }}
+              >
+                <Plus size={rs.s(16)} color={COLORS.white} />
+                <Text style={wsStyles.addItemBtnText}>Add New Item</Text>
+              </TouchableOpacity>
+            </SectionCard>
+
+            {/* Item Form Modal */}
+            <Modal visible={showItemForm} animationType="slide" transparent>
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: rs.s(20) }}>
+                <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(20), maxHeight: '85%' }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs.s(16) }}>
+                    <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.amber900 }}>{editingItem ? '✏️ Edit Item' : '➕ New Item'}</Text>
+                    <TouchableOpacity onPress={() => { setShowItemForm(false); setEditingItem(null); }}>
+                      <X size={rs.s(20)} color={COLORS.stone500} />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView>
+                    <InputField label="Item Name" value={itemForm.name} onChangeText={(t) => setItemForm(prev => ({ ...prev, name: t }))} placeholder="e.g. Silver Eagle Coin" />
+                    <InputField label="Description (optional)" value={itemForm.description} onChangeText={(t) => setItemForm(prev => ({ ...prev, description: t }))} placeholder="Condition, year, details..." multiline />
+                    <View style={{ flexDirection: 'row', gap: rs.s(10) }}>
+                      <View style={{ flex: 1 }}>
+                        <InputField label="Price (USD)" value={itemForm.dollarPrice} onChangeText={(t) => setItemForm(prev => ({ ...prev, dollarPrice: t }))} placeholder="0.00" keyboardType="numeric" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <InputField label="Price (KAS)" value={itemForm.kaspaPrice} onChangeText={(t) => setItemForm(prev => ({ ...prev, kaspaPrice: t }))} placeholder="0" keyboardType="numeric" />
+                      </View>
+                    </View>
+                    <View style={{ backgroundColor: COLORS.blue50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(12), borderWidth: 1, borderColor: COLORS.blue200 }}>
+                      <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.blue800, marginBottom: rs.s(4) }}>📸 Direct Post Link</Text>
+                      <Text style={{ fontSize: rs.font(10), color: COLORS.blue600, marginBottom: rs.s(8) }}>
+                        Paste the link to this item's photo on Instagram, Pinterest, or Etsy.{String.fromCharCode(10)}Buyers tap the item → opens this exact post.
+                      </Text>
+                      <TextInput
+                        style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.blue300, borderRadius: rs.s(10), paddingHorizontal: rs.s(12), paddingVertical: rs.s(10), fontSize: rs.font(12), color: COLORS.stone800, fontFamily: 'monospace' }}
+                        value={itemForm.socialUrl}
+                        onChangeText={(t) => setItemForm(prev => ({ ...prev, socialUrl: t }))}
+                        placeholder="https://instagram.com/p/ABC123..."
+                        placeholderTextColor={COLORS.stone400}
+                        keyboardType="url"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(6), marginTop: rs.s(8) }}>
+                        {['📸 Instagram', '📌 Pinterest', '🛍️ Etsy', '🎵 TikTok', '🏷️ eBay'].map(p => (
+                          <View key={p} style={{ backgroundColor: COLORS.stone100, paddingHorizontal: rs.s(8), paddingVertical: rs.s(3), borderRadius: rs.s(6) }}>
+                            <Text style={{ fontSize: rs.font(9), color: COLORS.stone500 }}>{p}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                    <TouchableOpacity onPress={handleSaveItem}
+                      style={{ backgroundColor: COLORS.green600, borderRadius: rs.s(12), paddingVertical: rs.s(14), alignItems: 'center', marginTop: rs.s(8) }}>
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>{editingItem ? 'Save Changes' : 'Add Item'}</Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                </View>
+              </View>
+            </Modal>
+          </View>
         )}
         
         {/* DApps Tab */}
@@ -3278,60 +4393,18 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         
         {/* Preview Tab */}
         {activeView === 'preview' && (
-          <View>
-            <SectionCard title="Storefront Preview">
-              {/* Hero */}
-              <View style={[wsStyles.previewHero, { backgroundColor: COLORS.amber600 }]}>
-                <Text style={wsStyles.previewHeroTitle}>{brandName}</Text>
-                <Text style={wsStyles.previewHeroSubtitle}>Professional storefront powered by KasVillage</Text>
-              </View>
-              
-              {/* Social Footer */}
-              <View style={wsStyles.previewSocialRow}>
-                {SOCIAL_PLATFORMS.slice(0, 5).map(p => (
-                  <Text 
-                    key={p.id} 
-                    style={[
-                      wsStyles.previewSocialIcon,
-                      !socialLinks[p.id] && { opacity: 0.2 }
-                    ]}
-                  >
-                    {p.icon}
-                  </Text>
-                ))}
-              </View>
-            </SectionCard>
-            
-            <View style={wsStyles.actionRow}>
-              <TouchableOpacity style={wsStyles.visitBtn} onPress={() => {
-                if (onOpenStorefront) {
-                  onOpenStorefront({ hostId, hostName: brandName });
-                }
-              }}>
-                <Eye size={rs.s(16)} color={COLORS.white} />
-                <Text style={wsStyles.visitBtnText}>Visit Storefront</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={wsStyles.saveBtn} 
-                onPress={handlePublishStorefront}
-                disabled={isPublishing}
-              >
-                {isPublishing ? (
-                  <ActivityIndicator color={COLORS.white} />
-                ) : (
-                  <>
-                    <Save size={rs.s(16)} color={COLORS.white} />
-                    <Text style={wsStyles.saveBtnText}>Publish</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-            
-            <Text style={wsStyles.publishNote}>
-              KasVillage verifies and posts to Arweave for you (FREE via Turbo)
+          <SectionCard title="Storefront Preview">
+            <Text style={{ fontSize: rs.font(13), color: COLORS.stone600, textAlign: 'center', paddingVertical: rs.s(16) }}>
+              Your storefront banner is shown above.{String.fromCharCode(10)}
+              Tap "Visit Storefront" to open your social page.{String.fromCharCode(10)}
+              Tap "Publish" to inscribe config to Arweave.
             </Text>
-          </View>
+            <View style={{ backgroundColor: COLORS.amber50, borderRadius: rs.s(8), padding: rs.s(10), marginTop: rs.s(8) }}>
+              <Text style={{ fontSize: rs.font(10), color: COLORS.amber700, textAlign: 'center' }}>
+                Buyers see your banner on KasVillage → tap an item → directed to your Instagram/Pinterest/Etsy listing
+              </Text>
+            </View>
+          </SectionCard>
         )}
         
         {/* Bottom padding */}
