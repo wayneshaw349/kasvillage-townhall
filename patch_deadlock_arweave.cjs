@@ -1,33 +1,54 @@
-// patch_deadlock_arweave.cjs — inscribe Deadlocked status to Arweave
+// patch_deadlock_arweave.cjs v2 — CRLF-safe
 const fs = require('fs');
 const path = require('path');
 const FILE = path.join(__dirname, 'NeighborAgreement.tsx');
 
-const src = fs.readFileSync(FILE, 'utf8');
+let src = fs.readFileSync(FILE, 'utf8');
 if (src.includes("status: 'Deadlocked'")) {
   console.log('[patch] Already applied — skipping.');
   process.exit(0);
 }
 
-const OLD = `const handleEnterDispute = () => {
-    const newStats = {
-      ...userStats,
-      deadlocks: userStats.deadlocks + 1,
-      xp: Math.max(0, userStats.xp - 50),
-    };
-    setUserStats(newStats);
-    SecureStore.setItemAsync('kv_user_stats', JSON.stringify(newStats));
-    setStep(8);
-  };`;
+// Normalize to LF for matching
+const norm = src.replace(/\r\n/g, '\n');
 
-const NEW = `const handleEnterDispute = async () => {
-    const newStats = {
-      ...userStats,
-      deadlocks: userStats.deadlocks + 1,
-      xp: Math.max(0, userStats.xp - 50),
-    };
-    setUserStats(newStats);
-    SecureStore.setItemAsync('kv_user_stats', JSON.stringify(newStats));
+// 1) Make handleEnterDispute async
+const syncFn = 'const handleEnterDispute = () => {';
+const asyncFn = 'const handleEnterDispute = async () => {';
+if (norm.includes(syncFn)) {
+  src = src.replace(syncFn, asyncFn);
+  console.log('[patch] 1/2 Made handleEnterDispute async');
+} else if (norm.includes(asyncFn)) {
+  console.log('[patch] 1/2 Already async');
+} else {
+  console.log('[patch] ERROR: handleEnterDispute not found');
+  process.exit(1);
+}
+
+// 2) Inject after kv_user_stats setItemAsync line
+const marker = "SecureStore.setItemAsync('kv_user_stats', JSON.stringify(newStats))";
+const markerAlt = 'SecureStore.setItemAsync("kv_user_stats", JSON.stringify(newStats))';
+const insertMarker = src.includes(marker) ? marker : src.includes(markerAlt) ? markerAlt : null;
+
+if (!insertMarker) {
+  console.log('[patch] ERROR: kv_user_stats marker not found');
+  process.exit(1);
+}
+
+// Find the FIRST occurrence inside handleEnterDispute (not other functions)
+const fnStart = src.indexOf(asyncFn);
+const markerIdx = src.indexOf(insertMarker, fnStart);
+if (markerIdx === -1 || markerIdx - fnStart > 500) {
+  console.log('[patch] ERROR: marker too far from function');
+  process.exit(1);
+}
+
+// Find end of that line (after the semicolon)
+let insertAt = markerIdx + insertMarker.length;
+// Skip past the semicolon if present
+while (insertAt < src.length && src[insertAt] !== '\n' && src[insertAt] !== '\r') insertAt++;
+
+const INJECT = `
     // Inscribe Deadlocked status to Arweave (permanent record)
     try {
       const wallet = await loadMainWallet();
@@ -53,14 +74,10 @@ const NEW = `const handleEnterDispute = async () => {
         });
         console.log('[Deadlock] Inscribed to Arweave');
       }
-    } catch (e) { console.warn('[Deadlock] Arweave inscription failed:', e); }
-    setStep(8);
-  };`;
+    } catch (e) { console.warn('[Deadlock] Arweave inscription failed:', e); }`;
 
-if (!src.includes(OLD)) {
-  console.log('[patch] Pattern not found. Check NeighborAgreement.tsx manually.');
-  process.exit(1);
-}
+src = src.slice(0, insertAt) + INJECT + src.slice(insertAt);
+console.log('[patch] 2/2 Injected Arweave Deadlocked inscription');
 
-fs.writeFileSync(FILE, src.replace(OLD, NEW));
-console.log('[patch] Done — Deadlocked Arweave inscription added.');
+fs.writeFileSync(FILE, src);
+console.log('[patch] Done.');
