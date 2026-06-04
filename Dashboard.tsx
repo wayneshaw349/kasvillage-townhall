@@ -29,7 +29,6 @@ import { useKaspaPrice } from './useKaspaPrice';
 import ProceduralBackground from './expo_procedural_backgrounds';
 import { SlothPoisonBar } from './SlothPoisonMeter';
 import * as SecureStore from 'expo-secure-store';
-import { aggregateUserStatsFromArweave } from './arweave_queries';
 import type { IOULedger } from './IOUBalanceSheetShare';
 import { calculateNetPosition } from './IOUBalanceSheetShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -37,7 +36,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // ============================================================================
 // DASHBOARD STATS HOOK — UTXO Ledger + Arweave + IOU + TX History
 // ============================================================================
-function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n) {
+function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, xpFallback: number = 0) {
   const [stats, setStats] = useState({
     agreementsCompleted: 0,
     deadlocks: 0,
@@ -64,9 +63,59 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n) {
     setStats(s => ({ ...s, loading: true }));
 
     try {
-      const resolvedPubkey = pubkey || (await SecureStore.getItemAsync('kaspa_pubkey')) || '';
+      // Derive pubkey from address if all SecureStore keys empty
+      let resolvedPubkey = pubkey 
+        || (await SecureStore.getItemAsync('kaspa_pubkey')) 
+        || (await SecureStore.getItemAsync('kv_l1_pubkey'))
+        || (await SecureStore.getItemAsync('public_key'))
+        || '';
       const addr = await SecureStore.getItemAsync('kaspa_address') || '';
+
+      if (!resolvedPubkey && addr) {
+        // Kaspa P2PK address embeds x-only pubkey in bech32 — decode it
+        try {
+          const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+          const dataPart = addr.split(':')[1] || '';
+          const stripped = dataPart.slice(0, dataPart.length - 8); // remove 8-char checksum
+          const fiveBit: number[] = [];
+          for (const c of stripped) {
+            const v = CHARSET.indexOf(c);
+            if (v === -1) break;
+            fiveBit.push(v);
+          }
+          // first 5-bit value is address type (0=P2PK), skip it
+          const payload = fiveBit.slice(1);
+          // convert 5-bit to 8-bit
+          let acc = 0, bits = 0;
+          const bytes: number[] = [];
+          for (const v of payload) {
+            acc = (acc << 5) | v;
+            bits += 5;
+            if (bits >= 8) {
+              bits -= 8;
+              bytes.push((acc >> bits) & 0xff);
+            }
+          }
+          if (bytes.length >= 32) {
+            const xOnly = bytes.slice(0, 32).map(b => b.toString(16).padStart(2, '0')).join('');
+            resolvedPubkey = '02' + xOnly; // assume even y (standard for x-only)
+            console.log('[DashStats] Derived pubkey from address:', resolvedPubkey.slice(0, 16));
+          }
+        } catch (e) { console.warn('[DashStats] Address decode error:', e); }
+      }
+
       console.log('[DashStats] pubkey:', resolvedPubkey.slice(0, 12) || 'NONE', 'addr:', addr.slice(0, 20) || 'NONE');
+
+      // Read local XP from kv_user_stats (TownHall writes here)
+      let localXp = 0;
+      try {
+        const statsJson = await SecureStore.getItemAsync('kv_user_stats');
+        if (statsJson) {
+          const us = JSON.parse(statsJson);
+          localXp = us.xp ?? 0;
+          console.log('[DashStats] Local XP from kv_user_stats:', localXp);
+        }
+      } catch {}
 
       // 1) UTXO ledger from AsyncStorage
       let totalBalanceSompi = 0n;
@@ -99,23 +148,67 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n) {
         console.log('[DashStats] Using balanceSompi fallback:', Number(balanceSompiFallback)/1e8);
       }
 
-      // 2) Arweave: FROST agreement history (5s timeout — can't hang the hook)
+      // 2) Arweave: frost-agreement stats (direct GraphQL, 8s timeout)
       let agreementsCompleted = 0, deadlocks = 0, pComplete = 0, xp = 0, totalVolumeSompi = 0;
+      let totalAgreements = 0;
       try {
         if (resolvedPubkey) {
-          const arPromise = aggregateUserStatsFromArweave(resolvedPubkey);
-          const timeout = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Arweave timeout')), 5000));
-          const ar = await Promise.race([arPromise, timeout]);
-          if (ar) {
-            agreementsCompleted = ar.successes ?? 0;
-            deadlocks = ar.deadlocks ?? 0;
-            pComplete = ar.pComplete ?? 0;
-            xp = ar.xp ?? 0;
-            totalVolumeSompi = ar.totalVolumeSompi ?? 0;
+          const gql = `{ transactions(tags: [{ name: "App-Name", values: ["KasVillage"] }, { name: "KV-Type", values: ["frost-agreement"] }, { name: "KV-Pubkey", values: ["${resolvedPubkey}"] }], first: 100, sort: HEIGHT_DESC) { edges { node { tags { name value } } } } }`;
+          const gql2 = `{ transactions(tags: [{ name: "App-Name", values: ["KasVillage"] }, { name: "KV-Type", values: ["frost-agreement"] }, { name: "KV-Counterparty", values: ["${resolvedPubkey}"] }], first: 100, sort: HEIGHT_DESC) { edges { node { tags { name value } } } } }`;
+
+          const fetchAr = async (q: string) => {
+            const r = await fetch('https://arweave.net/graphql', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: q }),
+            });
+            const d = await r.json();
+            return d?.data?.transactions?.edges || [];
+          };
+
+          const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Arweave timeout')), 8000));
+          const [edges1, edges2] = await Promise.race([
+            Promise.all([fetchAr(gql), fetchAr(gql2)]),
+            timeout.then(() => { throw new Error('timeout'); }),
+          ]) as [any[], any[]];
+
+          const allEdges = [...edges1, ...edges2];
+          // Status ranking: Released/Deadlocked are terminal, keep highest per agreement
+          const rank: Record<string, number> = { Proposed: 1, Accepted: 2, Agreed: 3, Released: 4, Deadlocked: 4 };
+          const agrMap = new Map<string, { status: string; amount: number }>();
+
+          for (const e of allEdges) {
+            const tags: Record<string, string> = {};
+            for (const t of e.node.tags) tags[t.name] = t.value;
+            const agrId = tags['KV-AgreementId'] || '';
+            const status = tags['KV-Status'] || '';
+            const amount = parseInt(tags['KV-Amount'] || '0', 10);
+            if (!agrId) continue;
+            const existing = agrMap.get(agrId);
+            if (!existing || (rank[status] || 0) > (rank[existing.status] || 0)) {
+              agrMap.set(agrId, { status, amount });
+            }
           }
-          console.log('[DashStats] Arweave — completed:', agreementsCompleted, 'xp:', xp);
+
+          totalAgreements = agrMap.size;
+          for (const [, v] of agrMap) {
+            if (v.status === 'Released') { agreementsCompleted++; totalVolumeSompi += v.amount; }
+            if (v.status === 'Deadlocked') { deadlocks++; }
+          }
+
+          // XP from Arweave: +10 per success, -50 per deadlock
+          const arweaveXp = Math.max(0, agreementsCompleted * 10 - deadlocks * 50);
+          // pComplete: Bayesian (1+s)/(2+s+d)
+          pComplete = totalAgreements > 0 ? (1 + agreementsCompleted) / (2 + agreementsCompleted + deadlocks) : 0;
+          xp = arweaveXp;
+
+          console.log('[DashStats] Arweave — total:', totalAgreements, 'completed:', agreementsCompleted, 'deadlocks:', deadlocks, 'xp:', xp, 'volume:', totalVolumeSompi / 1e8);
         }
       } catch (e) { console.warn('[DashStats] Arweave error:', e); }
+
+      // Use local XP if Arweave didn't provide it
+      if (xp === 0 && localXp > 0) xp = localXp;
+      if (xp === 0 && xpFallback > 0) xp = xpFallback;
 
       // 3) IOU ledgers: net positions
       let iousOwedSompi = 0n;
@@ -168,7 +261,7 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n) {
       console.warn('[DashStats] OUTER error:', e);
       setStats(s => ({ ...s, loading: false }));
     }
-  }, [pubkey, balanceSompiFallback]);
+  }, [pubkey, balanceSompiFallback, xpFallback]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -317,7 +410,7 @@ const BedroomBackground: React.FC<{ children: React.ReactNode }> = ({ children }
 // Dynamic Background Switcher
 const DynamicBackground: React.FC<{
   activeTab: string;
-  avatarConfig?: { race: string; class: string; occupation: string; name: string };
+  avatarConfig?: { race: string; class: string; occupation: string; name: string; gender?: string };
   children: React.ReactNode
 }> = ({ activeTab, avatarConfig, children }) => {
   if (avatarConfig && avatarConfig.race) {
@@ -1134,11 +1227,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
 
   const [activeTab, setActiveTab] = useState<'wallet' | 'mailbox' | 'workspace' | 'bathroom'>('wallet');
-  const [avatarConfig, setAvatarConfig] = useState<{ race: string; class: string; occupation: string; name: string } | null>(null);
+  const [avatarConfig, setAvatarConfig] = useState<{ race: string; class: string; occupation: string; name: string; gender?: string } | null>(null);
   const [kaspaAddress, setKaspaAddress] = useState<string>('');
 
   // ---- REAL DATA HOOK ----
-  const ds = useDashboardStats(user.pubkey, balanceSompi);
+  const ds = useDashboardStats(user.pubkey, balanceSompi, user.xp);
 
   useEffect(() => {
     const loadConfig = async () => {
