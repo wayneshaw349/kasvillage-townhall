@@ -29,6 +29,151 @@ import { useKaspaPrice } from './useKaspaPrice';
 import ProceduralBackground from './expo_procedural_backgrounds';
 import { SlothPoisonBar } from './SlothPoisonMeter';
 import * as SecureStore from 'expo-secure-store';
+import { aggregateUserStatsFromArweave } from './arweave_queries';
+import type { IOULedger } from './IOUBalanceSheetShare';
+import { calculateNetPosition } from './IOUBalanceSheetShare';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// ============================================================================
+// DASHBOARD STATS HOOK — UTXO Ledger + Arweave + IOU + TX History
+// ============================================================================
+function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n) {
+  const [stats, setStats] = useState({
+    agreementsCompleted: 0,
+    deadlocks: 0,
+    pComplete: 0,
+    xp: 0,
+    totalVolumeSompi: 0,
+    totalBalanceSompi: 0n,
+    spendableBalanceSompi: 0n,
+    committedSompi: 0n,
+    iouAllocatedSompi: 0n,
+    iousOwedSompi: 0n,
+    iousOwedToYouSompi: 0n,
+    agreementReturnsSompi: 0n,
+    totalSentSompi: 0n,
+    totalReceivedSompi: 0n,
+    sendCount: 0,
+    receiveCount: 0,
+    storefronts: 0,
+    isSnailPoison: false,
+    loading: true,
+  });
+
+  const refresh = useCallback(async () => {
+    setStats(s => ({ ...s, loading: true }));
+
+    try {
+      const resolvedPubkey = pubkey || (await SecureStore.getItemAsync('kaspa_pubkey')) || '';
+      const addr = await SecureStore.getItemAsync('kaspa_address') || '';
+      console.log('[DashStats] pubkey:', resolvedPubkey.slice(0, 12) || 'NONE', 'addr:', addr.slice(0, 20) || 'NONE');
+
+      // 1) UTXO ledger from AsyncStorage
+      let totalBalanceSompi = 0n;
+      let spendableBalanceSompi = 0n;
+      let committedSompi = 0n;
+      let iouAllocatedSompi = 0n;
+      try {
+        const ledgerJson = await AsyncStorage.getItem('kv_utxo_ledger');
+        console.log('[DashStats] UTXO ledger:', ledgerJson ? ledgerJson.length + ' chars' : 'NONE');
+        if (ledgerJson) {
+          const entries: Array<{ amountSompi: string; status: string }> = JSON.parse(ledgerJson);
+          for (const e of entries) {
+            const amt = BigInt(e.amountSompi);
+            totalBalanceSompi += amt;
+            switch (e.status) {
+              case 'free': spendableBalanceSompi += amt; break;
+              case 'iou-allocated': iouAllocatedSompi += amt; break;
+              case 'collateral-committed':
+              case 'collateral-locked': committedSompi += amt; break;
+            }
+          }
+          console.log('[DashStats] UTXO total:', Number(totalBalanceSompi)/1e8, 'free:', Number(spendableBalanceSompi)/1e8);
+        }
+      } catch (e) { console.warn('[DashStats] UTXO ledger error:', e); }
+
+      // Fallback: if ledger empty but we have balanceSompi from prop, use it
+      if (totalBalanceSompi === 0n && balanceSompiFallback > 0n) {
+        totalBalanceSompi = balanceSompiFallback;
+        spendableBalanceSompi = balanceSompiFallback; // assume all free if ledger not populated
+        console.log('[DashStats] Using balanceSompi fallback:', Number(balanceSompiFallback)/1e8);
+      }
+
+      // 2) Arweave: FROST agreement history (5s timeout — can't hang the hook)
+      let agreementsCompleted = 0, deadlocks = 0, pComplete = 0, xp = 0, totalVolumeSompi = 0;
+      try {
+        if (resolvedPubkey) {
+          const arPromise = aggregateUserStatsFromArweave(resolvedPubkey);
+          const timeout = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Arweave timeout')), 5000));
+          const ar = await Promise.race([arPromise, timeout]);
+          if (ar) {
+            agreementsCompleted = ar.successes ?? 0;
+            deadlocks = ar.deadlocks ?? 0;
+            pComplete = ar.pComplete ?? 0;
+            xp = ar.xp ?? 0;
+            totalVolumeSompi = ar.totalVolumeSompi ?? 0;
+          }
+          console.log('[DashStats] Arweave — completed:', agreementsCompleted, 'xp:', xp);
+        }
+      } catch (e) { console.warn('[DashStats] Arweave error:', e); }
+
+      // 3) IOU ledgers: net positions
+      let iousOwedSompi = 0n;
+      let iousOwedToYouSompi = 0n;
+      let agreementReturnsSompi = 0n;
+      try {
+        const json = await SecureStore.getItemAsync('kv_iou_ledgers');
+        if (json) {
+          const ledgers: IOULedger[] = JSON.parse(json);
+          for (const ledger of ledgers) {
+            if (ledger.status === 'settled') continue;
+            const pos = calculateNetPosition(ledger, resolvedPubkey);
+            iousOwedToYouSompi += pos.theyOwe;
+            iousOwedSompi += pos.iOwe;
+            if (ledger.status === 'settling' && pos.theyOwe > 0n) {
+              agreementReturnsSompi += pos.theyOwe;
+            }
+          }
+        }
+      } catch (e) { console.warn('[DashStats] IOU error:', e); }
+
+      // 4) TX history: direct send/receive
+      let totalSentSompi = 0n;
+      let totalReceivedSompi = 0n;
+      let sendCount = 0;
+      let receiveCount = 0;
+      try {
+        const txJson = await SecureStore.getItemAsync('kv_tx_history');
+        if (txJson) {
+          const txs: Array<{ type: string; amountSompi: string; status: string }> = JSON.parse(txJson);
+          for (const tx of txs) {
+            if (tx.status === 'failed') continue;
+            const amt = BigInt(tx.amountSompi);
+            if (tx.type === 'send') { totalSentSompi += amt; sendCount++; }
+            if (tx.type === 'receive') { totalReceivedSompi += amt; receiveCount++; }
+          }
+        }
+      } catch (e) { console.warn('[DashStats] TX history error:', e); }
+
+      setStats({
+        agreementsCompleted, deadlocks, pComplete, xp, totalVolumeSompi,
+        totalBalanceSompi, spendableBalanceSompi, committedSompi, iouAllocatedSompi,
+        iousOwedSompi, iousOwedToYouSompi, agreementReturnsSompi,
+        totalSentSompi, totalReceivedSompi, sendCount, receiveCount,
+        storefronts: 0,
+        isSnailPoison: xp < 0,
+        loading: false,
+      });
+    } catch (e) {
+      console.warn('[DashStats] OUTER error:', e);
+      setStats(s => ({ ...s, loading: false }));
+    }
+  }, [pubkey, balanceSompiFallback]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  return { ...stats, refresh };
+}
 
 // ============================================================================
 // RESPONSIVE SCALER (Same as expo_phone_)
@@ -574,7 +719,7 @@ const cardStyles = StyleSheet.create({
 });
 
 // ============================================================================
-// WALLET OVERVIEW PLACEHOLDER
+// WALLET OVERVIEW
 // ============================================================================
 const WalletOverview: React.FC<{
   balance: number;
@@ -586,15 +731,13 @@ const WalletOverview: React.FC<{
   onNavigateProfile?: () => void;
   onNavigateNeighbor?: () => void;
   onNavigateTxHistory?: () => void;
-  onNavigateTxHistory?: () => void;
   onNavigatePOBox?: () => void;
   onSwitchMode?: (mode: 'tutorial' | 'real') => void;
+  activeMode?: 'tutorial' | 'real';
   balanceSompi?: bigint;
-  inAgreementsSompi?: bigint;
-  iousOwedSompi?: bigint;
-  iousOwedToYouSompi?: bigint;
-  agreementReturnsSompi?: bigint;
-}> = ({ balance, xp, onDeposit, onWithdraw, onSend, onPayNearby, onNavigateProfile, onNavigateNeighbor, onNavigateTxHistory, onNavigatePOBox, activeMode, onSwitchMode, balanceSompi = 0n, inAgreementsSompi = 0n, iousOwedSompi = 0n, iousOwedToYouSompi = 0n, agreementReturnsSompi = 0n }) => {
+  // Stats from hook
+  ds: ReturnType<typeof useDashboardStats>;
+}> = ({ balance, xp, onDeposit, onWithdraw, onSend, onPayNearby, onNavigateProfile, onNavigateNeighbor, onNavigateTxHistory, onNavigatePOBox, activeMode, onSwitchMode, balanceSompi = 0n, ds }) => {
   const { formattedPrice, usdPerKas, loading: priceLoading, isStale } = useKaspaPrice({ autoStart: true });
   const kasBalance = Number(balanceSompi) / 100_000_000;
   const usdValue = kasBalance * usdPerKas;
@@ -625,7 +768,7 @@ const WalletOverview: React.FC<{
         )}
         <View style={walletStyles.xpRow}>
           <Zap size={rs.s(14)} color={COLORS.amber600} />
-          <Text style={walletStyles.xpText}>{xp} XP</Text>
+          <Text style={walletStyles.xpText}>{ds.loading ? '...' : ds.xp} XP</Text>
         </View>
       </Card>
     
@@ -703,87 +846,118 @@ const WalletOverview: React.FC<{
     
 
 
-    {/* Financial Summary */}
+    {/* Financial Summary — UTXO ledger tagged breakdown */}
     <Card variant="green" style={walletStyles.statsCard}>
-      <Text style={walletStyles.statsTitle}>Financial Summary</Text>
+      <Text style={walletStyles.statsTitle}>
+        {ds.loading ? 'Loading Financial Summary…' : 'Financial Summary'}
+      </Text>
       <View style={{ marginTop: 8 }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
-          <Text style={{ color: "#888", fontSize: 13 }}>Wallet Balance</Text>
-          <Text style={{ color: "#D4AF37", fontSize: 13, fontWeight: "bold" }}>{(Number(balanceSompi) / 1e8).toFixed(4)} KASPA</Text>
+          <Text style={{ color: "#888", fontSize: 13 }}>Total On-Chain</Text>
+          <Text style={{ color: "#D4AF37", fontSize: 13, fontWeight: "bold" }}>{(Number(ds.totalBalanceSompi) / 1e8).toFixed(4)} KASPA</Text>
         </View>
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
-          <Text style={{ color: "#888", fontSize: 13 }}>In Agreements</Text>
-          <Text style={{ color: "#E67E22", fontSize: 13 }}>{(Number(inAgreementsSompi) / 1e8).toFixed(4)} KASPA</Text>
+          <Text style={{ color: "#888", fontSize: 13 }}>Collateral (FROST)</Text>
+          <Text style={{ color: "#E67E22", fontSize: 13 }}>{(Number(ds.committedSompi) / 1e8).toFixed(4)} KASPA</Text>
         </View>
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
-          <Text style={{ color: "#888", fontSize: 13 }}>IOUs Owed by You</Text>
-          <Text style={{ color: "#E74C3C", fontSize: 13 }}>{(Number(iousOwedSompi) / 1e8).toFixed(4)} KASPA</Text>
+          <Text style={{ color: "#888", fontSize: 13 }}>IOU-Backed UTXOs</Text>
+          <Text style={{ color: "#E67E22", fontSize: 13 }}>{(Number(ds.iouAllocatedSompi) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>IOUs You Owe (net)</Text>
+          <Text style={{ color: "#E74C3C", fontSize: 13 }}>{(Number(ds.iousOwedSompi) / 1e8).toFixed(4)} KASPA</Text>
         </View>
         <View style={{ height: 1, backgroundColor: "#333", marginVertical: 8 }} />
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
-          <Text style={{ color: "#888", fontSize: 14, fontWeight: "bold" }}>Spendable</Text>
-          <Text style={{ color: "#27AE60", fontSize: 14, fontWeight: "bold" }}>{(Math.max(0, Number(balanceSompi) - Number(inAgreementsSompi) - Number(iousOwedSompi)) / 1e8).toFixed(4)} KASPA</Text>
+          <Text style={{ color: "#888", fontSize: 14, fontWeight: "bold" }}>Spendable (free UTXOs)</Text>
+          <Text style={{ color: "#27AE60", fontSize: 14, fontWeight: "bold" }}>{(Number(ds.spendableBalanceSompi) / 1e8).toFixed(4)} KASPA</Text>
         </View>
         <View style={{ height: 1, backgroundColor: "#333", marginVertical: 8 }} />
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
           <Text style={{ color: "#888", fontSize: 13 }}>IOUs Owed to You</Text>
-          <Text style={{ color: "#27AE60", fontSize: 13 }}>+{(Number(iousOwedToYouSompi) / 1e8).toFixed(4)} KASPA</Text>
+          <Text style={{ color: "#27AE60", fontSize: 13 }}>+{(Number(ds.iousOwedToYouSompi) / 1e8).toFixed(4)} KASPA</Text>
         </View>
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
           <Text style={{ color: "#888", fontSize: 13 }}>Agreement Returns</Text>
-          <Text style={{ color: "#27AE60", fontSize: 13 }}>+{(Number(agreementReturnsSompi) / 1e8).toFixed(4)} KASPA</Text>
+          <Text style={{ color: "#27AE60", fontSize: 13 }}>+{(Number(ds.agreementReturnsSompi) / 1e8).toFixed(4)} KASPA</Text>
         </View>
         <View style={{ height: 1, backgroundColor: "#333", marginVertical: 8 }} />
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
           <Text style={{ color: "#D4AF37", fontSize: 14, fontWeight: "bold" }}>Potential Balance</Text>
-          <Text style={{ color: "#D4AF37", fontSize: 14, fontWeight: "bold" }}>{((Number(balanceSompi) + Number(iousOwedToYouSompi) + Number(agreementReturnsSompi)) / 1e8).toFixed(4)} KASPA</Text>
+          <Text style={{ color: "#D4AF37", fontSize: 14, fontWeight: "bold" }}>{((Number(ds.totalBalanceSompi) + Number(ds.iousOwedToYouSompi) + Number(ds.agreementReturnsSompi)) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+        <View style={{ height: 1, backgroundColor: "#555", marginVertical: 8 }} />
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>Total Sent ({ds.sendCount})</Text>
+          <Text style={{ color: "#E74C3C", fontSize: 13 }}>-{(Number(ds.totalSentSompi) / 1e8).toFixed(4)} KASPA</Text>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>Total Received ({ds.receiveCount})</Text>
+          <Text style={{ color: "#27AE60", fontSize: 13 }}>+{(Number(ds.totalReceivedSompi) / 1e8).toFixed(4)} KASPA</Text>
         </View>
       </View>
     </Card>
 
-    {/* Village Stats */}
+    {/* Village Stats — real data from hook */}
     <Card variant="green" style={walletStyles.statsCard}>
-      <Text style={walletStyles.statsTitle}>Your Stats</Text>
+      <Text style={walletStyles.statsTitle}>
+        {ds.loading ? 'Loading Stats…' : 'Your Stats'}
+      </Text>
       <View style={walletStyles.statsRow}>
         <View style={walletStyles.statItem}>
-          <Text style={walletStyles.statValue}>{xp >= 2000 ? "Archon" : xp >= 1000 ? "Sentinel" : xp >= 500 ? "Custodian" : xp >= 200 ? "Verified" : "Base"}</Text>
+          <Text style={walletStyles.statValue}>{ds.xp >= 2000 ? "Archon" : ds.xp >= 1000 ? "Sentinel" : ds.xp >= 500 ? "Custodian" : ds.xp >= 200 ? "Verified" : "Base"}</Text>
           <Text style={walletStyles.statLabel}>Tier</Text>
         </View>
         <View style={walletStyles.statItem}>
-          <Text style={walletStyles.statValue}>{xp}</Text>
+          <Text style={walletStyles.statValue}>{ds.xp}</Text>
           <Text style={walletStyles.statLabel}>XP</Text>
         </View>
         <View style={walletStyles.statItem}>
-          <Text style={walletStyles.statValue}>Unknown</Text>
+          <Text style={walletStyles.statValue}>{ds.agreementsCompleted > 0 ? (ds.pComplete >= 0.9 ? "Low" : ds.pComplete >= 0.7 ? "Med" : "High") : "Unknown"}</Text>
           <Text style={walletStyles.statLabel}>Risk Rating</Text>
         </View>
       </View>
       <View style={[walletStyles.statsRow, { marginTop: 8 }]}>
         <View style={walletStyles.statItem}>
-          <Text style={walletStyles.statValue}>0</Text>
+          <Text style={walletStyles.statValue}>{ds.agreementsCompleted}</Text>
           <Text style={walletStyles.statLabel}>Completed</Text>
         </View>
         <View style={walletStyles.statItem}>
-          <Text style={walletStyles.statValue}>0</Text>
+          <Text style={walletStyles.statValue}>{ds.deadlocks}</Text>
           <Text style={walletStyles.statLabel}>Deadlocks</Text>
         </View>
         <View style={walletStyles.statItem}>
-          <Text style={walletStyles.statValue}>N/A</Text>
+          <Text style={walletStyles.statValue}>{ds.agreementsCompleted > 0 ? (ds.pComplete * 100).toFixed(1) + '%' : 'N/A'}</Text>
           <Text style={walletStyles.statLabel}>P(Complete)</Text>
         </View>
       </View>
       <View style={[walletStyles.statsRow, { marginTop: 8 }]}>
         <View style={walletStyles.statItem}>
-          <Text style={walletStyles.statValue}>0</Text>
+          <Text style={walletStyles.statValue}>{ds.storefronts}</Text>
           <Text style={walletStyles.statLabel}>Storefronts</Text>
         </View>
         <View style={walletStyles.statItem}>
-          <Text style={walletStyles.statValue}>0</Text>
-          <Text style={walletStyles.statLabel}>DApps</Text>
+          <Text style={walletStyles.statValue}>{(ds.totalVolumeSompi / 1e8).toFixed(2)}</Text>
+          <Text style={walletStyles.statLabel}>Volume (KAS)</Text>
         </View>
         <View style={walletStyles.statItem}>
-          <Text style={walletStyles.statValue}>{"No"}</Text>
+          <Text style={[walletStyles.statValue, ds.isSnailPoison ? { color: COLORS.red600 } : {}]}>{ds.isSnailPoison ? "Yes" : "No"}</Text>
           <Text style={walletStyles.statLabel}>Snail Poison</Text>
+        </View>
+      </View>
+      <View style={[walletStyles.statsRow, { marginTop: 8 }]}>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>{ds.sendCount}</Text>
+          <Text style={walletStyles.statLabel}>Sends</Text>
+        </View>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>{ds.receiveCount}</Text>
+          <Text style={walletStyles.statLabel}>Receives</Text>
+        </View>
+        <View style={walletStyles.statItem}>
+          <Text style={walletStyles.statValue}>{ds.sendCount + ds.receiveCount}</Text>
+          <Text style={walletStyles.statLabel}>Total TXs</Text>
         </View>
       </View>
     </Card>
@@ -922,15 +1096,16 @@ interface DashboardProps {
   onNavigateEntertainment?: () => void;
   onNavigateProfile?: () => void;
   onNavigateNeighbor?: () => void;
-
   onNavigateSendKas?: () => void;
   onNavigateTownHall?: () => void;
   onNavigatePayNearby?: () => void;
   onNavigateBathroom?: () => void;
   onNavigateReceive?: () => void;
   onNavigateTxHistory?: () => void;
-  onNavigateTxHistory?: () => void;
   onNavigatePOBox?: () => void;
+  activeMode?: 'tutorial' | 'real';
+  onSwitchMode?: (mode: 'tutorial' | 'real') => void;
+  balanceSompi?: bigint;
 }
 
 
@@ -962,6 +1137,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [avatarConfig, setAvatarConfig] = useState<{ race: string; class: string; occupation: string; name: string } | null>(null);
   const [kaspaAddress, setKaspaAddress] = useState<string>('');
 
+  // ---- REAL DATA HOOK ----
+  const ds = useDashboardStats(user.pubkey, balanceSompi);
+
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -980,10 +1158,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    // Refresh data from Arweave/API
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await ds.refresh();
     setRefreshing(false);
-  }, []);
+  }, [ds.refresh]);
   
   const handleSend = useCallback(() => {
     onNavigateSendKas?.();
@@ -1027,6 +1204,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               balance={balance}
               balanceSompi={balanceSompi}
               xp={user.xp}
+              ds={ds}
               onDeposit={() => onNavigateReceive?.()}
               onWithdraw={() => onNavigateSendKas?.()}
               onSend={handleSend}

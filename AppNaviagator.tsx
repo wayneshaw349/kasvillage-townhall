@@ -697,7 +697,7 @@ export const AppNavigator: React.FC = () => {
           setScreen('onboarding');
           return;
         }
-        const publicKey: string = (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY)) || ''; console.log('[AppNav] Your PubKey:', publicKey);
+        const publicKey: string = (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY)) || (await SecureStore.getItemAsync('kaspa_pubkey')) || ''; console.log('[AppNav] Your PubKey:', publicKey);
         // pubkey logged above
         const identityRaw: string = (await SecureStore.getItemAsync(STORE_KEYS.IDENTITY)) || '';
         const identity = identityRaw ? JSON.parse(identityRaw) : null;
@@ -884,7 +884,7 @@ export const AppNavigator: React.FC = () => {
         // Ritual finished — reload user data and go to dashboard
         (async () => {
           try {
-            const publicKey = (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY)) || '';
+            const publicKey = (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY)) || (await SecureStore.getItemAsync('kaspa_pubkey')) || '';
             const identityRaw = (await SecureStore.getItemAsync(STORE_KEYS.IDENTITY)) || '';
             const avatarRaw = (await SecureStore.getItemAsync('kv_avatar_recipe')) || '';
             const identity = identityRaw ? JSON.parse(identityRaw) : null;
