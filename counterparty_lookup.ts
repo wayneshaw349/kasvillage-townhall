@@ -6,7 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import { bytesToHex } from '@noble/hashes/utils';
 
 // CONSTANTS
-const TOWNHALL_API = 'https://townhall.kasvillage.app';
+const TOWNHALL_API = 'https://kasvillage.app.runonflux.io';
 const LOOKUP_TIMEOUT_MS = 10000;
 
 // TYPES
