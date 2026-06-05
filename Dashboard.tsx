@@ -32,8 +32,7 @@ import * as SecureStore from 'expo-secure-store';
 import type { IOULedger } from './IOUBalanceSheetShare';
 import { calculateNetPosition } from './IOUBalanceSheetShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { lookupCounterpartyCached, computeEnhancedPComplete } from './counterparty_lookup';
-import type { CounterpartyStats } from './counterparty_lookup';
+// TownHall stats fetched directly via /user-stats POST (no counterparty_lookup needed)
 
 // ============================================================================
 // DASHBOARD STATS HOOK — UTXO Ledger + Arweave + IOU + TX History
@@ -222,7 +221,8 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
       if (xp === 0 && localXp > 0) xp = localXp;
       if (xp === 0 && xpFallback > 0) xp = xpFallback;
 
-      // ── TownHall Bayesian stats (cached, non-blocking) ──
+      // ── TownHall Bayesian stats via /user-stats POST (direct Flux endpoint) ──
+      const TOWNHALL_STATS_URL = 'https://kasvillage.app.runonflux.io/user-stats';
       let bayesianScore = pComplete || 0.5;
       let bayesianConfidence = 0;
       let townhallRiskRating = 'unknown';
@@ -234,38 +234,48 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
       let enhancedFactors: any = null;
       try {
         if (resolvedPubkey) {
-          const result = await lookupCounterpartyCached(resolvedPubkey, { includeHistory: true });
-          if (result.found && result.stats) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          const resp = await fetch(TOWNHALL_STATS_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ pubkey: resolvedPubkey }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          if (resp.ok) {
+            const ts = await resp.json();
             townhallOnline = true;
-            const ts = result.stats;
-            bayesianScore = ts.pComplete;
-            bayesianConfidence = ts.confidence;
-            townhallRiskRating = ts.riskRating;
-            townhallVolumeSompi = ts.neighborAgreements.totalVolumeSompi;
-            townhallAvgCompletionMs = ts.neighborAgreements.avgCompletionTimeMs;
-            townhallSuccesses = ts.successes;
-            townhallDeadlocks = ts.deadlocks;
-            // Prefer TownHall over local Arweave when available
-            if (ts.successes > 0 || ts.deadlocks > 0) {
-              agreementsCompleted = ts.successes;
-              deadlocks = ts.deadlocks;
-              pComplete = ts.pComplete;
-              if (ts.xp > 0) xp = ts.xp;
-              if (ts.neighborAgreements.totalVolumeSompi > 0) {
-                totalVolumeSompi = ts.neighborAgreements.totalVolumeSompi;
-              }
+            const s = ts.successes || 0;
+            const d = ts.deadlocks || 0;
+            const n = s + d;
+            const thXp = ts.xp || 0;
+            const thPComplete = n > 0 ? (1 + s) / (2 + n) : 0.5;
+            const thConfidence = Math.min(n / 10, 1);
+            bayesianScore = thPComplete;
+            bayesianConfidence = thConfidence;
+            townhallSuccesses = s;
+            townhallDeadlocks = d;
+            // Risk rating
+            if (thPComplete > 0.9 && thConfidence > 0.5) townhallRiskRating = 'highly_trusted';
+            else if (thPComplete > 0.75) townhallRiskRating = 'reliable';
+            else if (thPComplete < 0.4) townhallRiskRating = 'high_risk';
+            else townhallRiskRating = 'medium_risk';
+            // Prefer TownHall over local Arweave
+            if (s > 0 || d > 0) {
+              agreementsCompleted = s;
+              deadlocks = d;
+              pComplete = thPComplete;
+              if (thXp > 0) xp = thXp;
             }
-            // Enhanced Bayesian with recency/pattern/speed factors
-            enhancedFactors = computeEnhancedPComplete(ts);
-            bayesianScore = enhancedFactors.finalP;
             console.log('[DashStats] TownHall — pComplete:', bayesianScore.toFixed(3),
-              'confidence:', bayesianConfidence.toFixed(2), 'risk:', townhallRiskRating);
+              'confidence:', bayesianConfidence.toFixed(2), 'risk:', townhallRiskRating, 'xp:', thXp);
           } else {
-            console.log('[DashStats] TownHall — not found, using Arweave data');
+            console.log('[DashStats] TownHall — HTTP', resp.status, 'using Arweave data');
           }
         }
-      } catch (e) {
-        console.warn('[DashStats] TownHall fetch error (non-fatal):', e);
+      } catch (e: any) {
+        console.warn('[DashStats] TownHall fetch error (non-fatal):', e?.message || e);
       }
 
       // 3) IOU ledgers: net positions
