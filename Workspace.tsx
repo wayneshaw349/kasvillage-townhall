@@ -3955,9 +3955,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(4) }}>
                       {group.mods.map(m => (
                         <TouchableOpacity key={m} onPress={() => {
-                          const importLine = "import { " + m + " } from '@kasvillage/sdk/kasvillage_" + m + "';\nimport { procedural_sdk } from '@kasvillage/sdk/procedural_sdk';";
-                          Clipboard.setStringAsync(importLine);
-                          Alert.alert('Copied!', m + ' import copied.\nprocedural_sdk auto-included.\nPaste into Claude Code.');
+                          const nameMap = { 'procedural_sdk': 'procedural_sdk', 'game_input': 'kasvillage_game_input_paint' };
+                          const fileName = nameMap[m] || ('kasvillage_' + m);
+                          const rawUrl = 'https://raw.githubusercontent.com/wayneshaw349/kasvillage-townhall/main/' + fileName + '.ts';
+                          Clipboard.setStringAsync('Fetch this file and use it to build: ' + rawUrl);
+                          Alert.alert('Copied!', fileName + '.ts\nGitHub URL on clipboard.\nPaste into Claude Code.');
                         }} style={{ backgroundColor: '#fff', paddingHorizontal: rs.s(6), paddingVertical: rs.s(3), borderRadius: rs.s(5), borderWidth: 1, borderColor: '#fca5a5' }} activeOpacity={0.6}>
                           <Text style={{ fontSize: rs.font(8), fontFamily: 'monospace', color: '#991b1b' }}>📋 {m}</Text>
                         </TouchableOpacity>
