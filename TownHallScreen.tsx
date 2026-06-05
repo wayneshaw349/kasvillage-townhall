@@ -62,6 +62,8 @@ import {
   AlertCircle,
 } from 'lucide-react-native';
 
+const TOWNHALL_BASE = 'https://kasvillage.app.runonflux.io';
+
 // ============================================================================
 // RESPONSIVE SCALER
 // ============================================================================
@@ -592,41 +594,57 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         searchType = 'stats';
       }
       
-      // Call Town Hall API
-      const response = await fetch(`https://townhall.kasvillage.dev/api/verify/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, type: searchType }),
-      });
+      // Call Town Hall API (routes matched to configure_routes_v3)
+      let response;
+      let data: any;
       
-      const data = await response.json();
-      
-      if (data.ok) {
-        setSearchResult({
-          found: true,
-          type: data.type,
-          verified: data.verified,
-          aptNumber: data.apt_number,
-          address: data.kaspa_address,
-          name: data.name,
-          traits: data.trait_count,
-          arweaveTx: data.arweave_tx,
-          isOwner: data.is_owner,
-          // Stats data
-          xp: data.xp,
-          pComplete: data.p_complete,
-          successes: data.successes,
-          deadlocks: data.deadlocks,
-          statsProofTx: data.stats_proof_tx,
-          // Rules compliance
-          rulesFollowed: data.rules_followed,
-          violations: data.violations,
+      if (searchType === 'stats' || searchType === 'address') {
+        // User stats lookup via /user-stats POST
+        response = await fetch(`${TOWNHALL_BASE}/user-stats`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pubkey: query.replace('kaspa:', '').replace('kaspatest:', '') }),
         });
+        data = await response.json();
+        if (data.successes !== undefined || data.xp !== undefined) {
+          const s = data.successes || 0;
+          const d = data.deadlocks || 0;
+          const n = s + d;
+          setSearchResult({
+            found: true,
+            type: 'stats',
+            verified: n > 0,
+            name: data.citadel_tier || 'Guest',
+            xp: data.xp || 0,
+            pComplete: n > 0 ? (1 + s) / (2 + n) : 0.5,
+            successes: s,
+            deadlocks: d,
+          });
+        } else {
+          setSearchResult({ found: false, error: data.error || 'Not found' });
+        }
+      } else if (searchType === 'dapp') {
+        // DApp lookup via /api/query/dapp POST (doesn't exist yet — fallback to not found)
+        // TODO: wire when /api/query/dapp is deployed
+        setSearchResult({ found: false, error: 'DApp search not yet available on this TownHall instance' });
       } else {
-        setSearchResult({
-          found: false,
-          error: data.error || 'Not found',
+        // APT or generic — try identity verify
+        response = await fetch(`${TOWNHALL_BASE}/api/identity/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identity_hash: query }),
         });
+        data = await response.json();
+        if (data.verified) {
+          setSearchResult({
+            found: true,
+            type: 'apt',
+            verified: data.verified,
+            aptNumber: query,
+          });
+        } else {
+          setSearchResult({ found: false, error: data.message || 'Not found' });
+        }
       }
     } catch (error) {
       setSearchResult({
@@ -669,7 +687,10 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         payload.stats_hash = await generateStatsHash(myStats);
       }
       
-      const response = await fetch('https://townhall.kasvillage.dev/api/verify/submit', {
+      const sendEndpoint = sendType === 'dapp' ? '/api/verify/dapp'
+        : sendType === 'store' ? '/api/verify/store'
+        : '/api/verify/user/full';
+      const response = await fetch(`${TOWNHALL_BASE}${sendEndpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -727,10 +748,10 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     setIsLoadingProofs(true);
     
     try {
-      const response = await fetch(`https://townhall.kasvillage.dev/api/verify/my-proofs`, {
+      const response = await fetch(`${TOWNHALL_BASE}/api/proofs/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pubkey: myAddress, apt: myApt }),
+        body: JSON.stringify({ subject_id: myAddress || myApt || '' }),
       });
       
       const data = await response.json();
@@ -779,7 +800,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
   // Handle APT conflict resolution
   const handleChangeApt = async (newApt: string) => {
     try {
-      const response = await fetch('https://townhall.kasvillage.dev/api/apt/change', {
+      const response = await fetch(`${TOWNHALL_BASE}/api/apt/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -818,7 +839,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     setIsVerifying(true);
     
     try {
-      const response = await fetch('https://townhall.kasvillage.dev/api/verify/identity', {
+      const response = await fetch(`${TOWNHALL_BASE}/verify-identity`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pubkey: myAddress, apt: myApt }),
