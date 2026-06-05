@@ -38,32 +38,29 @@ import Svg, {
 import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
-import { Feather, MaterialIcons, FontAwesome5, Ionicons } from '@expo/vector-icons';
-
-// ============================================================================
-// ICON WRAPPERS (drop-in replacement for lucide-react-native)
-// ============================================================================
-const Search = ({ size, color }: { size: number; color: string }) => <Feather name="search" size={size} color={color} />;
-const Shield = ({ size, color }: { size: number; color: string }) => <Feather name="shield" size={size} color={color} />;
-const CheckCircle = ({ size, color }: { size: number; color: string }) => <Feather name="check-circle" size={size} color={color} />;
-const XCircle = ({ size, color }: { size: number; color: string }) => <Feather name="x-circle" size={size} color={color} />;
-const Copy = ({ size, color }: { size: number; color: string }) => <Feather name="copy" size={size} color={color} />;
-const Download = ({ size, color }: { size: number; color: string }) => <Feather name="download" size={size} color={color} />;
-const Upload = ({ size, color }: { size: number; color: string }) => <Feather name="upload" size={size} color={color} />;
-const Clock = ({ size, color }: { size: number; color: string }) => <Feather name="clock" size={size} color={color} />;
-const AlertTriangle = ({ size, color }: { size: number; color: string }) => <Feather name="alert-triangle" size={size} color={color} />;
-const ChevronRight = ({ size, color }: { size: number; color: string }) => <Feather name="chevron-right" size={size} color={color} />;
-const Building2 = ({ size, color }: { size: number; color: string }) => <MaterialIcons name="business" size={size} color={color} />;
-const User = ({ size, color }: { size: number; color: string }) => <Feather name="user" size={size} color={color} />;
-const Package = ({ size, color }: { size: number; color: string }) => <Feather name="package" size={size} color={color} />;
-const GraduationCap = ({ size, color }: { size: number; color: string }) => <FontAwesome5 name="graduation-cap" size={size} color={color} />;
-const Wrench = ({ size, color }: { size: number; color: string }) => <Feather name="tool" size={size} color={color} />;
-const Gamepad2 = ({ size, color }: { size: number; color: string }) => <Ionicons name="game-controller" size={size} color={color} />;
-const ExternalLink = ({ size, color }: { size: number; color: string }) => <Feather name="external-link" size={size} color={color} />;
-const FileCode = ({ size, color }: { size: number; color: string }) => <Feather name="file-text" size={size} color={color} />;
-const BarChart3 = ({ size, color }: { size: number; color: string }) => <Feather name="bar-chart-2" size={size} color={color} />;
-const History = ({ size, color }: { size: number; color: string }) => <Feather name="clock" size={size} color={color} />;
-const AlertCircle = ({ size, color }: { size: number; color: string }) => <Feather name="alert-circle" size={size} color={color} />;
+import {
+  Search,
+  Shield,
+  CheckCircle,
+  XCircle,
+  Copy,
+  Download,
+  Upload,
+  Clock,
+  AlertTriangle,
+  ChevronRight,
+  Building2,
+  User,
+  Package,
+  GraduationCap,
+  Wrench,
+  Gamepad2,
+  ExternalLink,
+  FileCode,
+  BarChart3,
+  History,
+  AlertCircle,
+} from 'lucide-react-native';
 
 // ============================================================================
 // RESPONSIVE SCALER
@@ -147,7 +144,7 @@ const COLORS = {
 // TYPES
 // ============================================================================
 interface TownHallScreenProps {
-  onClose?: () => void;
+  // No wallet send/receive - this is for verification proofs
 }
 
 interface VerificationResult {
@@ -520,7 +517,7 @@ const TownHallBackground: React.FC = () => {
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
+export const TownHallScreen: React.FC<TownHallScreenProps> = () => {
   // State
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -596,10 +593,10 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
       }
       
       // Call Town Hall API
-      const response = await fetch(`https://kasvillage.app.runonflux.io/api/scan`, {
+      const response = await fetch(`https://townhall.kasvillage.dev/api/verify/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: query }),
+        body: JSON.stringify({ query, type: searchType }),
       });
       
       const data = await response.json();
@@ -672,7 +669,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         payload.stats_hash = await generateStatsHash(myStats);
       }
       
-      const response = await fetch('https://kasvillage.app.runonflux.io/api/verify/store', {
+      const response = await fetch('https://townhall.kasvillage.dev/api/verify/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -730,24 +727,15 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     setIsLoadingProofs(true);
     
     try {
-      const response = await fetch(`https://kasvillage.app.runonflux.io/api/proofs/query`, {
+      const response = await fetch(`https://townhall.kasvillage.dev/api/verify/my-proofs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject_id: myAddress || myApt, proof_type: null }),
+        body: JSON.stringify({ pubkey: myAddress, apt: myApt }),
       });
       
       const data = await response.json();
       
-      if (Array.isArray(data)) {
-        setMyProofs(data.map((p: any) => ({
-          id: p.id || p.arweave_tx,
-          type: p.proof_type || 'identity',
-          name: p.subject_id || '',
-          status: 'verified',
-          arweaveTx: p.arweave_tx || p.id,
-          timestamp: p.timestamp || 0,
-        })));
-      } else if (data.ok && data.proofs) {
+      if (data.ok && data.proofs) {
         setMyProofs(data.proofs.map((p: any) => ({
           id: p.id,
           type: p.type,
@@ -791,19 +779,20 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
   // Handle APT conflict resolution
   const handleChangeApt = async (newApt: string) => {
     try {
-      const response = await fetch('https://kasvillage.app.runonflux.io/api/apt/register', {
+      const response = await fetch('https://townhall.kasvillage.dev/api/apt/change', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          device_hash: myAddress || '',
-          pubkey_hash: newApt,
+          pubkey: myAddress, 
+          current_apt: myApt,
+          new_apt: newApt,
         }),
       });
       
       const data = await response.json();
       
-      if (data.success || data.ok) {
-        setMyApt(data.apt || newApt);
+      if (data.ok) {
+        setMyApt(newApt);
         await SecureStore.setItemAsync('kv_apt_number', newApt);
         setShowAptConflict(false);
         Alert.alert('Success', `Your APT is now ${newApt}`);
@@ -829,18 +818,14 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     setIsVerifying(true);
     
     try {
-      const response = await fetch('https://kasvillage.app.runonflux.io/verify-identity', {
+      const response = await fetch('https://townhall.kasvillage.dev/api/verify/identity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          pubkey: myAddress || '',
-          avatar: { name: myApt || '', race: 'Human', class: 'Warrior', occupation: '', animal: '', combat_style: '', defining_moment: '', formative_memory: '', life_philosophy: '', lore_origin: '', mutant: '', mutate: '', origin_story: '', personality: '', power_spike: '', signature_move: '' },
-          signature: '',
-        }),
+        body: JSON.stringify({ pubkey: myAddress, apt: myApt }),
       });
       const data = await response.json();
       
-      if (data.success || data.ok) {
+      if (data.ok) {
         setIsVerified(true);
         Alert.alert(
           '✓ Verified!',
@@ -910,11 +895,6 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         
         {/* Title */}
         <View style={styles.titleBar}>
-          {onClose && (
-            <TouchableOpacity onPress={onClose} style={{ paddingRight: 12, paddingVertical: 4 }}>
-              <Text style={{ fontSize: 16, color: COLORS.amber600, fontWeight: 'bold' }}>← Back</Text>
-            </TouchableOpacity>
-          )}
           <Building2 size={rs.s(24)} color={COLORS.amber600} />
           <Text style={styles.title}>Town Hall</Text>
         </View>
@@ -1031,9 +1011,9 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         
         {/* Your Identity Section */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Your Avatar Identity</Text>
+          <Text style={styles.cardTitle}>🏠 Your Identity</Text>
           
-          {(myApt || myAddress) ? (
+          {myApt ? (
             <>
               <View style={styles.identityRow}>
                 <View style={styles.identityInfo}>
@@ -1132,9 +1112,9 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
             <View style={styles.noWalletBox}>
               <AlertTriangle size={rs.s(24)} color={COLORS.amber600} />
               <Text style={styles.noWalletText}>No wallet registered</Text>
-              <TouchableOpacity style={styles.downloadBtn} onPress={handleVerify}>
+              <TouchableOpacity style={styles.downloadBtn}>
                 <Download size={rs.s(18)} color={COLORS.white} />
-                <Text style={styles.downloadBtnText}>Register Wallet</Text>
+                <Text style={styles.downloadBtnText}>Create Wallet</Text>
               </TouchableOpacity>
             </View>
           )}
