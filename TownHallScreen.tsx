@@ -144,7 +144,7 @@ const COLORS = {
 // TYPES
 // ============================================================================
 interface TownHallScreenProps {
-  // No wallet send/receive - this is for verification proofs
+  onClose?: () => void;
 }
 
 interface VerificationResult {
@@ -517,7 +517,7 @@ const TownHallBackground: React.FC = () => {
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-export const TownHallScreen: React.FC<TownHallScreenProps> = () => {
+export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
   // State
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -895,6 +895,11 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = () => {
         
         {/* Title */}
         <View style={styles.titleBar}>
+          {onClose && (
+            <TouchableOpacity onPress={onClose} style={{ paddingRight: 12, paddingVertical: 4 }}>
+              <Text style={{ fontSize: 16, color: COLORS.amber600, fontWeight: 'bold' }}>← Back</Text>
+            </TouchableOpacity>
+          )}
           <Building2 size={rs.s(24)} color={COLORS.amber600} />
           <Text style={styles.title}>Town Hall</Text>
         </View>
