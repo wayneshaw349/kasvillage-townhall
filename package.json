@@ -41,8 +41,6 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-aes-crypto": "^3.3.0",
-    "react-native-ble-advertise": "^2.0.5",
-    "react-native-ble-plx": "^3.5.1",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-http-bridge": "^0.6.1",
     "react-native-qrcode-svg": "^6.3.21",
