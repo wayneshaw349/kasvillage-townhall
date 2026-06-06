@@ -7362,6 +7362,64 @@ async fn frost_list_proposed(state: web::Data<AppStateV3>) -> impl Responder {
     HttpResponse::Ok().json(agreements)
 }
 
+
+// ── Device attestation check — stateless Arweave query ──────────────────────
+async fn check_device_attestation(
+    body: web::Json<serde_json::Value>,
+) -> impl Responder {
+    let device_hash = match body.get("device_hash").and_then(|v| v.as_str()) {
+        Some(h) => h.to_string(),
+        None => return HttpResponse::BadRequest().json(json!({ "error": "device_hash required" })),
+    };
+
+    // Query Arweave for device attestation
+    let gql = format!(
+        r#"{{"query":"{{ transactions(tags: [{{ name: \"App-Name\", values: [\"KasVillage\"] }}, {{ name: \"KV-Type\", values: [\"device-attestation\"] }}, {{ name: \"KV-DeviceHash\", values: [\"{}\"] }}], sort: HEIGHT_DESC, first: 1) {{ edges {{ node {{ tags {{ name value }} }} }} }} }}"}}"#,
+        device_hash
+    );
+
+    let client = reqwest::Client::new();
+    match client.post("https://arweave.net/graphql")
+        .header("Content-Type", "application/json")
+        .body(gql)
+        .timeout(std::time::Duration::from_secs(8))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            if let Ok(data) = resp.json::<serde_json::Value>().await {
+                let edges = &data["data"]["transactions"]["edges"];
+                if let Some(edge) = edges.as_array().and_then(|a| a.first()) {
+                    let tags = &edge["node"]["tags"];
+                    let mut pubkey = String::new();
+                    let mut apt = String::new();
+                    let mut platform = String::new();
+                    if let Some(arr) = tags.as_array() {
+                        for t in arr {
+                            match t["name"].as_str() {
+                                Some("KV-Pubkey") => pubkey = t["value"].as_str().unwrap_or("").to_string(),
+                                Some("KV-Apt") => apt = t["value"].as_str().unwrap_or("").to_string(),
+                                Some("KV-Platform") => platform = t["value"].as_str().unwrap_or("").to_string(),
+                                _ => {}
+                            }
+                        }
+                    }
+                    return HttpResponse::Ok().json(json!({
+                        "attested": true,
+                        "pubkey": pubkey,
+                        "apt": apt,
+                        "platform": platform,
+                        "source": "arweave"
+                    }));
+                }
+            }
+            HttpResponse::Ok().json(json!({ "attested": false }))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(json!({
+            "error": format!("Arweave query failed: {}", e)
+        })),
+    }
+}
 pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
     cfg
         .route("/health", web::get().to(health))
