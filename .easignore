@@ -1,9 +1,11 @@
-node_modules/
 .git/
 *.cjs
 *.log
-townhall_merged.rs
-src/main.rs
+*.rs
 *.apk
 *.ipa
 *.aab
+*.mp4
+*.mov
+android/
+ios/
