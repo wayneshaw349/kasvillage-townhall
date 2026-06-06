@@ -614,6 +614,9 @@ export async function inscribeIdentity(
     return { success: false, error: 'No wallet address — generate wallet first' };
   }
 
+  // Read pubkey for Arweave tagging
+  const pubkeyHex = await SecureStore.getItemAsync('kv_public_key') ?? '';
+
   // Get device anchor hash (first 16 hex chars = 8 bytes)
   const deviceHash = await getDeviceHash();
   const deviceAnchorHash = deviceHash.slice(0, 16);

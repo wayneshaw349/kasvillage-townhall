@@ -26,9 +26,9 @@ import {
   ShieldCheck, Zap, Activity 
 } from 'lucide-react-native';
 import { useKaspaPrice } from './useKaspaPrice';
+import * as SecureStore from 'expo-secure-store';
 import ProceduralBackground from './expo_procedural_backgrounds';
 import { SlothPoisonBar } from './SlothPoisonMeter';
-import * as SecureStore from 'expo-secure-store';
 import type { IOULedger } from './IOUBalanceSheetShare';
 import { calculateNetPosition } from './IOUBalanceSheetShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -76,6 +76,7 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
     try {
       // Derive pubkey from address if all SecureStore keys empty
       let resolvedPubkey = pubkey 
+        || (await SecureStore.getItemAsync('kv_public_key')) 
         || (await SecureStore.getItemAsync('kaspa_pubkey')) 
         || (await SecureStore.getItemAsync('kv_l1_pubkey'))
         || (await SecureStore.getItemAsync('public_key'))
@@ -1626,3 +1627,6 @@ const dashStyles = StyleSheet.create({
 });
 
 export default memo(Dashboard);
+
+
+
