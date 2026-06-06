@@ -4072,6 +4072,71 @@ pub struct AptRegisterRequest {
     pub pubkey_hash: String,
 }
 
+
+// ── Device Check — stateless Arweave query ──────────────────────────────────
+
+async fn check_device(
+    body: web::Json<serde_json::Value>,
+) -> impl Responder {
+    let device_hash = match body.get("device_hash").and_then(|v| v.as_str()) {
+        Some(h) => h.to_string(),
+        None => return HttpResponse::BadRequest().json(json!({ "error": "device_hash required" })),
+    };
+
+    // Query Arweave for this device hash
+    let gql = format!(r#"{{
+        transactions(
+            tags: [
+                {{ name: "App-Name", values: ["KasVillage"] }},
+                {{ name: "KV-Type", values: ["device-attestation"] }},
+                {{ name: "KV-DeviceHash", values: ["{}"] }}
+            ],
+            sort: HEIGHT_DESC,
+            first: 1
+        ) {{
+            edges {{ node {{ tags {{ name value }} }} }}
+        }}
+    }}"#, device_hash);
+
+    let client = reqwest::Client::new();
+    match client.post("https://arweave.net/graphql")
+        .header("Content-Type", "application/json")
+        .body(format!(r#"{{"query": "{}"}}"#, gql.replace('"', r#"\""#).replace('
+', " ")))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            if let Ok(data) = resp.json::<serde_json::Value>().await {
+                let edges = &data["data"]["transactions"]["edges"];
+                if let Some(edge) = edges.as_array().and_then(|a| a.first()) {
+                    let tags = &edge["node"]["tags"];
+                    let mut pubkey = String::new();
+                    let mut apt = String::new();
+                    if let Some(arr) = tags.as_array() {
+                        for t in arr {
+                            match t["name"].as_str() {
+                                Some("KV-Pubkey") => pubkey = t["value"].as_str().unwrap_or("").to_string(),
+                                Some("KV-Apt") => apt = t["value"].as_str().unwrap_or("").to_string(),
+                                _ => {}
+                            }
+                        }
+                    }
+                    return HttpResponse::Ok().json(json!({
+                        "bound": true,
+                        "pubkey": pubkey,
+                        "apt_number": apt,
+                        "source": "arweave"
+                    }));
+                }
+            }
+            HttpResponse::Ok().json(json!({ "bound": false }))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(json!({
+            "error": format!("Arweave query failed: {}", e)
+        })),
+    }
+}
 async fn register_apt(
     state: web::Data<AppStateV2>,
     body: web::Json<AptRegisterRequest>,
@@ -4281,6 +4346,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/verify/store", web::post().to(verify_store))
         .route("/api/verify/dapp", web::post().to(verify_dapp))
         .route("/api/verify/user/full", web::post().to(verify_user_full_api))
+        .route("/api/device/check", web::post().to(check_device))
         .route("/api/apt/register", web::post().to(register_apt))
         .route("/api/apt/conflict", web::post().to(check_apt_conflict))
         .route("/api/proofs/query", web::post().to(query_proofs))

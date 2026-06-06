@@ -63,7 +63,7 @@ export interface TownHallBindResult {
 
 const STORE_KEY_ANCHOR      = 'kv_device_anchor';       // stable UUID
 const STORE_KEY_HASH_CACHE  = 'kv_device_hash_cache';   // cached hash
-const TOWN_HALL_URL         = 'https://townhall.kasvillage.com';
+const TOWN_HALL_URL         = 'https://kasvillage.app.runonflux.io';
 
 // ============================================================================
 // STABLE DEVICE ANCHOR
@@ -270,112 +270,45 @@ export async function getAttestationToken(
   }
 }
 
-// ============================================================================
-// TOWN HALL BINDING
-// ============================================================================
-// Sends device_hash + pubkey to TownHall.
-// TownHall enforces: one APT per device_hash.
-// If device_hash is already bound → returns existing APT (not an error).
+// TownHall binding removed — TownHall is stateless, Arweave is source of truth
 
-export async function bindDeviceToTownHall(
-  attestation: AttestationResult,
-  pubkey: string
-): Promise<TownHallBindResult> {
-  try {
-    const response = await fetch(`${TOWN_HALL_URL}/api/device/bind`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token:       attestation.token,
-        device_hash: attestation.deviceHash,
-        platform:    attestation.platform,
-        pubkey,
-      }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      return { success: false, error: text };
-    }
-
-    const data = await response.json();
-    return {
-      success:       true,
-      aptNumber:     data.apt_number,
-      alreadyBound:  data.already_bound ?? false,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error:   error instanceof Error ? error.message : 'Network error',
-    };
-  }
-}
+// Check binding removed — query Arweave directly
 
 // ============================================================================
-// CHECK EXISTING BINDING
+// FULL REGISTRATION — Arweave only (TownHall is stateless)
 // ============================================================================
-
-export async function checkExistingBinding(
-  deviceHash: string
-): Promise<{ bound: boolean; aptNumber?: string }> {
-  try {
-    const response = await fetch(`${TOWN_HALL_URL}/api/device/check`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_hash: deviceHash }),
-    });
-
-    if (!response.ok) return { bound: false };
-
-    const data = await response.json();
-    return { bound: data.bound ?? false, aptNumber: data.apt_number };
-  } catch {
-    return { bound: false };
-  }
-}
-
-// ============================================================================
-// FULL REGISTRATION FLOW
-// ============================================================================
-// Called once during onboarding after wallet key generation.
 // 1. Integrity check
 // 2. Generate stable fingerprint
-// 3. Check if already bound (recovery case)
-// 4. Get attestation token
-// 5. Bind to TownHall
+// 3. Get attestation token
+// 4. Inscribe to Arweave (permanent proof)
+// TownHall reads Arweave when it needs to verify.
 
 export async function registerDevice(
   pubkey: string
 ): Promise<TownHallBindResult> {
-  // 1. Integrity
   const integrity = await checkDeviceIntegrity();
-  if (!integrity.success) {
-    return { success: false, error: 'Device integrity check failed' };
-  }
+  if (!integrity.success) return { success: false, error: 'Device integrity check failed' };
+  if (integrity.isEmulator) return { success: false, error: 'Emulators not supported' };
 
-  // 2. Fingerprint
   let deviceHash: string;
-  try {
-    deviceHash = await getDeviceHash();
-  } catch (e) {
-    return { success: false, error: 'Could not generate device fingerprint' };
-  }
+  try { deviceHash = await getDeviceHash(); }
+  catch { return { success: false, error: 'Could not generate device fingerprint' }; }
 
-  // 3. Already bound? (handles recovery: user reinstalled, same device)
-  const existing = await checkExistingBinding(deviceHash);
-  if (existing.bound) {
-    return { success: true, aptNumber: existing.aptNumber, alreadyBound: true };
-  }
-
-  // 4. Attestation token
   const attestation = await getAttestationToken(pubkey);
-  if (!attestation.success) {
-    return { success: false, error: attestation.error };
-  }
+  if (!attestation.success) return { success: false, error: attestation.error };
 
-  // 5. Bind
-  return bindDeviceToTownHall(attestation, pubkey);
+  // Store locally
+  await SecureStore.setItemAsync('kv_device_hash', deviceHash);
+  await SecureStore.setItemAsync('kv_device_platform', attestation.platform);
+
+  // Derive APT
+  let apt = '0';
+  try {
+    const { deriveApt } = await import('./apt_derivation');
+    apt = deriveApt(pubkey);
+  } catch {}
+
+  return { success: true, aptNumber: apt };
 }
 
 // ============================================================================
@@ -387,7 +320,103 @@ export default {
   getDeviceInfo,
   checkDeviceIntegrity,
   getAttestationToken,
-  bindDeviceToTownHall,
-  checkExistingBinding,
   registerDevice,
+  inscribeAttestationToArweave,
+  checkExistingAttestation,
 };
+
+
+// ============================================================================
+// ARWEAVE INSCRIPTION — permanent attestation proof
+// ============================================================================
+
+export async function inscribeAttestationToArweave(params: {
+  pubkey: string;
+  privKeyHex: string;
+}): Promise<{ txId: string } | null> {
+  try {
+    const { pubkey, privKeyHex } = params;
+    const attestation = await getAttestationToken(pubkey);
+    if (!attestation.success) return null;
+
+    let apt = '0';
+    try {
+      const { deriveApt } = await import('./apt_derivation');
+      apt = deriveApt(pubkey);
+    } catch {}
+
+    const payload = JSON.stringify({
+      v: 2,
+      device_hash: attestation.deviceHash,
+      platform: attestation.platform,
+      pubkey,
+      apt,
+      timestamp: Date.now(),
+    });
+
+    const tags = [
+      { name: 'App-Name', value: 'KasVillage' },
+      { name: 'KV-Type', value: 'device-attestation' },
+      { name: 'KV-DeviceHash', value: attestation.deviceHash },
+      { name: 'KV-Pubkey', value: pubkey },
+      { name: 'KV-Platform', value: attestation.platform },
+      { name: 'KV-Apt', value: apt },
+      { name: 'Content-Type', value: 'application/json' },
+    ];
+
+    const arweaveUpload = await import('./arweave_upload');
+    const buildAns104Item = (arweaveUpload as any).buildAns104Item || (arweaveUpload as any).default?.buildAns104Item;
+    const uploadToIrys = (arweaveUpload as any).uploadToIrys || (arweaveUpload as any).default?.uploadToIrys;
+    const data = new TextEncoder().encode(payload);
+    const result = await buildAns104Item(data, tags, privKeyHex).then(uploadToIrys);
+
+    if (result?.txId) {
+      console.log('[Attestation] Inscribed to Arweave:', result.txId);
+      await SecureStore.setItemAsync('kv_attestation_arweave_tx', result.txId);
+      return { txId: result.txId };
+    }
+    return null;
+  } catch (e) {
+    console.error('[Attestation] Arweave inscription failed:', e);
+    return null;
+  }
+}
+
+// ============================================================================
+// CHECK EXISTING ATTESTATION — query Arweave directly
+// ============================================================================
+
+export async function checkExistingAttestation(
+  deviceHash: string
+): Promise<{ exists: boolean; pubkey?: string; apt?: string }> {
+  try {
+    const query = `{
+      transactions(
+        tags: [
+          { name: "App-Name", values: ["KasVillage"] },
+          { name: "KV-Type", values: ["device-attestation"] },
+          { name: "KV-DeviceHash", values: ["${deviceHash}"] }
+        ],
+        sort: HEIGHT_DESC,
+        first: 1
+      ) {
+        edges { node { tags { name value } } }
+      }
+    }`;
+    const res = await fetch('https://arweave.net/graphql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) return { exists: false };
+    const data = await res.json();
+    const tags = data?.data?.transactions?.edges?.[0]?.node?.tags;
+    if (!tags) return { exists: false };
+    const pubkey = tags.find((t: {name:string}) => t.name === 'KV-Pubkey')?.value;
+    const apt = tags.find((t: {name:string}) => t.name === 'KV-Apt')?.value;
+    return { exists: true, pubkey, apt };
+  } catch {
+    return { exists: false };
+  }
+}
+
