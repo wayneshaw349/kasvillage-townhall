@@ -672,7 +672,7 @@ async function initBluetooth(): Promise<void> {
     if (granted !== 'granted') throw new Error('Location permission denied');
   }
 
-  // BLE disabled — native modules not installed
+  // BLE disabled until next EAS build
   console.warn('[FROST] BLE disabled'); return;
 
   // blePeripheral disabled
@@ -1270,4 +1270,7 @@ export default {
   startTailscaleFunnel, openTailscaleApp, exchangeViaTownhall,
   exchangePubkeys, createFrostAgreement, completeFrost2Round, cleanup,
 };
+
+
+
 
