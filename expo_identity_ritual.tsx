@@ -120,6 +120,7 @@ import {
   SVG_GENERATORS,
   getSvgForKeyword,
 } from './keyword_dictionary_draggable';
+import { registerPushToken, inscribePushToken } from './push_notifications';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SVG_WIDTH = 400;
@@ -9252,6 +9253,19 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
 
       // Mark as verified for return authentication
       await SecureStore.setItemAsync('kv_verified', 'true');
+      // === Push notification registration ===
+      try {
+        const pushToken = await registerPushToken();
+        if (pushToken) {
+          const pubkey = await SecureStore.getItemAsync('kv_public_key') || '';
+          if (pubkey) {
+            await inscribePushToken(pubkey);
+            console.log('[PhaseAnchor] Push token inscribed to Arweave');
+          }
+        }
+      } catch (pushErr) {
+        console.warn('[PhaseAnchor] Push registration failed (non-fatal):', pushErr);
+      }
       
       setStep('complete');
       

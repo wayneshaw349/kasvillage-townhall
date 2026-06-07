@@ -110,6 +110,7 @@ import {// Types
   computeFrostPartialS,
   aggregateFrostSig,
   cleanup as cleanupFrost, aggregateToAddress, completeFrost2Round} from './frost_complete';
+import { sendPushToCounterparty } from './push_notifications';
 
 // REST API for real L1 transactions
 import { sendKaspaViaRest } from './kaspa_rest_tx';
