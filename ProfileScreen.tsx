@@ -14,8 +14,8 @@ import { getUserStats } from './wallet_registration_v2';
 import * as LocalAuthentication from 'expo-local-authentication';
 import MnemonicExportModal from './MnemonicExportModal';
 import ProceduralBackground from './expo_procedural_backgrounds';
-import { StoredAvatarRenderer, getStoredAvatar } from './avatar_silhouette_generator';
-import type { AvatarIdentity } from './avatar_silhouette_generator';
+import { StoredAvatarRenderer, getStoredAvatar, RACE_GENERATORS, storeAvatarLocally, computeAvatarHash } from './avatar_silhouette_generator';
+import type { AvatarIdentity, Race, Gender } from './avatar_silhouette_generator';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
@@ -412,13 +412,13 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
           const recipeStr = await SecureStore.getItemAsync('kv_avatar_recipe');
           if (recipeStr) {
             const recipe = JSON.parse(recipeStr);
-            const { RACE_GENERATORS, storeAvatarLocally, computeAvatarHash } = require('./avatar_silhouette_generator');
+            // Using imports from top of file
             const race = recipe.race || 'human';
             const gender = recipe.gender || 'male';
-            const gen = RACE_GENERATORS[race.toLowerCase()] || RACE_GENERATORS['human'];
+            const gen = RACE_GENERATORS[race.toLowerCase() as Race] || RACE_GENERATORS['human'];
             const paths = gen(gender, 1);
             const hash = computeAvatarHash(paths);
-            const ident = { race, gender, paths, hash, name: recipe.name || 'Villager' };
+            const ident = { race: race as Race, gender: gender as Gender, paths, hash, name: recipe.name || 'Villager', createdAt: Date.now() };
             await storeAvatarLocally(ident);
             setAvatarIdentity(ident as any);
             console.log('[Profile] Avatar regenerated:', race, gender, paths.length, 'paths');
