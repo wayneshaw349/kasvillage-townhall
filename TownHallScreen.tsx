@@ -1032,10 +1032,10 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
   
   // Request verification (for current user)
   const handleVerify = async () => {
-    if (traitCount < 13) {
+    if (traitCount < 6) {
       Alert.alert(
         'Passport Required',
-        `You need 13 traits to verify. You have ${traitCount}.`,
+        `You need 6 traits to verify. You have ${traitCount}.`,
         [{ text: 'OK' }]
       );
       return;
@@ -1402,7 +1402,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
                 You're verified! Your content is visible in search.
               </Text>
             </View>
-          ) : traitCount >= 13 ? (
+          ) : traitCount >= 6 ? (
             <TouchableOpacity
               style={styles.verifyBtn}
               onPress={handleVerify}
@@ -1420,18 +1420,18 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           ) : (
             <View style={styles.needTraitsBox}>
               <Text style={styles.needTraitsText}>
-                Need {13 - traitCount} more traits to verify
+                Need {6 - traitCount} more traits to verify
               </Text>
               <View style={styles.traitProgress}>
                 <View
                   style={[
                     styles.traitProgressFill,
-                    { width: `${(traitCount / 13) * 100}%` },
+                    { width: `${(traitCount / 6) * 100}%` },
                   ]}
                 />
               </View>
               <Text style={styles.traitProgressText}>
-                {traitCount}/13 traits
+                {traitCount}/6 traits
               </Text>
             </View>
           )}
@@ -1457,7 +1457,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           <View style={styles.infoRow}>
             <Text style={styles.infoBullet}>1.</Text>
             <Text style={styles.infoText}>
-              Complete 13 avatar traits (Passport level)
+              Complete 6 avatar traits (Passport level)
             </Text>
           </View>
           <View style={styles.infoRow}>
@@ -2440,5 +2440,6 @@ const styles = StyleSheet.create({
 });
 
 export default TownHallScreen;
+
 
 

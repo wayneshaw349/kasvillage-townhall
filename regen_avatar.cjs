@@ -1,8 +1,27 @@
+// regen_avatar.cjs
+// Adds avatar regeneration from stored recipe to ProfileScreen.tsx
+// If no stored avatar SVG, regenerates from race/gender in kv_avatar_recipe
 const fs = require("fs");
-let s = fs.readFileSync("ProfileScreen.tsx", "utf8");
+const path = require("path");
+
+const file = path.join(__dirname, "ProfileScreen.tsx");
+let s = fs.readFileSync(file, "utf8");
+
+if (s.includes("// REGEN:")) {
+  console.log("Already patched");
+  process.exit(0);
+}
+
+const target = "getStoredAvatar().then(async (id) => {";
+if (!s.includes(target)) {
+  console.error("Target not found in ProfileScreen.tsx");
+  process.exit(1);
+}
+
 s = s.replace(
-  "getStoredAvatar().then(async (id) => {\n      if (id) {",
+  target,
   `getStoredAvatar().then(async (id) => {
+      // REGEN: regenerate from recipe if no stored avatar
       if (!id) {
         try {
           const recipeStr = await SecureStore.getItemAsync('kv_avatar_recipe');
@@ -21,8 +40,8 @@ s = s.replace(
             return;
           }
         } catch (e) { console.warn('[Profile] Avatar regen failed:', e); }
-      }
-      if (id) {`
+      }`
 );
-fs.writeFileSync("ProfileScreen.tsx", s);
-console.log("done - avatar regen added");
+
+fs.writeFileSync(file, s, "utf8");
+console.log("done - avatar regen patched into ProfileScreen.tsx");

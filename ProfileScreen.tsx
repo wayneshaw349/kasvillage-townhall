@@ -73,8 +73,8 @@ const XP_TIERS = [
 
 const SNAIL_THRESHOLD = 150;
 const ELITE_THRESHOLD = 300;
-const CITADEL_BUYER_THRESHOLD = 8;
-const CITADEL_SELLER_THRESHOLD = 12;
+const CITADEL_BUYER_THRESHOLD = 5;
+const CITADEL_SELLER_THRESHOLD = 6;
 
 // ============================================================================
 // MOCK DATA
@@ -250,13 +250,13 @@ const CitadelStatus: React.FC<{ traitCount: number }> = ({ traitCount }) => {
         <View style={[styles.citadelBadge, isBuyer && styles.citadelActive]}>
           <Text style={styles.citadelIcon}>🛒</Text>
           <Text style={styles.citadelText}>Resident</Text>
-          <Text style={styles.citadelReq}>{traitCount}/8 traits</Text>
+          <Text style={styles.citadelReq}>{traitCount}/5 traits</Text>
         </View>
         
         <View style={[styles.citadelBadge, isSeller && styles.citadelActive]}>
           <Text style={styles.citadelIcon}>🛍️</Text>
           <Text style={styles.citadelText}>Passport</Text>
-          <Text style={styles.citadelReq}>{traitCount}/12 traits</Text>
+          <Text style={styles.citadelReq}>{traitCount}/6 traits</Text>
         </View>
       </View>
       
@@ -406,6 +406,26 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
 
   useEffect(() => {
     getStoredAvatar().then(async (id) => {
+      // REGEN: regenerate from recipe if no stored avatar
+      if (!id) {
+        try {
+          const recipeStr = await SecureStore.getItemAsync('kv_avatar_recipe');
+          if (recipeStr) {
+            const recipe = JSON.parse(recipeStr);
+            const { RACE_GENERATORS, storeAvatarLocally, computeAvatarHash } = require('./avatar_silhouette_generator');
+            const race = recipe.race || 'human';
+            const gender = recipe.gender || 'male';
+            const gen = RACE_GENERATORS[race.toLowerCase()] || RACE_GENERATORS['human'];
+            const paths = gen(gender, 1);
+            const hash = computeAvatarHash(paths);
+            const ident = { race, gender, paths, hash, name: recipe.name || 'Villager' };
+            await storeAvatarLocally(ident);
+            setAvatarIdentity(ident as any);
+            console.log('[Profile] Avatar regenerated:', race, gender, paths.length, 'paths');
+            return;
+          }
+        } catch (e) { console.warn('[Profile] Avatar regen failed:', e); }
+      }
       if (id) {
         setAvatarIdentity(id);
       } else {
@@ -595,7 +615,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
             ) : (
               <Text style={{ color: '#888', fontSize: 12 }}>No avatar SVG stored yet</Text>
             )}
-            <Text style={{ color: '#D4AF37', fontSize: 11, marginTop: 8 }}>Trait Count: {stats.trait_count}/12</Text>
+            <Text style={{ color: '#D4AF37', fontSize: 11, marginTop: 8 }}>Trait Count: {stats.trait_count}/6</Text>
           </View>
         )}
 
