@@ -312,7 +312,7 @@ export function generateQuestionBank(recipe: QuizRecipe): QuizQuestion[] {
         correctAnswer: `${mix.color1}|${mix.color2}`,
         options: shuffle([
           `${mix.color1}|${mix.color2}`,
-          ...FAKE_COLOR_PAIRS.map(p => `${p[0]}|${p[1]}`).slice(0, 5),
+          ...FAKE_COLOR_PAIRS.map(p => `${p[0]}|${p[1]}`).slice(0, 19),
         ]),
         category: 'mix',
         difficulty: 'hard',
@@ -332,7 +332,7 @@ export function generateQuestionBank(recipe: QuizRecipe): QuizQuestion[] {
       id: `q_${questionId++}`,
       question: 'Which keyword spawned an ITEM on your coat of arms?',
       correctAnswer: keyword,
-      options: shuffle([keyword, ...fakeKeywords.filter(k => k !== keyword).slice(0, 5)]),
+      options: shuffle([keyword, ...fakeKeywords.filter(k => k !== keyword).slice(0, 19)]),
       category: 'item',
       difficulty: 'hard',
     });
@@ -342,105 +342,89 @@ export function generateQuestionBank(recipe: QuizRecipe): QuizQuestion[] {
   // ============================================================================
 
   // ============================================================================
-  // PROCEDURAL QUESTION ENGINE
-  // Questions: generic scenarios using avatar NAME only (no class/race)
-  // Answers: specific actions from class verbs + occupation tools + signature move
-  // 19 fakes: equally vivid actions from other class/occupation combos
+  // PROCEDURAL QUESTION ENGINE v2
+  // Simpler scenarios: "[Name] encounters [situation]. What does [Name] do?"
+  // 6 options: 1 correct (user's class), 5 fakes (other classes)
+  // Correct answer uses class verbs + occupation flavor + signature move
   // ============================================================================
 
   if (recipe.class && recipe.name) {
     const name = recipe.name;
     const occ = recipe.occupation || '';
     const sig = recipe.signatureMove || '';
-    const power = recipe.powerSpike || '';
-    const origin = recipe.originStory || '';
-    const desire = recipe.scenarioDesire || '';
+    const animal = recipe.animal || '';
 
-    // CLASS ACTION LIBRARY — specific verbs/actions per class, NO class name
-    const CLASS_ACTIONS: Record<string, { verb: string; crisis: string; help: string; treasure: string; betrayal: string; darkness: string }> = {
-      Warrior:     { verb: 'draw steel',        crisis: 'charge forward with blade raised, cutting through the chaos',                help: 'stand guard over them, sword drawn, daring anyone to come closer',          treasure: 'test the weight in your hands — if it serves battle, claim it',          betrayal: 'slam your fist on the table and demand they face you in combat',         darkness: 'grip your weapon tight, steady your breathing, and march forward' },
-      Mage:        { verb: 'weave a spell',     crisis: 'trace arcane symbols in the air and unleash a barrier of shimmering light',  help: 'kneel and channel warm golden energy through your palms into their wounds',  treasure: 'sense the magical resonance first — is it enchanted or cursed?',         betrayal: 'unravel the lies with a truth-seeking divination',                       darkness: 'conjure a floating orb of light and scan for hidden wards' },
-      Rogue:       { verb: 'slip away',         crisis: 'vanish into shadow, circle behind the threat, and strike the blind spot',    help: 'check the perimeter for traps before approaching cautiously',                treasure: 'inspect every edge for tripwires, then pocket it silently',              betrayal: 'disappear without a word — revenge is a dish served cold',               darkness: 'become one with the dark, letting your fingers read the walls' },
-      Healer:      { verb: 'mend the wound',    crisis: 'rush to the fallen, pressing warm palms to wounds, channeling soothing light', help: 'cradle their head gently, whispering words of comfort as light flows',      treasure: 'set it aside — the real treasure is everyone walking out alive',         betrayal: 'look them in the eyes and ask why, searching for the pain underneath',   darkness: 'hum a soft hymn, letting the melody guide your steps through the black' },
-      Ranger:      { verb: 'track the signs',   crisis: 'read the terrain instantly, finding high ground and natural cover',          help: 'whistle for your animal companion to keep watch while you tend them',        treasure: 'leave it — the forest provides everything you need',                     betrayal: 'retreat into the wilderness where the trees are more honest',             darkness: 'close your eyes and listen — the wind tells you what the dark hides' },
-      Paladin:     { verb: 'invoke the oath',   crisis: 'raise your shield and call out a prayer that makes the air hum with power',  help: 'lay hands upon them and invoke divine healing with a solemn vow',            treasure: 'kneel and pray for guidance — then donate it to those in need',           betrayal: 'demand a trial by the old laws, letting justice decide their fate',       darkness: 'raise your hand and let holy light burst from your palm like a torch' },
-      Necromancer: { verb: 'call the dead',     crisis: 'whisper ancient words and watch skeletal hands claw up from the earth to fight for you', help: 'probe their fading life force — if they die, they can still serve', treasure: 'bind dark enchantments into it, making it pulse with shadow',             betrayal: 'curse them with a hex that will haunt their bloodline',                  darkness: 'smile — darkness is where your power thrives, the shadows obey you' },
-      Bard:        { verb: 'spin a tale',       crisis: 'strum a dissonant chord that freezes everyone, then talk your way out',      help: 'sing a gentle ballad that eases their pain and lifts their spirit',          treasure: 'compose an epic ballad about the discovery on the spot',                 betrayal: 'write a scathing song about them that every tavern will sing',           darkness: 'hum a tune from childhood — the melody echoes and maps the space' },
-      Monk:        { verb: 'center yourself',   crisis: 'flow through precise strikes, deflecting blows with open palms',            help: 'sit beside them in silence, sharing calm energy through presence alone',     treasure: 'meditate on whether attachment to it would cloud your path',              betrayal: 'breathe deeply, release the anger, and walk away in peace',              darkness: 'sit cross-legged, slow your heart, and feel vibrations in the stone' },
-      Berserker:   { verb: 'unleash rage',      crisis: 'let out a bone-shaking roar and smash through everything in your path',     help: 'growl protectively, scooping them up with raw strength',                     treasure: 'rip the chest open with bare hands — no patience for locks',             betrayal: 'flip the table, grab them by the collar, and roar in their face',        darkness: 'roar into the void — if anything is hiding, it should be afraid of YOU' },
-      Assassin:    { verb: 'strike unseen',     crisis: 'flick a poisoned needle from the shadows — the threat drops before anyone blinks', help: 'observe from a distance first, checking if this is bait',              treasure: 'take it without a sound, leaving no trace you were ever there',          betrayal: 'vanish — they will find a dagger on their pillow as a warning',          darkness: 'move like smoke, every step silent, every breath measured' },
-      Druid:       { verb: 'call on nature',    crisis: 'roots explode from the ground, vines wrap the threat while thorns grow sharp', help: 'press a hand to the earth and coax healing moss to grow over their wounds', treasure: 'return it to the earth — everything belongs to the cycle',               betrayal: 'let the forest handle it — poison ivy has a way of finding traitors',    darkness: 'ask the beetles and bats — they see in the dark better than anyone' },
+    // CLASS ACTIONS: short, clear, recognizable
+    const ACTIONS: Record<string, string[]> = {
+      Warrior:     ['draw your sword and charge', 'raise your shield and stand firm', 'slam your fist and demand order', 'cut through the chaos with steel', 'roar a battle cry and push forward', 'grip your blade and guard the way', 'smash through the obstacle with brute strength', 'throw a punch and settle it fast', 'stand between danger and the helpless', 'draw steel and dare them to come closer'],
+      Mage:        ['cast a protective spell', 'trace symbols in the air and unleash light', 'weave magic to freeze the moment', 'conjure a barrier of shimmering energy', 'send a bolt of arcane fire', 'read the magical aura first', 'summon a shield of pure light', 'channel energy through your hands', 'whisper ancient words of power', 'levitate above the danger'],
+      Rogue:       ['slip into the shadows', 'vanish and strike from behind', 'pick the lock and sneak through', 'check for traps before moving', 'steal the key without anyone noticing', 'disappear into the crowd', 'circle around to the blind spot', 'use misdirection to escape', 'pocket something useful while nobody looks', 'move like smoke through the dark'],
+      Healer:      ['rush to help and heal the wounds', 'press warm hands to the injury', 'whisper calming words as light flows', 'check their pulse with gentle fingers', 'channel soothing energy into them', 'wrap the wound with careful hands', 'pray for their recovery', 'cradle them and ease the pain', 'use herbs from your pouch', 'sing a soft melody of mending'],
+      Ranger:      ['read the tracks on the ground', 'whistle for your animal companion', 'find high ground and scout ahead', 'listen to what nature is telling you', 'track the source of the trouble', 'set a snare and wait', 'blend into the trees and observe', 'follow the trail through the brush', 'use the terrain to your advantage', 'send your hawk to survey from above'],
+      Paladin:     ['raise your shield and say a prayer', 'invoke holy light to protect everyone', 'demand justice in the name of the oath', 'lay hands and channel divine healing', 'stand tall and let your armor shine', 'call upon sacred power', 'kneel and pray for guidance', 'shine your shield like a beacon', 'recite the code and hold the line', 'bless the ground with holy words'],
+      Necromancer: ['call upon the dead for help', 'raise skeletal hands from the earth', 'whisper to the spirits nearby', 'drain life force from the threat', 'curse them with ancient dark words', 'summon a shade to do your bidding', 'touch the ground and feel the dead below', 'bind shadows to serve you', 'let the darkness answer for you', 'commune with ghosts for information'],
+      Bard:        ['play a tune to calm everyone', 'sing a song that lifts their spirits', 'strum a chord that freezes the room', 'tell a story to buy time', 'use your voice to charm the threat', 'compose a verse about this moment', 'whistle a melody that soothes pain', 'crack a joke to defuse the tension', 'perform a ballad of courage', 'recite a poem that echoes through the hall'],
+      Monk:        ['center yourself and breathe', 'flow through strikes with open palms', 'sit in silence and share calm energy', 'deflect the blow with precise movement', 'meditate on the right action', 'catch their fist mid-swing', 'walk calmly through the chaos', 'place a steady hand on their shoulder', 'move like water around the obstacle', 'exhale slowly and find the path'],
+      Berserker:   ['let out a roar and smash through', 'grab them with raw strength', 'flip the table and charge', 'rip the door off its hinges', 'scream into the void fearlessly', 'headbutt the problem away', 'crush the obstacle with bare hands', 'howl with fury and leap forward', 'pound the ground until it cracks', 'pick them up and throw them aside'],
+      Druid:       ['call the roots to rise from the ground', 'ask the animals for help', 'grow healing moss over the wounds', 'let the vines handle the threat', 'shape-shift into something useful', 'listen to the wind for answers', 'plant a seed and watch it grow fast', 'command the trees to block the path', 'speak to the birds for a report', 'return it to the natural cycle'],
+      Warlock:     ['make a dark bargain for power', 'channel eldritch energy from your pact', 'summon your patron for aid', 'unleash forbidden magic', 'mark them with a hex', 'tap into otherworldly power', 'invoke the pact and let chaos decide', 'send a wave of dread through the crowd', 'bind their will with dark words', 'open a rift to another plane'],
     };
 
-    // OCCUPATION FLAVOR — tools/props that color the answer
-    const OCC_FLAVOR: Record<string, string> = {
-      Blacksmith: 'grabbing your hammer and tongs', Teacher: 'pulling out your worn notebook', Merchant: 'weighing the options like a deal',
-      Farmer: 'using the same hands that work the soil', Chef: 'with the precision of a knife on a cutting board', Doctor: 'checking for a pulse with practiced fingers',
-      Scholar: 'recalling an ancient text about this exact situation', Guard: 'falling into patrol formation instinctively', Sailor: 'reading the situation like wind on open water',
-      Musician: 'letting rhythm guide your timing', Hunter: 'tracking every detail like following a blood trail', Architect: 'seeing the structural weakness immediately',
-      Alchemist: 'reaching for the vial at your belt', Priest: 'murmuring a quiet prayer under your breath', Spy: 'already three steps ahead of everyone',
-      Miner: 'bracing yourself like shoring up a tunnel', Artist: 'seeing the beauty even in the chaos', Thief: 'pocketing something useful while nobody looks',
-      Engineer: 'calculating angles and force in your head', Librarian: 'remembering a story exactly like this one', Herbalist: 'spotting the right plant within arm s reach',
+    // OCCUPATION TOOLS: short phrases
+    const OCC_TOOLS: Record<string, string> = {
+      Blacksmith: 'using your hammer', Scholar: 'recalling what you read', Merchant: 'thinking like a deal',
+      Hunter: 'tracking every detail', Artist: 'seeing beauty in the chaos', Guardian: 'guarding with instinct',
+      Alchemist: 'reaching for a vial', Assassin: 'moving without a sound', Explorer: 'reading the map in your head',
+      Pirate: 'sailing through trouble', Noble: 'commanding with authority', Farmer: 'with soil-worn hands',
     };
 
-    // SIGNATURE MOVE FLAVOR — weave user's actual input into answers
-    const sigFlavor = sig.length > 3 ? `, finishing with your signature — ${sig}` : '';
-    const occFlavor = OCC_FLAVOR[occ] ? `, ${OCC_FLAVOR[occ]}` : '';
-
-    // SUBJECTS + SITUATIONS + CONTEXTS — mix and match
-    const SUBJECTS = ['a wounded stranger', 'a crying child', 'an elderly traveler', 'a cornered merchant', 'a trapped animal', 'a fallen comrade', 'a starving family', 'a suspicious figure', 'a lost pilgrim', 'a chained prisoner'];
-    const SITUATIONS = ['collapses at your feet', 'is being robbed in front of you', 'screams for help from a burning building', 'begs you for food', 'is surrounded by thugs', 'lies bleeding on the ground', 'is accused of a crime they didn t commit', 'stumbles out of the dark covered in mud', 'offers you a deal that seems too good', 'blocks your path and won t move'];
-    const CONTEXTS = ['on a rain-soaked road at dusk', 'in a crowded marketplace', 'deep in an unfamiliar forest', 'at the gates of a ruined temple', 'during a violent thunderstorm', 'in the dead of night with no moon', 'at the edge of a cliff', 'inside a collapsing mine shaft', 'on the deck of a sinking ship', 'in a narrow alley with no exit'];
-
-    const shuffle2 = <T,>(arr: T[]): T[] => [...arr].sort(() => Math.random() - 0.5);
-    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    // SCENARIOS: simple, vivid, name-first
+    const SCENARIOS = [
+      (n: string) => n + ' finds a wounded stranger collapsed in a rainy alley. What does ' + n + ' do?',
+      (n: string) => n + ' sees a child being chased by thugs in the market. What does ' + n + ' do?',
+      (n: string) => n + ' discovers a locked chest glowing with strange light. What does ' + n + ' do?',
+      (n: string) => n + ' is betrayed by a trusted friend at a tavern meeting. What does ' + n + ' do?',
+      (n: string) => n + ' wakes up in total darkness with no memory of how they got there. What does ' + n + ' do?',
+      (n: string) => n + ' finds a bridge collapsing with people still on it. What does ' + n + ' do?',
+      (n: string) => n + ' encounters a wild beast blocking the only path forward. What does ' + n + ' do?',
+      (n: string) => n + ' catches someone stealing food from a starving family. What does ' + n + ' do?',
+      (n: string) => n + ' hears a cry for help coming from inside a burning building. What does ' + n + ' do?',
+      (n: string) => n + ' finds an ancient weapon stuck in stone. What does ' + n + ' do?',
+    ];
 
     const userClass = recipe.class;
-    const userActions = CLASS_ACTIONS[userClass] || CLASS_ACTIONS['Warrior'];
-    const allClassKeys = Object.keys(CLASS_ACTIONS);
+    const userActions = ACTIONS[userClass] || ACTIONS['Warrior'];
+    const allClassKeys = Object.keys(ACTIONS);
     const otherClassKeys = allClassKeys.filter(k => k !== userClass);
+    const occTool = OCC_TOOLS[occ] || '';
+    const sigSuffix = sig.length > 3 ? ', finishing with ' + sig : '';
 
-    // Generate 4 scenario questions with unique combos
-    const scenarioKeys: (keyof typeof userActions)[] = shuffle2(['crisis', 'help', 'treasure', 'betrayal', 'darkness'] as const).slice(0, 4) as any;
+    // Pick 4 random scenarios
+    const shuffledScenarios = shuffle(SCENARIOS).slice(0, 4);
 
-    for (const sKey of scenarioKeys) {
-      const subject = pick(SUBJECTS);
-      const situation = pick(SITUATIONS);
-      const context = pick(CONTEXTS);
+    for (let i = 0; i < shuffledScenarios.length; i++) {
+      const questionText = shuffledScenarios[i](name);
+      
+      // Pick a random correct action and add occupation + signature flavor
+      const baseAction = userActions[Math.floor(Math.random() * userActions.length)];
+      const correctAnswer = baseAction + (occTool ? ', ' + occTool : '') + sigSuffix;
 
-      const questionText = `${name} encounters ${subject} who ${situation}, ${context}. What does ${name} do?`;
-      const correctAnswer = userActions[sKey] + occFlavor + sigFlavor;
-
-      // 19 fakes: same scenario key applied to OTHER classes + occupation flavor from random occupations
-      const otherOccs = Object.keys(OCC_FLAVOR).filter(o => o !== occ);
+      // Pick 5 fake answers from other classes (1 per class, no duplicates)
       const fakes: string[] = [];
-      for (const otherClass of shuffle2(otherClassKeys)) {
-        const otherAct = CLASS_ACTIONS[otherClass];
-        if (otherAct && otherAct[sKey]) {
-          const fakeOcc = pick(otherOccs);
-          const fakeOccFlavor = OCC_FLAVOR[fakeOcc] ? `, ${OCC_FLAVOR[fakeOcc]}` : '';
-          fakes.push(otherAct[sKey] + fakeOccFlavor);
+      const shuffledOthers = shuffle(otherClassKeys);
+      for (const otherClass of shuffledOthers) {
+        if (fakes.length >= 5) break;
+        const otherActions = ACTIONS[otherClass];
+        if (otherActions) {
+          fakes.push(otherActions[Math.floor(Math.random() * otherActions.length)]);
         }
-        if (fakes.length >= 15) break;
       }
-      // Pad with absurd but vivid fakes
-      const absurd = shuffle2([
-        'freeze completely, then pretend you didn t see anything and walk the other way',
-        'pull out a sandwich, sit down, and watch the chaos unfold while eating',
-        'start an inspirational TED talk about resilience and hope',
-        'challenge everyone present to a dance battle to resolve the conflict',
-        'immediately start digging a hole, because maybe the answer is underground',
-        'scream into the void and hope the universe provides a solution',
-        'begin writing a strongly-worded letter to the local authorities',
-        'announce you re on lunch break and this is not your jurisdiction',
-      ]);
-      while (fakes.length < 19) fakes.push(absurd[fakes.length - 15] || 'do absolutely nothing and hope for the best');
 
       questions.push({
-        id: `q_${questionId++}`,
+        id: 'q_' + questionId++,
         question: questionText,
         correctAnswer: correctAnswer,
-        options: shuffle2([correctAnswer, ...fakes.slice(0, 19)]),
+        options: shuffle([correctAnswer, ...fakes]),
         category: 'text',
         difficulty: 'medium',
       });
@@ -508,7 +492,7 @@ export function generateQuestionBank(recipe: QuizRecipe): QuizQuestion[] {
 export function selectQuizQuestions(allQuestions: QuizQuestion[], count: number = 5): QuizQuestion[] {
   if (allQuestions.length === 0) return [];
   
-  // For single question (return auth), pick fully random — no priority bias
+  // For single question (return auth), pick fully random ï¿½ no priority bias
   if (count === 1) {
     const shuffled = [...allQuestions].sort(() => Math.random() - 0.5);
     return [shuffled[0]];
