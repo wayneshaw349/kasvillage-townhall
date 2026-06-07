@@ -6332,21 +6332,11 @@ export default function IdentityRitual({ onRecoveryRequest, onComplete }: Identi
           return (
             <View style={styles.phaseContent}>
               <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                <Text style={{ fontSize: 80 }}>❌</Text>
-                <Text style={{ color: '#F44336', fontSize: 28, fontWeight: 'bold', marginTop: 20, textAlign: 'center' }}>
-                  SENTRY REJECTS YOU
-                </Text>
-                <Text style={{ color: '#EF5350', fontSize: 16, marginTop: 12, textAlign: 'center' }}>
-                  Failed twice. You must restart the entire ritual.
-                </Text>
-                <Text style={{ color: '#B8A080', fontSize: 14, marginTop: 8, textAlign: 'center' }}>
-                  The gate slams shut. Begin again from the beginning.
-                </Text>
-                <TouchableOpacity
-                  style={{ backgroundColor: '#F44336', paddingVertical: 16, paddingHorizontal: 48, borderRadius: 12, marginTop: 32 }}
-                  onPress={() => setState(prev => ({ ...prev, showQuizResult: 'none' as const, phase: 1 }))}
-                >
-                  <Text style={{ color: '#FFF', fontSize: 18, fontWeight: 'bold' }}>Restart Ritual</Text>
+                <Text style={{ fontSize: 80 }}>?</Text>
+                <Text style={{ color: '#FF6B35', fontSize: 28, fontWeight: 'bold', marginTop: 20, textAlign: 'center' }}>SENTRY SUSPICIOUS</Text>
+                <Text style={{ color: '#FFA726', fontSize: 16, marginTop: 12, textAlign: 'center' }}>Failed twice. Take a moment and try again.</Text>
+                <TouchableOpacity style={{ backgroundColor: '#F59E0B', paddingVertical: 16, paddingHorizontal: 48, borderRadius: 12, marginTop: 32 }} onPress={() => { const q = generateQuiz(state.recipe, state.colorMixHistory); setState(prev => ({ ...prev, showQuizResult: 'none', quizQuestions: q, currentQuizIndex: 0, quizScore: 0, quizRetries: 0 })); }}>
+                  <Text style={{ color: '#000', fontSize: 18, fontWeight: 'bold' }}>Try Again</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -9225,7 +9215,7 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
         const paths = recipeData.silhouettePaths || [];
         if (paths.length > 0) {
           const hash = computeAvatarHash(paths);
-          await storeAvatarLocally({ race: recipeData.race || 'human', gender: recipeData.gender || 'male', paths, hash });
+          await storeAvatarLocally({ race: recipeData.race || 'human', gender: recipeData.gender || 'male', paths, hash, createdAt: Date.now() } as any);
           console.log('[PhaseAnchor] Avatar SVG saved to device:', paths.length, 'paths, hash:', hash.slice(0, 16));
         } else {
           console.warn('[PhaseAnchor] No silhouette paths in recipe to save');
