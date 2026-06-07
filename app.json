@@ -4,10 +4,7 @@
     "slug": "kasvillage-mobile",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
-    "platforms": [
-      "ios",
-      "android"
-    ],
+    "platforms": ["ios", "android"],
     "orientation": "portrait",
     "scheme": "kasvillage",
     "plugins": [
@@ -18,6 +15,13 @@
         "expo-local-authentication",
         {
           "faceIDPermission": "KasVillage uses Face ID to secure your wallet."
+        }
+      ],
+      "react-native-ble-plx",
+      [
+        "expo-notifications",
+        {
+          "color": "#D4AF37"
         }
       ]
     ],
