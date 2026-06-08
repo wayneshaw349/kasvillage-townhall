@@ -4,8 +4,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Dimensions, RefreshControl, Alert,
-, Platform , TextInput } from 'react-native';
+  Dimensions, RefreshControl, Alert, Platform, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Rect, Circle, Path, Text as SvgText } from 'react-native-svg';
@@ -515,7 +514,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
   }, []);
   const [publicKey, setPublicKey] = useState('');
 
-  const traitCount = getFilledTraits(avatar);
+  const traitCount = stats.trait_count;
   const snailMode = isSnailMode(stats.xp, stats.p_complete);
   const eliteMode = isEliteMode(stats.xp);
 
