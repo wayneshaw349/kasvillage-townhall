@@ -46,6 +46,7 @@ import {
 } from './wallet_registration_v2';
 import { startPriceFeed, subscribeToPriceUpdates, getKasPrice } from './kas_price_feed';
 import { getBalance as getKaspaBalance, setNetwork } from './kaspa_unified';
+import { getDeviceHash, getSerialHash } from './device_attestation';
 
 // ============================================================================
 // TYPES
@@ -735,6 +736,18 @@ export const AppNavigator: React.FC = () => {
 
   // After biometric succeeds, go to quiz gate (not directly to dashboard)
   const handleBiometricSuccess = useCallback(() => {
+    // Device attestation check (non-blocking)
+    (async () => {
+      try {
+        const deviceHash = await getDeviceHash();
+        const serialHash = await getSerialHash();
+        console.log('[DeviceAttestation] deviceHash:', deviceHash?.slice(0, 16) || 'none');
+        console.log('[DeviceAttestation] serialHash:', serialHash?.slice(0, 16) || 'none');
+        if (deviceHash) await SecureStore.setItemAsync('kv_last_device_hash', deviceHash);
+      } catch (attErr) {
+        console.warn('[DeviceAttestation] Check failed (non-fatal):', attErr);
+      }
+    })();
     setScreen('quiz_gate');
   }, []);
 

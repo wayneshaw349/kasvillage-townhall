@@ -5,7 +5,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Dimensions, RefreshControl, Alert,
-} from 'react-native';
+, Platform , TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Rect, Circle, Path, Text as SvgText } from 'react-native-svg';
@@ -16,6 +16,7 @@ import MnemonicExportModal from './MnemonicExportModal';
 import ProceduralBackground from './expo_procedural_backgrounds';
 import { StoredAvatarRenderer, getStoredAvatar, RACE_GENERATORS, storeAvatarLocally, computeAvatarHash } from './avatar_silhouette_generator';
 import type { AvatarIdentity, Race, Gender } from './avatar_silhouette_generator';
+import { storeSerialHash, getSerialHash } from './device_attestation';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
@@ -388,6 +389,14 @@ const AvatarLikenessCard: React.FC<{
 
 export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment?: () => void; onNavigateTownHall?: () => void; onNavigateBookshelf?: () => void }> = ({ navigation, onNavigateEntertainment, onNavigateTownHall, onNavigateBookshelf }) => {
   const [stats, setStats] = useState<UserStats>(mockStats);
+  const [serialInput, setSerialInput] = React.useState('');
+  const [serialHashed, setSerialHashed] = React.useState(false);
+  const [existingSerialHash, setExistingSerialHash] = React.useState<string | null>(null);
+
+  // Check if serial already bound
+  React.useEffect(() => {
+    getSerialHash().then(h => { if (h) { setExistingSerialHash(h); setSerialHashed(true); } });
+  }, []);
   const [avatar, setAvatar] = useState<Avatar>(mockAvatar);
   const [refreshing, setRefreshing] = useState(false);
   const [aptNumber] = useState('APT-303');
@@ -657,6 +666,49 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
             </View>
             <Text style={styles.seedExportArrow}>›</Text>
           </TouchableOpacity>
+
+          {/* Hardware Attestation — Serial Bind */}
+          <View style={{ marginTop: rs(12), backgroundColor: '#1A2A3A', borderRadius: rs(12), padding: rs(14), borderWidth: 1, borderColor: '#4A90D9' }}>
+            <Text style={{ color: '#4A90D9', fontSize: rs(14), fontWeight: 'bold', marginBottom: rs(4) }}>🔒 Hardware Bind</Text>
+            <Text style={{ color: '#AAA', fontSize: rs(11), lineHeight: rs(16), marginBottom: rs(8) }}>
+              Bind this wallet to your physical device. Your serial is NEVER stored or transmitted — only a one-way hash is kept locally on your device.
+            </Text>
+            {serialHashed ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ color: '#4CAF50', fontSize: rs(13), fontWeight: '600' }}>✓ Device hardware-bound</Text>
+                <Text style={{ color: '#666', fontSize: rs(10) }}>{existingSerialHash?.slice(0, 12)}...</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={{ color: '#888', fontSize: rs(10), marginBottom: rs(6) }}>Settings → About → Serial Number → Copy → Paste below</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput
+                    style={{ flex: 1, backgroundColor: '#0A0A14', borderRadius: 8, padding: rs(10), color: '#FFF', fontSize: rs(14), fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', borderWidth: 1, borderColor: '#333' }}
+                    placeholder="Paste serial..."
+                    placeholderTextColor="#555"
+                    value={serialInput}
+                    onChangeText={setSerialInput}
+                    autoCapitalize="characters"
+                  />
+                  {serialInput.length >= 5 && (
+                    <TouchableOpacity
+                      style={{ backgroundColor: '#4A90D9', borderRadius: 8, paddingHorizontal: rs(14), justifyContent: 'center' }}
+                      onPress={async () => {
+                        try {
+                          const hash = await storeSerialHash(serialInput);
+                          setSerialHashed(true);
+                          setExistingSerialHash(hash);
+                          Alert.alert('\u2705 Hardware Bound', 'Serial hash stored. Raw serial was NOT saved.');
+                        } catch (e) { Alert.alert('Error', e instanceof Error ? e.message : 'Failed'); }
+                      }}
+                    >
+                      <Text style={{ color: '#FFF', fontSize: rs(13), fontWeight: 'bold' }}>Bind</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </>
+            )}
+          </View>
         </View>
 
         {/* Quick Actions */}
