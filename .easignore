@@ -1,4 +1,4 @@
-﻿node_modules/
+node_modules/
 .git/
 *.cjs
 *.log
@@ -7,3 +7,6 @@ ios/
 .expo/
 dist/
 web-build/
+target/
+kasvillage-procedural-sdk/
+kasvillage-procedural-sdk - Copy/
