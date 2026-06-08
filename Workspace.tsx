@@ -271,7 +271,7 @@ async function verifyServiceWithTownHall(service: {
 // ============================================================================
 // CONSTANTS (v2 canonical 13 traits)
 // ============================================================================
-const CITADEL_SELLER_THRESHOLD = 13;
+const CITADEL_SELLER_THRESHOLD = 6;
 
 const SELLER_REQUIRED_TRAITS = [
   'Race', 'Gender', 'Name', 'Epithet', 'Eyes', 'Shoulders', 'Hair',

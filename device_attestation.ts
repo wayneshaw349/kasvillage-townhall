@@ -420,3 +420,57 @@ export async function checkExistingAttestation(
   }
 }
 
+
+
+// ============================================================================
+// SERIAL NUMBER HASH — Hardware-bound attestation (user pastes serial manually)
+// ============================================================================
+// Flow: User copies serial from Settings → About → pastes into app
+// App hashes locally: SHA256(serial + anchor + applicationId)
+// Only hash is stored/inscribed — raw serial NEVER leaves device
+// ============================================================================
+
+const STORE_KEY_SERIAL_HASH = 'kv_serial_hash';
+
+/**
+ * Hash a device serial number with the device anchor for hardware binding.
+ * Result is deterministic: same serial + same device = same hash.
+ */
+export async function hashSerialNumber(serial: string): Promise<string> {
+  const anchor = await getOrCreateAnchor();
+  const appId = Application.applicationId || 'com.kasvillage.mobile';
+  const input = `KV_SERIAL:${serial.trim().toUpperCase()}:${anchor}:${appId}`;
+  return await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    input
+  );
+}
+
+/**
+ * Store the serial hash after user pastes their serial number.
+ * Raw serial is NOT stored — only the one-way hash.
+ */
+export async function storeSerialHash(serial: string): Promise<string> {
+  const hash = await hashSerialNumber(serial);
+  await SecureStore.setItemAsync(STORE_KEY_SERIAL_HASH, hash);
+  return hash;
+}
+
+/**
+ * Get the stored serial hash (for Arweave inscription).
+ * Returns null if user hasn't entered serial yet.
+ */
+export async function getSerialHash(): Promise<string | null> {
+  return await SecureStore.getItemAsync(STORE_KEY_SERIAL_HASH);
+}
+
+/**
+ * Verify a serial number matches the stored hash.
+ * Used during device recovery / re-verification.
+ */
+export async function verifySerialNumber(serial: string): Promise<boolean> {
+  const stored = await SecureStore.getItemAsync(STORE_KEY_SERIAL_HASH);
+  if (!stored) return false;
+  const computed = await hashSerialNumber(serial);
+  return computed === stored;
+}

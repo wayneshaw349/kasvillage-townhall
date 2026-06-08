@@ -1201,7 +1201,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
                   )}
                   {searchResult.traits !== undefined && (
                     <Text style={styles.resultTraits}>
-                      {searchResult.traits}/18 traits
+                      {searchResult.traits}/10 traits
                     </Text>
                   )}
                   
@@ -1272,7 +1272,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
               <View style={styles.statusRow}>
                 <View style={styles.statusItem}>
                   <Text style={styles.statusLabel}>Traits</Text>
-                  <Text style={styles.statusValue}>{traitCount}/18</Text>
+                  <Text style={styles.statusValue}>{traitCount}/10</Text>
                 </View>
                 <View style={styles.statusItem}>
                   <Text style={styles.statusLabel}>Level</Text>

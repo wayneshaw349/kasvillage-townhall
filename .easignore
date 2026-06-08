@@ -1,11 +1,9 @@
+﻿node_modules/
 .git/
 *.cjs
 *.log
-*.rs
-*.apk
-*.ipa
-*.aab
-*.mp4
-*.mov
 android/
 ios/
+.expo/
+dist/
+web-build/

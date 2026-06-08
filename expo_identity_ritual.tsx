@@ -121,6 +121,7 @@ import {
   getSvgForKeyword,
 } from './keyword_dictionary_draggable';
 import { registerPushToken, inscribePushToken } from './push_notifications';
+import { getDeviceHash, storeSerialHash, getSerialHash } from './device_attestation';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SVG_WIDTH = 400;
@@ -9239,6 +9240,15 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
           { name: "KV-Version", value: "2" },
           { name: "Unix-Time", value: String(Math.floor(Date.now() / 1000)) },
         ];
+        // Add device attestation tags (non-blocking)
+        try {
+          const deviceHash = await getDeviceHash();
+          if (deviceHash) arTags.push({ name: "KV-DeviceHash", value: deviceHash });
+          const serialHash = await getSerialHash();
+          if (serialHash) arTags.push({ name: "KV-SerialHash", value: serialHash });
+        } catch (attErr) {
+          console.warn("[PhaseAnchor] Attestation tags failed (non-fatal):", attErr);
+        }
         const arResult = await uploadToTurbo(JSON.stringify(recipe), arTags);
         if (arResult.success) {
           console.log("[PhaseAnchor] Arweave SUCCESS! txId:", arResult.txId);
@@ -9461,6 +9471,48 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
           )}
         </View>
         
+        {/* Serial Number Attestation — hardware binding */}
+        <View style={{ backgroundColor: '#1A2A3A', borderRadius: 16, padding: 16, marginTop: 16, borderWidth: 2, borderColor: '#4A90D9' }}>
+          <Text style={{ color: '#4A90D9', fontSize: 14, fontWeight: 'bold', textAlign: 'center', marginBottom: 8 }}>🔒 HARDWARE ATTESTATION</Text>
+          <Text style={{ color: '#CCC', fontSize: 12, textAlign: 'center', lineHeight: 18, marginBottom: 12 }}>
+            Paste your device serial number to bind this wallet to your physical device.{'\n'}
+            Go to Settings → About → Serial Number → Copy
+          </Text>
+          <TextInput
+            style={{ backgroundColor: '#0A0A0A', borderRadius: 10, padding: 14, color: '#FFF', fontSize: 16, fontWeight: 'bold', textAlign: 'center', borderWidth: 1, borderColor: '#4A90D9', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}
+            placeholder="Paste serial number..."
+            placeholderTextColor="#555"
+            value={serialInput}
+            onChangeText={setSerialInput}
+            autoCapitalize="characters"
+            returnKeyType="done"
+            blurOnSubmit={true}
+          />
+          {serialInput.length >= 5 && (
+            <TouchableOpacity
+              style={{ backgroundColor: '#4A90D9', paddingVertical: 12, borderRadius: 10, marginTop: 10, alignItems: 'center' }}
+              onPress={async () => {
+                try {
+                  const hash = await storeSerialHash(serialInput);
+                  setSerialHashed(true);
+                  Alert.alert('✅ Hardware Bound', 'Serial hash stored securely. Raw serial was NOT saved — only the one-way hash.');
+                } catch (e) {
+                  Alert.alert('Error', 'Failed to hash serial');
+                }
+              }}
+            >
+              <Text style={{ color: '#FFF', fontSize: 14, fontWeight: 'bold' }}>
+                {serialHashed ? '✓ Serial Hashed' : '🔐 Hash & Store'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {serialHashed && (
+            <Text style={{ color: '#4CAF50', fontSize: 11, textAlign: 'center', marginTop: 8 }}>
+              ✓ Device hardware-bound. This hash will be inscribed to Arweave.
+            </Text>
+          )}
+        </View>
+
         {mnemonic && (
           <View style={styles.mnemonicCard}>
             <Text style={styles.mnemonicWarning}>BACKUP YOUR RECOVERY PHRASE</Text>
