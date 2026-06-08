@@ -466,6 +466,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
             'voiceLine', 'lifePhilosophy', 'powerSpike', 'signatureMove'];
           const filled = traitKeys.filter(k => recipe[k] && recipe[k].length > 0).length;
           setStats(prev => ({ ...prev, trait_count: filled }));
+        console.log('[Profile] trait_count:', filled, 'filled keys:', JSON.stringify(traitKeys.filter(k => recipe[k] && recipe[k].length > 0)));
         }
         const addr = await SecureStore.getItemAsync('kaspa_address');
         if (addr) {
