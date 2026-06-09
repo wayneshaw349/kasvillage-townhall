@@ -757,7 +757,17 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     const loadData = async () => {
       const pubkey = await SecureStore.getItemAsync('kv_public_key');
       const kaspaAddress = await SecureStore.getItemAsync('kaspa_address');
-      const traits = await SecureStore.getItemAsync('kv_trait_count');
+      // Count traits from avatar recipe (same as ProfileScreen)
+      let traits = null;
+      try {
+        const recipeStr = await SecureStore.getItemAsync('kv_avatar_recipe');
+        if (recipeStr) {
+          const recipe = JSON.parse(recipeStr);
+          const traitKeys = ['name','race','class','occupation','animal','originStory','formativeMemory','scenarioDesire','characterDescription','voiceLine','lifePhilosophy','powerSpike','signatureMove'];
+          const filled = traitKeys.filter(k => recipe[k] && recipe[k].length > 0).length;
+          traits = String(filled);
+        }
+      } catch {}
       
       if (pubkey) {
         setMyPubkey(pubkey);
