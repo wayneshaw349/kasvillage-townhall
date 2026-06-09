@@ -8977,6 +8977,8 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
   const [txId, setTxId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showMnemonic, setShowMnemonic] = useState(false);
+  const [serialInput, setSerialInput] = useState(String.fromCharCode(39)+String.fromCharCode(39));
+  const [serialHashed, setSerialHashed] = useState(false);
   const balancePollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   const INSCRIPTION_COST = 0.001; // KAS needed for inscription (dust + fee)
