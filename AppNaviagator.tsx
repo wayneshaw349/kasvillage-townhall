@@ -37,6 +37,7 @@ import { useBluetoothPay, PayablePeer } from './bluetooth_p2p';
 import { sendKASWithHybridSig } from './kasvillage_cold_wallet';
 import { EntertainmentCenter } from './EntertainmentCenter';
 import { ProfileScreen } from './ProfileScreen';
+import { QRPayNearby } from './QRPayNearby';
 import TradeFiScreen from './TradeFiScreen';
 import { NeighborAgreement } from './NeighborAgreement';
 import {
@@ -1056,11 +1057,7 @@ export const AppNavigator: React.FC = () => {
         </View>
       );
     case 'pay_nearby':
-      return <PayNearbyScreen
-        userAddress={kaspaAddress}
-        userName={user.apartment}
-        onBack={() => setScreen('dashboard')}
-      />;
+      return <QRPayNearby onClose={() => setScreen('dashboard')} />;
 
     default:
       return <LoadingScreen />;
