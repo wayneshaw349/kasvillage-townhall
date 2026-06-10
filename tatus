@@ -1,0 +1,10 @@
+[33me91a44a[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m feat: duplicate proposal guard + KV clipboard format + FROST tests
+[33m77579fd[m feat: FROST e2e test + proposal test
+[33mb0c8056[m feat: seller verifies TX template before co-signing - checks outputs, amounts, own address
+[33m8e2f221[m fix: buyer packs full TX template with outputs
+[33mc737edf[m fix: remove remaining dynamic require in buyerAddress IIFE
+[33ma173a2f[m fix: seller release bar split template, multi-s parsing, arweave.net, static imports
+[33m2325639[m feat: seller paste auto-extracts R+SIG from buyer Copy Release Info
+[33maa6ba4f[m feat: buyer sends full TX template, seller uses it directly - guaranteed identical sighashes
+[33m733f7d0[m fix: split UTXO snapshot before encrypt, use sigForEncrypt
+[33m88bc357[m fix: split UTXO snapshot from sig before encryption, reattach after
