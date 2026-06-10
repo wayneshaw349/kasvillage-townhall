@@ -21,7 +21,7 @@ const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
 // TYPES
 // ============================================================================
 
-type Mode = 'choose' | 'receive' | 'send' | 'ble_send' | 'ble_receive';
+type Mode = 'choose' | 'ble_send' | 'ble_receive';
 
 interface QRPayload {
   type: 'kasvillage_pay';
@@ -159,25 +159,13 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           <View style={styles.modeContainer}>
             <Text style={styles.modeTitle}>How would you like to connect?</Text>
 
-            <TouchableOpacity style={styles.modeCard} onPress={() => setMode('receive')}>
-              <Text style={styles.modeIcon}>📥</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modeCardTitle}>Receive KAS</Text>
-                <Text style={styles.modeCardSub}>Show your QR code for someone to scan</Text>
-              </View>
-            </TouchableOpacity>
+            
 
-            <TouchableOpacity style={styles.modeCard} onPress={() => setMode('send')}>
-              <Text style={styles.modeIcon}>📤</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modeCardTitle}>Send KAS</Text>
-                <Text style={styles.modeCardSub}>Scan a QR code or paste an address</Text>
-              </View>
-            </TouchableOpacity>
+            
 
             {/* Bluetooth Option */}
             <View style={{ marginTop: rs(8), borderTopWidth: 1, borderTopColor: '#222', paddingTop: rs(12) }}>
-              <Text style={{ color: '#666', fontSize: rs(11), textAlign: 'center', marginBottom: rs(8) }}>Or use Bluetooth (same platform only)</Text>
+              <Text style={{ color: '#666', fontSize: rs(11), textAlign: 'center', marginBottom: rs(8) }}>Connect with nearby users</Text>
               <View style={{ flexDirection: 'row', gap: rs(8) }}>
                 <TouchableOpacity
                   style={{ flex: 1, backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#4169E1' }}
@@ -218,119 +206,6 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               >
                 <Text style={{ color: '#FFF', fontSize: rs(14), fontWeight: '700' }}>📶 Open Hotspot Settings</Text>
               </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* RECEIVE MODE — Show QR */}
-        {mode === 'receive' && (
-          <View style={styles.receiveContainer}>
-            <TouchableOpacity onPress={() => setMode('choose')} style={styles.modeSwitch}>
-              <Text style={styles.modeSwitchText}>← Change Mode</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.receiveTitle}>Show this QR to sender</Text>
-
-            {/* QR Code */}
-            <View style={styles.qrContainer}>
-              <QRCode
-                value={qrPayload}
-                size={rs(220)}
-                backgroundColor="#FFFFFF"
-                color="#000000"
-              />
-            </View>
-
-            {/* Identity Info */}
-            <View style={styles.identityCard}>
-              <Text style={styles.identityName}>{avatarName}</Text>
-              <TouchableOpacity onPress={handleCopyAddress}>
-                <Text style={styles.identityApt}>{apt}</Text>
-                <Text style={styles.identityAddr}>{address.slice(0, 35)}...</Text>
-                <Text style={styles.copyHint}>tap to copy address</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Request Amount */}
-            <View style={styles.amountCard}>
-              <Text style={styles.amountLabel}>Request Amount (optional)</Text>
-              <TextInput
-                style={styles.amountInput}
-                placeholder="0.00"
-                placeholderTextColor="#555"
-                value={requestAmount}
-                onChangeText={setRequestAmount}
-                keyboardType="decimal-pad"
-              />
-              <Text style={styles.amountUnit}>KAS</Text>
-            </View>
-
-            {/* Share Button */}
-            <TouchableOpacity style={styles.shareBtn} onPress={handleShare}>
-              <Text style={styles.shareBtnText}>📤 Share Address</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* SEND MODE — Paste/Scan */}
-        {mode === 'send' && (
-          <View style={styles.sendContainer}>
-            <TouchableOpacity onPress={() => setMode('choose')} style={styles.modeSwitch}>
-              <Text style={styles.modeSwitchText}>← Change Mode</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.sendTitle}>Enter recipient</Text>
-
-            {/* Paste Input */}
-            <View style={styles.pasteCard}>
-              <Text style={styles.pasteLabel}>Paste address, APT number, or QR data</Text>
-              <TextInput
-                style={styles.pasteInput}
-                placeholder="kaspatest:qq... or APT-7954310"
-                placeholderTextColor="#555"
-                value={pasteInput}
-                onChangeText={setPasteInput}
-                autoCapitalize="none"
-                multiline
-              />
-              <View style={styles.pasteButtons}>
-                <TouchableOpacity
-                  style={styles.pasteBtn}
-                  onPress={async () => {
-                    const clip = await Clipboard.getStringAsync();
-                    if (clip) setPasteInput(clip);
-                  }}
-                >
-                  <Text style={styles.pasteBtnText}>📋 Paste</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.lookupBtn} onPress={handlePasteSubmit}>
-                  <Text style={styles.lookupBtnText}>🔍 Lookup</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Resolved Address */}
-            {resolvedAddress.length > 0 && (
-              <View style={styles.resolvedCard}>
-                <Text style={styles.resolvedLabel}>✅ Recipient Found</Text>
-                <Text style={styles.resolvedAddr}>{resolvedAddress}</Text>
-                <TouchableOpacity
-                  style={styles.sendBtn}
-                  onPress={() => {
-                    // Navigate to SendKAS with pre-filled address
-                    Alert.alert('Send KAS', `Ready to send to:\n${resolvedAddress.slice(0, 35)}...\n\nSendKAS screen will be wired here.`);
-                  }}
-                >
-                  <Text style={styles.sendBtnText}>Send KAS →</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Camera placeholder */}
-            <View style={styles.cameraPlaceholder}>
-              <Text style={styles.cameraIcon}>📷</Text>
-              <Text style={styles.cameraText}>Camera QR scanning coming soon</Text>
-              <Text style={styles.cameraSub}>For now, paste the QR data or address above</Text>
             </View>
           </View>
         )}
