@@ -16,6 +16,7 @@ import ProceduralBackground from './expo_procedural_backgrounds';
 import { StoredAvatarRenderer, getStoredAvatar, RACE_GENERATORS, storeAvatarLocally, computeAvatarHash } from './avatar_silhouette_generator';
 import type { AvatarIdentity, Race, Gender } from './avatar_silhouette_generator';
 import { storeSerialHash, getSerialHash } from './device_attestation';
+import * as Clipboard from 'expo-clipboard';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
@@ -398,7 +399,26 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
   }, []);
   const [avatar, setAvatar] = useState<Avatar>(mockAvatar);
   const [refreshing, setRefreshing] = useState(false);
-  const [aptNumber] = useState('APT-303');
+  const [aptNumber, setAptNumber] = useState('APT-...');
+
+  // Derive real APT from pubkey (same as TownHall)
+  useEffect(() => {
+    (async () => {
+      try {
+        // Check stored alias first
+        const stored = await SecureStore.getItemAsync('apt_alias');
+        if (stored) { setAptNumber(stored); return; }
+        // Derive from pubkey
+        const pubkey = await SecureStore.getItemAsync('kv_l1_pubkey') || await SecureStore.getItemAsync('kaspa_pubkey') || await SecureStore.getItemAsync('kv_public_key') || '';
+        if (pubkey && pubkey.length >= 10) {
+          const hexSlice = pubkey.slice(2, 9);
+          const num = parseInt(hexSlice, 16) % 10000000;
+          const apt = 'APT-' + num.toString();
+          setAptNumber(apt);
+        }
+      } catch {} 
+    })();
+  }, []);
 
   // Mnemonic export state
   const [mnemonicModalVisible, setMnemonicModalVisible] = useState(false);
