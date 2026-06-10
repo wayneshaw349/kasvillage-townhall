@@ -1,0 +1,62 @@
+diff --git a/node_modules/react-native-http-bridge/android/build.gradle b/node_modules/react-native-http-bridge/android/build.gradle
+index 9417a5f..d42cb1e 100644
+--- a/node_modules/react-native-http-bridge/android/build.gradle
++++ b/node_modules/react-native-http-bridge/android/build.gradle
+@@ -1,27 +1,25 @@
+ buildscript {
+     repositories {
+-        jcenter()
++        mavenCentral()
+     }
+     dependencies {
+-        classpath 'com.android.tools.build:gradle:2.2.0'
++        classpath 'com.android.tools.build:gradle:8.2.0'
+     }
+ }
+ 
+ allprojects {
+     repositories {
+-        jcenter()
++        mavenCentral()
+     }
+ }
+ 
+ apply plugin: 'com.android.library'
+ 
+ android {
+-    compileSdkVersion 26
+-    buildToolsVersion "26.0.2"
+-
++    compileSdkVersion 34
+     defaultConfig {
+-        minSdkVersion 16
+-        targetSdkVersion 22
++        minSdkVersion 24
++        targetSdkVersion 34
+         versionCode 2
+         versionName "1.1"
+         ndk {
+@@ -34,7 +32,7 @@ android {
+ }
+ 
+ dependencies {
+-    compile 'com.facebook.react:react-native:+'
+-    compile 'com.google.android.gms:play-services-gcm:+'
+-    compile 'org.nanohttpd:nanohttpd:2.3.1'
++    implementation 'com.facebook.react:react-native:+'
++    implementation 'com.google.android.gms:play-services-gcm:+'
++    implementation 'org.nanohttpd:nanohttpd:2.3.1'
+ }
+diff --git a/node_modules/react-native-http-bridge/android/src/main/java/me/alwx/HttpServer/Server.java b/node_modules/react-native-http-bridge/android/src/main/java/me/alwx/HttpServer/Server.java
+index decf9f2..d6606fd 100644
+--- a/node_modules/react-native-http-bridge/android/src/main/java/me/alwx/HttpServer/Server.java
++++ b/node_modules/react-native-http-bridge/android/src/main/java/me/alwx/HttpServer/Server.java
+@@ -14,7 +14,7 @@ import java.util.Set;
+ import java.util.HashMap;
+ import java.util.Random;
+ 
+-import android.support.annotation.Nullable;
++import androidx.annotation.Nullable;
+ import android.util.Log;
+ 
+ public class Server extends NanoHTTPD {
