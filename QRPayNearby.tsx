@@ -13,6 +13,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Linking } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useBluetoothPay } from './bluetooth_p2p';
+import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance } from './proposal_share';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
@@ -21,7 +22,7 @@ const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
 // TYPES
 // ============================================================================
 
-type Mode = 'choose' | 'ble_send' | 'ble_receive';
+type Mode = 'choose' | 'ble_send' | 'ble_receive' | 'send_proposal' | 'receive_proposal';
 
 interface QRPayload {
   type: 'kasvillage_pay';
@@ -60,6 +61,12 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [resolvedAddress, setResolvedAddress] = useState('');
   const { scanning, advertising, payees, startReceiving, stopReceiving, startScanning, stopScanning } = useBluetoothPay();
   const [selectedPeer, setSelectedPeer] = useState<any>(null);
+  const [proposalAmount, setProposalAmount] = useState('');
+  const [proposalDesc, setProposalDesc] = useState('');
+  const [proposalSending, setProposalSending] = useState(false);
+  const [incomingText, setIncomingText] = useState('');
+  const [incomingProposal, setIncomingProposal] = useState<any>(null);
+  const [proposalVerified, setProposalVerified] = useState(false);
 
   // Load wallet info
   useEffect(() => {
@@ -163,6 +170,23 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
             
 
+            {/* Text/DM Proposal */}
+            <TouchableOpacity style={styles.modeCard} onPress={() => setMode('send_proposal')}>
+              <Text style={styles.modeIcon}>📤</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modeCardTitle}>Send Proposal</Text>
+                <Text style={styles.modeCardSub}>Create signed proposal — share via text or DM</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.modeCard} onPress={() => setMode('receive_proposal')}>
+              <Text style={styles.modeIcon}>📥</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modeCardTitle}>Receive Proposal</Text>
+                <Text style={styles.modeCardSub}>Paste a proposal to verify and accept</Text>
+              </View>
+            </TouchableOpacity>
+
             {/* Bluetooth Option */}
             <View style={{ marginTop: rs(8), borderTopWidth: 1, borderTopColor: '#222', paddingTop: rs(12) }}>
               <Text style={{ color: '#666', fontSize: rs(11), textAlign: 'center', marginBottom: rs(8) }}>Connect with nearby users</Text>
@@ -207,6 +231,151 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 <Text style={{ color: '#FFF', fontSize: rs(14), fontWeight: '700' }}>📶 Open Hotspot Settings</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        )}
+
+        {/* SEND PROPOSAL */}
+        {mode === 'send_proposal' && (
+          <View>
+            <TouchableOpacity onPress={() => setMode('choose')} style={{ marginBottom: rs(12) }}>
+              <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={{ color: '#FFF', fontSize: rs(18), fontWeight: '700', marginBottom: rs(16) }}>Create Signed Proposal</Text>
+
+            <View style={{ backgroundColor: '#1A1A2E', borderRadius: rs(16), padding: rs(16), borderWidth: 1, borderColor: '#333' }}>
+              <Text style={{ color: '#888', fontSize: rs(12), marginBottom: rs(6) }}>Amount (KAS)</Text>
+              <TextInput
+                style={{ backgroundColor: '#0A0A14', borderRadius: rs(10), padding: rs(14), color: '#FFF', fontSize: rs(20), fontWeight: '700', textAlign: 'center', borderWidth: 1, borderColor: '#333', marginBottom: rs(12) }}
+                placeholder="0.00"
+                placeholderTextColor="#555"
+                value={proposalAmount}
+                onChangeText={setProposalAmount}
+                keyboardType="decimal-pad"
+              />
+              <Text style={{ color: '#888', fontSize: rs(12), marginBottom: rs(6) }}>What for?</Text>
+              <TextInput
+                style={{ backgroundColor: '#0A0A14', borderRadius: rs(10), padding: rs(14), color: '#FFF', fontSize: rs(14), borderWidth: 1, borderColor: '#333', marginBottom: rs(12) }}
+                placeholder="Coffee, goods, services..."
+                placeholderTextColor="#555"
+                value={proposalDesc}
+                onChangeText={setProposalDesc}
+              />
+              <TouchableOpacity
+                style={{ backgroundColor: proposalAmount && !proposalSending ? '#F59E0B' : '#333', borderRadius: rs(12), padding: rs(16), alignItems: 'center' }}
+                onPress={async () => {
+                  const n = parseFloat(proposalAmount);
+                  if (isNaN(n) || n <= 0) { Alert.alert('Error', 'Enter a valid amount'); return; }
+                  setProposalSending(true);
+                  const result = await createProposal('pay', n, proposalDesc || 'KAS payment');
+                  setProposalSending(false);
+                  if ('error' in result) { Alert.alert('Error', result.error); return; }
+                  await shareProposal(result.encoded, n);
+                  setProposalAmount('');
+                  setProposalDesc('');
+                  setMode('choose');
+                }}
+                disabled={!proposalAmount || proposalSending}
+              >
+                <Text style={{ color: proposalAmount ? '#000' : '#666', fontSize: rs(16), fontWeight: '700' }}>
+                  {proposalSending ? 'Signing...' : '📤 Sign & Share Proposal'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ backgroundColor: '#0D2818', borderRadius: rs(12), padding: rs(12), marginTop: rs(12), borderWidth: 1, borderColor: '#10B981' }}>
+              <Text style={{ color: '#10B981', fontSize: rs(11) }}>
+                ✓ Signed with your ephemeral key{'
+'}
+                ✓ Balance verified before sharing{'
+'}
+                ✓ Expires in 24 hours{'
+'}
+                ✓ No private keys in the message
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* RECEIVE PROPOSAL */}
+        {mode === 'receive_proposal' && (
+          <View>
+            <TouchableOpacity onPress={() => { setMode('choose'); setIncomingProposal(null); setIncomingText(''); setProposalVerified(false); }} style={{ marginBottom: rs(12) }}>
+              <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={{ color: '#FFF', fontSize: rs(18), fontWeight: '700', marginBottom: rs(16) }}>Verify Proposal</Text>
+
+            <View style={{ backgroundColor: '#1A1A2E', borderRadius: rs(16), padding: rs(16), borderWidth: 1, borderColor: '#333' }}>
+              <Text style={{ color: '#888', fontSize: rs(12), marginBottom: rs(6) }}>Paste the proposal text (starts with kv1:)</Text>
+              <TextInput
+                style={{ backgroundColor: '#0A0A14', borderRadius: rs(10), padding: rs(14), color: '#FFF', fontSize: rs(12), minHeight: rs(80), borderWidth: 1, borderColor: '#333', marginBottom: rs(8), fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}
+                placeholder="kv1:eyJ2Ijox..."
+                placeholderTextColor="#555"
+                value={incomingText}
+                onChangeText={setIncomingText}
+                multiline
+              />
+              <View style={{ flexDirection: 'row', gap: rs(8) }}>
+                <TouchableOpacity
+                  style={{ flex: 1, backgroundColor: '#333', borderRadius: rs(8), padding: rs(12), alignItems: 'center' }}
+                  onPress={async () => {
+                    const clip = await Clipboard.getStringAsync();
+                    if (clip) setIncomingText(clip);
+                  }}
+                >
+                  <Text style={{ color: '#FFF', fontSize: rs(14) }}>📋 Paste</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ flex: 1, backgroundColor: '#F59E0B', borderRadius: rs(8), padding: rs(12), alignItems: 'center' }}
+                  onPress={() => {
+                    const decoded = decodeProposal(incomingText.trim());
+                    if (!decoded) { Alert.alert('Invalid', 'Could not decode proposal. Make sure you copied the full text.'); return; }
+                    const v = verifyProposal(decoded);
+                    if (!v.valid) { Alert.alert('Verification Failed', v.error || 'Invalid signature'); return; }
+                    setIncomingProposal(decoded);
+                    setProposalVerified(true);
+                  }}
+                >
+                  <Text style={{ color: '#000', fontSize: rs(14), fontWeight: '700' }}>🔍 Verify</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {proposalVerified && incomingProposal && (
+              <View style={{ backgroundColor: '#0D2818', borderRadius: rs(16), padding: rs(16), marginTop: rs(12), borderWidth: 1, borderColor: '#10B981' }}>
+                <Text style={{ color: '#10B981', fontSize: rs(16), fontWeight: '700', marginBottom: rs(8) }}>✅ Proposal Verified</Text>
+                <Text style={{ color: '#FFF', fontSize: rs(14) }}>From: {incomingProposal.fromName} ({incomingProposal.fromAPT})</Text>
+                <Text style={{ color: '#FFF', fontSize: rs(20), fontWeight: '900', marginTop: rs(8) }}>
+                  {(Number(incomingProposal.amount) / 1e8).toFixed(2)} KAS
+                </Text>
+                <Text style={{ color: '#AAA', fontSize: rs(12), marginTop: rs(4) }}>{incomingProposal.desc}</Text>
+                <Text style={{ color: '#666', fontSize: rs(10), marginTop: rs(4) }}>Network: {incomingProposal.net}</Text>
+                <Text style={{ color: '#666', fontSize: rs(10) }}>Address: {incomingProposal.fromAddr.slice(0, 35)}...</Text>
+
+                <TouchableOpacity
+                  style={{ backgroundColor: '#10B981', borderRadius: rs(12), padding: rs(16), alignItems: 'center', marginTop: rs(12) }}
+                  onPress={async () => {
+                    const result = await acceptProposal(incomingProposal);
+                    if ('error' in result) { Alert.alert('Error', result.error); return; }
+                    const amtKAS = Number(incomingProposal.amount) / 1e8;
+                    await shareAcceptance(result.encoded, amtKAS);
+                    Alert.alert('Accepted!', 'Counter-signed acceptance shared. The sender can now complete the transaction.');
+                    setMode('choose');
+                    setIncomingProposal(null);
+                    setIncomingText('');
+                    setProposalVerified(false);
+                  }}
+                >
+                  <Text style={{ color: '#FFF', fontSize: rs(16), fontWeight: '700' }}>✓ Accept & Counter-Sign</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{ backgroundColor: '#333', borderRadius: rs(12), padding: rs(14), alignItems: 'center', marginTop: rs(8) }}
+                  onPress={() => { setIncomingProposal(null); setProposalVerified(false); }}
+                >
+                  <Text style={{ color: '#FF6B6B', fontSize: rs(14) }}>✗ Reject</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
 
