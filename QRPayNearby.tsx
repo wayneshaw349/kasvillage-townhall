@@ -198,7 +198,7 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 style={{ backgroundColor: '#10B981', borderRadius: rs(10), padding: rs(12), marginTop: rs(10), alignItems: 'center' }}
                 onPress={() => {
                   if (Platform.OS === 'ios') {
-                    Linking.openURL('App-Prefs:').catch(() => { Alert.alert('Hotspot', 'Go to Settings > Personal Hotspot > Turn On'); });
+                    Alert.alert('Turn On Hotspot', 'Go to Settings > Personal Hotspot > Toggle ON\n\nOr use Control Center (swipe down).', [{ text: 'Got it' }]);
                   } else {
                     Linking.sendIntent('android.settings.TETHERING_SETTINGS').catch(() => { Alert.alert('Hotspot', 'Go to Settings > Mobile Hotspot > Turn On'); });
                   }
