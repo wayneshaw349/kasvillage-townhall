@@ -5,9 +5,15 @@
   },
   "build": {
     "development": {
-      "env": { "NPM_CONFIG_LEGACY_PEER_DEPS": "true" },
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
+      },
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      }
     },
     "preview": {
       "distribution": "internal"
