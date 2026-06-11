@@ -32,6 +32,7 @@ import { SlothPoisonBar } from './SlothPoisonMeter';
 import type { IOULedger } from './IOUBalanceSheetShare';
 import { calculateNetPosition } from './IOUBalanceSheetShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getFinancialSummary } from './proposal_share';
 // TownHall stats fetched directly via /user-stats POST (no counterparty_lookup needed)
 
 // ============================================================================
