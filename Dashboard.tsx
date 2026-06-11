@@ -68,6 +68,8 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
     townhallSuccesses: 0,
     townhallDeadlocks: 0,
     enhancedFactors: null as any,
+    pendingProposals: 0,
+    acceptedProposals: 0,
     loading: true,
   });
 
@@ -317,6 +319,19 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
           }
         }
       } catch (e) { console.warn('[DashStats] TX history error:', e); }
+
+      // 5) Proposals: pending + accepted counts
+      let pendingProposals = 0;
+      let acceptedProposals = 0;
+      try {
+        const propJson = await SecureStore.getItemAsync('kv_proposals');
+        if (propJson) {
+          const proposals = JSON.parse(propJson);
+          pendingProposals = proposals.filter((p: any) => p.status === 'proposed').length;
+          acceptedProposals = proposals.filter((p: any) => p.status === 'accepted').length;
+          console.log('[DashStats] Proposals — pending:', pendingProposals, 'accepted:', acceptedProposals);
+        }
+      } catch (e) { console.warn('[DashStats] Proposals error:', e); }
 
       setStats({
         agreementsCompleted, deadlocks, pComplete, xp, totalVolumeSompi,
@@ -1125,6 +1140,18 @@ const WalletOverview: React.FC<{
           <Text style={{ color: "#888", fontSize: 13 }}>IOUs You Owe (net)</Text>
           <Text style={{ color: "#E74C3C", fontSize: 13 }}>{(Number(ds.iousOwedSompi) / 1e8).toFixed(4)} KASPA</Text>
         </View>
+        {ds.pendingProposals > 0 && (
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>Pending Proposals</Text>
+          <Text style={{ color: "#F59E0B", fontSize: 13, fontWeight: "bold" }}>{ds.pendingProposals}</Text>
+        </View>
+        )}
+        {ds.acceptedProposals > 0 && (
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>Active Agreements</Text>
+          <Text style={{ color: "#10B981", fontSize: 13, fontWeight: "bold" }}>{ds.acceptedProposals}</Text>
+        </View>
+        )}
         <View style={{ height: 1, backgroundColor: "#333", marginVertical: 8 }} />
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
           <Text style={{ color: "#888", fontSize: 14, fontWeight: "bold" }}>Spendable (free UTXOs)</Text>
