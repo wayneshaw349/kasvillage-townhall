@@ -1055,7 +1055,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     
     try {
       // Build avatar from recipe
-      let avatar = { animal:'',class:'',combat_style:'',defining_moment:'',formative_memory:'',life_philosophy:'',lore_origin:'',mutant:'',mutate:'',name:'',occupation:'',origin_story:'',personality:'',power_spike:'',race:'',signature_move:'',voice_line:'',weakness:'' };
+      let avatar = { animal:'',class:'',combatStyle:'',definingMoment:'',formativeMemory:'',lifePhilosophy:'',loreOrigin:'',mutant:'',mutate:'',name:'',occupation:'',originStory:'',personality:'',powerSpike:'',race:'',signatureMove:'',voiceLine:'',weakness:'' };
       try {
         const recipeStr = await SecureStore.getItemAsync('kv_avatar_recipe');
         if (recipeStr) {
@@ -1065,14 +1065,14 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           avatar.class = r.class || '';
           avatar.occupation = r.occupation || '';
           avatar.animal = r.animal || '';
-          avatar.origin_story = r.originStory || '';
-          avatar.formative_memory = r.formativeMemory || '';
-          avatar.life_philosophy = r.lifePhilosophy || '';
-          avatar.power_spike = r.powerSpike || '';
-          avatar.signature_move = r.signatureMove || '';
-          avatar.voice_line = r.voiceLine || '';
+          avatar.originStory = r.originStory || '';
+          avatar.formativeMemory = r.formativeMemory || '';
+          avatar.lifePhilosophy = r.lifePhilosophy || '';
+          avatar.powerSpike = r.powerSpike || '';
+          avatar.signatureMove = r.signatureMove || '';
+          avatar.voiceLine = r.voiceLine || '';
           avatar.personality = r.characterDescription || r.scenarioDesire || '';
-          avatar.defining_moment = r.scenarioDesire || r.characterDescription || '';
+          avatar.definingMoment = r.scenarioDesire || r.characterDescription || '';
         }
       } catch {}
       const response = await fetch(`${TOWNHALL_BASE}/verify-identity`, {
