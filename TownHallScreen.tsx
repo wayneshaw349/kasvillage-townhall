@@ -1082,7 +1082,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
       });
       const data = await response.json();
       
-      if (data.ok) {
+      if (data.ok || data.success) {
         setIsVerified(true);
         Alert.alert(
           '✓ Verified!',
