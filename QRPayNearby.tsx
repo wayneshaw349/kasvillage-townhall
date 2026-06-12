@@ -284,12 +284,9 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
             <View style={{ backgroundColor: '#0D2818', borderRadius: rs(12), padding: rs(12), marginTop: rs(12), borderWidth: 1, borderColor: '#10B981' }}>
               <Text style={{ color: '#10B981', fontSize: rs(11) }}>
-                ✓ Signed with your ephemeral key{'
-'}
-                ✓ Balance verified before sharing{'
-'}
-                ✓ Expires in 24 hours{'
-'}
+                ✓ Signed with your ephemeral key{'\n'}
+                ✓ Balance verified before sharing{'\n'}
+                ✓ Expires in 24 hours{'\n'}
                 ✓ No private keys in the message
               </Text>
             </View>

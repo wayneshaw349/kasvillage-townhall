@@ -635,6 +635,7 @@ export const AppNavigator: React.FC = () => {
           const balData = await balResp.json();
           const sompi = BigInt(balData.balance);
           console.log('[AppNav] Balance loaded:', sompi.toString(), 'sompi');
+          setBalanceSompi(sompi); // Show balance immediately
           // Fetch agreement data for financial summary
           try {
             const pubkey = await SecureStore.getItemAsync('kv_l1_pubkey');
