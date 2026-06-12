@@ -8,6 +8,7 @@
 import { onUtxoRefresh } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
 import React, { useState, useEffect, useCallback } from 'react';
+import { registerPushToken, setupNotificationHandlers, inscribePushToken } from './push_notifications';
 import {
   View,
   StyleSheet,
@@ -714,6 +715,16 @@ export const AppNavigator: React.FC = () => {
         setUser({ apartment: resolvedAlias, xp: 0, pubkey: publicKey, publicKey, name: avatarName });
         setScreen('biometric_gate');
         loadUserStats(resolvedAlias, publicKey);
+
+        // Register push notifications
+        if (kvVerified === 'true') {
+          registerPushToken().then(async (token) => {
+            if (token && privateKey) {
+              await inscribePushToken({ pubkey: publicKey, privKeyHex: privateKey });
+              console.log('[AppNav] Push token registered + inscribed');
+            }
+          }).catch(e => console.warn('[AppNav] Push registration failed:', e));
+        }
       } catch {
         setScreen('onboarding');
       }
@@ -721,6 +732,14 @@ export const AppNavigator: React.FC = () => {
 
     return stopPriceFeed;
   }, [loadUserStats]);
+
+  // Push notification handlers
+  useEffect(() => {
+    const cleanup = setupNotificationHandlers((event, data) => {
+      console.log('[Push] Received:', event, data?.agreementId || '');
+    });
+    return cleanup;
+  }, []);
 
   // ------------------------------------------------------------------
   // Price feed → USD balance

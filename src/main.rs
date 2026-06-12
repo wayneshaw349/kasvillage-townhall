@@ -120,8 +120,8 @@ const KV2A_MARKER: &[u8; 4] = b"KV2A";
 const KV2R_MARKER: &[u8; 4] = b"KV2R";
 
 // Citadel requirements
-const TRAITS_TO_BUY: u8 = 9;
-const TRAITS_TO_SELL: u8 = 13;
+const TRAITS_TO_BUY: u8 = 5;
+const TRAITS_TO_SELL: u8 = 6;
 
 // ============================================================================
 // CANONICAL AVATAR SCHEMA (18 fields, alphabetical)

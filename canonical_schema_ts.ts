@@ -41,8 +41,8 @@ export const CANONICAL_AVATAR_FIELDS = [
 // ============================================================================
 // CITADEL THRESHOLDS
 // ============================================================================
-export const CITADEL_BUYER_THRESHOLD = 9;
-export const CITADEL_SELLER_THRESHOLD = 13;
+export const CITADEL_BUYER_THRESHOLD = 5;
+export const CITADEL_SELLER_THRESHOLD = 6;
 
 // Traits counted for buyer (first 9)
 export const BUYER_TRAITS = [

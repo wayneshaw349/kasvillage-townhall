@@ -58,7 +58,7 @@ export async function registerPushToken(): Promise<PushToken | null> {
 
     // Get Expo push token
     const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: 'kasvillage-mobile', // Your EAS project ID
+      projectId: '0c21bfdb-4a6b-4ffb-823d-052c0182cfd4', // Your EAS project ID
     });
     const token = tokenData.data;
     const platform = Platform.OS as 'ios' | 'android';

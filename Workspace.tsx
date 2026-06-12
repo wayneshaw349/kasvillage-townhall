@@ -474,7 +474,7 @@ const PassportGate: React.FC<PassportGateProps> = ({ filledTraits, missingTraits
         <Text style={gateStyles.progressLabel}>Progress</Text>
         <Text style={[
           gateStyles.progressCount,
-          filledTraits >= 9 && { color: COLORS.green600 }
+          filledTraits >= 5 && { color: COLORS.green600 }
         ]}>
           {filledTraits}/12
         </Text>
@@ -483,18 +483,18 @@ const PassportGate: React.FC<PassportGateProps> = ({ filledTraits, missingTraits
         <View style={[
           gateStyles.progressFill,
           { 
-            width: `${(filledTraits / 13) * 100}%`,
-            backgroundColor: filledTraits >= 13 ? COLORS.green500 : 
-                            filledTraits >= 9 ? COLORS.amber500 : COLORS.amber600
+            width: `${(filledTraits / 6) * 100}%`,
+            backgroundColor: filledTraits >= 6 ? COLORS.green500 : 
+                            filledTraits >= 5 ? COLORS.amber500 : COLORS.amber600
           }
         ]} />
       </View>
       <View style={gateStyles.progressLabels}>
         <Text style={gateStyles.tierLabel}>Guest</Text>
-        <Text style={[gateStyles.tierLabel, filledTraits >= 9 && { color: COLORS.green600 }]}>
+        <Text style={[gateStyles.tierLabel, filledTraits >= 5 && { color: COLORS.green600 }]}>
           Resident (8)
         </Text>
-        <Text style={[gateStyles.tierLabel, filledTraits >= 13 && { color: COLORS.green600 }]}>
+        <Text style={[gateStyles.tierLabel, filledTraits >= 6 && { color: COLORS.green600 }]}>
           Passport (12)
         </Text>
       </View>

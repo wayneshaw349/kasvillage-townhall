@@ -1526,6 +1526,7 @@ function parseClipboard(raw: string): {
             const result = { success: false, txId: null }; // DISABLED: completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: wallet.address });
             if (result.success && result.txId) {
               console.log('[PartialSig-Poll] Release TX broadcast:', result.txId);
+              try { const cpk = contract.buyerPubkey || ''; if (cpk) sendPushToCounterparty({ counterpartyPubkey: cpk, event: 'release_available', agreementId: contract.agreementId }); } catch {}
               setContract(prev => ({ ...prev, releaseTxId: result.txId, releaseExplorerUrl: result.explorerUrl }));
               await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
               
@@ -1805,6 +1806,8 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
             } as any);
             // Reduce spendable for proposer (input cap)
             console.log('[Neighbor] Proposal sent ? waiting for counterparty to accept');
+            // Push notify counterparty
+            try { const cpk = (contract as any)?.counterpartyPubkey || (contract as any)?.sellerPubkey || ''; if (cpk) sendPushToCounterparty({ counterpartyPubkey: cpk, event: 'agreement_proposed', agreementId: contract.agreementId }); } catch {}
             if (!proposeResult?.success) {
               console.warn('[Neighbor] TownHall propose failed:', JSON.stringify(proposeResult));
               Alert.alert('Proposal Failed', 'Could not post to TownHall. Please try again.');
@@ -3274,6 +3277,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                         const res = await completeFrostAndBroadcast({ frostAddress: sc.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, counterpartyPartialSig: dec });
                         if (res.success && res.txId) {
                           Alert.alert('Released!', 'TX: ' + (res.txId || '').slice(0,16) + '...');
+                        try { const cpk = sc.buyerPubkey || ''; if (cpk) sendPushToCounterparty({ counterpartyPubkey: cpk, event: 'release_available', agreementId: sc.agreementId || '' }); } catch {}
                           await clearAgreementSession();
                         } else { Alert.alert('Failed', res.error || 'Co-sign failed'); }
                       } catch (e) { Alert.alert('Error', String(e)); }
