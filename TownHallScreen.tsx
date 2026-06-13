@@ -1082,7 +1082,27 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
       });
       const data = await response.json();
       
-      if (data.ok || data.success) {
+      if (data.ok || data.success || data.proof_id) {
+        // Poll for async proof
+        if (data.proof_id) {
+          const pollForProof = async () => {
+            for (let i = 0; i < 24; i++) {
+              await new Promise(r => setTimeout(r, 5000));
+              try {
+                const pollRes = await fetch(`${TOWNHALL_BASE}/proof-status/${data.proof_id}`);
+                const pollData = await pollRes.json();
+                console.log('[TownHall] Proof poll:', pollData.status);
+                if (pollData.status === 'ready' && pollData.response) {
+                  data.proof_hash = pollData.response.proof_hash;
+                  data.proof_public_inputs = pollData.response.proof_public_inputs;
+                  break;
+                }
+                if (pollData.status === 'failed') break;
+              } catch {}
+            }
+          };
+          await pollForProof();
+        }
         setIsVerified(true);
         let arweaveTxId = null;
         try {
