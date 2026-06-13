@@ -7645,6 +7645,7 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/health", web::get().to(health))
         // --- Stateless Arweave endpoints (v5) ---
         .route("/verify-identity", web::post().to(stateless_verify_identity))
+        .route("/proof-status/{id}", web::get().to(get_proof_status))
         .route("/user-stats", web::post().to(stateless_get_user_stats))
         .route("/xp-ledger", web::post().to(stateless_get_xp_ledger))
         .route("/api/scan", web::post().to(scan_code_api))
