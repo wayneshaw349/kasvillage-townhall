@@ -104,6 +104,26 @@ pub const TREE_DEPTH: usize = 32;  // Release: 4 billion leaves
 const ARWEAVE_GATEWAY: &str = "https://arweave.net";
 const ARWEAVE_GRAPHQL: &str = "https://arweave.net/graphql";
 const BUNDLR_NODE: &str = "https://node2.irys.xyz";
+
+// ============================================================================
+// ASYNC PROOF QUEUE
+// ============================================================================
+use std::sync::OnceLock;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ProofJob {
+    pub proof_id: String,
+    pub status: String, // "generating", "ready", "failed"
+    pub proof: Option<VerificationProof>,
+    pub response: Option<StatelessVerifyResponse>,
+    pub created_at: u64,
+}
+
+fn proof_queue() -> &'static Arc<RwLock<std::collections::HashMap<String, ProofJob>>> {
+    static QUEUE: OnceLock<Arc<RwLock<std::collections::HashMap<String, ProofJob>>>> = OnceLock::new();
+    QUEUE.get_or_init(|| Arc::new(RwLock::new(std::collections::HashMap::new())))
+}
+
 const KASPA_REST: &str = "https://api.kaspa.org";
 const SOMPI_PER_KAS: u64 = 100_000_000;
 
@@ -7318,7 +7338,7 @@ pub struct StatelessVerifyRequest {
     pub signature: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StatelessVerifyResponse {
     pub success: bool,
     pub tier: String,
@@ -7334,62 +7354,129 @@ pub struct StatelessVerifyResponse {
     pub error: Option<String>,
 }
 
+
+async fn get_proof_status(path: web::Path<String>) -> impl Responder {
+    let proof_id = path.into_inner();
+    let queue = proof_queue().read().unwrap();
+    match queue.get(&proof_id) {
+        Some(job) if job.status == "ready" => {
+            HttpResponse::Ok().json(json!({
+                "proof_id": job.proof_id,
+                "status": "ready",
+                "response": job.response,
+            }))
+        }
+        Some(job) => {
+            HttpResponse::Ok().json(json!({
+                "proof_id": job.proof_id,
+                "status": job.status,
+            }))
+        }
+        None => HttpResponse::NotFound().json(json!({"error": "Proof not found"})),
+    }
+}
+
 async fn stateless_verify_identity(
     req: web::Json<StatelessVerifyRequest>,
     state: web::Data<AppStateV3>,
 ) -> impl Responder {
-    let pubkey = &req.pubkey;
-    let avatar = &req.avatar;
+    let pubkey = req.pubkey.clone();
+    let avatar = req.avatar.clone();
     let traits = avatar.count_traits();
     let tier = avatar.citadel_tier();
-
-    let stats = match state.arweave_reader.get_user_stats(pubkey).await {
-        Ok(s) => s,
-        Err(e) => return HttpResponse::InternalServerError().json(StatelessVerifyResponse {
-            success: false,
-            tier: "Guest".to_string(),
-            traits: 0,
-            can_buy: false,
-            can_sell: false,
-            xp: 0,
-            p_complete: 0.5,
-            snail_mode: false,
-            arweave_tx_id: None,
-            proof_hash: None,
-            proof_public_inputs: None,
-            error: Some(format!("Stats fetch failed: {}", e)),
-        }),
-    };
-
-    // Generate verification proof
-    let citadel_traits = avatar.to_citadel_traits();
-    let user_stats_l1 = UserStatsL1 {
-        pubkey_hash: pubkey.clone(),
-        xp: stats.xp,
-        successes: stats.successes,
-        deadlocks: stats.deadlocks,
-        completion_pct: (stats.p_complete() * 100.0) as u8,
-        dispute_pct: 0,
-        snail_mode: stats.should_snail_mode(),
-        attestation_hash: String::new(),
-        timestamp: current_timestamp(),
-    };
-    let proof = generate_user_proof(&user_stats_l1, &citadel_traits);
     
-    HttpResponse::Ok().json(StatelessVerifyResponse {
-        success: true,
-        tier: tier.as_str().to_string(),
-        traits,
-        can_buy: avatar.can_buy(),
-        can_sell: avatar.can_sell(),
-        xp: stats.xp,
-        p_complete: stats.p_complete(),
-        snail_mode: stats.should_snail_mode(),
-        arweave_tx_id: None,
-        proof_hash: Some(proof.proof_bytes),
-        proof_public_inputs: Some(proof.public_inputs),
-        error: None,
-    })
+    // Generate proof_id
+    let mut id_hasher = Sha256::new();
+    id_hasher.update(pubkey.as_bytes());
+    id_hasher.update(&current_timestamp().to_le_bytes());
+    let proof_id = hex::encode(&id_hasher.finalize()[..16]);
+
+    // Stats fetched in background task
+
+    // Spawn async proof generation
+    let state_clone = state.clone();
+    let pubkey_clone = pubkey.clone();
+    let avatar_clone = avatar.clone();
+    let proof_id_clone = proof_id.clone();
+    
+    // Insert pending job
+    {
+        let mut queue = proof_queue().write().unwrap();
+        queue.insert(proof_id.clone(), ProofJob {
+            proof_id: proof_id.clone(),
+            status: "generating".into(),
+            proof: None,
+            response: None,
+            created_at: current_timestamp(),
+        });
+        // Cleanup old jobs (>10 min)
+        let now = current_timestamp();
+        queue.retain(|_, j| now - j.created_at < 600);
+    }
+    
+    // Background proof generation
+    tokio::spawn(async move {
+        let stats = match state_clone.arweave_reader.get_user_stats(&pubkey_clone).await {
+            Ok(s) => s,
+            Err(e) => {
+                let mut queue = proof_queue().write().unwrap();
+                if let Some(job) = queue.get_mut(&proof_id_clone) {
+                    job.status = "failed".into();
+                }
+                eprintln!("[Proof] Stats fetch failed: {}", e);
+                return;
+            }
+        };
+        
+        let citadel_traits = avatar_clone.to_citadel_traits();
+        let user_stats_l1 = UserStatsL1 {
+            pubkey_hash: pubkey_clone.clone(),
+            xp: stats.xp,
+            successes: stats.successes,
+            deadlocks: stats.deadlocks,
+            completion_pct: (stats.p_complete() * 100.0) as u8,
+            dispute_pct: 0,
+            snail_mode: stats.should_snail_mode(),
+            attestation_hash: String::new(),
+            timestamp: current_timestamp(),
+        };
+        let proof = generate_user_proof(&user_stats_l1, &citadel_traits);
+        
+        let response = StatelessVerifyResponse {
+            success: true,
+            tier: avatar_clone.citadel_tier().as_str().to_string(),
+            traits: avatar_clone.count_traits(),
+            can_buy: avatar_clone.can_buy(),
+            can_sell: avatar_clone.can_sell(),
+            xp: stats.xp,
+            p_complete: stats.p_complete(),
+            snail_mode: stats.should_snail_mode(),
+            arweave_tx_id: None,
+            proof_hash: Some(proof.proof_bytes.clone()),
+            proof_public_inputs: Some(proof.public_inputs.clone()),
+            error: None,
+        };
+        
+        let mut queue = proof_queue().write().unwrap();
+        if let Some(job) = queue.get_mut(&proof_id_clone) {
+            job.status = "ready".into();
+            job.proof = Some(proof);
+            job.response = Some(response);
+            eprintln!("[Proof] Job {} complete", proof_id_clone);
+        }
+    });
+    
+    // Return immediately with proof_id
+    HttpResponse::Ok().json(json!({
+        "success": true,
+        "tier": tier.as_str(),
+        "traits": traits,
+        "can_buy": avatar.can_buy(),
+        "can_sell": avatar.can_sell(),
+        "proof_id": proof_id,
+        "proof_status": "generating",
+        "poll_url": format!("/proof-status/{}", proof_id),
+    }))
 }
 
 #[derive(Deserialize)]
