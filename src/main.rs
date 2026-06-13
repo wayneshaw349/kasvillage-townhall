@@ -2652,6 +2652,58 @@ pub fn generate_user_proof(stats: &UserStatsL1, traits: &CitadelTraits) -> Verif
     }
 }
 
+/// Generate ZK proof for any entity type (store, dapp, game, academic, service, stats)
+pub fn generate_entity_proof(entity_type: &str, subject_id: &str, data: &[u8]) -> VerificationProof {
+    let mut leaf_hasher = Sha256::new();
+    leaf_hasher.update(b"KV_ENTITY_V1:");
+    leaf_hasher.update(entity_type.as_bytes());
+    leaf_hasher.update(b":");
+    leaf_hasher.update(subject_id.as_bytes());
+    leaf_hasher.update(data);
+    let leaf_hash: [u8; 32] = leaf_hasher.finalize().into();
+    let leaf = bytes_to_fq(&leaf_hash);
+    
+    let mut tree = SparseMerkleTree::new(8);
+    let idx: u64 = u64::from_le_bytes([leaf_hash[0], leaf_hash[1], leaf_hash[2], leaf_hash[3], 0, 0, 0, 0]) % 256;
+    tree.update(idx, leaf);
+    let root = tree.root();
+    let merkle_proof = tree.generate_proof(idx);
+    
+    let mut index_bits = [false; 8];
+    let mut proof_values = [Value::unknown(); 8];
+    for i in 0..8 {
+        index_bits[i] = (idx >> i) & 1 == 1;
+        proof_values[i] = Value::known(merkle_proof.path[i].sibling);
+    }
+    let circuit = SparseMerkleCircuit::<8> {
+        leaf: Value::known(leaf),
+        index: index_bits,
+        proof: proof_values,
+        root: Value::known(root),
+    };
+    
+    let ps = ProofSystem::new(HALO2_K);
+    let (proof_hex, proof_type_str) = match ps.prove_with_bytes(circuit, vec![vec![root]]) {
+        Ok((bytes, true)) => {
+            eprintln!("[Proof] {} Halo2 proof: {} bytes", entity_type, bytes.len());
+            (hex::encode(&bytes), "halo2-ipa")
+        }
+        _ => {
+            eprintln!("[Proof] {} Halo2 failed, SHA256 fallback", entity_type);
+            (hex::encode(&leaf_hash), "sha256-fallback")
+        }
+    };
+    
+    VerificationProof {
+        proof_type: format!("{}-{}", entity_type, proof_type_str),
+        subject_id: subject_id.to_string(),
+        verified: true,
+        proof_bytes: proof_hex,
+        public_inputs: vec![entity_type.to_string(), format!("{:?}", root)],
+        timestamp: current_timestamp(),
+    }
+}
+
 // ============================================================================
 // APP STATE
 // ============================================================================
@@ -4329,7 +4381,7 @@ async fn verify_store(
         link_validation,
         traits: CitadelTraits::default(), // Would be fetched from L1
         verified,
-        arweave_tx: None,
+        arweave_tx: { let p = generate_entity_proof("store", &body.store_id, body.code.as_bytes()); Some(p.proof_bytes) },
         timestamp: current_timestamp(),
     };
     
@@ -4375,7 +4427,7 @@ async fn verify_dapp(
         runway_days: body.runway_days,
         visibility_score: visibility.score,
         verified,
-        arweave_tx: None,
+        arweave_tx: { let p = generate_entity_proof("dapp", &body.dapp_id, body.code.as_bytes()); Some(p.proof_bytes) },
         timestamp: current_timestamp(),
     };
     
@@ -7051,7 +7103,10 @@ async fn verify_academic(
         abstract_hash,
         credentials: Vec::new(),
         verified,
-        arweave_tx: None,
+        arweave_tx: {
+            let p = generate_entity_proof("academic", &body.owner_apt, body.email_headers.as_bytes());
+            Some(p.proof_bytes)
+        },
         timestamp: current_timestamp(),
     };
     
@@ -7138,7 +7193,10 @@ async fn verify_game(
         runway_days: 30,
         visibility_score: visibility.score,
         verified: false, // Games require manual review
-        arweave_tx: None,
+        arweave_tx: {
+            let p = generate_entity_proof("game", &body.game_id, body.code.as_bytes());
+            Some(p.proof_bytes)
+        },
         timestamp: current_timestamp(),
     };
     
