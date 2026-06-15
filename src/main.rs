@@ -86,10 +86,10 @@ use rand::rngs::OsRng;
 /// Circuit size: 2^K rows
 #[cfg(debug_assertions)]
 pub const HALO2_K: u32 = 12;  // Default: fast proofs, same security for marketplace
-pub const HALO2_K_ACADEMIC: u32 = 17;  // Academic DKIM proofs only  // Dev: fast compilation
 
 #[cfg(not(debug_assertions))]
-pub const HALO2_K: u32 = 12;  // Default: fast proofs, same security for marketplace
+pub const HALO2_K: u32 = 12;
+pub const HALO2_K_ACADEMIC: u32 = 17;  // Default: fast proofs, same security for marketplace
 
 /// Merkle tree depth
 #[cfg(debug_assertions)]
@@ -7141,7 +7141,7 @@ async fn verify_academic(
         credentials: Vec::new(),
         verified,
         arweave_tx: {
-            let p = generate_entity_proof("academic", &body.owner_apt, body.email_headers.as_bytes());
+            let p = { let mut lh = Sha256::new(); lh.update(b"KV_ACADEMIC_V1:"); lh.update(body.owner_apt.as_bytes()); lh.update(body.email_headers.as_bytes()); let lhash: [u8;32] = lh.finalize().into(); let leaf = bytes_to_fq(&lhash); let mut tree = SparseMerkleTree::new(8); let idx: u64 = u64::from_le_bytes([lhash[0],lhash[1],lhash[2],lhash[3],0,0,0,0]) % 256; tree.update(idx, leaf); let root = tree.root(); let mp = tree.generate_proof(idx); let mut ib = [false;8]; let mut pv = [Value::unknown();8]; for i in 0..8 { ib[i]=(idx>>i)&1==1; pv[i]=Value::known(mp.path[i].sibling); } let circ = SparseMerkleCircuit::<8>{leaf:Value::known(leaf),index:ib,proof:pv,root:Value::known(root)}; let ps = ProofSystem::new(HALO2_K_ACADEMIC); let (ph,pt) = match ps.prove_with_bytes(circ,vec![vec![root]]){Ok((b,true))=>{eprintln!("[Proof] Academic K=17: {} bytes",b.len());(hex::encode(&b),"halo2-ipa-k17")}_=>(hex::encode(&lhash),"sha256-fallback")}; VerificationProof{proof_type:format!("academic-{}",pt),subject_id:body.owner_apt.clone(),verified:true,proof_bytes:ph,public_inputs:vec!["academic".into(),format!("{:?}",root)],timestamp:current_timestamp()} };
             Some(p.proof_bytes)
         },
         timestamp: current_timestamp(),
