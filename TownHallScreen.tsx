@@ -730,6 +730,8 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
   const [accessLevel, setAccessLevel] = useState<AccessLevel>('GUEST');
   const [traitCount, setTraitCount] = useState(0);
   const [isVerified, setIsVerified] = useState(false);
+  useEffect(() => { SecureStore.getItemAsync('kv_townhall_verified').then(v => { if (v === 'true') setIsVerified(true);
+        SecureStore.setItemAsync('kv_townhall_verified', 'true'); }); }, []);
   const [myStats, setMyStats] = useState<UserStats | null>(null);
   
   // Verification events history
