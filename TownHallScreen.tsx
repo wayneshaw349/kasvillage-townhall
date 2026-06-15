@@ -1086,7 +1086,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         // Poll for async proof
         if (data.proof_id) {
           const pollForProof = async () => {
-            for (let i = 0; i < 24; i++) {
+            for (let i = 0; i < 48; i++) {
               await new Promise(r => setTimeout(r, 5000));
               try {
                 const pollRes = await fetch(`${TOWNHALL_BASE}/proof-status/${data.proof_id}`);
@@ -1098,6 +1098,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
                   break;
                 }
                 if (pollData.status === 'failed') break;
+                if (!pollData.status && pollData.error) continue; // Wrong container, retry
               } catch {}
             }
           };
