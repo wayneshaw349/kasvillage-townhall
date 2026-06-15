@@ -730,8 +730,8 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
   const [accessLevel, setAccessLevel] = useState<AccessLevel>('GUEST');
   const [traitCount, setTraitCount] = useState(0);
   const [isVerified, setIsVerified] = useState(false);
-  useEffect(() => { SecureStore.getItemAsync('kv_townhall_verified').then(v => { if (v === 'true') setIsVerified(true);
-        SecureStore.setItemAsync('kv_townhall_verified', 'true'); }); }, []);
+  useEffect(() => { SecureStore.getItemAsync('kv_townhall_verified').then(v => { if (v === 'true') setIsVerified(true); }); }, []);
+  // Verification from Arweave, not local flag
   const [myStats, setMyStats] = useState<UserStats | null>(null);
   
   // Verification events history
@@ -1091,7 +1091,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
             for (let i = 0; i < 48; i++) {
               await new Promise(r => setTimeout(r, 5000));
               try {
-                const pollRes = await fetch(`${TOWNHALL_BASE}/proof-status/${data.proof_id}`);
+                const pollRes = await fetch(`${TOWNHALL_BASE}/proof-status/${data.proof_id}?t=${Date.now()}`);
                 const pollData = await pollRes.json();
                 console.log('[TownHall] Proof poll:', pollData.status);
                 if (pollData.status === 'ready' && pollData.response) {
@@ -1121,6 +1121,8 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
               const result = await buildFn(dataBytes, tags, privKey).then(uploadFn);
               arweaveTxId = result?.txId || null;
               console.log('[TownHall] Proof inscribed:', arweaveTxId);
+              await SecureStore.setItemAsync('kv_townhall_verified', 'true');
+              await SecureStore.setItemAsync('kv_verification_tx', arweaveTxId);
             }
           }
         } catch (e) { console.warn('[TownHall] Arweave inscription failed:', e); }
@@ -1468,6 +1470,13 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
               <Text style={styles.alreadyVerifiedText}>
                 You're verified! Your content is visible in search.
               </Text>
+            
+              <TouchableOpacity
+                style={{ backgroundColor: '#F59E0B', borderRadius: 10, padding: 12, marginTop: 10, alignItems: 'center', width: '100%' }}
+                onPress={() => { setIsVerified(false); }}
+              >
+                <Text style={{ color: '#000', fontWeight: '700', fontSize: 13 }}>Re-verify + Inscribe to Arweave</Text>
+              </TouchableOpacity>
             </View>
           ) : traitCount >= 6 ? (
             <TouchableOpacity
@@ -2070,7 +2079,7 @@ const styles = StyleSheet.create({
     color: COLORS.white,
   },
   alreadyVerified: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     gap: rs.s(10),
     backgroundColor: COLORS.green500 + '15',

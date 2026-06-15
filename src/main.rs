@@ -85,10 +85,11 @@ use rand::rngs::OsRng;
 
 /// Circuit size: 2^K rows
 #[cfg(debug_assertions)]
-pub const HALO2_K: u32 = 12;  // Dev: fast compilation
+pub const HALO2_K: u32 = 12;  // Default: fast proofs, same security for marketplace
+pub const HALO2_K_ACADEMIC: u32 = 17;  // Academic DKIM proofs only  // Dev: fast compilation
 
 #[cfg(not(debug_assertions))]
-pub const HALO2_K: u32 = 17;  // Release: production security
+pub const HALO2_K: u32 = 12;  // Default: fast proofs, same security for marketplace
 
 /// Merkle tree depth
 #[cfg(debug_assertions)]
@@ -810,6 +811,22 @@ impl ArweaveStateReader {
                 .unwrap_or_default()
                 .as_millis() as u64,
         })
+    }
+
+    pub async fn get_push_token(&self, pubkey: &str) -> Result<String, String> {
+        let query = format!(r#"{{ transactions(tags: [{{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "KV-Type", values: ["push-token"] }}, {{ name: "KV-Pubkey", values: ["{}"] }}], sort: HEIGHT_DESC, first: 1) {{ edges {{ node {{ id }} }} }} }}"#, pubkey);
+        let resp = self.http_client.post("https://arweave.net/graphql")
+            .json(&serde_json::json!({"query": query}))
+            .send().await.map_err(|e| e.to_string())?;
+        let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        let tx_id = data["data"]["transactions"]["edges"][0]["node"]["id"]
+            .as_str().ok_or_else(|| "No push token found".to_string())?;
+        let token_resp = self.http_client.get(&format!("https://arweave.net/{}", tx_id))
+            .send().await.map_err(|e| e.to_string())?;
+        let token_data: serde_json::Value = token_resp.json().await.map_err(|e| e.to_string())?;
+        token_data["encrypted_token"].as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "Token field not found".to_string())
     }
 
     pub async fn get_verified_identity(&self, pubkey: &str) -> Result<Option<VerifiedIdentityRecord>, String> {
@@ -7372,7 +7389,7 @@ async fn get_proof_status(path: web::Path<String>) -> impl Responder {
                 "status": job.status,
             }))
         }
-        None => HttpResponse::NotFound().json(json!({"error": "Proof not found"})),
+        None => HttpResponse::Ok().json(json!({"proof_id": proof_id, "status": "generating"})),
     }
 }
 
@@ -7457,12 +7474,26 @@ async fn stateless_verify_identity(
             error: None,
         };
         
-        let mut queue = proof_queue().write().unwrap();
-        if let Some(job) = queue.get_mut(&proof_id_clone) {
-            job.status = "ready".into();
-            job.proof = Some(proof);
-            job.response = Some(response);
-            eprintln!("[Proof] Job {} complete", proof_id_clone);
+        {
+            let mut queue = proof_queue().write().unwrap();
+            if let Some(job) = queue.get_mut(&proof_id_clone) {
+                job.status = "ready".into();
+                job.proof = Some(proof);
+                job.response = Some(response);
+                eprintln!("[Proof] Job {} complete", proof_id_clone);
+            }
+        }
+        if let Ok(token_data) = state_clone.arweave_reader.get_push_token(&pubkey_clone).await {
+            let _ = reqwest::Client::new()
+                .post("https://exp.host/--/api/v2/push/send")
+                .json(&serde_json::json!({
+                    "to": token_data,
+                    "title": "Proof Ready",
+                    "body": "Your ZK proof is ready. Tap to inscribe to Arweave.",
+                    "data": { "event": "proof_ready", "proof_id": proof_id_clone }
+                }))
+                .send().await;
+            eprintln!("[Proof] Push sent to {}", &pubkey_clone[..10]);
         }
     });
     
