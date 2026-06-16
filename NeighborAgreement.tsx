@@ -3661,6 +3661,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                             network: contract.frostData?.network || 'testnet-10',
                             buyerR: buyerR_saved,
                             verificationCode: contract.verificationCode || '',
+                            buyerPubkey: myPubkey || '',
                             description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });
                           Clipboard.setStringAsync(shareText);

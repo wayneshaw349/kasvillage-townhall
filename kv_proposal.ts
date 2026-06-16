@@ -41,6 +41,7 @@ export interface KVProposal {
   utxoTag?: string;           // buyer's committed UTXO key (txId:index)
   buyerPubkey?: string | null;
   sellerPubkey?: string | null;
+  buyerPubkeyRaw?: string;
   valid?: boolean;
   error?: string;
 }
@@ -60,7 +61,7 @@ export function generateProposal(params: {
   if (params.frostCounter !== undefined) parts.push(String(params.frostCounter));
   return ['KV', params.agrId, params.buyerAddress, params.sellerAddress,
     params.buyerAmountSompi.toString(), params.sellerAmountSompi.toString(),
-    params.network, params.buyerR, params.verificationCode, desc].join('|');
+    params.network, params.buyerR, params.verificationCode, desc, params.buyerPubkey || ''].join('|');
 }
 
 export function parseProposal(text: string): KVProposal | null {
@@ -73,10 +74,11 @@ export function parseProposal(text: string): KVProposal | null {
     agrId: parts[1], buyerAddress: parts[2], sellerAddress: parts[3],
     buyerAmountSompi: parseInt(parts[4], 10), sellerAmountSompi: parseInt(parts[5], 10),
     network: parts[6], buyerR: parts[7], verificationCode: parts[8],
-    description: parts.slice(9).join('|'),
+    description: parts[9] || '',
+    buyerPubkeyRaw: parts[10] || '',
   };
 
-  proposal.buyerPubkey = addressToPubkey(proposal.buyerAddress);
+  proposal.buyerPubkey = proposal.buyerPubkeyRaw || addressToPubkey(proposal.buyerAddress);
   proposal.sellerPubkey = addressToPubkey(proposal.sellerAddress);
 
   if (!proposal.buyerPubkey || !proposal.sellerPubkey) {
