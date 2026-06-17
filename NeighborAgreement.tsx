@@ -1107,8 +1107,12 @@ function parseClipboard(raw: string): {
   const [proposedSplit, setProposedSplit] = useState({ buyerGets: 0, sellerGets: 0 });
   const [isLoading, setIsLoading] = useState(false);
   const [sellerResponseB64, setSellerResponseB64] = useState('');
+  const [sellerTrackingNum, setSellerTrackingNum] = useState('');
   const [templateBuilt, setTemplateBuilt] = useState(false);
-  const [releaseMode, setReleaseMode] = useState<ReleaseMode>('release');
+  const [releaseMode, setReleaseMode] = useState<'release' | 'cancel'>('release');
+
+  // Collateral agreements always use cancel mode (both parties get deposit back)
+  useEffect(() => { if (agreementType === 'simple') setReleaseMode('cancel'); }, [agreementType]);
   const [collateralFailed, setCollateralFailed] = useState(false);
   const [counterpartyAddress, setCounterpartyAddress] = useState<string | null>(null);
   const [counterpartyKaspaAddr, setCounterpartyKaspaAddr] = useState<string>('');
@@ -2109,6 +2113,8 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         counter: contract.frostData?.frostCounter || 0,
         utxos: utxos.map((u: any) => ({ txId: u.outpoint.transactionId, index: u.outpoint.index, amount: u.utxoEntry.amount, scriptPubKey: u.utxoEntry.scriptPublicKey.scriptPublicKey })),
         buyerAmountSompi: BigInt(Math.floor(contract.itemPriceKas * 1e8)),
+        sellerAmountSompi: BigInt(Math.floor(contract.sellerCommitmentKas * 1e8)),
+        releaseMode: releaseMode,
         agrId: contract.agreementId,
       });
 
@@ -2118,7 +2124,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
 
       console.log('[Ceremony] Template built:', result.templateB64.length, 'chars');
       setTemplateBuilt(true);
-      Alert.alert('TX Template Copied', 'Send clipboard to seller.\nBuyer: ' + (Number(BigInt(result.template.o[0].v)) / 1e8).toFixed(4) + ' KAS\nSeller: ' + (Number(BigInt(result.template.o[1].v)) / 1e8).toFixed(4) + ' KAS');
+      Alert.alert('TX Template Copied', 'Send clipboard to seller.\n' + (result.template.o.length === 1 ? 'Seller receives: ' + (Number(BigInt(result.template.o[0].v)) / 1e8).toFixed(4) + ' KAS' : 'Buyer: ' + (Number(BigInt(result.template.o[0].v)) / 1e8).toFixed(4) + ' KAS\nSeller: ' + (Number(BigInt(result.template.o[1].v)) / 1e8).toFixed(4) + ' KAS'));
     } catch (e: any) { console.error('[Ceremony]', e); Alert.alert('Error', e.message || 'Template build failed'); }
     finally { setIsLoading(false); }
   };
@@ -3934,8 +3940,8 @@ const handleAcceptFromInbox = async (agreement: any) => {
                   {role === 'buyer' ? (
                     <>
                       {/* Release mode banner */}
-                      <View style={{ backgroundColor: releaseMode === 'cancel' ? '#fef3c7' : releaseMode === 'split' ? '#fef2f2' : '#f0fdf4', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: releaseMode === 'cancel' ? '#f59e0b' : releaseMode === 'split' ? '#fca5a5' : '#86efac' }}>
-                        <Text style={{ fontSize: 12, fontWeight: 'bold', color: releaseMode === 'cancel' ? '#92400e' : releaseMode === 'split' ? '#991b1b' : '#166534' }}>
+                      <View style={{ backgroundColor: releaseMode === 'cancel' ? '#fef3c7' : '#f0fdf4', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: releaseMode === 'cancel' ? '#f59e0b' : '#86efac' }}>
+                        <Text style={{ fontSize: 12, fontWeight: 'bold', color: releaseMode === 'cancel' ? '#92400e' : '#166534' }}>
                           {releaseMode === 'cancel' ? '↩ Cancellation — each party receives their collateral back' : releaseMode === 'split' ? '⚖ Settlement — custom split' : '✓ Release — payment transfers to seller'}
                         </Text>
                       </View>

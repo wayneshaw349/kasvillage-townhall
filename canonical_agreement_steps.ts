@@ -171,7 +171,7 @@ export interface SellerResponse {
 // ============================================================================
 
 /** How funds leave the FROST address */
-export type ReleaseMode = 'release' | 'cancel' | 'split';
+export type ReleaseMode = 'release' | 'cancel';
 
 /**
  * Compute outputs for each release mode.
@@ -188,7 +188,6 @@ export function computeReleaseOutputs(
   partyB_depositSompi: bigint,
   partyA_xOnly: string,
   partyB_xOnly: string,
-  customPartyA_gets?: bigint,
 ): { outputs: TxTemplateOutput[]; description: string } {
   const net = totalIn - fee;
   const scriptA = p2pkScript(partyA_xOnly);
@@ -223,18 +222,7 @@ export function computeReleaseOutputs(
         description: 'Cancellation: Party A receives ' + (Number(aGets) / 1e8).toFixed(4) + ', Party B receives ' + (Number(bGets) / 1e8).toFixed(4) + ' KAS',
       };
     }
-    case 'split': {
-      // Dispute resolution: arbitrary split agreed by both parties
-      const aGets = customPartyA_gets || 0n;
-      const bGets = net - aGets;
-      const outs: TxTemplateOutput[] = [];
-      if (aGets > 0n) outs.push({ v: aGets.toString(), s: scriptA });
-      if (bGets > 0n) outs.push({ v: bGets.toString(), s: scriptB });
-      return {
-        outputs: outs,
-        description: 'Settlement: Party A receives ' + (Number(aGets) / 1e8).toFixed(4) + ', Party B receives ' + (Number(bGets) / 1e8).toFixed(4) + ' KAS',
-      };
-    }
+
   }
 }
 
@@ -250,7 +238,6 @@ export function buildReleaseTemplate(params: {
   partyA_depositSompi: bigint;
   partyB_depositSompi: bigint;
   mode: ReleaseMode;
-  customPartyA_gets?: bigint;
   fee?: bigint;
   R_hex: string;
   agrId: string;
@@ -264,7 +251,6 @@ export function buildReleaseTemplate(params: {
     params.mode, totalIn, fee,
     params.partyA_depositSompi, params.partyB_depositSompi,
     params.partyA_xOnly, params.partyB_xOnly,
-    params.customPartyA_gets,
   );
 
   return {
@@ -904,6 +890,8 @@ export function buyerBuildTemplate(params: {
   counter: number;
   utxos: { txId: string; index: number; amount: string; scriptPubKey: string }[];
   buyerAmountSompi: bigint;
+  sellerAmountSompi?: bigint;
+  releaseMode?: ReleaseMode;
   fee?: bigint;
   agrId: string;
 }): {
@@ -912,7 +900,8 @@ export function buyerBuildTemplate(params: {
   nonce: FrostNonce;
   sighashes: string[];
 } {
-  const fee = params.fee || BigInt(params.utxos.length * 115000 + 2 * 48000 + 5000);
+  const numOutputs = (params.releaseMode || 'release') === 'release' ? 1 : 2;
+  const fee = params.fee || BigInt(params.utxos.length * 115000 + numOutputs * 48000 + 5000);
 
   // Generate nonce (k born)
   const nonce = generateNonce(
@@ -928,15 +917,24 @@ export function buyerBuildTemplate(params: {
   const sellerXOnly =
     params.sellerPubkey.length === 66 ? params.sellerPubkey.slice(2) : params.sellerPubkey;
 
-  const template = buildTemplate({
-    utxos: params.utxos,
-    buyerXOnly,
-    sellerXOnly,
-    buyerAmountSompi: params.buyerAmountSompi,
-    fee,
-    buyerR_hex: nonce.R_hex,
-    agrId: params.agrId,
-  });
+  const mode: ReleaseMode = params.releaseMode || 'release';
+  const sorted = [...params.utxos].sort((a, b) => a.txId.localeCompare(b.txId));
+  const totalIn = sorted.reduce((s, u) => s + BigInt(u.amount), 0n);
+  const sellerDeposit = params.sellerAmountSompi ?? (totalIn - params.buyerAmountSompi - fee);
+
+  const { outputs } = computeReleaseOutputs(
+    mode, totalIn, fee,
+    params.buyerAmountSompi, sellerDeposit,
+    buyerXOnly, sellerXOnly,
+  );
+
+  const template: TxTemplate = {
+    u: sorted.map((u) => ({ t: u.txId, i: u.index, a: u.amount, s: u.scriptPubKey })),
+    o: outputs,
+    f: fee.toString(),
+    R: nonce.R_hex,
+    agr: params.agrId,
+  };
 
   // Compute sighashes
   const inputs: CanonicalInput[] = template.u.map((u) => ({
@@ -945,14 +943,14 @@ export function buyerBuildTemplate(params: {
     value: BigInt(u.a),
     scriptPubKey: u.s,
   }));
-  const outputs: CanonicalOutput[] = template.o.map((o) => ({
+  const canonOutputs: CanonicalOutput[] = template.o.map((o) => ({
     value: BigInt(o.v),
     script: o.s,
   }));
 
   const sighashes: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    sighashes.push(bytesToHex(computeSighash(inputs, outputs, i)));
+    sighashes.push(bytesToHex(computeSighash(inputs, canonOutputs, i)));
   }
 
   return {
