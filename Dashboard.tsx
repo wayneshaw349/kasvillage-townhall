@@ -113,7 +113,7 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
           }
           if (bytes.length >= 32) {
             const xOnly = bytes.slice(0, 32).map(b => b.toString(16).padStart(2, '0')).join('');
-            resolvedPubkey = '02' + xOnly; // assume even y (standard for x-only)
+            resolvedPubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly); // assume even y (standard for x-only)
             console.log('[DashStats] Derived pubkey from address:', resolvedPubkey.slice(0, 16));
           }
         } catch (e) { console.warn('[DashStats] Address decode error:', e); }

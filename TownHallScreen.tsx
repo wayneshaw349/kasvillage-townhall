@@ -25,6 +25,7 @@ import {
   ActivityIndicator,
   StatusBar,
   Modal,
+  Linking,
 } from 'react-native';
 import Svg, {
   Rect,
@@ -846,22 +847,25 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         setSearchResult({ found: false, error: 'DApp search not yet available on this TownHall instance' });
       } else {
         // APT or generic — try identity verify
-        response = await fetch(`${TOWNHALL_BASE}/api/identity/verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identity_hash: query }),
-        });
-        data = await response.json();
-        if (data.verified) {
-          setSearchResult({
-            found: true,
-            type: 'apt',
-            verified: data.verified,
-            aptNumber: query,
-          });
-        } else {
-          setSearchResult({ found: false, error: data.message || 'Not found' });
-        }
+        // Query Arweave directly for verification proof
+                const aptNum = query.replace(/^APT-/i, '');
+                console.log('[Search] Looking up APT:', aptNum);
+                const gql = JSON.stringify({ query: `{transactions(tags:[{name:"App-Name",values:["KasVillage"]},{name:"KV-Type",values:["verification-proof"]}],first:10){edges{node{id tags{name value}}}}}` });
+                const arRes = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: gql });
+                const arData = await arRes.json();
+                const edges = arData?.data?.transactions?.edges || [];
+                console.log('[Search] Arweave results:', edges.length);
+                const match = edges.find((e2: any) => {
+                  const pk = e2.node.tags.find((t: any) => t.name === 'KV-Pubkey');
+                  return pk && deriveApt(pk.value) === aptNum;
+                });
+                if (match) {
+                  const tier = match.node.tags.find((t: any) => t.name === 'KV-Tier')?.value || 'Guest';
+                  console.log('[Search] Found! TX:', match.node.id);
+                  setSearchResult({ found: true, type: "apt", verified: true, aptNumber: "APT-" + aptNum, arweaveTx: match.node.id, name: tier });
+                } else {
+                  setSearchResult({ found: false, error: 'No verification proof on Arweave for APT-' + aptNum });
+                }
       }
     } catch (error) {
       setSearchResult({
@@ -1112,17 +1116,16 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           const privKey = await SecureStore.getItemAsync('kv_l1_privkey') || await SecureStore.getItemAsync('kv_private_key') || '';
           if (privKey && data.proof_hash) {
             const proofPayload = JSON.stringify({ v:1, type:'identity-verification', pubkey:myPubkey, apt:myApt, tier:data.tier, traits:data.traits, proof_hash:data.proof_hash, public_inputs:data.proof_public_inputs||[], timestamp:Date.now() });
-            const tags = [{ name:'App-Name', value:'KasVillage' },{ name:'KV-Type', value:'verification-proof' },{ name:'KV-Pubkey', value:myPubkey||'' },{ name:'KV-ProofHash', value:data.proof_hash },{ name:'KV-Tier', value:data.tier||'Guest' },{ name:'Content-Type', value:'application/json' }];
+            const tags = [{ name:'App-Name', value:'KasVillage' },{ name:'KV-Type', value:'verification-proof' },{ name:'KV-Pubkey', value:myPubkey||'' },{ name:'KV-ProofHash', value:(data.proof_hash||'').slice(0,64) },{ name:'KV-Tier', value:data.tier||'Guest' },{ name:'Content-Type', value:'application/json' }];
             const arweaveUpload = await import('./arweave_upload');
-            const buildFn = arweaveUpload.buildAns104Item || arweaveUpload.default?.buildAns104Item;
-            const uploadFn = arweaveUpload.uploadToIrys || arweaveUpload.default?.uploadToIrys;
-            if (buildFn && uploadFn) {
-              const dataBytes = new TextEncoder().encode(proofPayload);
-              const result = await buildFn(dataBytes, tags, privKey).then(uploadFn);
+              console.log('[TownHall] Starting Arweave inscription, payload:', proofPayload.length, 'bytes');
+              if (arweaveUpload.uploadToTurbo) {
+              const result = await arweaveUpload.uploadToTurbo(proofPayload, tags);
+              console.log('[TownHall] Upload result:', JSON.stringify(result));
               arweaveTxId = result?.txId || null;
               console.log('[TownHall] Proof inscribed:', arweaveTxId);
-              await SecureStore.setItemAsync('kv_townhall_verified', 'true');
-              await SecureStore.setItemAsync('kv_verification_tx', arweaveTxId);
+              if (arweaveTxId) await SecureStore.setItemAsync('kv_townhall_verified', 'true');
+              if (arweaveTxId) await SecureStore.setItemAsync('kv_verification_tx', arweaveTxId);
             }
           }
         } catch (e) { console.warn('[TownHall] Arweave inscription failed:', e); }
@@ -1293,7 +1296,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
                   )}
                   
                   {searchResult.arweaveTx && (
-                    <TouchableOpacity style={styles.arweaveLink}>
+                    <TouchableOpacity style={styles.arweaveLink} onPress={() => Linking.openURL('https://arweave.net/' + searchResult.arweaveTx)}>
                       <ExternalLink size={rs.s(12)} color={COLORS.indigo500} />
                       <Text style={styles.arweaveLinkText}>View on Arweave</Text>
                     </TouchableOpacity>
