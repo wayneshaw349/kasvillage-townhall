@@ -15,7 +15,8 @@ import MnemonicExportModal from './MnemonicExportModal';
 import ProceduralBackground from './expo_procedural_backgrounds';
 import { StoredAvatarRenderer, getStoredAvatar, RACE_GENERATORS, storeAvatarLocally, computeAvatarHash } from './avatar_silhouette_generator';
 import type { AvatarIdentity, Race, Gender } from './avatar_silhouette_generator';
-import { storeSerialHash, getSerialHash } from './device_attestation';
+import { storeSerialHash, getSerialHash, getDeviceHash } from './device_attestation';
+import { uploadToTurbo } from './arweave_upload';
 import * as Clipboard from 'expo-clipboard';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -718,7 +719,22 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
                           const hash = await storeSerialHash(serialInput);
                           setSerialHashed(true);
                           setExistingSerialHash(hash);
-                          Alert.alert('\u2705 Hardware Bound', 'Serial hash stored. Raw serial was NOT saved.');
+                          // Inscribe serial hash to Arweave (permanent)
+                          try {
+                            const pubkey = await SecureStore.getItemAsync('kv_public_key') || '';
+                            const deviceHash = await getDeviceHash();
+                            const apt = aptNumber;
+                            await uploadToTurbo(JSON.stringify({ serialHash: hash, deviceHash, apt, timestamp: Date.now() }), [
+                              { name: 'KV-Type', value: 'device-attestation' },
+                              { name: 'KV-Pubkey', value: pubkey },
+                              { name: 'KV-Apt', value: apt.replace('APT-','') },
+                              { name: 'KV-DeviceHash', value: deviceHash || '' },
+                              { name: 'KV-SerialHash', value: hash },
+                              { name: 'KV-Platform', value: Platform.OS },
+                            ]);
+                            console.log('[Serial] Inscribed to Arweave');
+                          } catch (e) { console.warn('[Serial] Arweave inscription failed (non-fatal):', e); }
+                          Alert.alert('\u2705 Hardware Bound', 'Serial hash stored and inscribed to Arweave. Raw serial was NOT saved.');
                         } catch (e) { Alert.alert('Error', e instanceof Error ? e.message : 'Failed'); }
                       }}
                     >
