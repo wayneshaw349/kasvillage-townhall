@@ -767,6 +767,7 @@ export async function inscribeAgreementToArweave(agreement: {
   status: string;
   signature: string;
   counterpartyPubkey?: string;
+  trackingNumber?: string;
   frostAddress?: string;
   frostR?: string;
   daaScore?: number;
@@ -784,6 +785,7 @@ export async function inscribeAgreementToArweave(agreement: {
     { name: 'KV-Amount', value: String(agreement.amount_sompi) },
     { name: 'KV-BuyerAmount', value: String(agreement.buyerAmountSompi || (agreement as any).buyerAmountSompi || 0) },
     { name: 'KV-SellerAmount', value: String(agreement.sellerAmountSompi || (agreement as any).sellerAmountSompi || 0) },
+    ...((agreement as any).trackingNumber ? [{ name: 'KV-TrackingNumber', value: (agreement as any).trackingNumber }] : []),
     { name: 'KV-Description', value: (agreement.description || '').slice(0, 100) },
     { name: 'KV-DAAScore', value: String(agreement.daaScore || 0) },
     { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },

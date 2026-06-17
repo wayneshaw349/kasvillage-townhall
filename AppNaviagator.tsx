@@ -317,6 +317,8 @@ const QuizGate: React.FC<QuizGateProps> = ({ onSuccess, onFail }) => {
   useEffect(() => {
     checkLockout();
   }, []);
+
+  
   
   const checkLockout = async () => {
     try {

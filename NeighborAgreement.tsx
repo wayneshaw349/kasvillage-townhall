@@ -1158,7 +1158,7 @@ function parseClipboard(raw: string): {
         let myPubkey = '';
         if (result[0] === 0x00 && result.length >= 33) {
           const xOnly = result.slice(1, 33);
-          myPubkey = '02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+          myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
         }
         if (!myPubkey) return;
 
@@ -1331,7 +1331,7 @@ function parseClipboard(raw: string): {
           try {
             const wallet = await loadMainWallet();
             if (wallet) {
-              const myPk = '02' + wallet.address.split(':')[1].slice(0,64);
+              const myPk = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + wallet.address.split(':')[1].slice(0,64));
               // Query Arweave for my agreements
               const arAll = await queryAgreementsFromArweave({ network: 'testnet-10' });
               const mine = arAll.filter((a: any) => (a.pubkey || '').startsWith(myPk.slice(0,16)) || (a.counterpartyPubkey || '').startsWith(myPk.slice(0,16)));
@@ -1356,6 +1356,47 @@ function parseClipboard(raw: string): {
             } else { updatedList.push(entry); }
           } catch { updatedList.push(entry); }
         }
+        
+        // === CRASH RECOVERY: auto-send if seller funded but buyer hasn't ===
+        for (const entry of updatedList) {
+          if (entry.step >= 4) continue; // already fully funded
+          if (entry.role !== 'buyer') continue; // only buyer auto-sends from recovery
+          const expectedBuyer = Math.floor(entry.buyerAmount * 1e8);
+          const expectedSeller = Math.floor(entry.sellerAmount * 1e8);
+          if (expectedBuyer <= 0 || expectedSeller <= 0) continue;
+          try {
+            const eUtxoResp = await fetch(apiBase + '/addresses/' + entry.frostAddr + '/utxos');
+            if (!eUtxoResp.ok) continue;
+            const eUtxos = await eUtxoResp.json();
+            if (!Array.isArray(eUtxos) || eUtxos.length !== 1) continue; // exactly 1 UTXO = seller sent, buyer hasn't
+            const sellerBal = Number(eUtxos[0]?.utxoEntry?.amount || '0');
+            if (sellerBal < expectedSeller * 0.95) continue; // seller's amount �5%
+            // Check we haven't already sent (idempotent guard)
+            const sentKey = 'kv_frost_poll_sent_' + entry.agrId;
+            const alreadySent = await AsyncStorage.getItem(sentKey);
+            if (alreadySent) { console.log('[Crash-Recovery] Already sent for', entry.agrId.slice(0,12)); continue; }
+            // Auto-send buyer collateral
+            const rWallet = await loadMainWallet();
+            if (!rWallet?.privKeyHex) continue;
+            console.log('[Crash-Recovery] Seller funded', entry.agrId.slice(0,12), '- auto-sending', expectedBuyer / 1e8, 'KAS');
+            const { sendKaspaViaRest: sendRecover } = require('./kaspa_rest_tx');
+            const rResult = await sendRecover({
+              senderAddress: rWallet.address,
+              recipientAddress: entry.frostAddr,
+              amountSompi: BigInt(expectedBuyer),
+              privateKeyHex: rWallet.privKeyHex,
+              network: rWallet.network || 'testnet-10',
+            });
+            if (rResult.success) {
+              await AsyncStorage.setItem(sentKey, rResult.txId || String(Date.now()));
+              console.log('[Crash-Recovery] Buyer collateral TX:', rResult.txId);
+              entry.step = 4; // mark as fully funded
+            } else {
+              console.warn('[Crash-Recovery] Send failed:', rResult.error);
+            }
+          } catch (e) { console.warn('[Crash-Recovery] Error for', entry.agrId.slice(0,12), ':', e); }
+        }
+
         setFrostActiveList(updatedList);
         // DISABLED: inbox handles session restore from Arweave
         // if (bal > 0n || session.step >= 3) { ... }
@@ -1637,7 +1678,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         let myPubkey = '';
         if (result[0] === 0x00 && result.length >= 33) {
           const xOnly = result.slice(1, 33);
-          myPubkey = '02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+          myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
         }
         if (!myPubkey || cancelled) return;
         // Layer 1: TownHall (instant)
@@ -1862,7 +1903,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         for (const d of data5bit) { buff = (buff << 5) | d; bits += 5; while (bits >= 8) { bits -= 8; result.push((buff >> bits) & 0xff); } }
         if (result[0] === 0x00 && result.length >= 33) {
           const xOnly = result.slice(1, 33);
-          const pubkey = '02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+          const pubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
           console.log('[Neighbor] My pubkey:', pubkey);
           // Only set pubkey if FROST hasn't been derived yet
           if (!contract.multisigAddress) {
@@ -1894,7 +1935,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         for (const d of data5bit) { buff = (buff << 5) | d; bits += 5; while (bits >= 8) { bits -= 8; result.push((buff >> bits) & 0xff); } }
         if (result[0] === 0x00 && result.length >= 33) {
           const xOnly = result.slice(1, 33);
-          const pubkeyHex = '02' + xOnly.map(b => b.toString(16).padStart(2, '0')).join('');
+          const pubkeyHex = '02' + xOnly.map(b => b.toString(16).padStart(2, '0')).join(''); // Counterparty: prefix unknown from address, proposal overrides
           console.log('[Neighbor] Counterparty pubkey from address:', pubkeyHex);
           if (role === 'buyer') {
             setContract(prev => ({ ...prev, sellerPubkey: pubkeyHex, counterpartyPubkey: pubkeyHex }));
@@ -1927,7 +1968,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
       let myPubkey = '';
       if (result[0] === 0x00 && result.length >= 33) {
         const xOnly = result.slice(1, 33);
-        myPubkey = '02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+        myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
       }
       if (!myPubkey) { setInboxLoading(false); return; }
       const agreements = await listMyAgreements(myPubkey);
@@ -2051,7 +2092,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
           mode: releaseMode,
           R_hex: _nonce.R_hex, agrId: contract.agreementId || '',
         });
-        await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ k: _nonce.k.toString(16), d_tweaked: _nonce.d_tweaked.toString(16), R_hex: _nonce.R_hex }));
+        await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ k: _nonce.k.toString(16), d_tweaked: _nonce.d_tweaked.toString(16), R_hex: _nonce.R_hex, createdAt: Date.now() }));
         await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(_cTmpl));
         const _b64 = encodeTemplate(_cTmpl);
         try { await Clipboard.setStringAsync(_b64); } catch {}
@@ -2071,7 +2112,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         agrId: contract.agreementId,
       });
 
-      await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ k: result.nonce.k.toString(16), d_tweaked: result.nonce.d_tweaked.toString(16), R_hex: result.nonce.R_hex }));
+      await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ k: result.nonce.k.toString(16), d_tweaked: result.nonce.d_tweaked.toString(16), R_hex: result.nonce.R_hex, createdAt: Date.now() }));
       await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(result.template));
       try { await Clipboard.setStringAsync(result.templateB64); } catch {}
 
@@ -2151,6 +2192,28 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
       if (submitResp.ok) {
         const txId = (await submitResp.json()).transactionId || '';
         console.log('[Ceremony-Buyer] Release TX:', txId);
+        // Inscribe buyer confirmation to Arweave (dispute evidence)
+        if (sellerTrackingNum.trim()) {
+          try {
+            const _bPk = (await SecureStore.getItemAsync('kv_public_key')) || '';
+            await inscribeAgreementToArweave({
+              agreementId: contract.agreementId || '',
+              pubkey: _bPk,
+              amount_sompi: Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8),
+              description: 'Buyer confirmed: ' + sellerTrackingNum.trim(),
+              network: 'testnet-10',
+              status: 'Confirmed',
+              frostAddress: contract.multisigAddress || '',
+              signature: 'buyer_confirmed_' + Date.now(),
+              counterpartyPubkey: contract.sellerPubkey || '',
+              buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
+              sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
+              trackingNumber: sellerTrackingNum.trim(),
+            });
+            console.log('[Ceremony-Buyer] Confirmation inscribed to Arweave:', sellerTrackingNum.trim());
+          } catch (e) { console.warn('[Ceremony-Buyer] Arweave inscription failed:', e); }
+        }
+
         await SecureStore.deleteItemAsync('kv_frost_nonce_' + contract.agreementId).catch(() => {});
         await SecureStore.deleteItemAsync('kv_frost_template_' + contract.agreementId).catch(() => {});
         
@@ -2163,7 +2226,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
             const _rD5 = Array.from(_rDp).map((c) => _rCharset.indexOf(c));
             const _rRb = []; let _rBf = 0, _rBi = 0;
             for (const d of _rD5) { _rBf = (_rBf << 5) | d; _rBi += 5; while (_rBi >= 8) { _rBi -= 8; _rRb.push((_rBf >> _rBi) & 0xff); } }
-            const _rMyPk = _rRb[0] === 0x00 && _rRb.length >= 33 ? '02' + _rRb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join('') : '';
+            const _rMyPk = _rRb[0] === 0x00 && _rRb.length >= 33 ? ((await SecureStore.getItemAsync('kv_public_key')) || ('02' + _rRb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join(''))) : '';
             const _rApiBase = (_rWallet.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
             // Fetch actual TX from L1 for full proof data
             let _rDaaScore = 0;
@@ -2227,7 +2290,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
             const _rD5 = Array.from(_rDp).map((c) => _rCharset.indexOf(c));
             const _rRb = []; let _rBf = 0, _rBi = 0;
             for (const d of _rD5) { _rBf = (_rBf << 5) | d; _rBi += 5; while (_rBi >= 8) { _rBi -= 8; _rRb.push((_rBf >> _rBi) & 0xff); } }
-            const _rMyPk = _rRb[0] === 0x00 && _rRb.length >= 33 ? '02' + _rRb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join('') : '';
+            const _rMyPk = _rRb[0] === 0x00 && _rRb.length >= 33 ? ((await SecureStore.getItemAsync('kv_public_key')) || ('02' + _rRb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join(''))) : '';
             const _rApiBase = (_rWallet.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
             // Fetch actual TX from L1 for full proof data
             let _rDaaScore = 0;
@@ -2312,7 +2375,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
       let myPubkey = '';
       if (result[0] === 0x00 && result.length >= 33) {
         const xOnly = result.slice(1, 33);
-        myPubkey = '02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+        myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
       }
       // Step 1: Inscribe "Agreed" to Arweave (with dedup)
       const agrId = agreement.agreementId || agreement.agreement_id || '';
@@ -2575,7 +2638,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 amountSompi: BigInt(immediateSendAmount),
                 privateKeyHex: wallet.privKeyHex,
                 network: wallet.network || 'testnet-10',
-                payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await SecureStore.setItemAsync('kv_frost_nonce_' + agrId, JSON.stringify(nonce)); console.log('[FROST-R] Embedded R in collateral TX payload:', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: nonce.R_hex }).then(() => console.log('[FROST-R] R posted to TownHall')).catch(() => {}); } catch {} return nonce.R_hex; } catch(e) { console.warn('[FROST-R] Payload nonce failed:', e); return ''; } })(),
+                payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await SecureStore.setItemAsync('kv_frost_nonce_' + agrId, JSON.stringify({ ...nonce, createdAt: Date.now() })); console.log('[FROST-R] Nonce saved (NOT in payload):', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: nonce.R_hex }).then(() => console.log('[FROST-R] R posted to TownHall')).catch(() => {}); } catch {} return ''; } catch(e) { console.warn('[FROST-R] Nonce gen failed:', e); return ''; } })(),
               });
               console.log('[Neighbor] Seller collateral TX:', txResult.txId);
               // DISABLED: await AsyncStorage.setItem('kv_frost_sent_' + agrId, String(Date.now())); // L1 is source of truth
@@ -2817,7 +2880,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
         const d5 = Array.from(dp).map(c => CHARSET.indexOf(c));
         const rb = []; let bf = 0, bi = 0;
         for (const d of d5) { bf = (bf << 5) | d; bi += 5; while (bi >= 8) { bi -= 8; rb.push((bf >> bi) & 0xff); } }
-        const myPk = rb[0] === 0x00 && rb.length >= 33 ? '02' + rb.slice(1, 33).map(b => b.toString(16).padStart(2, '0')).join('') : '';
+        const myPk = rb[0] === 0x00 && rb.length >= 33 ? ((await SecureStore.getItemAsync('kv_public_key')) || ('02' + rb.slice(1, 33).map(b => b.toString(16).padStart(2, '0')).join(''))) : '';
         await inscribeAgreementToArweave({
           agreementId: contract.agreementId || '',
           pubkey: myPk,
@@ -2940,7 +3003,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                           const d5 = Array.from(dp).map((c) => CHARSET.indexOf(c));
                           const rb = []; let bf = 0, bi = 0;
                           for (const d of d5) { bf = (bf << 5) | d; bi += 5; while (bi >= 8) { bi -= 8; rb.push((bf >> bi) & 0xff); } }
-                          const myPk = rb[0] === 0x00 && rb.length >= 33 ? '02' + rb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join('') : '';
+                          const myPk = rb[0] === 0x00 && rb.length >= 33 ? ((await SecureStore.getItemAsync('kv_public_key')) || ('02' + rb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join(''))) : '';
                           // Look up from Arweave
                           const all = await queryAgreementsFromArweave({ network: 'testnet-10' });
                           const match = all.find((a) => (a.agreementId || a.agreement_id) === manualAgrId);
@@ -3029,7 +3092,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                           const d5 = Array.from(dp).map((c) => CHARSET.indexOf(c));
                           const rb = []; let bf = 0, bi = 0;
                           for (const d of d5) { bf = (bf << 5) | d; bi += 5; while (bi >= 8) { bi -= 8; rb.push((bf >> bi) & 0xff); } }
-                          const myPk = rb[0] === 0x00 && rb.length >= 33 ? '02' + rb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join('') : '';
+                          const myPk = rb[0] === 0x00 && rb.length >= 33 ? ((await SecureStore.getItemAsync('kv_public_key')) || ('02' + rb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join(''))) : '';
                           const all = await queryAgreementsFromArweave({ network: 'testnet-10' });
                           const match = all.find((a) => (a.agreementId || a.agreement_id) === manualAgrId);
                           if (!match) { Alert.alert('Not Found', 'AGR ID not found on Arweave'); setIsLoading(false); return; }
@@ -3661,7 +3724,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                             network: contract.frostData?.network || 'testnet-10',
                             buyerR: buyerR_saved,
                             verificationCode: contract.verificationCode || '',
-                            buyerPubkey: myPubkey || '',
+                            buyerPubkey: contract.buyerPubkey || '',
                             description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });
                           Clipboard.setStringAsync(shareText);
@@ -3858,116 +3921,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
             )}
             
             {/* Seller Release Bar */}
-            {(step === 4 || step === 5) && role === 'seller' && (
-              <View style={{ backgroundColor: '#eef2ff', borderRadius: 8, padding: 12, marginTop: 10, borderWidth: 1, borderColor: '#a5b4fc' }}>
-                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#059669', marginBottom: 6 }}>Paste Buyer Verification</Text>
-                <TextInput
-                  style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#6ee7b7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 10 }}
-                  placeholder="Paste buyer verification code here..."
-                  placeholderTextColor="#a8a29e"
-                  onChangeText={async (txt) => { const v = txt.trim(); if (v.length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), v); console.log('[Seller] Saved manual buyer R:', v.slice(0,20)); } }}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#3730a3', marginBottom: 6 }}>Paste Buyer Signature</Text>
-                <TextInput
-                  style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
-                  placeholder="Paste buyer signature here..."
-                  placeholderTextColor="#a8a29e"
-                  onChangeText={async (txt) => {
-                    const v = txt.trim();
-                    // Auto-extract R and SIG from multi-line paste
-                    const rMatch = v.match(/R:\s*([0-9a-f]{60,66})/i);
-                    const sigMatch = v.match(/SIG:\s*(.+)/i);
-                    if (rMatch && sigMatch) {
-                      // Multi-line paste from buyer's Copy Release Info
-                      const extractedR = rMatch[1].trim();
-                      const extractedSig = sigMatch[1].trim();
-                      await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), extractedR);
-                      console.log('[Seller] Auto-extracted R:', extractedR.slice(0,20), 'SIG:', extractedSig.slice(0,20));
-                      setContract(prev => ({ ...prev, partialReleaseTx: extractedSig }));
-                    } else {
-                      setContract(prev => ({ ...prev, partialReleaseTx: v }));
-                    }
-                  }}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  multiline
-                />
-                <TouchableOpacity
-                  style={{ backgroundColor: '#059669', borderRadius: 8, padding: 12, alignItems: 'center' }}
-                  disabled={isLoading}
-                  onPress={async () => {
-                    try {
-                      setIsLoading(true);
-                      const partialSig = contract.partialReleaseTx || '';
-                      if (!partialSig || partialSig.length < 10) { Alert.alert('Invalid', 'Paste the buyer signature'); setIsLoading(false); return; }
-                      /* DISABLED: old auto-trigger — use canonical template flow instead */
-                      // console.log('[Seller-Release] Got partial sig, co-signing...');
-                      const w = await loadMainWallet();
-                      if (!w || !contract.frostData) { Alert.alert('Error', 'Wallet or FROST not ready'); setIsLoading(false); return; }
-                      // completeFrost2Round imported statically from frost_complete
-                      // getFrostR imported statically
-                      // AsyncStorage imported statically
-                      const total = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
-                      // Universal parse of pasted data
-                      const parsed = parseClipboard(partialSig || '');
-                      let txTemplateB64_2 = parsed.template || '';
-                      const rawSig = parsed.sig || '';
-                      // Save buyer R if found in paste
-                      if (parsed.buyerR && parsed.buyerR.length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), parsed.buyerR); console.log('[Seller-Release] Auto-extracted R:', parsed.buyerR.slice(0,20)); }
-                      // Decrypt only if encrypted, otherwise use raw
-                      const decrypted = parsed.isEncrypted ? (() => { try { return decryptPartialSig({ encrypted: rawSig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: contract.buyerPubkey || '' }); } catch { return rawSig; } })() : rawSig;
-                      Alert.alert("Use Step 5", "Paste the TX template at Step 5 Signing Ceremony instead."); setIsLoading(false); return; // OLD PATH DISABLED
-                      // console.log('[Seller-Release] Sig mode:', parsed.isEncrypted ? 'ENCRYPTED' : 'RAW', 'template:', txTemplateB64_2 ? 'YES' : 'NO', 'R:', parsed.buyerR ? 'YES' : 'NO');
-                      // Get buyer R from TownHall
-                      let buyerR = parsed.buyerR || '';
-                      if (!buyerR) { try { const mr = await AsyncStorage.getItem('kv_manual_counterparty_r_' + (contract.agreementId || '')); if (mr) buyerR = mr; } catch {} }
-                      console.log('[Seller-Release] buyerR source:', buyerR ? (parsed.buyerR ? 'PASTE' : 'STORAGE') : 'NONE', buyerR.slice(0,20));
-                      if (!buyerR) { try { const rData = await getFrostR(contract.agreementId || ''); if (rData?.frost_r_a) buyerR = rData.frost_r_a; } catch {} }
-                      if (!buyerR) {
-                        try { const gql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }, { name: "KV-Status", values: ["PartialSig"] }]) { edges { node { tags { name value } } } } }';
-                          const resp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) });
-                          const arResp2 = await resp.json(); const tags = arResp2?.data?.transactions?.edges?.[0]?.node?.tags || [];
-                          const rTag = tags.find((t) => t.name === 'KV-FrostR'); if (rTag?.value) buyerR = rTag.value;
-                        } catch {}
-                      }
-                      // Parse buyer's partial sig (R_agg_x || s format)
-                      const sigBytes = typeof decrypted === 'string' ? decrypted : '';
-                      // Parse all s values + reattach template
-                      const cpAllS2: string[] = []; for (let si = 64; si < sigBytes.length; si += 64) { cpAllS2.push(sigBytes.slice(si, si + 64)); }
-                      const buyerSig = cpAllS2.length > 0 ? { R_agg_x_hex: sigBytes.slice(0, 64), s_hex: cpAllS2.join('') + (txTemplateB64_2 ? '|' + txTemplateB64_2 : '') } : undefined;
-                      const myNonceJson = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || ''));
-                      if (!myNonceJson || !buyerR) { Alert.alert('Missing Data', 'Nonce or buyer R not found. Try again.'); setIsLoading(false); return; }
-                      // Covenant safety: verify all outputs are pure P2PK
-                      if (txTemplateB64_2) {
-                        try {
-                          const tmplCheck = JSON.parse(atob(txTemplateB64_2));
-                          for (const o of (tmplCheck.o || [])) {
-                            if (!isPureP2PK(o.s)) {
-                              console.error('[COVENANT] ⚠️ Output script is not pure P2PK:', o.s?.slice(0,20));
-                              const proceed = await new Promise((resolve) => Alert.alert('⚠️ Covenant Detected', 'Release TX output contains a non-standard script. This is NOT a normal payment — it may have hidden conditions that claw back your funds.\n\nDo you want to continue?', [{ text: 'Stop (Recommended)', style: 'cancel', onPress: () => resolve(false) }, { text: 'I understand the risk', style: 'destructive', onPress: () => resolve(true) }]));
-                              if (!proceed) { setIsLoading(false); return; }
-                            }
-                          }
-                          console.log('[COVENANT] All outputs are pure P2PK ✓');
-                        } catch (e) { console.warn('[COVENANT] Template parse failed:', e); }
-                      }
-                      console.log('[Seller-Release] 2-round: buyerR=', buyerR.slice(0,20), 'buyerSig=', buyerSig ? 'yes' : 'no');
-                      const result = { success: false, txId: null }; // DISABLED: completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: w.address });
-                      if (result.success && result.txId) {
-                        console.log('[Seller-Release] Release TX:', result.txId);
-                        setContract(prev => ({ ...prev, releaseTxId: result.txId }));
-                        await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
-                        Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...');
-                      } else { Alert.alert('Failed', result.error || 'Co-sign failed'); }
-                    } catch (e) { Alert.alert('Error', String(e)); }
-                    finally { setIsLoading(false); }
-                  }}>
-                  {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Release Funds</Text>}
-                </TouchableOpacity>
-              </View>
-            )}
+            { /* Old R input bars removed � canonical template flow handles R internally */ }
 
             {/* Step 5: Complete */}
             
@@ -3984,6 +3938,19 @@ const handleAcceptFromInbox = async (agreement: any) => {
                         <Text style={{ fontSize: 12, fontWeight: 'bold', color: releaseMode === 'cancel' ? '#92400e' : releaseMode === 'split' ? '#991b1b' : '#166534' }}>
                           {releaseMode === 'cancel' ? '↩ Cancellation — each party receives their collateral back' : releaseMode === 'split' ? '⚖ Settlement — custom split' : '✓ Release — payment transfers to seller'}
                         </Text>
+                      </View>
+                      <View style={{ marginBottom: 10 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#1e40af', marginBottom: 2 }}>Confirmation / Receipt # (optional)</Text>
+                        <Text style={{ fontSize: 10, color: '#4338ca', marginBottom: 4 }}>{"Saved to Arweave as proof you received the item.\nShare separately in DM � do NOT mix with signed response."}</Text>
+                        <TextInput
+                          style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#93c5fd', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, color: '#1c1917' }}
+                          placeholder="e.g. delivery confirmed, receipt #, etc."
+                          placeholderTextColor="#a8a29e"
+                          value={sellerTrackingNum}
+                          onChangeText={setSellerTrackingNum}
+                          autoCapitalize="characters"
+                          autoCorrect={false}
+                        />
                       </View>
                       <TouchableOpacity onPress={buildReleaseTemplate} disabled={templateBuilt} style={{ backgroundColor: templateBuilt ? '#9ca3af' : '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{templateBuilt ? 'Template Built ✓ (paste response below)' : 'Build TX Template (generates k + R)'}</Text>
@@ -4005,6 +3972,19 @@ const handleAcceptFromInbox = async (agreement: any) => {
                     </>
                   ) : (
                     <>
+                      <View style={{ marginBottom: 10 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#059669', marginBottom: 2 }}>Tracking Number (optional)</Text>
+                        <Text style={{ fontSize: 10, color: '#15803d', marginBottom: 4 }}>{"Saved permanently to Arweave as proof of shipment.\nDo NOT paste with your signed response."}</Text>
+                        <TextInput
+                          style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#86efac', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, color: '#1c1917' }}
+                          placeholder="e.g. 1Z999AA10123456784"
+                          placeholderTextColor="#a8a29e"
+                          value={sellerTrackingNum}
+                          onChangeText={setSellerTrackingNum}
+                          autoCapitalize="characters"
+                          autoCorrect={false}
+                        />
+                      </View>
                       <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e40af', marginBottom: 4 }}>Paste Buyer Template</Text>
                       <Text style={{ fontSize: 11, color: '#4338ca', marginBottom: 8 }}>The buyer sends a TX template. Paste it below to co-sign.</Text>
                       <TextInput
@@ -4031,6 +4011,29 @@ const handleAcceptFromInbox = async (agreement: any) => {
                             if ('error' in result) { Alert.alert('Verification Failed', result.error); setIsLoading(false); return; }
                             try { await Clipboard.setStringAsync(result.responseB64); } catch {}
                             console.log('[Ceremony-Seller] Signed! Response:', result.responseB64.length, 'chars');
+                            // Inscribe signed + tracking to Arweave (dispute evidence)
+                            try {
+                              const _sWallet = await loadMainWallet();
+                              if (_sWallet) {
+                                const _sPk = (await SecureStore.getItemAsync('kv_public_key')) || '';
+                                await inscribeAgreementToArweave({
+                                  agreementId: contract.agreementId || '',
+                                  pubkey: _sPk,
+                                  amount_sompi: Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8),
+                                  description: (contract.itemDescription || '') + (sellerTrackingNum.trim() ? ' | Tracking: ' + sellerTrackingNum.trim() : ''),
+                                  network: _sWallet.network || 'testnet-10',
+                                  status: 'Signed',
+                                  frostAddress: contract.multisigAddress || '',
+                                  signature: 'seller_signed_' + Date.now(),
+                                  counterpartyPubkey: contract.buyerPubkey || '',
+                                  buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
+                                  sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
+                                  trackingNumber: sellerTrackingNum.trim() || undefined,
+                                });
+                                console.log('[Ceremony-Seller] Inscribed to Arweave' + (sellerTrackingNum.trim() ? ' with tracking: ' + sellerTrackingNum.trim() : ''));
+                              }
+                            } catch (e) { console.warn('[Ceremony-Seller] Arweave inscription failed (non-fatal):', e); }
+
                             Alert.alert('Signed! Response Copied', 'Send clipboard back to buyer.\nYour share: ' + (Number(result.verification.myAmount) / 1e8).toFixed(4) + ' KAS');
                           } catch (e) {
                             console.error('[Ceremony-Seller] Error:', e);
