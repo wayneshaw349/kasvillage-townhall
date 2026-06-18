@@ -690,7 +690,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
 
           {/* Hardware Attestation — Serial Bind */}
           <View style={{ marginTop: rs(12), backgroundColor: '#1A2A3A', borderRadius: rs(12), padding: rs(14), borderWidth: 1, borderColor: '#4A90D9' }}>
-            <Text style={{ color: '#4A90D9', fontSize: rs(14), fontWeight: 'bold', marginBottom: rs(4) }}>🔒 Hardware Bind</Text>
+            <Text style={{ color: '#4A90D9', fontSize: rs(14), fontWeight: 'bold', marginBottom: rs(4) }}>🔒 Hardware Bind (bind device to avatar)</Text>
             <Text style={{ color: '#AAA', fontSize: rs(11), lineHeight: rs(16), marginBottom: rs(8) }}>
               Bind this wallet to your physical device. Your serial is NEVER stored or transmitted — only a one-way hash is kept locally on your device.
             </Text>
