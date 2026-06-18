@@ -16,6 +16,7 @@ import ProceduralBackground from './expo_procedural_backgrounds';
 import { StoredAvatarRenderer, getStoredAvatar, RACE_GENERATORS, storeAvatarLocally, computeAvatarHash } from './avatar_silhouette_generator';
 import type { AvatarIdentity, Race, Gender } from './avatar_silhouette_generator';
 import { storeSerialHash, getSerialHash, getDeviceHash } from './device_attestation';
+import { deriveApt } from './apt_derivation';
 import { uploadToTurbo } from './arweave_upload';
 import * as Clipboard from 'expo-clipboard';
 
@@ -398,7 +399,43 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
   // Check if serial already bound
   React.useEffect(() => {
     getSerialHash().then(h => { if (h) { setExistingSerialHash(h); setSerialHashed(true); } });
-    SecureStore.getItemAsync('kv_arweave_attested').then(v => { if (v === 'true') setArweaveAttested(true); });
+    SecureStore.getItemAsync('kv_arweave_attested').then(async (v) => {
+      // Reset once for App-Name fix
+        if (v === 'v2') { setArweaveAttested(true); return; }
+      // Auto-inscribe if serial bound but not yet attested
+      const sh = await getSerialHash();
+      if (sh) {
+        try {
+          const pubkey = await SecureStore.getItemAsync('kv_public_key') || '';
+          const deviceHash = await getDeviceHash();
+          const { deriveApt: da } = await import('./apt_derivation');
+          const apt = da(pubkey);
+          await uploadToTurbo(JSON.stringify({ serialHash: sh, deviceHash, apt: 'APT-' + apt, timestamp: Date.now() }), [
+            { name: 'App-Name', value: 'KasVillage' },
+                      { name: 'Content-Type', value: 'application/json' },
+                      { name: 'App-Name', value: 'KasVillage' },
+                      { name: 'Content-Type', value: 'application/json' },
+                      { name: 'App-Name', value: 'KasVillage' },
+                      { name: 'Content-Type', value: 'application/json' },
+                      { name: 'App-Name', value: 'KasVillage' },
+                      { name: 'Content-Type', value: 'application/json' },
+                      { name: 'App-Name', value: 'KasVillage' },
+                      { name: 'Content-Type', value: 'application/json' },
+                      { name: 'App-Name', value: 'KasVillage' },
+                      { name: 'Content-Type', value: 'application/json' },
+                      { name: 'KV-Type', value: 'device-attestation' },
+            { name: 'KV-Pubkey', value: pubkey },
+            { name: 'KV-Apt', value: apt },
+            { name: 'KV-DeviceHash', value: deviceHash || '' },
+            { name: 'KV-SerialHash', value: sh },
+            { name: 'KV-Platform', value: Platform.OS },
+          ]);
+          await SecureStore.setItemAsync('kv_arweave_attested', 'v2');
+          setArweaveAttested(true);
+          console.log('[Serial] Auto-attested to Arweave');
+        } catch (e) { console.warn('[Serial] Auto-attest failed (non-fatal):', e); }
+      }
+    });
   }, []);
   const [avatar, setAvatar] = useState<Avatar>(mockAvatar);
   const [refreshing, setRefreshing] = useState(false);
@@ -414,9 +451,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
         // Derive from pubkey
         const pubkey = await SecureStore.getItemAsync('kv_l1_pubkey') || await SecureStore.getItemAsync('kaspa_pubkey') || await SecureStore.getItemAsync('kv_public_key') || '';
         if (pubkey && pubkey.length >= 10) {
-          const hexSlice = pubkey.slice(2, 9);
-          const num = parseInt(hexSlice, 16) % 10000000;
-          const apt = 'APT-' + num.toString();
+          const apt = 'APT-' + deriveApt(pubkey);
           setAptNumber(apt);
         }
       } catch {} 
@@ -697,60 +732,14 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment
               Bind this wallet to your physical device. Your serial is NEVER stored or transmitted — only a one-way hash is kept locally on your device.
             </Text>
             {serialHashed ? (
+              <>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={{ color: '#4CAF50', fontSize: rs(13), fontWeight: '600' }}>✓ Device hardware-bound</Text>
                 <Text style={{ color: '#666', fontSize: rs(10) }}>{existingSerialHash?.slice(0, 12)}...</Text>
               </View>
-              {!arweaveAttested && (
-              <TouchableOpacity
-                style={{ backgroundColor: '#2A4A6A', borderRadius: 8, padding: rs(10), marginTop: rs(8), alignItems: 'center' }}
-                onPress={async () => {
-                  try {
-                    const pubkey = await SecureStore.getItemAsync('kv_public_key') || '';
-                    const deviceHash = await getDeviceHash();
-                    const hash = existingSerialHash || '';
-                    await uploadToTurbo(JSON.stringify({ serialHash: hash, deviceHash, apt: aptNumber, timestamp: Date.now() }), [
-                      { name: 'KV-Type', value: 'device-attestation' },
-                      { name: 'KV-Pubkey', value: pubkey },
-                      { name: 'KV-Apt', value: aptNumber.replace('APT-','') },
-                      { name: 'KV-DeviceHash', value: deviceHash || '' },
-                      { name: 'KV-SerialHash', value: hash },
-                      { name: 'KV-Platform', value: Platform.OS },
-                    ]);
-                    await SecureStore.setItemAsync('kv_arweave_attested', 'true');
-                    setArweaveAttested(true);
-                    Alert.alert('\u2705 Attested', 'Device attestation inscribed to Arweave.');
-                  } catch (e) { Alert.alert('Error', e instanceof Error ? e.message : 'Failed'); }
-                }}
-              >
-                <Text style={{ color: '#AAA', fontSize: rs(11) }}>Attest to Arweave</Text>
-              </TouchableOpacity>
-              )}
-              {!arweaveAttested && (
-              <TouchableOpacity
-                style={{ backgroundColor: '#2A4A6A', borderRadius: 8, padding: rs(10), marginTop: rs(8), alignItems: 'center' }}
-                onPress={async () => {
-                  try {
-                    const pubkey = await SecureStore.getItemAsync('kv_public_key') || '';
-                    const deviceHash = await getDeviceHash();
-                    const hash = existingSerialHash || '';
-                    await uploadToTurbo(JSON.stringify({ serialHash: hash, deviceHash, apt: aptNumber, timestamp: Date.now() }), [
-                      { name: 'KV-Type', value: 'device-attestation' },
-                      { name: 'KV-Pubkey', value: pubkey },
-                      { name: 'KV-Apt', value: aptNumber.replace('APT-','') },
-                      { name: 'KV-DeviceHash', value: deviceHash || '' },
-                      { name: 'KV-SerialHash', value: hash },
-                      { name: 'KV-Platform', value: Platform.OS },
-                    ]);
-                    await SecureStore.setItemAsync('kv_arweave_attested', 'true');
-                    setArweaveAttested(true);
-                    Alert.alert('\u2705 Attested', 'Device attestation inscribed to Arweave.');
-                  } catch (e) { Alert.alert('Error', e instanceof Error ? e.message : 'Failed'); }
-                }}
-              >
-                <Text style={{ color: '#AAA', fontSize: rs(11) }}>Attest to Arweave</Text>
-              </TouchableOpacity>
-              )}
+
+
+              </>
             ) : (
               <>
                 <Text style={{ color: '#888', fontSize: rs(10), marginBottom: rs(6) }}>Settings → About → Serial Number → Copy → Paste below</Text>

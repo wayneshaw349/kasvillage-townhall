@@ -849,7 +849,7 @@ export async function lookupByApt(
   apt: string,
   options?: { includeProof?: boolean }
 ): Promise<{ pubkey: string | null; stats: CounterpartyStats | null }> {
-  const pubkey = await resolvePubkeyFromArweave('KV-Apt', apt);
+  let pubkey = await resolvePubkeyFromArweave('KV-Apt', apt);
   if (!pubkey) {
     console.warn('[Resolve] No pubkey found for apt:', apt);
     return { pubkey: null, stats: null };
