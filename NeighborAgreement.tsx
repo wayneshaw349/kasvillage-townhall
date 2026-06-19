@@ -2986,14 +2986,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 {/* RESUME AGREEMENT — pick role + paste AGR ID */}
                 <View style={{ marginBottom: 12, backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#93c5fd' }}>
                   <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e40af', marginBottom: 8 }}>Resume Agreement</Text>
-                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-                    <TouchableOpacity
-                      style={{ flex: 1, padding: 8, borderRadius: 8, borderWidth: 2, borderColor: resumeAsCollateral ? '#059669' : '#d1d5db', backgroundColor: resumeAsCollateral ? '#ecfdf5' : '#fff', alignItems: 'center' }}
-                      onPress={() => setResumeAsCollateral(!resumeAsCollateral)}
-                    >
-                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: resumeAsCollateral ? '#059669' : '#888' }}>{resumeAsCollateral ? '\u2705 Collateral Mode' : 'Collateral?'}</Text>
-                    </TouchableOpacity>
-                  </View>
+
                   <TextInput
                     style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#93c5fd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, fontFamily: 'monospace', color: '#1c1917', marginBottom: 10 }}
                     placeholder="Paste AGR_ID here..."
@@ -3183,6 +3176,22 @@ const handleAcceptFromInbox = async (agreement: any) => {
                       {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{'\u{1F3EA} Load as Seller'}</Text>}
                     </TouchableOpacity>
                   </View>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                    <TouchableOpacity
+                      style={{ flex: 1, backgroundColor: '#059669', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                      disabled={!manualAgrId || manualAgrId.length < 6}
+                      onPress={() => { setResumeAsCollateral(true); /* trigger buyer handler with collateral */ }}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Party A (Collateral)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{ flex: 1, backgroundColor: '#059669', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                      disabled={!manualAgrId || manualAgrId.length < 6}
+                      onPress={() => { setResumeAsCollateral(true); /* trigger seller handler with collateral */ }}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Party B (Collateral)</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 <Text style={{ fontSize: rs.font(16), fontWeight: 'bold', color: COLORS.indigo900, marginBottom: 12, textAlign: 'center' }}>What type of agreement?</Text>
                 <TouchableOpacity
@@ -3326,46 +3335,6 @@ const handleAcceptFromInbox = async (agreement: any) => {
                     {inboxLoading ? 'Loading...' : 'Refresh Inbox'}
                   </Text>
                 </TouchableOpacity>
-
-                <View style={{ backgroundColor: '#f0fdf4', borderRadius: 8, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#86efac' }}>
-                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>?? Paste Release Key</Text>
-                  <TextInput
-                    style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#86efac', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 8 }}
-                    placeholder="Paste encrypted key from buyer..."
-                    placeholderTextColor="#a8a29e"
-                    onChangeText={async (txt) => { const v = txt.trim(); const rMatch = v.match(/^R:\s*(.+)$/m); const sigMatch = v.match(/^SIG:\s*(.+)$/m); if (rMatch && rMatch[1].length >= 60) { await AsyncStorage.setItem('kv_manual_counterparty_r_' + (contract.agreementId || ''), rMatch[1].trim()); console.log('[Seller] Auto-extracted buyer R from paste:', rMatch[1].slice(0,20)); } // Store full paste so Release button can re-extract R
-                    setContract(prev => ({ ...prev, partialReleaseTx: v })); }}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    multiline
-                  />
-                  <TouchableOpacity
-                    style={{ backgroundColor: '#059669', borderRadius: 8, padding: 10, alignItems: 'center' }}
-                    disabled={isLoading}
-                    onPress={async () => {
-                      try {
-                        setIsLoading(true);
-                        const sig = contract.partialReleaseTx || '';
-                        if (!sig || sig.length < 10) { Alert.alert('Invalid', 'Paste the buyer signature'); setIsLoading(false); return; }
-                        const session = await loadAgreementSession();
-                        if (!session?.contract?.frostData) { Alert.alert('No Agreement', 'Accept an agreement first'); setIsLoading(false); return; }
-                        const w = await loadMainWallet();
-                        if (!w) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
-                        const sc = session.contract;
-                        const total = BigInt(Math.floor(((sc.itemPriceKas || 0) + (sc.sellerCommitmentKas || 0)) * 1e8)) - 10000n;
-                        const dec = (() => { try { return decryptPartialSig({ encrypted: sig, myPrivKeyHex: w.privKeyHex, counterpartyPubKeyHex: sc.buyerPubkey || '' }); } catch { return sig; } })();
-                        const res = await completeFrostAndBroadcast({ frostAddress: sc.frostData, myPrivateKeyHex: w.privKeyHex, recipientAddress: w.address, amountSompi: total, counterpartyPartialSig: dec });
-                        if (res.success && res.txId) {
-                          Alert.alert('Released!', 'TX: ' + (res.txId || '').slice(0,16) + '...');
-                        try { const cpk = sc.buyerPubkey || ''; if (cpk) sendPushToCounterparty({ counterpartyPubkey: cpk, event: 'release_available', agreementId: sc.agreementId || '' }); } catch {}
-                          await clearAgreementSession();
-                        } else { Alert.alert('Failed', res.error || 'Co-sign failed'); }
-                      } catch (e) { Alert.alert('Error', String(e)); }
-                      finally { setIsLoading(false); }
-                    }}>
-                    {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Release Funds</Text>}
-                  </TouchableOpacity>
-                </View>
 
                 {inboxAgreements.length > 0 && (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
