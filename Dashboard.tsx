@@ -1130,7 +1130,7 @@ const WalletOverview: React.FC<{
         </View>
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
           <Text style={{ color: "#888", fontSize: 13 }}>Collateral (FROST)</Text>
-          <Text style={{ color: "#E67E22", fontSize: 13 }}>{(Number((ds.totalBalanceSompi || 0n) - (ds.spendableBalanceSompi || 0n)) / 1e8).toFixed(4)} KASPA</Text>
+          <Text style={{ color: "#E67E22", fontSize: 13 }}>{((Number(ds.totalBalanceSompi || 0) - Number(ds.spendableBalanceSompi || 0)) / 1e8).toFixed(4)} KASPA</Text>
         </View>
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
           <Text style={{ color: "#888", fontSize: 13 }}>IOU-Backed UTXOs</Text>
@@ -1155,7 +1155,7 @@ const WalletOverview: React.FC<{
         <View style={{ height: 1, backgroundColor: "#333", marginVertical: 8 }} />
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
           <Text style={{ color: "#888", fontSize: 14, fontWeight: "bold" }}>Spendable (free UTXOs)</Text>
-          <Text style={{ color: "#27AE60", fontSize: 14, fontWeight: "bold" }}>{(Number(ds.spendableBalanceSompi - (ds.iousOwedSompi || 0n)) / 1e8).toFixed(4)} KASPA</Text>
+          <Text style={{ color: "#27AE60", fontSize: 14, fontWeight: "bold" }}>{((Number(ds.spendableBalanceSompi || 0) - Number(ds.iousOwedSompi || 0)) / 1e8).toFixed(4)} KASPA</Text>
         </View>
         <View style={{ height: 1, backgroundColor: "#333", marginVertical: 8 }} />
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
