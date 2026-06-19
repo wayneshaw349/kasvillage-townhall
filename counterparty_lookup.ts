@@ -419,7 +419,7 @@ export async function lookupCounterparty(
     if (options.includeHistory) params.set('include_history', 'true');
     if (options.includeProof) params.set('include_proof', 'true');
     
-    const url = `${TOWNHALL_API}/api/counterparty/${pubkey}${endpoint ? '/' + endpoint : ''}?${params}`;
+    const url = `${TOWNHALL_API}/user-stats`;
     
     const response = await fetch(url, {
       method: 'GET',
