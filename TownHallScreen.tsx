@@ -63,7 +63,7 @@ import {
   AlertCircle,
 } from 'lucide-react-native';
 import { deriveApt, deriveAptWithCheck, resolveAptToPubkey, verifyApt } from './apt_derivation';
-import { lookupByAddress, lookupByApt } from './counterparty_lookup';
+import { lookupByAddress, lookupByApt, lookupCounterparty } from './counterparty_lookup';
 
 const TOWNHALL_BASE = 'https://kasvillage.app.runonflux.io';
 
@@ -242,9 +242,16 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         // Address lookup → Arweave KV-Address tag → pubkey → stats
         lookupResult = await lookupByAddress(q);
       } else {
-        // APT lookup → Arweave KV-Apt tag → pubkey → stats
+        // APT lookup: check self first, then Arweave
         const aptNum = q.replace(/^APT-/i, '');
-        lookupResult = await lookupByApt(aptNum);
+        const myAptNum = (myApt || '').replace(/^APT-/i, '');
+        if (aptNum === myAptNum && myPubkey) {
+          console.log('[StatsLookup] Self-lookup via /user-stats');
+          const res = await fetch('https://kasvillage.app.runonflux.io/user-stats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pubkey: myPubkey }) });
+          if (res.ok) { lookupResult = { pubkey: myPubkey, stats: await res.json() }; }
+        } else {
+          lookupResult = await lookupByApt(aptNum);
+        }
       }
 
       if (lookupResult?.pubkey && lookupResult?.stats) {
