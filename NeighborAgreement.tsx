@@ -3788,7 +3788,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
             {/* Step 4: Pay / Confirm & Release */}
             {step === 4 && (
               <View>
-                <Text style={styles.stepTitle}>Step 2: Confirm & Release</Text>
+                <Text style={styles.stepTitle}>Step 2: {releaseMode === 'cancel' ? 'Return Collateral' : 'Confirm & Release'}</Text>
                 
                 <View style={styles.flowBox}>
                   <Text style={styles.flowTitle}>On Successful Delivery:</Text>
@@ -3809,7 +3809,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 {role === 'buyer' ? (
                   <View>
                     <View style={styles.releasePreview}>
-                      <Text style={styles.releasePreviewLabel}>Releasing to seller:</Text>
+                      <Text style={styles.releasePreviewLabel}>{releaseMode === 'cancel' ? 'Return to Party A + Return to Party B:' : 'Releasing to seller:'}</Text>
                       <Text style={styles.releasePreviewAmount}>{contract.itemPriceKas} KASPA</Text>
                       <Text style={styles.releasePreviewNote}>
                         Seller's {contract.sellerCommitmentKas} KASPA returns to them
@@ -3825,7 +3825,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                       {isLoading ? (
                         <ActivityIndicator color={COLORS.white} />
                       ) : (
-                        <Text style={styles.successBtnText}>✓ Confirm & Release KASPA to Seller</Text>
+                        <Text style={styles.successBtnText}>✓ {releaseMode === 'cancel' ? '\u21A9 Return Collateral to Both Parties' : '\u2713 Confirm & Release KASPA to Seller'}</Text>
                       )}
                     </TouchableOpacity>
                     
