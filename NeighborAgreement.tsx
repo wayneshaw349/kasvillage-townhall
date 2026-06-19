@@ -1020,6 +1020,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [manualAgrId, setManualAgrId] = useState('');
   const [resumeAsCollateral, setResumeAsCollateral] = useState(false);
+  const collateralRef = React.useRef(false);
   const [manualLookupResult, setManualLookupResult] = useState<any>(null);
   const [manualVerCode, setManualVerCode] = useState('');
   const [frostActiveList, setFrostActiveList] = useState<FrostActiveEntry[]>([]);
@@ -2996,7 +2997,10 @@ const handleAcceptFromInbox = async (agreement: any) => {
                     autoCapitalize="none"
                     autoCorrect={false}
                   />
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    <TouchableOpacity onPress={() => { collateralRef.current = !collateralRef.current; setResumeAsCollateral(!resumeAsCollateral); }} style={{ marginBottom: 8, padding: 8, borderRadius: 8, backgroundColor: resumeAsCollateral ? '#ecfdf5' : '#f3f4f6', borderWidth: 2, borderColor: resumeAsCollateral ? '#059669' : '#d1d5db' }}>
+                    <Text style={{ fontSize: 12, textAlign: 'center', fontWeight: 'bold', color: resumeAsCollateral ? '#059669' : '#888' }}>{resumeAsCollateral ? '\u2705 Collateral Agreement' : 'Tap for Collateral Mode'}</Text>
+                  </TouchableOpacity>
+<View style={{ flexDirection: 'row', gap: 8 }}>
                     <TouchableOpacity
                       style={{ flex: 1, backgroundColor: '#059669', borderRadius: 8, padding: 12, alignItems: 'center' }}
                       disabled={!manualAgrId || manualAgrId.length < 6}
@@ -3075,8 +3079,9 @@ const handleAcceptFromInbox = async (agreement: any) => {
                           }
                           // ROLE = BUYER
                           setRole('buyer');
-                          setAgreementType(resumeAsCollateral ? 'simple' : 'trade');
-                          if (resumeAsCollateral) setReleaseMode('cancel');
+                          setAgreementType(collateralRef.current ? 'simple' : 'trade');
+                          if (collateralRef.current) { setReleaseMode('cancel'); console.log('[Resume] Collateral mode: cancel (2 outputs)'); }
+                          collateralRef.current = false;
                           setContract({ agreementId: manualAgrId, multisigAddress: frostAddr, itemPriceKas: buyerAmt, sellerCommitmentKas: sellerAmt, buyerPubkey: iAmProposer ? myPk : proposerPk, sellerPubkey: iAmProposer ? counterPk : myPk, itemDescription: match.description || manualAgrId.slice(0,12), stipulations: '', expiryHours: 24, frostData: frostAddr ? (() => { let _fc = 0; try { for (let _i = 0; _i < 25; _i++) { const _a = deriveAggregateKey(iAmProposer ? myPk : proposerPk, iAmProposer ? counterPk : myPk, _i); const _ad = deriveAddress(_a.aggXOnly, 'testnet-10'); if (_ad === frostAddr) { _fc = _i; console.log('[Resume] Counter recovered:', _i); break; } } } catch(e) { console.warn('[Resume] Counter scan failed:', e); } return { address: frostAddr, network: 'testnet-10', frostCounter: _fc }; })() : undefined });
                           if (derivedStep >= 4) { setBuyerLocked(true); setSellerLocked(true); }
                           setStep(derivedStep);
@@ -3085,7 +3090,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                         finally { setIsLoading(false); }
                       }}
                     >
-                      {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{'\u{1F6D2} Load as Buyer'}</Text>}
+                      {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{'\u{1F6D2} ' + (resumeAsCollateral ? 'Party A' : 'Load as Buyer') + '}'}</Text>}
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={{ flex: 1, backgroundColor: '#2563eb', borderRadius: 8, padding: 12, alignItems: 'center' }}
@@ -3163,8 +3168,9 @@ const handleAcceptFromInbox = async (agreement: any) => {
                           }
                           // ROLE = SELLER
                           setRole('seller');
-                          setAgreementType(resumeAsCollateral ? 'simple' : 'trade');
-                          if (resumeAsCollateral) setReleaseMode('cancel');
+                          setAgreementType(collateralRef.current ? 'simple' : 'trade');
+                          if (collateralRef.current) { setReleaseMode('cancel'); console.log('[Resume] Collateral mode: cancel (2 outputs)'); }
+                          collateralRef.current = false;
                           setContract({ agreementId: manualAgrId, multisigAddress: frostAddr, itemPriceKas: buyerAmt, sellerCommitmentKas: sellerAmt, buyerPubkey: iAmProposer ? myPk : proposerPk, sellerPubkey: iAmProposer ? counterPk : myPk, itemDescription: match.description || manualAgrId.slice(0,12), stipulations: '', expiryHours: 24, frostData: frostAddr ? (() => { let _fc = 0; try { for (let _i = 0; _i < 25; _i++) { const _a = deriveAggregateKey(iAmProposer ? myPk : proposerPk, iAmProposer ? counterPk : myPk, _i); const _ad = deriveAddress(_a.aggXOnly, 'testnet-10'); if (_ad === frostAddr) { _fc = _i; console.log('[Resume] Counter recovered:', _i); break; } } } catch(e) { console.warn('[Resume] Counter scan failed:', e); } return { address: frostAddr, network: 'testnet-10', frostCounter: _fc }; })() : undefined });
                           if (derivedStep >= 4) { setBuyerLocked(true); setSellerLocked(true); }
                           setStep(derivedStep);
@@ -3173,26 +3179,10 @@ const handleAcceptFromInbox = async (agreement: any) => {
                         finally { setIsLoading(false); }
                       }}
                     >
-                      {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{'\u{1F3EA} Load as Seller'}</Text>}
+                      {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{'\u{1F3EA} ' + (resumeAsCollateral ? 'Party B' : 'Load as Seller') + '}'}</Text>}
                     </TouchableOpacity>
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                    <TouchableOpacity
-                      style={{ flex: 1, backgroundColor: '#059669', borderRadius: 8, padding: 12, alignItems: 'center' }}
-                      disabled={!manualAgrId || manualAgrId.length < 6}
-                      onPress={() => { setResumeAsCollateral(true); /* trigger buyer handler with collateral */ }}
-                    >
-                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Party A (Collateral)</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={{ flex: 1, backgroundColor: '#059669', borderRadius: 8, padding: 12, alignItems: 'center' }}
-                      disabled={!manualAgrId || manualAgrId.length < 6}
-                      onPress={() => { setResumeAsCollateral(true); /* trigger seller handler with collateral */ }}
-                    >
-                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Party B (Collateral)</Text>
-                    </TouchableOpacity>
                   </View>
-                </View>
                 <Text style={{ fontSize: rs.font(16), fontWeight: 'bold', color: COLORS.indigo900, marginBottom: 12, textAlign: 'center' }}>What type of agreement?</Text>
                 <TouchableOpacity
                   onPress={() => { setAgreementType('simple'); setRole('buyer'); }}
