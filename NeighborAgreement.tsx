@@ -1019,6 +1019,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   const [inboxSort, setInboxSort] = useState<'recent'|'buyerHigh'|'sellerLow'|'name'>('recent');
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [manualAgrId, setManualAgrId] = useState('');
+  const [resumeAsCollateral, setResumeAsCollateral] = useState(false);
   const [manualLookupResult, setManualLookupResult] = useState<any>(null);
   const [manualVerCode, setManualVerCode] = useState('');
   const [frostActiveList, setFrostActiveList] = useState<FrostActiveEntry[]>([]);
@@ -2985,6 +2986,14 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 {/* RESUME AGREEMENT — pick role + paste AGR ID */}
                 <View style={{ marginBottom: 12, backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#93c5fd' }}>
                   <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e40af', marginBottom: 8 }}>Resume Agreement</Text>
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                    <TouchableOpacity
+                      style={{ flex: 1, padding: 8, borderRadius: 8, borderWidth: 2, borderColor: resumeAsCollateral ? '#059669' : '#d1d5db', backgroundColor: resumeAsCollateral ? '#ecfdf5' : '#fff', alignItems: 'center' }}
+                      onPress={() => setResumeAsCollateral(!resumeAsCollateral)}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: resumeAsCollateral ? '#059669' : '#888' }}>{resumeAsCollateral ? '\u2705 Collateral Mode' : 'Collateral?'}</Text>
+                    </TouchableOpacity>
+                  </View>
                   <TextInput
                     style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#93c5fd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, fontFamily: 'monospace', color: '#1c1917', marginBottom: 10 }}
                     placeholder="Paste AGR_ID here..."
@@ -3073,7 +3082,8 @@ const handleAcceptFromInbox = async (agreement: any) => {
                           }
                           // ROLE = BUYER
                           setRole('buyer');
-                          setAgreementType('trade');
+                          setAgreementType(resumeAsCollateral ? 'simple' : 'trade');
+                          if (resumeAsCollateral) setReleaseMode('cancel');
                           setContract({ agreementId: manualAgrId, multisigAddress: frostAddr, itemPriceKas: buyerAmt, sellerCommitmentKas: sellerAmt, buyerPubkey: iAmProposer ? myPk : proposerPk, sellerPubkey: iAmProposer ? counterPk : myPk, itemDescription: match.description || manualAgrId.slice(0,12), stipulations: '', expiryHours: 24, frostData: frostAddr ? (() => { let _fc = 0; try { for (let _i = 0; _i < 25; _i++) { const _a = deriveAggregateKey(iAmProposer ? myPk : proposerPk, iAmProposer ? counterPk : myPk, _i); const _ad = deriveAddress(_a.aggXOnly, 'testnet-10'); if (_ad === frostAddr) { _fc = _i; console.log('[Resume] Counter recovered:', _i); break; } } } catch(e) { console.warn('[Resume] Counter scan failed:', e); } return { address: frostAddr, network: 'testnet-10', frostCounter: _fc }; })() : undefined });
                           if (derivedStep >= 4) { setBuyerLocked(true); setSellerLocked(true); }
                           setStep(derivedStep);
@@ -3160,7 +3170,8 @@ const handleAcceptFromInbox = async (agreement: any) => {
                           }
                           // ROLE = SELLER
                           setRole('seller');
-                          setAgreementType('trade');
+                          setAgreementType(resumeAsCollateral ? 'simple' : 'trade');
+                          if (resumeAsCollateral) setReleaseMode('cancel');
                           setContract({ agreementId: manualAgrId, multisigAddress: frostAddr, itemPriceKas: buyerAmt, sellerCommitmentKas: sellerAmt, buyerPubkey: iAmProposer ? myPk : proposerPk, sellerPubkey: iAmProposer ? counterPk : myPk, itemDescription: match.description || manualAgrId.slice(0,12), stipulations: '', expiryHours: 24, frostData: frostAddr ? (() => { let _fc = 0; try { for (let _i = 0; _i < 25; _i++) { const _a = deriveAggregateKey(iAmProposer ? myPk : proposerPk, iAmProposer ? counterPk : myPk, _i); const _ad = deriveAddress(_a.aggXOnly, 'testnet-10'); if (_ad === frostAddr) { _fc = _i; console.log('[Resume] Counter recovered:', _i); break; } } } catch(e) { console.warn('[Resume] Counter scan failed:', e); } return { address: frostAddr, network: 'testnet-10', frostCounter: _fc }; })() : undefined });
                           if (derivedStep >= 4) { setBuyerLocked(true); setSellerLocked(true); }
                           setStep(derivedStep);
