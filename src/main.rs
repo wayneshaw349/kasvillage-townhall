@@ -1747,6 +1747,7 @@ pub struct JitterCommitmentConfig {
     pub pass_flag_col: Column<Advice>,
     pub salt_col: Column<Advice>,
     pub commitment_instance: Column<Instance>,
+    pub selector: Selector,
 }
 
 /// ZK Circuit: Proves knowledge of (pass_flag, salt) such that:
@@ -1805,6 +1806,7 @@ impl Circuit<Fq> for JitterCommitmentCircuit {
             pass_flag_col,
             salt_col,
             commitment_instance,
+            selector,
         }
     }
 
@@ -1815,6 +1817,7 @@ impl Circuit<Fq> for JitterCommitmentCircuit {
         let pass_flag_cell = layouter.assign_region(
             || "pass_flag",
             |mut region| {
+                config.selector.enable(&mut region, 0)?;
                 region.assign_advice(|| "pass_flag", config.pass_flag_col, 0, || self.pass_flag)
             }
         )?;
@@ -3735,24 +3738,20 @@ mod tests {
     #[test]
     fn test_traits_can_buy() {
         let mut t = CitadelTraits::default();
-        for _ in 0..8 { t.name = true; t.class = true; t.race = true; t.occupation = true;
-                        t.origin_story = true; t.defining_moment = true; t.formative_memory = true;
-                        t.life_philosophy = true; }
-        assert!(!t.can_buy()); // 8 traits
-        t.personality = true;
-        assert!(t.can_buy()); // 9 traits
+        t.name = true; t.class = true; t.race = true; t.occupation = true;
+        assert!(!t.can_buy()); // 4 traits < 5
+        t.origin_story = true;
+        assert!(t.can_buy()); // 5 traits
     }
 
     #[test]
     fn test_traits_can_sell() {
         let mut t = CitadelTraits::default();
         t.name = true; t.class = true; t.race = true; t.occupation = true;
-        t.origin_story = true; t.defining_moment = true; t.formative_memory = true;
-        t.life_philosophy = true; t.personality = true; t.weakness = true;
-        t.signature_move = true; t.voice_line = true;
-        assert!(!t.can_sell()); // 12 traits
-        t.power_spike = true;
-        assert!(t.can_sell()); // 13 traits
+        t.origin_story = true;
+        assert!(!t.can_sell()); // 5 traits < 6
+        t.defining_moment = true;
+        assert!(t.can_sell()); // 6 traits
     }
 
     // ========================================================================
@@ -4332,9 +4331,9 @@ pub fn verify_user_full(
     let can_sell = traits.can_sell() && stats.meets_criteria();
     let verified_passport = can_sell && att_result.valid;
     
-    let access_level = if traits.count() < 9 {
+    let access_level = if traits.count() < 5 {
         "GUEST"
-    } else if traits.count() < 13 {
+    } else if traits.count() < 6 {
         "RESIDENT"
     } else if !verified_passport {
         "PASSPORT_ELIGIBLE"
@@ -4957,11 +4956,9 @@ mod tests_high_priority {
             snail_mode: false, attestation_hash: "".into(), timestamp: 0,
         };
         let mut traits = CitadelTraits::default();
-        // Set 9 traits
+        // Set 5 traits (can buy, cannot sell)
         traits.name = true; traits.class = true; traits.race = true;
         traits.occupation = true; traits.origin_story = true;
-        traits.defining_moment = true; traits.formative_memory = true;
-        traits.life_philosophy = true; traits.personality = true;
         
         let att = DeviceAttestation {
             platform: "ios".into(), attestation_blob: "valid".into(),
@@ -8667,26 +8664,19 @@ mod tests_remaining {
         assert!(!avatar.can_buy());
         assert!(!avatar.can_sell());
         
-        // Add 9 buyer traits
+        // Add 5 traits = Resident (can buy, cannot sell)
         avatar.class = "Warrior".to_string();
         avatar.race = "Human".to_string();
         avatar.occupation = "Knight".to_string();
         avatar.mutant = "Super Strength".to_string();
         avatar.animal = "Wolf".to_string();
-        avatar.mutate = "Cyborg".to_string();
-        avatar.personality = "Brave".to_string();
-        avatar.combat_style = "Melee".to_string();
-        avatar.signature_move = "Slash".to_string();
         
         assert_eq!(avatar.citadel_tier(), CitadelTier::Resident);
         assert!(avatar.can_buy());
         assert!(!avatar.can_sell());
         
-        // Add 4 seller traits
-        avatar.weakness = "Fire".to_string();
-        avatar.power_spike = "Level 6".to_string();
-        avatar.voice_line = "For honor!".to_string();
-        avatar.lore_origin = "Mountain kingdom".to_string();
+        // Add 1 more = 6 traits = Passport (can sell)
+        avatar.personality = "Brave".to_string();
         
         assert_eq!(avatar.citadel_tier(), CitadelTier::Passport);
         assert!(avatar.can_sell());
