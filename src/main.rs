@@ -7720,7 +7720,7 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/stats/global", web::get().to(get_global_stats))
         .route("/api/stats/circulation", web::get().to(get_circulation))
         .route("/api/verify/store", web::post().to(verify_store))
-        .route("/api/verify/dapp", web::post().to(verify_dapp))
+        .route("/api/verify/dapp", web::post().to(townhall_verification_complete::api_verify_dapp))
         .route("/api/verify/game", web::post().to(verify_game))
         .route("/api/verify/academic", web::post().to(verify_academic))
         .route("/api/verify/service", web::post().to(verify_service))
@@ -7754,7 +7754,13 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/agreement/partial-sig", web::post().to(frost_submit_partial_sig))
         .route("/api/agreement/{id}/frost-r", web::get().to(frost_get_r))
         .route("/api/agreement/frost-r", web::post().to(frost_submit_r))
-        .route("/api/agreement/release", web::post().to(frost_release_complete));
+        .route("/api/agreement/release", web::post().to(frost_release_complete))
+        // Counterparty Stats (townhall_verification_complete)
+        .route("/api/counterparty/batch", web::post().to(townhall_verification_complete::api_get_counterparty_stats_batch))
+        .route("/api/counterparty/{pubkey}", web::get().to(townhall_verification_complete::api_get_counterparty_stats))
+        .route("/api/counterparty/{pubkey}/proof", web::get().to(townhall_verification_complete::api_get_counterparty_stats_with_proof))
+        // Verification
+        .route("/api/verify/integrity", web::post().to(townhall_verification_complete::api_check_integrity));
 }
 
 // ============================================================================
