@@ -422,8 +422,9 @@ export async function lookupCounterparty(
     const url = `${TOWNHALL_API}/user-stats`;
     
     const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pubkey }),
       signal: controller.signal,
     });
     
@@ -436,8 +437,8 @@ export async function lookupCounterparty(
     const data = await response.json();
     
     return {
-      found: data.found,
-      stats: convertStats(data.stats),
+      found: !!(data.successes !== undefined || data.xp !== undefined),
+      stats: (data.successes !== undefined) ? computeStats(pubkey, data.xp || 0, data.successes || 0, data.deadlocks || 0) : unknownStats(pubkey),
       proof: data.proof ? convertProof(data.proof) : undefined,
       recentAgreements: data.recent_agreements?.map(convertAgreement),
       error: data.error,
