@@ -1,0 +1,10 @@
+const fs = require('fs');
+let c = fs.readFileSync('src/townhall_verification_complete.rs', 'utf8');
+c = c.replaceAll("l1_stats.fastest_completion_daa", "l1_stats.fastest_completion_ms");
+c = c.replaceAll("l1_stats.agreements_last_7d_daa", "l1_stats.agreements_last_7d");
+c = c.replaceAll("l1_stats.agreements_last_30d_daa", "l1_stats.agreements_last_30d");
+c = c.replaceAll("l1_stats.avg_completion_daa", "l1_stats.avg_completion_time_ms");
+c = c.replaceAll("l1_stats.deadlocks_as_buyer", "l1_stats.deadlock_as_buyer");
+c = c.replaceAll("l1_stats.deadlocks_as_seller", "l1_stats.deadlock_as_seller");
+console.log('Fixed all l1_stats field refs');
+fs.writeFileSync('src/townhall_verification_complete.rs', c);

@@ -37,6 +37,8 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 
+mod townhall_verification_complete;
+
 use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, Responder, middleware::Logger};
 use actix_cors::Cors;
 use serde::{Serialize, Deserialize};
@@ -7714,6 +7716,7 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/verify-identity", web::post().to(stateless_verify_identity))
         .route("/proof-status/{id}", web::get().to(get_proof_status))
         .route("/user-stats", web::post().to(stateless_get_user_stats))
+        .route("/api/verify/stats", web::post().to(api_verify_stats_proof))
         .route("/xp-ledger", web::post().to(stateless_get_xp_ledger))
         .route("/api/scan", web::post().to(scan_code_api))
         .route("/api/scan/game", web::post().to(verify_game))
@@ -8240,6 +8243,31 @@ async fn rehydrate_agreements_from_arweave(
     
 println!("   ✅ Rehydrated {} active agreements from Arweave", total_loaded);
     Ok(total_loaded)
+}
+
+
+/// POST /api/verify/stats - Generate Halo2 SNARK proof of user stats
+async fn api_verify_stats_proof(body: web::Json<serde_json::Value>) -> HttpResponse {
+    let pubkey = match body.get("pubkey").and_then(|v| v.as_str()) {
+        Some(p) if p.len() >= 60 => p.to_string(),
+        _ => return HttpResponse::BadRequest().json(serde_json::json!({"error": "pubkey required"})),
+    };
+    
+    match townhall_verification_complete::aggregate_and_prove_stats(&pubkey).await {
+        Ok((stats, proof)) => {
+            HttpResponse::Ok().json(serde_json::json!({
+                "ok": true,
+                "stats": stats,
+                "proof": proof,
+            }))
+        }
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "ok": false,
+                "error": e,
+            }))
+        }
+    }
 }
 
 #[actix_web::main]

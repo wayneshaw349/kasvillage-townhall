@@ -25,6 +25,7 @@ secp256k1 = { version = "0.29", features = ["global-context"] }
 
 # Random
 rand = "0.8"
+rand_core = "0.6"
 
 # Web framework
 actix-web = "4"

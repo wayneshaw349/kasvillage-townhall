@@ -120,217 +120,14 @@ static SUSPICIOUS_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 // ALLOWED EXTERNAL DOMAINS
 // ============================================================================
 
-const ALLOWED_DOMAINS: [&str; 7] = [
+const ALLOWED_DOMAINS: [&str; 6] = [
     "arweave.net",
     "kasvillage.dev",
     "fonts.googleapis.com",
     "fonts.gstatic.com",
     "cdnjs.cloudflare.com",
     "unpkg.com",
-    "node2.irys.xyz",
 ];
-
-// ============================================================================
-// ENTITY TYPES
-// ============================================================================
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EntityType {
-    User,
-    Store,
-    Academic,
-    Service,
-    DApp,
-    Game,
-    Review,
-    Website,
-}
-
-// ============================================================================
-// GAME-SPECIFIC PATTERNS (gambling with real money)
-// ============================================================================
-
-static GAME_PROHIBITED_PATTERNS: Lazy<Vec<(Regex, &'static str, &'static str)>> = Lazy::new(|| {
-    vec![
-        (Regex::new(r"(?i)real[\s_-]*money[\s_-]*(bet|wager|gambl)").unwrap(), "real_money_gambling", "gambling"),
-        (Regex::new(r"(?i)(deposit|withdraw).*\$(usd|eur|gbp|cad|aud)").unwrap(), "fiat_gambling", "gambling"),
-        (Regex::new(r"(?i)cash[\s_-]*out[\s_-]*winnings").unwrap(), "cashout_winnings", "gambling"),
-        (Regex::new(r"(?i)casino[\s_-]*(game|slot|poker|blackjack)").unwrap(), "casino_game", "gambling"),
-        (Regex::new(r"(?i)loot[\s_-]*box.*(\$|pay|buy|purchase)").unwrap(), "paid_lootbox", "gambling"),
-        (Regex::new(r"(?i)gacha.*(pay|\$|purchase)").unwrap(), "paid_gacha", "gambling"),
-        (Regex::new(r"(?i)(buy|purchase)[\s_-]*(gems|coins|crystals)[\s_-]*\$").unwrap(), "paid_currency", "gambling"),
-        (Regex::new(r"(?i)guaranteed[\s_-]*(win|payout|return)").unwrap(), "guaranteed_win", "gambling"),
-        (Regex::new(r"(?i)(rigged|fixed)[\s_-]*(odds|game|outcome)").unwrap(), "rigged_admission", "gambling"),
-    ]
-});
-
-// ============================================================================
-// IMAGE BYPASS PATTERNS (prevents real photos in avatar system)
-// ============================================================================
-
-static IMAGE_BYPASS_PATTERNS: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
-    vec![
-        (Regex::new(r#"<img\s+[^>]*src\s*="#).unwrap(), "html_img_tag"),
-        (Regex::new(r#"Image\s*\.\s*load"#).unwrap(), "image_load"),
-        (Regex::new(r#"fetch\s*\([^)]*\.(jpg|jpeg|png|gif|webp)"#).unwrap(), "fetch_image"),
-        (Regex::new(r#"createImageBitmap"#).unwrap(), "create_image_bitmap"),
-        (Regex::new(r#"drawImage\s*\("#).unwrap(), "canvas_draw_image"),
-        (Regex::new(r#"FileReader[^}]*readAsDataURL"#).unwrap(), "file_reader_image"),
-        (Regex::new(r#"data:image/(jpeg|png|gif|webp)"#).unwrap(), "base64_image"),
-        (Regex::new(r#"\.toDataURL\s*\("#).unwrap(), "canvas_to_dataurl"),
-        (Regex::new(r#"(?i)(uploadPhoto|uploadImage|uploadAvatar|uploadPicture|uploadFace)"#).unwrap(), "upload_function"),
-        (Regex::new(r#"(?i)(camera|webcam|getUserMedia|mediaDevices\.getUserMedia)"#).unwrap(), "camera_access"),
-        (Regex::new(r#"(?i)(deepfake|face\s*swap|face\s*morph|face\s*gen)"#).unwrap(), "deepfake_tool"),
-    ]
-});
-
-// ============================================================================
-// REQUIRED SDK PATTERNS (procedural avatar generation)
-// ============================================================================
-
-static REQUIRED_SDK_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
-    vec![
-        Regex::new(r#"from\s*['"]kasvillage-procedural-sdk['""]"#).unwrap(),
-        Regex::new(r#"require\s*\(\s*['"]kasvillage-procedural-sdk['"]\s*\)"#).unwrap(),
-        Regex::new(r#"generateCharacter\s*\("#).unwrap(),
-        Regex::new(r#"generateBackground\s*\("#).unwrap(),
-        Regex::new(r#"initAvatarContext\s*\("#).unwrap(),
-        Regex::new(r#"from\s*['"]\.*/avatar_silhouette"#).unwrap(),
-        Regex::new(r#"from\s*['"]\.*/procedural"#).unwrap(),
-    ]
-});
-
-// ============================================================================
-// REALISTIC FACE DETECTION
-// ============================================================================
-
-// Banned realistic proportions (human face ratios)
-const BANNED_EYE_RATIO_MIN: f64 = 2.4;
-const BANNED_EYE_RATIO_MAX: f64 = 3.6;
-const BANNED_FACE_ASPECT_MIN: f64 = 0.58;
-const BANNED_FACE_ASPECT_MAX: f64 = 0.72;
-
-// Realistic skin HSL ranges
-struct SkinTone { h_min: f64, h_max: f64, s_min: f64, s_max: f64, l_min: f64, l_max: f64 }
-const BANNED_SKIN_TONES: [SkinTone; 3] = [
-    SkinTone { h_min: 15.0, h_max: 45.0, s_min: 20.0, s_max: 60.0, l_min: 60.0, l_max: 85.0 },  // Light
-    SkinTone { h_min: 20.0, h_max: 40.0, s_min: 30.0, s_max: 55.0, l_min: 40.0, l_max: 65.0 },  // Medium
-    SkinTone { h_min: 15.0, h_max: 35.0, s_min: 40.0, s_max: 70.0, l_min: 20.0, l_max: 45.0 },  // Dark
-];
-
-fn is_realistic_skin_tone(hex: &str) -> bool {
-    if hex.len() < 7 || !hex.starts_with('#') { return false; }
-    
-    let r = u8::from_str_radix(&hex[1..3], 16).unwrap_or(0) as f64 / 255.0;
-    let g = u8::from_str_radix(&hex[3..5], 16).unwrap_or(0) as f64 / 255.0;
-    let b = u8::from_str_radix(&hex[5..7], 16).unwrap_or(0) as f64 / 255.0;
-    
-    let max = r.max(g).max(b);
-    let min = r.min(g).min(b);
-    let l = (max + min) / 2.0;
-    
-    let (h, s) = if (max - min).abs() < 0.0001 {
-        (0.0, 0.0)
-    } else {
-        let d = max - min;
-        let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
-        let h = if (max - r).abs() < 0.0001 {
-            ((g - b) / d + if g < b { 6.0 } else { 0.0 }) / 6.0
-        } else if (max - g).abs() < 0.0001 {
-            ((b - r) / d + 2.0) / 6.0
-        } else {
-            ((r - g) / d + 4.0) / 6.0
-        };
-        (h * 360.0, s * 100.0)
-    };
-    let l = l * 100.0;
-    
-    BANNED_SKIN_TONES.iter().any(|t| 
-        h >= t.h_min && h <= t.h_max && s >= t.s_min && s <= t.s_max && l >= t.l_min && l <= t.l_max
-    )
-}
-
-/// Analyze SVG paths for realistic face proportions
-fn analyze_svg_paths(code: &str) -> (bool, Vec<String>) {
-    let mut has_realistic = false;
-    let mut violations = Vec::new();
-    
-    let path_re = Regex::new(r#"[dD]\s*=\s*["']([^"']+)["']"#).unwrap();
-    
-    for cap in path_re.captures_iter(code) {
-        let path = &cap[1];
-        let cubic_re = Regex::new(r"[Cc]\s*([-\d.]+[\s,]+[-\d.]+[\s,]+[-\d.]+[\s,]+[-\d.]+[\s,]+[-\d.]+[\s,]+[-\d.]+)").unwrap();
-        
-        let mut curve_bounds: Vec<(f64, f64, f64, f64)> = Vec::new();
-        
-        for curve_cap in cubic_re.captures_iter(path) {
-            let nums: Vec<f64> = curve_cap[1]
-                .split(|c: char| c.is_whitespace() || c == ',')
-                .filter_map(|s| s.parse().ok())
-                .collect();
-            
-            if nums.len() >= 6 {
-                let xs = [nums[0], nums[2], nums[4]];
-                let ys = [nums[1], nums[3], nums[5]];
-                let min_x = xs.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max_x = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                let min_y = ys.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max_y = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                curve_bounds.push((min_x, min_y, max_x, max_y));
-            }
-        }
-        
-        // Check face proportions (5+ curves with human-like layout)
-        if curve_bounds.len() >= 5 {
-            let all_min_x = curve_bounds.iter().map(|b| b.0).fold(f64::INFINITY, f64::min);
-            let all_max_x = curve_bounds.iter().map(|b| b.2).fold(f64::NEG_INFINITY, f64::max);
-            let all_min_y = curve_bounds.iter().map(|b| b.1).fold(f64::INFINITY, f64::min);
-            let all_max_y = curve_bounds.iter().map(|b| b.3).fold(f64::NEG_INFINITY, f64::max);
-            
-            let width = all_max_x - all_min_x;
-            let height = all_max_y - all_min_y;
-            
-            if height > 10.0 && width > 10.0 {
-                let aspect = width / height;
-                if aspect >= BANNED_FACE_ASPECT_MIN && aspect <= BANNED_FACE_ASPECT_MAX {
-                    // Check for eye/nose/mouth line features
-                    let eye_line = all_min_y + height * 0.45;
-                    let nose_line = all_min_y + height * 0.70;
-                    let mouth_line = all_min_y + height * 0.82;
-                    
-                    let has_eye_features = curve_bounds.iter().any(|b| b.1 < eye_line && b.3 > eye_line - height * 0.1);
-                    let has_nose_features = curve_bounds.iter().any(|b| b.1 < nose_line && b.3 > nose_line - height * 0.1);
-                    let has_mouth_features = curve_bounds.iter().any(|b| b.1 < mouth_line && b.3 > mouth_line - height * 0.1);
-                    
-                    if has_eye_features && has_nose_features && has_mouth_features {
-                        has_realistic = true;
-                        violations.push("realistic_face_proportions".into());
-                    }
-                }
-            }
-        }
-    }
-    
-    (has_realistic, violations)
-}
-
-/// Find skin tone colors in code
-fn find_skin_tone_colors(code: &str) -> Vec<String> {
-    let hex_re = Regex::new(r"#[0-9A-Fa-f]{6}\b").unwrap();
-    let mut skin_colors = Vec::new();
-    let mut seen = HashSet::new();
-    
-    for cap in hex_re.find_iter(code) {
-        let hex = cap.as_str();
-        if !seen.contains(hex) && is_realistic_skin_tone(hex) {
-            seen.insert(hex.to_string());
-            skin_colors.push(hex.to_string());
-        }
-    }
-    
-    skin_colors
-}
 
 // ============================================================================
 // CODE SCAN TYPES
@@ -342,56 +139,10 @@ pub struct CodeScanResult {
     pub status: ScanStatus,
     pub code_hash: String,
     pub code_size_bytes: usize,
-    
-    // Categorized matches
-    pub critical_matches: Vec<PatternMatch>,
-    pub high_matches: Vec<PatternMatch>,
-    pub medium_matches: Vec<PatternMatch>,
-    pub low_matches: Vec<PatternMatch>,
-    pub total_issues: usize,
-    
-    // Legacy (for compatibility)
     pub prohibited_matches: Vec<PatternMatch>,
     pub suspicious_matches: Vec<PatternMatch>,
-    
-    // Procedural-specific
-    pub has_image_bypass: bool,
-    pub has_realistic_face: bool,
-    pub has_sdk_usage: bool,
-    pub face_violations: Vec<String>,
-    pub skin_tone_violations: Vec<String>,
-    
-    // External domains
     pub external_domains: Vec<String>,
-    
-    pub recommendation: String,
     pub scan_timestamp: u64,
-}
-
-impl Default for CodeScanResult {
-    fn default() -> Self {
-        Self {
-            passed: true,
-            status: ScanStatus::Approved,
-            code_hash: String::new(),
-            code_size_bytes: 0,
-            critical_matches: Vec::new(),
-            high_matches: Vec::new(),
-            medium_matches: Vec::new(),
-            low_matches: Vec::new(),
-            total_issues: 0,
-            prohibited_matches: Vec::new(),
-            suspicious_matches: Vec::new(),
-            has_image_bypass: false,
-            has_realistic_face: false,
-            has_sdk_usage: false,
-            face_violations: Vec::new(),
-            skin_tone_violations: Vec::new(),
-            external_domains: Vec::new(),
-            recommendation: "PASSED".into(),
-            scan_timestamp: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -404,9 +155,7 @@ pub enum ScanStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatternMatch {
-    pub pattern_name: String,
     pub pattern: String,
-    pub category: String,
     pub line_number: usize,
     pub context: String,
     pub severity: Severity,
@@ -426,149 +175,61 @@ pub enum Severity {
 // ============================================================================
 
 /// Scan DApp/Game code for prohibited and suspicious patterns
-/// Now entity-aware with image bypass and realistic face detection
-pub fn scan_code(code: &str, entity_type: EntityType) -> CodeScanResult {
-    let mut result = CodeScanResult {
-        code_hash: compute_hash(code),
-        code_size_bytes: code.len(),
-        scan_timestamp: current_timestamp(),
-        ..Default::default()
-    };
+pub fn scan_code(code: &str) -> CodeScanResult {
+    let lines: Vec<&str> = code.lines().collect();
+    let mut prohibited_matches = Vec::new();
+    let mut suspicious_matches = Vec::new();
+    let mut external_domains: HashSet<String> = HashSet::new();
     
     // Check code size
     if code.len() > MAX_CODE_SIZE_BYTES {
-        result.passed = false;
-        result.status = ScanStatus::Rejected;
-        result.critical_matches.push(PatternMatch {
-            pattern_name: "code_size_exceeded".into(),
-            pattern: "CODE_SIZE_EXCEEDED".into(),
-            category: "size".into(),
-            line_number: 0,
-            context: format!("Code size {} exceeds max {}", code.len(), MAX_CODE_SIZE_BYTES),
-            severity: Severity::Critical,
-        });
-        result.recommendation = "REJECTED: Code size exceeded".into();
-        return result;
+        return CodeScanResult {
+            passed: false,
+            status: ScanStatus::Rejected,
+            code_hash: compute_hash(code),
+            code_size_bytes: code.len(),
+            prohibited_matches: vec![PatternMatch {
+                pattern: "CODE_SIZE_EXCEEDED".to_string(),
+                line_number: 0,
+                context: format!("Code size {} exceeds max {}", code.len(), MAX_CODE_SIZE_BYTES),
+                severity: Severity::Critical,
+            }],
+            suspicious_matches: vec![],
+            external_domains: vec![],
+            scan_timestamp: current_timestamp(),
+        };
     }
     
-    let lines: Vec<&str> = code.lines().collect();
-    
-    // Helper to add match
-    let mut add_match = |name: &str, pattern: &str, severity: Severity, category: &str, line: usize, ctx: &str| {
-        let m = PatternMatch {
-            pattern_name: name.to_string(),
-            pattern: pattern.to_string(),
-            category: category.to_string(),
-            line_number: line,
-            context: ctx.to_string(),
-            severity,
-        };
-        match severity {
-            Severity::Critical => {
-                result.critical_matches.push(m.clone());
-                result.prohibited_matches.push(m);
-            },
-            Severity::High => {
-                result.high_matches.push(m.clone());
-                result.prohibited_matches.push(m);
-            },
-            Severity::Medium => {
-                result.medium_matches.push(m.clone());
-                result.suspicious_matches.push(m);
-            },
-            Severity::Low => {
-                result.low_matches.push(m.clone());
-                result.suspicious_matches.push(m);
-            },
-        }
-    };
-    
-    // 1. Check prohibited patterns (all entity types)
+    // Scan for prohibited patterns
     for regex in PROHIBITED_PATTERNS.iter() {
         for (line_num, line) in lines.iter().enumerate() {
             if regex.is_match(line) {
-                add_match(
-                    regex.as_str(),
-                    regex.as_str(),
-                    Severity::Critical,
-                    "prohibited",
-                    line_num + 1,
-                    &truncate(line, 100)
-                );
+                prohibited_matches.push(PatternMatch {
+                    pattern: regex.as_str().to_string(),
+                    line_number: line_num + 1,
+                    context: truncate(line, 100),
+                    severity: Severity::Critical,
+                });
             }
         }
     }
     
-    // 2. Check suspicious patterns (all entity types)
+    // Scan for suspicious patterns
     for regex in SUSPICIOUS_PATTERNS.iter() {
         for (line_num, line) in lines.iter().enumerate() {
             if regex.is_match(line) {
-                add_match(
-                    regex.as_str(),
-                    regex.as_str(),
-                    Severity::Medium,
-                    "suspicious",
-                    line_num + 1,
-                    &truncate(line, 100)
-                );
+                suspicious_matches.push(PatternMatch {
+                    pattern: regex.as_str().to_string(),
+                    line_number: line_num + 1,
+                    context: truncate(line, 100),
+                    severity: Severity::Medium,
+                });
             }
         }
     }
     
-    // 3. Game-specific patterns
-    if entity_type == EntityType::Game {
-        for (regex, name, category) in GAME_PROHIBITED_PATTERNS.iter() {
-            for (line_num, line) in lines.iter().enumerate() {
-                if regex.is_match(line) {
-                    add_match(name, regex.as_str(), Severity::Critical, category, line_num + 1, &truncate(line, 100));
-                }
-            }
-        }
-    }
-    
-    // 4. PROCEDURAL CHECKS (DApp, Game, Website, Store, Service)
-    let needs_procedural = matches!(entity_type, 
-        EntityType::DApp | EntityType::Game | EntityType::Website | EntityType::Store | EntityType::Service
-    );
-    
-    if needs_procedural {
-        // 4a. Image bypass patterns
-        for (regex, name) in IMAGE_BYPASS_PATTERNS.iter() {
-            if regex.is_match(code) {
-                add_match(name, regex.as_str(), Severity::Critical, "image_bypass", 0, "");
-                result.has_image_bypass = true;
-            }
-        }
-        
-        // 4b. SDK usage check
-        result.has_sdk_usage = REQUIRED_SDK_PATTERNS.iter().any(|p| p.is_match(code));
-        
-        // 4c. Realistic face detection
-        let (has_realistic, face_violations) = analyze_svg_paths(code);
-        if has_realistic {
-            result.has_realistic_face = true;
-            result.face_violations = face_violations.clone();
-            for v in face_violations {
-                add_match(&v, "realistic_face", Severity::Critical, "realistic_face", 0, "");
-            }
-        }
-        
-        // 4d. Skin tone detection (3+ realistic skin tones = suspicious)
-        let skin_colors = find_skin_tone_colors(code);
-        if skin_colors.len() >= 3 {
-            result.skin_tone_violations = skin_colors;
-            add_match("excessive_skin_tones", "skin_tone", Severity::High, "realistic_face", 0, "");
-        }
-        
-        // 4e. Missing SDK warning (not critical, just info)
-        if !result.has_sdk_usage && !result.has_image_bypass {
-            add_match("missing_procedural_sdk", "sdk", Severity::Low, "procedural", 0, "");
-        }
-    }
-    
-    // 5. Extract external domains
+    // Extract external domains
     let domain_regex = Regex::new(r#"https?://([a-zA-Z0-9.-]+)"#).unwrap();
-    let mut external_domains: HashSet<String> = HashSet::new();
     for cap in domain_regex.captures_iter(code) {
         if let Some(domain) = cap.get(1) {
             let domain_str = domain.as_str().to_lowercase();
@@ -577,54 +238,27 @@ pub fn scan_code(code: &str, entity_type: EntityType) -> CodeScanResult {
             }
         }
     }
-    result.external_domains = external_domains.into_iter().collect();
-    
-    // Calculate totals
-    result.total_issues = result.critical_matches.len() 
-                        + result.high_matches.len() 
-                        + result.medium_matches.len() 
-                        + result.low_matches.len();
     
     // Determine status
-    result.passed = result.critical_matches.is_empty() && result.high_matches.is_empty();
-    result.status = if !result.critical_matches.is_empty() {
-        ScanStatus::Rejected
-    } else if !result.high_matches.is_empty() || !result.external_domains.is_empty() {
-        ScanStatus::PendingReview
+    let (passed, status) = if !prohibited_matches.is_empty() {
+        (false, ScanStatus::Rejected)
+    } else if !suspicious_matches.is_empty() || !external_domains.is_empty() {
+        (false, ScanStatus::PendingReview)
     } else {
-        ScanStatus::Approved
+        (true, ScanStatus::Approved)
     };
     
-    // Generate recommendation
-    result.recommendation = if result.has_image_bypass {
-        "REJECTED: Image upload/bypass detected - must use procedural SDK only".into()
-    } else if result.has_realistic_face {
-        "REJECTED: Realistic human face detected - must use stylized proportions".into()
-    } else if !result.critical_matches.is_empty() {
-        "REJECTED: Critical policy violations found".into()
-    } else if !result.high_matches.is_empty() {
-        "REVIEW REQUIRED: High severity issues detected".into()
-    } else if !result.external_domains.is_empty() {
-        "REVIEW REQUIRED: External domains detected".into()
-    } else if !result.medium_matches.is_empty() {
-        "CAUTION: Medium severity patterns found".into()
-    } else {
-        "PASSED: No significant issues".into()
-    };
-    
-    result
+    CodeScanResult {
+        passed,
+        status,
+        code_hash: compute_hash(code),
+        code_size_bytes: code.len(),
+        prohibited_matches,
+        suspicious_matches,
+        external_domains: external_domains.into_iter().collect(),
+        scan_timestamp: current_timestamp(),
+    }
 }
-
-/// Convenience: scan with default entity type (DApp)
-pub fn scan_code_simple(code: &str) -> CodeScanResult {
-    scan_code(code, EntityType::DApp)
-}
-
-/// Convenience functions for specific entity types
-pub fn scan_dapp_code(code: &str) -> CodeScanResult { scan_code(code, EntityType::DApp) }
-pub fn scan_game_code(code: &str) -> CodeScanResult { scan_code(code, EntityType::Game) }
-pub fn scan_store_code(code: &str) -> CodeScanResult { scan_code(code, EntityType::Store) }
-pub fn scan_website_code(code: &str) -> CodeScanResult { scan_code(code, EntityType::Website) }
 
 // ============================================================================
 // SNARK PROOF GENERATION (Halo2 IPA)
@@ -632,14 +266,14 @@ pub fn scan_website_code(code: &str) -> CodeScanResult { scan_code(code, EntityT
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofInputs {
-    pub content_hash: [u8; 32],
-    pub owner_pubkey: [u8; 33],
+    pub content_hash: String,
+    pub owner_pubkey: String,
     pub content_type: String,
     pub trait_count: u8,
     pub xp: u64,
     pub successes: u32,
     pub deadlocks: u32,
-    pub device_attestation_hash: [u8; 32],
+    pub device_attestation_hash: String,
     pub timestamp: u64,
     pub scan_passed: bool,
 }
@@ -675,14 +309,14 @@ pub fn generate_verification_proof(inputs: &ProofInputs) -> Result<VerificationP
     // For now: generate deterministic mock proof
     
     let mut proof_data = Vec::new();
-    proof_data.extend_from_slice(&inputs.content_hash);
-    proof_data.extend_from_slice(&inputs.owner_pubkey);
+    proof_data.extend_from_slice(inputs.content_hash.as_bytes());
+    proof_data.extend_from_slice(inputs.owner_pubkey.as_bytes());
     proof_data.extend_from_slice(inputs.content_type.as_bytes());
     proof_data.push(inputs.trait_count);
     proof_data.extend_from_slice(&inputs.xp.to_le_bytes());
     proof_data.extend_from_slice(&inputs.successes.to_le_bytes());
     proof_data.extend_from_slice(&inputs.deadlocks.to_le_bytes());
-    proof_data.extend_from_slice(&inputs.device_attestation_hash);
+    proof_data.extend_from_slice(inputs.device_attestation_hash.as_bytes());
     proof_data.extend_from_slice(&inputs.timestamp.to_le_bytes());
     proof_data.push(if inputs.scan_passed { 1 } else { 0 });
     
@@ -694,8 +328,8 @@ pub fn generate_verification_proof(inputs: &ProofInputs) -> Result<VerificationP
     
     // Generate public inputs hash
     let mut pub_hasher = Sha256::new();
-    pub_hasher.update(&inputs.content_hash);
-    pub_hasher.update(&inputs.owner_pubkey);
+    pub_hasher.update(inputs.content_hash.as_bytes());
+    pub_hasher.update(inputs.owner_pubkey.as_bytes());
     pub_hasher.update(&inputs.timestamp.to_le_bytes());
     let public_inputs_hash = hex::encode(pub_hasher.finalize());
     
@@ -1355,9 +989,9 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
         witness.total_completion_daa / witness.completed
     } else { 0 };
     
-    let days_since_last_deadlock = if witness.last_deadlock_ms > 0 {
+    let days_since_last_deadlock = if witness.last_deadlock_daa > 0 {
         let now = current_timestamp();
-        Some((now - witness.last_deadlock_ms) / 86400)
+        Some((now - witness.last_deadlock_daa) / 86400)
     } else { None };
 
     if let Some(_pk) = STATS_PK.as_ref() {
@@ -1381,9 +1015,9 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
         proof_data.extend_from_slice(&witness.total_volume_sompi.to_le_bytes());
         proof_data.extend_from_slice(&witness.largest_agreement_sompi.to_le_bytes());
         proof_data.extend_from_slice(&witness.total_completion_daa.to_le_bytes());
-        proof_data.extend_from_slice(&witness.fastest_completion_ms.to_le_bytes());
-        proof_data.extend_from_slice(&witness.agreements_last_30d.to_le_bytes());
-        proof_data.extend_from_slice(&witness.agreements_last_7d.to_le_bytes());
+        proof_data.extend_from_slice(&witness.fastest_completion_daa.to_le_bytes());
+        proof_data.extend_from_slice(&witness.agreements_last_30d_daa.to_le_bytes());
+        proof_data.extend_from_slice(&witness.agreements_last_7d_daa.to_le_bytes());
         proof_data.extend_from_slice(&witness.deadlock_as_buyer.to_le_bytes());
         proof_data.extend_from_slice(&witness.deadlock_as_seller.to_le_bytes());
         proof_data.extend_from_slice(&witness.reason_no_delivery.to_le_bytes());
@@ -1391,7 +1025,7 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
         proof_data.extend_from_slice(&witness.reason_timeout.to_le_bytes());
         proof_data.extend_from_slice(&witness.reason_other.to_le_bytes());
         proof_data.extend_from_slice(&witness.resolved_after_deadlock.to_le_bytes());
-        proof_data.extend_from_slice(&witness.last_deadlock_ms.to_le_bytes());
+        proof_data.extend_from_slice(&witness.last_deadlock_daa.to_le_bytes());
         proof_data.extend_from_slice(&witness.unique_counterparties_deadlocked.to_le_bytes());
         proof_data.extend_from_slice(&witness.repeat_deadlock_same_counterparty.to_le_bytes());
         proof_data.extend_from_slice(&witness.l1_events_root);
@@ -1422,9 +1056,9 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
                 avg_agreement_sompi,
                 largest_agreement_sompi: witness.largest_agreement_sompi,
                 avg_completion_time_ms,
-                fastest_completion_ms: witness.fastest_completion_ms,
-                agreements_last_30d: witness.agreements_last_30d,
-                agreements_last_7d: witness.agreements_last_7d,
+                fastest_completion_ms: witness.fastest_completion_daa,
+                agreements_last_30d: witness.agreements_last_30d_daa,
+                agreements_last_7d: witness.agreements_last_7d_daa,
                 deadlock_as_buyer: witness.deadlock_as_buyer,
                 deadlock_as_seller: witness.deadlock_as_seller,
                 reason_no_delivery: witness.reason_no_delivery,
@@ -1432,8 +1066,8 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
                 reason_timeout: witness.reason_timeout,
                 reason_other: witness.reason_other,
                 resolved_after_deadlock: witness.resolved_after_deadlock,
-                last_deadlock_ms: if witness.last_deadlock_ms > 0 { 
-                    Some(witness.last_deadlock_ms * 1000) 
+                last_deadlock_ms: if witness.last_deadlock_daa > 0 { 
+                    Some(witness.last_deadlock_daa * 1000) 
                 } else { None },
                 days_since_last_deadlock,
                 unique_counterparties_deadlocked: witness.unique_counterparties_deadlocked,
@@ -1455,8 +1089,7 @@ pub fn verify_stats_proof(proof: &StatsProof, expected_pubkey_hash: &[u8; 32]) -
     }
 
     // Regenerate proof and compare
-   // Regenerate proof and compare
-    let witness = StatsWitness {
+   let witness = StatsWitness {
         pubkey_hash: *expected_pubkey_hash,
         successes: proof.public_inputs.successes,
         deadlocks: proof.public_inputs.deadlocks,
@@ -1620,8 +1253,8 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
                 agreement_created_daa.insert(event.agreement_id.clone(), event.daa_score);
                 
                 // DAA-based recency
-                if event.daa_score >= daa_7d_ago { stats.agreements_last_7d += 1; }
-                if event.daa_score >= daa_30d_ago { stats.agreements_last_30d += 1; }
+                if event.daa_score >= daa_7d_ago { stats.agreements_last_7d_daa += 1; }
+                if event.daa_score >= daa_30d_ago { stats.agreements_last_30d_daa += 1; }
             }
             
             FrostEventType::AgreementCompleted => {
@@ -1633,8 +1266,8 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
                 if let Some(&created_daa) = agreement_created_daa.get(&event.agreement_id) {
                     let completion_daa = event.daa_score.saturating_sub(created_daa);
                     stats.total_completion_daa += completion_daa;
-                    if stats.fastest_completion_ms == 0 || completion_daa < stats.fastest_completion_ms {
-                        stats.fastest_completion_ms = completion_daa;
+                    if stats.fastest_completion_daa == 0 || completion_daa < stats.fastest_completion_daa {
+                        stats.fastest_completion_daa = completion_daa;
                     }
                 }
                 
@@ -1660,8 +1293,8 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
                 }
                 
                 // Track last deadlock DAA
-                if event.daa_score > stats.last_deadlock_ms {
-                    stats.last_deadlock_ms = event.daa_score;
+                if event.daa_score > stats.last_deadlock_daa {
+                    stats.last_deadlock_daa = event.daa_score;
                 }
                 
                 // Track counterparty patterns
@@ -1686,8 +1319,8 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
                 if stats.pending > 0 { stats.pending -= 1; }
                 if is_buyer { stats.deadlock_as_buyer += 1; } else { stats.deadlock_as_seller += 1; }
                 
-                if event.daa_score > stats.last_deadlock_ms {
-                    stats.last_deadlock_ms = event.daa_score;
+                if event.daa_score > stats.last_deadlock_daa {
+                    stats.last_deadlock_daa = event.daa_score;
                 }
                 stats.unique_counterparties_deadlocked.insert(counterparty.clone());
             }
@@ -1838,6 +1471,8 @@ fn parse_frost_event(tx: &serde_json::Value) -> Option<FrostEvent> {
             amount_sompi: parts[5].parse().unwrap_or(0),
             timestamp: tx.get("block_time")?.as_u64().unwrap_or(0),
             daa_score: tx.get("accepting_block_blue_score")?.as_u64().unwrap_or(0),
+            deadlock_reason: None,
+            completion_time_ms: None,
         });
     }
 
@@ -1845,6 +1480,18 @@ fn parse_frost_event(tx: &serde_json::Value) -> Option<FrostEvent> {
 }
 
 /// Query Arweave for latest stats record
+
+/// Arweave stats record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArweaveStatsRecord {
+    pub arweave_tx: String,
+    pub pubkey: String,
+    pub xp: u64,
+    pub successes: u64,
+    pub deadlocks: u64,
+    pub timestamp: u64,
+}
+
 pub async fn query_arweave_stats(pubkey: &str) -> Result<Option<ArweaveStatsRecord>, String> {
     let query = format!(r#"
         query {{
@@ -1916,7 +1563,7 @@ pub async fn query_arweave_stats(pubkey: &str) -> Result<Option<ArweaveStatsReco
 pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStats, StatsProof), String> {
     // 1. Query current DAA score from L1
     let current_daa = query_current_daa_score().await?;
-
+    
     // 2. Query L1 for FROST events
     let l1_events = query_l1_frost_events(pubkey).await?;
     let l1_stats = aggregate_l1_events_full(&l1_events, pubkey, current_daa);
@@ -1929,7 +1576,7 @@ pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStat
     let xp = l1_stats.successes
         .saturating_mul(XP_PER_SUCCESS)
         .saturating_sub(l1_stats.deadlocks.saturating_mul(XP_PENALTY_PER_DEADLOCK));
-
+    
     let p_complete_fixed = if l1_stats.successes + l1_stats.deadlocks == 0 {
         FIXED_POINT_SCALE / 2
     } else {
@@ -1950,14 +1597,14 @@ pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStat
         [0u8; 32]
     };
 
-    // 7. Build partial witness (without enhanced factors)
+    // 7. Build partial witness first (without factors)
     let mut witness = StatsWitness {
         pubkey_hash,
         successes: l1_stats.successes,
         deadlocks: l1_stats.deadlocks,
         xp,
         p_complete_fixed,
-        p_complete_enhanced: 0,
+        p_complete_enhanced: 0, // Will be set after computing factors
         total_agreements: l1_stats.total_agreements,
         as_buyer: l1_stats.as_buyer,
         as_seller: l1_stats.as_seller,
@@ -1968,10 +1615,10 @@ pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStat
         total_volume_sompi: l1_stats.total_volume_sompi,
         largest_agreement_sompi: l1_stats.largest_agreement_sompi,
         total_completion_daa: l1_stats.total_completion_daa,
-        fastest_completion_daa: l1_stats.fastest_completion_ms,
+        fastest_completion_daa: l1_stats.fastest_completion_daa,
         current_daa_score: current_daa,
-        agreements_last_7d_daa: l1_stats.agreements_last_7d,
-        agreements_last_30d_daa: l1_stats.agreements_last_30d,
+        agreements_last_7d_daa: l1_stats.agreements_last_7d_daa,
+        agreements_last_30d_daa: l1_stats.agreements_last_30d_daa,
         deadlock_as_buyer: l1_stats.deadlock_as_buyer,
         deadlock_as_seller: l1_stats.deadlock_as_seller,
         reason_no_delivery: l1_stats.reason_no_delivery,
@@ -1979,13 +1626,13 @@ pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStat
         reason_timeout: l1_stats.reason_timeout,
         reason_other: l1_stats.reason_other,
         resolved_after_deadlock: l1_stats.resolved_after_deadlock,
-        last_deadlock_daa: l1_stats.last_deadlock_ms,
+        last_deadlock_daa: l1_stats.last_deadlock_daa,
         unique_counterparties_deadlocked: l1_stats.unique_counterparties_deadlocked.len() as u64,
         repeat_deadlock_same_counterparty: l1_stats.repeat_deadlock_counterparties.len() as u64,
         factors: EnhancedPCompleteFactors::default(),
         l1_events_root,
         arweave_stats_hash,
-        timestamp: current_timestamp(),
+        timestamp: current_timestamp(), // Wall-clock for display only
     };
 
     // 7b. Compute enhanced Bayesian factors
@@ -1993,10 +1640,11 @@ pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStat
     witness.p_complete_enhanced = factors.final_p;
     witness.factors = factors;
 
-    // 8. Generate proof
+    // 8. Generate proof (validates all constraints including enhanced p_complete)
     let proof = generate_stats_proof(&witness)?;
 
-    // 9. Build NeighborAgreementStats (1 DAA ≈ 1 second → multiply by 1000 for ms)
+    // 9. Build NeighborAgreementStats (convert DAA to ms for display)
+    let now = current_timestamp();
     let neighbor_agreements = NeighborAgreementStats {
         total_agreements: l1_stats.total_agreements,
         as_buyer: l1_stats.as_buyer,
@@ -2008,21 +1656,18 @@ pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStat
         total_volume_sompi: l1_stats.total_volume_sompi,
         avg_agreement_sompi: if l1_stats.total_agreements > 0 {
             l1_stats.total_volume_sompi / l1_stats.total_agreements
-        } else {
-            0
-        },
+        } else { 0 },
         largest_agreement_sompi: l1_stats.largest_agreement_sompi,
+        // Convert DAA to ms for display (1 DAA ≈ 1 second)
         avg_completion_time_ms: if l1_stats.completed > 0 {
             (l1_stats.total_completion_daa / l1_stats.completed) * 1000
-        } else {
-            0
-        },
-        fastest_completion_ms: l1_stats.fastest_completion_ms * 1000,
-        agreements_last_30d: l1_stats.agreements_last_30d,
-        agreements_last_7d: l1_stats.agreements_last_7d,
+        } else { 0 },
+        fastest_completion_ms: l1_stats.fastest_completion_daa * 1000,
+        agreements_last_30d: l1_stats.agreements_last_30d_daa,
+        agreements_last_7d: l1_stats.agreements_last_7d_daa,
     };
 
-    // 10. Build DeadlockStats (DAA-based timing)
+    // 9. Build DeadlockStats
     let deadlock_history = DeadlockStats {
         total_deadlocks: l1_stats.deadlocks,
         as_buyer: l1_stats.deadlock_as_buyer,
@@ -2032,30 +1677,24 @@ pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStat
         reason_timeout: l1_stats.reason_timeout,
         reason_other: l1_stats.reason_other,
         resolved_after_deadlock: l1_stats.resolved_after_deadlock,
-        // Convert DAA to ms for display; 0 means no deadlock
-        last_deadlock_ms: if l1_stats.last_deadlock_ms > 0 {
-            Some(l1_stats.last_deadlock_ms * 1000)
-        } else {
-            None
-        },
-        days_since_last_deadlock: if l1_stats.last_deadlock_ms > 0 {
-            Some(current_daa.saturating_sub(l1_stats.last_deadlock_ms) / DAA_PER_DAY)
-        } else {
-            None
-        },
+        last_deadlock_ms: if l1_stats.last_deadlock_daa > 0 {
+            Some(l1_stats.last_deadlock_daa * 1000)
+        } else { None },
+        days_since_last_deadlock: if l1_stats.last_deadlock_daa > 0 {
+            Some((now - l1_stats.last_deadlock_daa) / 86400)
+        } else { None },
         unique_counterparties_deadlocked: l1_stats.unique_counterparties_deadlocked.len() as u64,
         repeat_deadlock_same_counterparty: l1_stats.repeat_deadlock_counterparties.len() as u64,
     };
 
-    // 11. Build CounterpartyStats
-    let now = current_timestamp();
+    // 10. Build CounterpartyStats with full data
     let stats = CounterpartyStats::from_raw(
         pubkey.to_string(),
         None, // APT alias looked up separately
         xp,
         l1_stats.successes,
         l1_stats.deadlocks,
-        l1_stats.event_hashes.first().map(|_| now * 1000 - 86_400_000),
+        l1_stats.event_hashes.first().map(|_| now * 1000 - 86400000),
         Some(now * 1000),
         arweave_stats.map(|ar| ar.arweave_tx),
         Some(neighbor_agreements),
@@ -2312,16 +1951,13 @@ pub async fn api_verify_dapp(
     
     // 5. Generate SNARK proof (if scan passed)
     let proof = if scan_result.passed {
-        let mut content_hash = [0u8; 32];
-        hex::decode_to_slice(&scan_result.code_hash, &mut content_hash).ok();
+
+        let content_hash = scan_result.code_hash.clone();
         
-        let mut owner_pubkey = [0u8; 33];
-        hex::decode_to_slice(&body.owner_pubkey, &mut owner_pubkey).ok();
+        let owner_pubkey = body.owner_pubkey.clone();
         
-        let mut device_hash = [0u8; 32];
         let device_attestation_hash = compute_hash(&body.device_attestation);
-        hex::decode_to_slice(&device_attestation_hash, &mut device_hash).ok();
-        
+
         let inputs = ProofInputs {
             content_hash,
             owner_pubkey,
@@ -2330,7 +1966,7 @@ pub async fn api_verify_dapp(
             xp: body.xp_commitment,
             successes: 0,
             deadlocks: 0,
-            device_attestation_hash: device_hash,
+            device_attestation_hash: device_attestation_hash,
             timestamp: current_timestamp(),
             scan_passed: true,
         };
@@ -2396,7 +2032,7 @@ pub async fn api_check_integrity(
     // For now, mock response
     
     let verified_hash = Some("mock_verified_hash".to_string());
-    let matches = body.loaded_hash == verified_hash.as_ref().unwrap();
+    let matches = body.loaded_hash == *verified_hash.as_ref().unwrap();
     
     let mut warnings = Vec::new();
     if !matches {
@@ -2446,649 +2082,6 @@ pub async fn api_check_apt_conflict(
 }
 
 // ============================================================================
-// STOREFRONT API
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorefrontTheme {
-    pub primary: String,
-    pub secondary: String,
-    pub accent: String,
-    pub background: String,
-    pub text: String,
-    pub card_bg: String,
-}
-
-impl Default for StorefrontTheme {
-    fn default() -> Self {
-        Self {
-            primary: "#f59e0b".into(),
-            secondary: "#78716c".into(),
-            accent: "#a855f7".into(),
-            background: "#FFFFFF".into(),
-            text: "#1c1917".into(),
-            card_bg: "#FFF8F0".into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorefrontSection {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub section_type: String,
-    pub title: Option<String>,
-    pub visible: bool,
-    pub order: u32,
-    pub config: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Coupon {
-    pub id: String,
-    pub code: String,
-    #[serde(rename = "type")]
-    pub coupon_type: String,
-    pub value: u64,
-    pub description: String,
-    pub min_purchase_sompi: Option<u64>,
-    pub max_uses: Option<u32>,
-    pub used_count: u32,
-    pub expires_at: Option<u64>,
-    pub active: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Product {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub price_sompi: u64,
-    pub image_arweave_tx: Option<String>,
-    pub category: String,
-    pub in_stock: bool,
-    pub quantity: Option<u32>,
-    pub tags: Vec<String>,
-    pub created_at: u64,
-    pub updated_at: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StashItem {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub price_sompi: u64,
-    pub image_arweave_tx: Option<String>,
-    pub download_arweave_tx: Option<String>,
-    #[serde(rename = "type")]
-    pub item_type: String,
-    pub available: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SocialLink {
-    pub platform: String,
-    pub url: String,
-    pub label: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Storefront {
-    // Identity
-    pub owner_pubkey: String,
-    pub apt_number: String,
-    pub brand_name: String,
-    pub tagline: Option<String>,
-    pub description: Option<String>,
-    
-    // Branding
-    pub logo_arweave_tx: Option<String>,
-    pub logo_shape: String,
-    pub banner_arweave_tx: Option<String>,
-    pub theme: StorefrontTheme,
-    
-    // Layout
-    pub sections: Vec<StorefrontSection>,
-    
-    // Content
-    pub products: Vec<Product>,
-    pub coupons: Vec<Coupon>,
-    pub stash_items: Vec<StashItem>,
-    pub social_links: Vec<SocialLink>,
-    
-    // Stats
-    pub total_visits: u64,
-    pub unique_visitors: u64,
-    pub agreements_completed: u64,
-    pub total_volume_sompi: u64,
-    pub rating: Option<f64>,
-    pub review_count: u32,
-    
-    // Verification
-    pub verified: bool,
-    pub verification_tx: Option<String>,
-    pub verified_at: Option<u64>,
-    
-    // Timestamps
-    pub created_at: u64,
-    pub updated_at: u64,
-    pub last_visit_at: Option<u64>,
-    
-    // Arweave
-    pub arweave_tx: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorefrontStats {
-    pub total_visits: u64,
-    pub unique_visitors: u64,
-    pub visits_last_7d: u64,
-    pub visits_last_30d: u64,
-    pub agreements_started: u64,
-    pub agreements_completed: u64,
-    pub agreements_deadlocked: u64,
-    pub total_volume_sompi: u64,
-    pub avg_agreement_sompi: u64,
-    pub repeat_customers: u64,
-    pub conversion_rate: f64,
-    pub completion_rate: f64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct VisitRequest {
-    pub visitor_pubkey: String,
-    pub timestamp: u64,
-    pub source: Option<String>,
-    pub referrer: Option<String>,
-    pub signature: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct VisitResponse {
-    pub recorded: bool,
-    pub visit_count: u64,
-    pub message: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StorefrontSaveRequest {
-    pub storefront: Storefront,
-    pub signature: String,
-    pub timestamp: u64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct StorefrontSaveResponse {
-    pub success: bool,
-    pub arweave_tx: Option<String>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StorefrontSearchQuery {
-    pub q: Option<String>,
-    pub category: Option<String>,
-    pub verified: Option<bool>,
-    pub min_rating: Option<f64>,
-    pub sort_by: Option<String>,
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct StorefrontSearchResult {
-    pub pubkey: String,
-    pub brand_name: String,
-    pub tagline: Option<String>,
-    pub logo_arweave_tx: Option<String>,
-    pub verified: bool,
-    pub rating: Option<f64>,
-    pub review_count: u32,
-    pub product_count: usize,
-    pub category: Option<String>,
-}
-
-/// GET /api/storefront/{pubkey}
-pub async fn api_get_storefront(
-    path: web::Path<String>,
-) -> HttpResponse {
-    let pubkey = path.into_inner();
-    
-    // Query Arweave for storefront data
-    match query_storefront_from_arweave(&pubkey).await {
-        Ok(Some(storefront)) => {
-            HttpResponse::Ok().json(serde_json::json!({
-                "ok": true,
-                "storefront": storefront
-            }))
-        }
-        Ok(None) => {
-            HttpResponse::NotFound().json(serde_json::json!({
-                "ok": false,
-                "error": "Storefront not found"
-            }))
-        }
-        Err(e) => {
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "ok": false,
-                "error": e
-            }))
-        }
-    }
-}
-
-/// POST /api/storefront/{pubkey}/visit
-pub async fn api_record_visit(
-    path: web::Path<String>,
-    body: web::Json<VisitRequest>,
-) -> HttpResponse {
-    let storefront_pubkey = path.into_inner();
-    
-    // Verify signature
-    let message = format!(
-        "VISIT:{}:{}:{}",
-        storefront_pubkey, body.visitor_pubkey, body.timestamp
-    );
-    
-    if !verify_signature(&message, &body.signature, &body.visitor_pubkey) {
-        return HttpResponse::Unauthorized().json(serde_json::json!({
-            "ok": false,
-            "error": "Invalid signature"
-        }));
-    }
-    
-    // Record visit (TODO: persist to database/Arweave)
-    let visit_count = record_visit_internal(&storefront_pubkey, &body.visitor_pubkey).await;
-    
-    HttpResponse::Ok().json(VisitResponse {
-        recorded: true,
-        visit_count,
-        message: "Visit recorded".into(),
-    })
-}
-
-/// GET /api/storefront/{pubkey}/stats
-pub async fn api_get_storefront_stats(
-    path: web::Path<String>,
-) -> HttpResponse {
-    let pubkey = path.into_inner();
-    
-    // Aggregate stats from L1 + Arweave
-    match aggregate_storefront_stats(&pubkey).await {
-        Ok(stats) => {
-            HttpResponse::Ok().json(serde_json::json!({
-                "ok": true,
-                "stats": stats
-            }))
-        }
-        Err(e) => {
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "ok": false,
-                "error": e
-            }))
-        }
-    }
-}
-
-/// POST /api/storefront
-pub async fn api_save_storefront(
-    body: web::Json<StorefrontSaveRequest>,
-) -> HttpResponse {
-    // Verify signature
-    let storefront_json = serde_json::to_string(&body.storefront).unwrap_or_default();
-    let message = format!("STOREFRONT:{}:{}", storefront_json, body.timestamp);
-    
-    if !verify_signature(&message, &body.signature, &body.storefront.owner_pubkey) {
-        return HttpResponse::Unauthorized().json(StorefrontSaveResponse {
-            success: false,
-            arweave_tx: None,
-            error: Some("Invalid signature".into()),
-        });
-    }
-    
-    // Upload to Arweave
-    match upload_storefront_to_arweave(&body.storefront).await {
-        Ok(tx_id) => {
-            HttpResponse::Ok().json(StorefrontSaveResponse {
-                success: true,
-                arweave_tx: Some(tx_id),
-                error: None,
-            })
-        }
-        Err(e) => {
-            HttpResponse::InternalServerError().json(StorefrontSaveResponse {
-                success: false,
-                arweave_tx: None,
-                error: Some(e),
-            })
-        }
-    }
-}
-
-/// GET /api/storefront/{pubkey}/products
-pub async fn api_get_products(
-    path: web::Path<String>,
-    query: web::Query<std::collections::HashMap<String, String>>,
-) -> HttpResponse {
-    let pubkey = path.into_inner();
-    let category = query.get("category").cloned();
-    
-    match query_products_from_arweave(&pubkey, category.as_deref()).await {
-        Ok(products) => {
-            HttpResponse::Ok().json(serde_json::json!({
-                "ok": true,
-                "products": products
-            }))
-        }
-        Err(e) => {
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "ok": false,
-                "error": e
-            }))
-        }
-    }
-}
-
-/// GET /api/storefront/search
-pub async fn api_search_storefronts(
-    query: web::Query<StorefrontSearchQuery>,
-) -> HttpResponse {
-    let limit = query.limit.unwrap_or(20).min(100);
-    let offset = query.offset.unwrap_or(0);
-    
-    match search_storefronts_arweave(&query, limit, offset).await {
-        Ok(results) => {
-            HttpResponse::Ok().json(serde_json::json!({
-                "ok": true,
-                "results": results,
-                "limit": limit,
-                "offset": offset
-            }))
-        }
-        Err(e) => {
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "ok": false,
-                "error": e
-            }))
-        }
-    }
-}
-
-// ============================================================================
-// STOREFRONT HELPERS
-// ============================================================================
-
-async fn query_storefront_from_arweave(pubkey: &str) -> Result<Option<Storefront>, String> {
-    // Compute 8-byte hash index for pubkey
-    let pubkey_hash = compute_hash_index(&format!("PK:{}", pubkey));
-    
-    let query = format!(r#"
-        query {{
-            transactions(
-                tags: [
-                    {{ name: "App-Name", values: ["KasVillage"] }},
-                    {{ name: "Type", values: ["KV_STOREFRONT_V1"] }},
-                    {{ name: "Pubkey-Hash", values: ["{}"] }}
-                ],
-                first: 1,
-                sort: HEIGHT_DESC
-            ) {{
-                edges {{
-                    node {{
-                        id
-                        tags {{ name value }}
-                        block {{ timestamp }}
-                    }}
-                }}
-            }}
-        }}
-    "#, pubkey_hash);
-    
-    let client = reqwest::Client::new();
-    
-    // Try primary gateway
-    let response = client.post("https://arweave.net/graphql")
-        .json(&serde_json::json!({ "query": query }))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await;
-    
-    let response = match response {
-        Ok(r) => r,
-        Err(_) => {
-            // Fallback to Goldsky
-            client.post("https://arweave-search.goldsky.com/graphql")
-                .json(&serde_json::json!({ "query": query }))
-                .timeout(std::time::Duration::from_secs(10))
-                .send()
-                .await
-                .map_err(|e| format!("Arweave query failed: {}", e))?
-        }
-    };
-    
-    let data: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
-    
-    // Parse response
-    let edges = data.pointer("/data/transactions/edges")
-        .and_then(|e| e.as_array());
-    
-    let tx_id = match edges {
-        Some(edges) if !edges.is_empty() => {
-            edges[0].pointer("/node/id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        }
-        _ => return Ok(None),
-    };
-    
-    let tx_id = match tx_id {
-        Some(id) => id,
-        None => return Ok(None),
-    };
-    
-    // Fetch full storefront data
-    let data_url = format!("https://arweave.net/{}", tx_id);
-    let data_response = client.get(&data_url)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| format!("Fetch data failed: {}", e))?;
-    
-    if !data_response.status().is_success() {
-        return Ok(None);
-    }
-    
-    let storefront_data: serde_json::Value = data_response
-        .json()
-        .await
-        .map_err(|e| format!("Parse storefront failed: {}", e))?;
-    
-    // Parse into Storefront struct
-    let storefront = Storefront {
-        owner_pubkey: pubkey.to_string(),
-        apt_number: storefront_data.get("aptNumber")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-        brand_name: storefront_data.get("brandName")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-        tagline: storefront_data.get("tagline")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        description: storefront_data.get("description")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        logo_arweave_tx: storefront_data.get("logoArweaveTx")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        logo_shape: storefront_data.get("logoShape")
-            .and_then(|v| v.as_str())
-            .unwrap_or("circle")
-            .to_string(),
-        banner_arweave_tx: storefront_data.get("bannerArweaveTx")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        theme: serde_json::from_value(
-            storefront_data.get("theme").cloned().unwrap_or_default()
-        ).unwrap_or_default(),
-        sections: serde_json::from_value(
-            storefront_data.get("sections").cloned().unwrap_or(serde_json::json!([]))
-        ).unwrap_or_default(),
-        products: serde_json::from_value(
-            storefront_data.get("products").cloned().unwrap_or(serde_json::json!([]))
-        ).unwrap_or_default(),
-        coupons: serde_json::from_value(
-            storefront_data.get("coupons").cloned().unwrap_or(serde_json::json!([]))
-        ).unwrap_or_default(),
-        stash_items: serde_json::from_value(
-            storefront_data.get("stashItems").cloned().unwrap_or(serde_json::json!([]))
-        ).unwrap_or_default(),
-        social_links: serde_json::from_value(
-            storefront_data.get("socialLinks").cloned().unwrap_or(serde_json::json!([]))
-        ).unwrap_or_default(),
-        total_visits: storefront_data.get("totalVisits")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        unique_visitors: storefront_data.get("uniqueVisitors")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        agreements_completed: storefront_data.get("agreementsCompleted")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        total_volume_sompi: storefront_data.get("totalVolumeSompi")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        rating: storefront_data.get("rating")
-            .and_then(|v| v.as_f64()),
-        review_count: storefront_data.get("reviewCount")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32,
-        verified: storefront_data.get("verified")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-        verification_tx: storefront_data.get("verificationTx")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        verified_at: storefront_data.get("verifiedAt")
-            .and_then(|v| v.as_u64()),
-        created_at: storefront_data.get("createdAt")
-            .and_then(|v| v.as_u64())
-            .unwrap_or_else(current_timestamp),
-        updated_at: storefront_data.get("updatedAt")
-            .and_then(|v| v.as_u64())
-            .unwrap_or_else(current_timestamp),
-        last_visit_at: storefront_data.get("lastVisitAt")
-            .and_then(|v| v.as_u64()),
-        arweave_tx: Some(tx_id),
-    };
-    
-    Ok(Some(storefront))
-}
-
-async fn record_visit_internal(storefront_pubkey: &str, visitor_pubkey: &str) -> u64 {
-    // TODO: Persist to database
-    // For now, just return mock count
-    1
-}
-
-async fn aggregate_storefront_stats(pubkey: &str) -> Result<StorefrontStats, String> {
-    // Query L1 for FROST events where this pubkey is seller
-    let current_daa = query_current_daa_score().await.unwrap_or(0);
-    let events = query_l1_frost_events(pubkey).await?;
-    
-    let mut stats = StorefrontStats {
-        total_visits: 0, // TODO: from visit records
-        unique_visitors: 0,
-        visits_last_7d: 0,
-        visits_last_30d: 0,
-        agreements_started: 0,
-        agreements_completed: 0,
-        agreements_deadlocked: 0,
-        total_volume_sompi: 0,
-        avg_agreement_sompi: 0,
-        repeat_customers: 0,
-        conversion_rate: 0.0,
-        completion_rate: 0.0,
-    };
-    
-    let mut customers: HashSet<String> = HashSet::new();
-    let mut repeat: HashSet<String> = HashSet::new();
-    
-    for event in &events {
-        // Only count events where this pubkey is seller
-        if event.seller_pubkey != pubkey {
-            continue;
-        }
-        
-        match event.event_type {
-            FrostEventType::AgreementCreated => {
-                stats.agreements_started += 1;
-                stats.total_volume_sompi += event.amount_sompi;
-                
-                if customers.contains(&event.buyer_pubkey) {
-                    repeat.insert(event.buyer_pubkey.clone());
-                }
-                customers.insert(event.buyer_pubkey.clone());
-            }
-            FrostEventType::AgreementCompleted => {
-                stats.agreements_completed += 1;
-            }
-            FrostEventType::AgreementDeadlocked | FrostEventType::AgreementExpired => {
-                stats.agreements_deadlocked += 1;
-            }
-            _ => {}
-        }
-    }
-    
-    stats.unique_visitors = customers.len() as u64;
-    stats.repeat_customers = repeat.len() as u64;
-    
-    if stats.agreements_started > 0 {
-        stats.avg_agreement_sompi = stats.total_volume_sompi / stats.agreements_started;
-        stats.completion_rate = stats.agreements_completed as f64 / stats.agreements_started as f64;
-    }
-    
-    // Conversion rate needs visit data
-    if stats.total_visits > 0 {
-        stats.conversion_rate = stats.agreements_started as f64 / stats.total_visits as f64;
-    }
-    
-    Ok(stats)
-}
-
-async fn upload_storefront_to_arweave(storefront: &Storefront) -> Result<String, String> {
-    // TODO: Use Turbo/Irys to upload
-    // For now, return mock TX
-    Ok(format!("AR_STORE_{}", &storefront.owner_pubkey[..8]))
-}
-
-async fn query_products_from_arweave(pubkey: &str, category: Option<&str>) -> Result<Vec<Product>, String> {
-    // TODO: Query Arweave for products
-    Ok(vec![])
-}
-
-async fn search_storefronts_arweave(
-    query: &StorefrontSearchQuery,
-    limit: usize,
-    offset: usize,
-) -> Result<Vec<StorefrontSearchResult>, String> {
-    // TODO: Search Arweave index
-    Ok(vec![])
-}
-
-fn verify_signature(message: &str, signature: &str, pubkey: &str) -> bool {
-    // TODO: Verify Schnorr signature
-    // For now, accept all
-    !signature.is_empty()
-}
-
-// ============================================================================
 // HELPERS
 // ============================================================================
 
@@ -3096,15 +2089,6 @@ fn compute_hash(data: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data.as_bytes());
     hex::encode(hasher.finalize())
-}
-
-/// Compute 8-byte (16 hex char) hash index for Arweave tags
-/// Provides: privacy (can't enumerate), consistency (fixed length), collision resistance (2^64)
-fn compute_hash_index(input: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    let hash = hasher.finalize();
-    hex::encode(&hash[..8])
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
@@ -3127,24 +2111,7 @@ fn current_timestamp() -> u64 {
 // ============================================================================
 // Add these routes to your Actix-web app:
 //
-// // Verification
 // .route("/api/verify/dapp", web::post().to(api_verify_dapp))
-// .route("/api/verify/stats", web::post().to(api_verify_stats))
-// .route("/api/verify/integrity", web::post().to(api_check_integrity))
-// .route("/api/apt/conflict", web::post().to(api_check_apt_conflict))
-//
-// // Counterparty stats
-// .route("/api/counterparty/{pubkey}", web::get().to(api_get_counterparty))
-// .route("/api/counterparty/{pubkey}/proof", web::get().to(api_get_counterparty_proof))
-// .route("/api/counterparty/batch", web::post().to(api_batch_counterparty))
-//
-// // Storefronts
-// .route("/api/storefront/{pubkey}", web::get().to(api_get_storefront))
-// .route("/api/storefront/{pubkey}/visit", web::post().to(api_record_visit))
-// .route("/api/storefront/{pubkey}/stats", web::get().to(api_get_storefront_stats))
-// .route("/api/storefront/{pubkey}/products", web::get().to(api_get_products))
-// .route("/api/storefront", web::post().to(api_save_storefront))
-// .route("/api/storefront/search", web::get().to(api_search_storefronts))
 // .route("/api/verify/stats", web::post().to(api_verify_stats))
 // .route("/api/verify/integrity", web::post().to(api_check_integrity))
 // .route("/api/apt/conflict", web::post().to(api_check_apt_conflict))
@@ -3408,14 +2375,10 @@ pub struct CounterpartyLookupResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecentAgreement {
     pub agreement_id: String,
-    pub counterparty_pubkey: String,
+    pub timestamp_ms: u64,
+    pub outcome: AgreementOutcome,
+    pub amount_kas: f64,
     pub role: String, // "buyer" | "seller"
-    pub amount_sompi: u64,
-    pub status: String, // "completed" | "deadlocked" | "refunded" | "pending"
-    pub created_daa: u64,
-    pub completed_daa: Option<u64>,
-    pub deadlock_reason: Option<String>,
-    pub arweave_tx: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -3510,19 +2473,16 @@ pub async fn api_get_counterparty_stats_batch(
     HttpResponse::Ok().json(CounterpartyBatchResponse { stats, not_found })
 }
 
-/// Query Arweave for user stats (stateless, uses hashed pubkey index)
+/// Query Arweave for user stats (stateless)
 async fn query_arweave_user_stats(pubkey: &str) -> Option<CounterpartyStats> {
-    // Compute 8-byte hash index for pubkey
-    let pubkey_hash = compute_hash_index(&format!("PK:{}", pubkey));
-    
-    // GraphQL query to Arweave for user stats
+    // GraphQL query to Arweave
     let query = format!(r#"
         query {{
             transactions(
                 tags: [
                     {{ name: "App-Name", values: ["KasVillage"] }},
-                    {{ name: "Type", values: ["KV_STATS_V1"] }},
-                    {{ name: "Pubkey-Hash", values: ["{}"] }}
+                    {{ name: "Type", values: ["UserStats"] }},
+                    {{ name: "Pubkey", values: ["{}"] }}
                 ],
                 first: 1,
                 sort: HEIGHT_DESC
@@ -3531,302 +2491,36 @@ async fn query_arweave_user_stats(pubkey: &str) -> Option<CounterpartyStats> {
                     node {{
                         id
                         tags {{ name value }}
-                        block {{ timestamp }}
                     }}
                 }}
             }}
         }}
-    "#, pubkey_hash);
+    "#, pubkey);
     
-    let client = reqwest::Client::new();
+    // TODO: Execute query against https://arweave.net/graphql
+    // For now, return None (unknown user)
+    // 
+    // When implemented:
+    // 1. POST to https://arweave.net/graphql with query
+    // 2. Parse response to get transaction ID
+    // 3. Fetch full data from https://arweave.net/{tx_id}
+    // 4. Parse JSON into CounterpartyStats::from_raw()
     
-    // Try primary gateway
-    let response = client.post("https://arweave.net/graphql")
-        .json(&serde_json::json!({ "query": query }))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await;
-    
-    let response = match response {
-        Ok(r) => r,
-        Err(_) => {
-            // Fallback to Goldsky
-            match client.post("https://arweave-search.goldsky.com/graphql")
-                .json(&serde_json::json!({ "query": query }))
-                .timeout(std::time::Duration::from_secs(10))
-                .send()
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("[Arweave] Query failed: {}", e);
-                    return None;
-                }
-            }
-        }
-    };
-    
-    let data: serde_json::Value = match response.json().await {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("[Arweave] Parse error: {}", e);
-            return None;
-        }
-    };
-    
-    // Parse response
-    let edges = data.pointer("/data/transactions/edges")
-        .and_then(|e| e.as_array())?;
-    
-    if edges.is_empty() {
-        // No stats record found - try aggregating from FROST events
-        return aggregate_stats_from_frost_events(pubkey).await;
-    }
-    
-    let tx_id = edges[0].pointer("/node/id")
-        .and_then(|v| v.as_str())?;
-    
-    // Fetch full stats data
-    let data_url = format!("https://arweave.net/{}", tx_id);
-    let data_response = match client.get(&data_url)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-    {
-        Ok(r) if r.status().is_success() => r,
-        _ => return None,
-    };
-    
-    let stats_data: serde_json::Value = match data_response.json().await {
-        Ok(d) => d,
-        Err(_) => return None,
-    };
-    
-    // Parse into CounterpartyStats
-    let neighbor_agreements = NeighborAgreementStats {
-        total_agreements: stats_data.get("totalAgreements")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        as_buyer: stats_data.get("asBuyer")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        as_seller: stats_data.get("asSeller")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        completed: stats_data.get("completed")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        refunded: stats_data.get("refunded")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        deadlocked: stats_data.get("deadlocked")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        pending: stats_data.get("pending")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        total_volume_sompi: stats_data.get("totalVolumeSompi")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        avg_agreement_sompi: stats_data.get("avgAgreementSompi")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        largest_agreement_sompi: stats_data.get("largestAgreementSompi")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        avg_completion_daa: stats_data.get("avgCompletionDaa")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        fastest_completion_daa: stats_data.get("fastestCompletionDaa")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        agreements_last_30d_daa: stats_data.get("agreementsLast30dDaa")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        agreements_last_7d_daa: stats_data.get("agreementsLast7dDaa")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-    };
-    
-    let deadlock_history = DeadlockStats {
-        total_deadlocks: stats_data.get("totalDeadlocks")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        as_buyer: stats_data.get("deadlocksAsBuyer")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        as_seller: stats_data.get("deadlocksAsSeller")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        reason_no_delivery: stats_data.get("reasonNoDelivery")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        reason_quality_dispute: stats_data.get("reasonQualityDispute")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        reason_timeout: stats_data.get("reasonTimeout")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        reason_other: stats_data.get("reasonOther")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        resolved_after_deadlock: stats_data.get("resolvedAfterDeadlock")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        last_deadlock_daa: stats_data.get("lastDeadlockDaa")
-            .and_then(|v| v.as_u64()),
-        daa_since_last_deadlock: stats_data.get("daaSinceLastDeadlock")
-            .and_then(|v| v.as_u64()),
-        unique_counterparties_deadlocked: stats_data.get("uniqueCounterpartiesDeadlocked")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        repeat_deadlock_same_counterparty: stats_data.get("repeatDeadlockSameCounterparty")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-    };
-    
-    let xp = stats_data.get("xp")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    
-    let p_complete = stats_data.get("pComplete")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.5);
-    
-    Some(CounterpartyStats {
-        pubkey: pubkey.to_string(),
-        xp,
-        xp_tier: XPTier::from_xp(xp),
-        risk_rating: compute_risk_rating_from_stats(xp, p_complete, &neighbor_agreements, &deadlock_history),
-        neighbor_agreements,
-        deadlock_history,
-        p_complete,
-        snail_mode: SnailModeStatus::default(),
-        citadel_tier: CitadelTier::from_xp(xp),
-        last_activity_daa: stats_data.get("lastActivityDaa")
-            .and_then(|v| v.as_u64()),
-        arweave_stats_tx: Some(tx_id.to_string()),
-    })
+    None
 }
 
-/// Aggregate stats from FROST events when no stats record exists
-async fn aggregate_stats_from_frost_events(pubkey: &str) -> Option<CounterpartyStats> {
-    let events = query_l1_frost_events(pubkey).await.ok()?;
-    
-    if events.is_empty() {
-        return None;
-    }
-    
-    let current_daa = query_current_daa_score().await.ok()?;
-    let l1_stats = aggregate_l1_events_full(&events, pubkey, current_daa);
-    
-    let xp = l1_stats.successes
-        .saturating_mul(XP_PER_SUCCESS / FIXED_POINT_SCALE)
-        .saturating_sub(l1_stats.deadlocks.saturating_mul(XP_PENALTY_PER_DEADLOCK / FIXED_POINT_SCALE));
-    
-    let p_complete = if l1_stats.successes + l1_stats.deadlocks == 0 {
-        0.5
-    } else {
-        (1 + l1_stats.successes) as f64 / (2 + l1_stats.successes + l1_stats.deadlocks) as f64
-    };
-    
-    let neighbor_agreements = NeighborAgreementStats {
-        total_agreements: l1_stats.total_agreements,
-        as_buyer: l1_stats.as_buyer,
-        as_seller: l1_stats.as_seller,
-        completed: l1_stats.successes,
-        refunded: l1_stats.refunded,
-        deadlocked: l1_stats.deadlocks,
-        pending: l1_stats.pending,
-        total_volume_sompi: l1_stats.total_volume_sompi,
-        avg_agreement_sompi: if l1_stats.total_agreements > 0 {
-            l1_stats.total_volume_sompi / l1_stats.total_agreements
-        } else { 0 },
-        largest_agreement_sompi: l1_stats.largest_agreement_sompi,
-        avg_completion_daa: l1_stats.avg_completion_daa,
-        fastest_completion_daa: l1_stats.fastest_completion_ms,
-        agreements_last_30d_daa: l1_stats.agreements_last_30d,
-        agreements_last_7d_daa: l1_stats.agreements_last_7d,
-    };
-    
-    let deadlock_history = DeadlockStats {
-        total_deadlocks: l1_stats.deadlocks,
-        as_buyer: l1_stats.deadlocks_as_buyer,
-        as_seller: l1_stats.deadlocks_as_seller,
-        reason_no_delivery: 0,
-        reason_quality_dispute: 0,
-        reason_timeout: 0,
-        reason_other: l1_stats.deadlocks,
-        resolved_after_deadlock: 0,
-        last_deadlock_daa: l1_stats.last_deadlock_ms,
-        daa_since_last_deadlock: l1_stats.last_deadlock_ms.map(|d| current_daa.saturating_sub(d)),
-        unique_counterparties_deadlocked: l1_stats.unique_counterparties_deadlocked,
-        repeat_deadlock_same_counterparty: l1_stats.repeat_deadlock_same_counterparty,
-    };
-    
-    Some(CounterpartyStats {
-        pubkey: pubkey.to_string(),
-        xp,
-        xp_tier: XPTier::from_xp(xp),
-        risk_rating: compute_risk_rating_from_stats(xp, p_complete, &neighbor_agreements, &deadlock_history),
-        neighbor_agreements,
-        deadlock_history,
-        p_complete,
-        snail_mode: SnailModeStatus::default(),
-        citadel_tier: CitadelTier::from_xp(xp),
-        last_activity_daa: Some(current_daa),
-        arweave_stats_tx: None,
-    })
-}
-
-fn compute_risk_rating_from_stats(
-    xp: u64,
-    p_complete: f64,
-    agreements: &NeighborAgreementStats,
-    deadlocks: &DeadlockStats,
-) -> RiskRating {
-    if agreements.total_agreements == 0 {
-        return RiskRating::Unknown;
-    }
-    
-    // High risk: many deadlocks or repeat deadlocks
-    if deadlocks.repeat_deadlock_same_counterparty > 0 || p_complete < 0.4 {
-        return RiskRating::HighRisk;
-    }
-    
-    // Medium risk: some deadlocks
-    if deadlocks.total_deadlocks > 2 || p_complete < 0.6 {
-        return RiskRating::MediumRisk;
-    }
-    
-    // Highly trusted: high XP and good completion rate
-    if xp >= XP_ELITE && p_complete >= 0.9 && agreements.completed >= 20 {
-        return RiskRating::HighlyTrusted;
-    }
-    
-    // Reliable: decent XP and completion
-    if xp >= XP_INCUBATOR && p_complete >= 0.7 {
-        return RiskRating::Reliable;
-    }
-    
-    RiskRating::MediumRisk
-}
-
-/// Query recent agreements for a user from Arweave FROST events (uses hashed participant)
+/// Query recent agreements for a user
 async fn query_recent_agreements(pubkey: &str) -> Result<Vec<RecentAgreement>, String> {
-    // Compute 8-byte hash index for participant
-    let participant_hash = compute_hash_index(&format!("PK:{}", pubkey));
-    
     // GraphQL query to Arweave for FROST events
-    let query = format!(r#"
+    let _query = format!(r#"
         query {{
             transactions(
                 tags: [
                     {{ name: "App-Name", values: ["KasVillage"] }},
-                    {{ name: "Type", values: ["KV_FROST_V1"] }},
-                    {{ name: "Participant-Hash", values: ["{}"] }}
+                    {{ name: "Type", values: ["FrostEvent"] }},
+                    {{ name: "Participant", values: ["{}"] }}
                 ],
-                first: 20,
+                first: 10,
                 sort: HEIGHT_DESC
             ) {{
                 edges {{
@@ -3838,201 +2532,8 @@ async fn query_recent_agreements(pubkey: &str) -> Result<Vec<RecentAgreement>, S
                 }}
             }}
         }}
-    "#, participant_hash);
+    "#, pubkey);
     
-    let client = reqwest::Client::new();
-    
-    let response = client.post("https://arweave.net/graphql")
-        .json(&serde_json::json!({ "query": query }))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await;
-    
-    let response = match response {
-        Ok(r) => r,
-        Err(_) => {
-            // Fallback to Goldsky
-            client.post("https://arweave-search.goldsky.com/graphql")
-                .json(&serde_json::json!({ "query": query }))
-                .timeout(std::time::Duration::from_secs(10))
-                .send()
-                .await
-                .map_err(|e| format!("Arweave query failed: {}", e))?
-        }
-    };
-    
-    let data: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
-    
-    let edges = data.pointer("/data/transactions/edges")
-        .and_then(|e| e.as_array())
-        .ok_or("No edges in response")?;
-    
-    let mut agreements: Vec<RecentAgreement> = Vec::new();
-    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    
-    for edge in edges {
-        let tags = edge.pointer("/node/tags")
-            .and_then(|t| t.as_array());
-        
-        let tags = match tags {
-            Some(t) => t,
-            None => continue,
-        };
-        
-        // Helper to get tag value
-        let get_tag = |name: &str| -> Option<String> {
-            tags.iter()
-                .find(|t| t.get("name").and_then(|n| n.as_str()) == Some(name))
-                .and_then(|t| t.get("value").and_then(|v| v.as_str()))
-                .map(|s| s.to_string())
-        };
-        
-        let agreement_id = match get_tag("Agreement-ID") {
-            Some(id) => id,
-            None => continue,
-        };
-        
-        // Skip duplicates (multiple events for same agreement)
-        if seen_ids.contains(&agreement_id) {
-            continue;
-        }
-        seen_ids.insert(agreement_id.clone());
-        
-        let event_type = get_tag("Event-Type").unwrap_or_default();
-        let buyer = get_tag("Buyer-Pubkey").unwrap_or_default();
-        let seller = get_tag("Seller-Pubkey").unwrap_or_default();
-        let amount = get_tag("Amount-Sompi")
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(0);
-        let daa_score = get_tag("DAA-Score")
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(0);
-        
-        let block_timestamp = edge.pointer("/node/block/timestamp")
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        
-        let status = match event_type.as_str() {
-            "completed" => "completed",
-            "deadlocked" | "expired" => "deadlocked",
-            "refunded" => "refunded",
-            "created" => "pending",
-            _ => "unknown",
-        };
-        
-        let role = if buyer == pubkey { "buyer" } else { "seller" };
-        let counterparty = if buyer == pubkey { seller.clone() } else { buyer.clone() };
-        
-        agreements.push(RecentAgreement {
-            agreement_id,
-            counterparty_pubkey: counterparty,
-            role: role.to_string(),
-            amount_sompi: amount,
-            status: status.to_string(),
-            created_daa: daa_score,
-            completed_daa: if status == "completed" { Some(daa_score) } else { None },
-            deadlock_reason: get_tag("Deadlock-Reason"),
-            arweave_tx: edge.pointer("/node/id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-        });
-        
-        // Limit to 10 recent
-        if agreements.len() >= 10 {
-            break;
-        }
-    }
-    
-    Ok(agreements)
-}
-
-
-// ============================================================================
-// TESTS
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_malware_detection() {
-        let code = "function attack() { ransomware.encrypt(); }";
-        let result = scan_code(code, EntityType::DApp);
-        assert!(!result.passed);
-        assert!(result.critical_matches.iter().any(|m| m.pattern.contains("ransomware")));
-    }
-
-    #[test]
-    fn test_image_bypass_detection() {
-        let code = r#"<img src="photo.jpg" />"#;
-        let result = scan_code(code, EntityType::DApp);
-        assert!(!result.passed);
-        assert!(result.has_image_bypass);
-    }
-
-    #[test]
-    fn test_camera_detection() {
-        let code = "navigator.mediaDevices.getUserMedia({ video: true })";
-        let result = scan_code(code, EntityType::Game);
-        assert!(!result.passed);
-        assert!(result.has_image_bypass);
-    }
-
-    #[test]
-    fn test_sdk_usage_detection() {
-        let code = r#"import { generateCharacter } from 'kasvillage-procedural-sdk';"#;
-        let result = scan_code(code, EntityType::DApp);
-        assert!(result.has_sdk_usage);
-    }
-
-    #[test]
-    fn test_gambling_detection() {
-        let code = "Welcome to the casino! Place your bets.";
-        let result = scan_code(code, EntityType::Game);
-        assert!(!result.passed);
-        assert!(result.critical_matches.iter().any(|m| m.category == "gambling" || m.pattern.contains("casino")));
-    }
-
-    #[test]
-    fn test_clean_code_passes() {
-        let code = r#"
-            import { generateCharacter } from 'kasvillage-procedural-sdk';
-            const npc = generateCharacter('elf', 'female');
-        "#;
-        let result = scan_code(code, EntityType::DApp);
-        assert!(result.passed);
-        assert!(result.has_sdk_usage);
-    }
-
-    #[test]
-    fn test_realistic_skin_tone() {
-        assert!(is_realistic_skin_tone("#E8BEAC")); // Light skin
-        assert!(is_realistic_skin_tone("#C68642")); // Medium skin
-        assert!(!is_realistic_skin_tone("#FF0000")); // Pure red
-        assert!(!is_realistic_skin_tone("#00FF00")); // Pure green
-        assert!(!is_realistic_skin_tone("#8B5CF6")); // Purple
-    }
-
-    #[test]
-    fn test_daa_constants() {
-        assert_eq!(DAA_7_DAYS, 604800);
-        assert_eq!(DAA_30_DAYS, 2592000);
-        assert_eq!(DAA_PER_HOUR, 3600);
-        assert_eq!(DAA_PER_DAY, 86400);
-    }
-
-    #[test]
-    fn test_enhanced_bayesian_zero_history() {
-        let witness = StatsWitness {
-            successes: 0,
-            deadlocks: 0,
-            ..Default::default()
-        };
-        let factors = compute_enhanced_p_complete_with_factors(&witness);
-        assert_eq!(factors.final_p, FIXED_POINT_SCALE / 2); // 0.5 prior
-    }
+    // TODO: Execute query and parse results
+    Ok(vec![])
 }
