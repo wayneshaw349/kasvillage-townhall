@@ -7760,7 +7760,14 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/counterparty/{pubkey}", web::get().to(townhall_verification_complete::api_get_counterparty_stats))
         .route("/api/counterparty/{pubkey}/proof", web::get().to(townhall_verification_complete::api_get_counterparty_stats_with_proof))
         // Verification
-        .route("/api/verify/integrity", web::post().to(townhall_verification_complete::api_check_integrity));
+        .route("/api/verify/integrity", web::post().to(townhall_verification_complete::api_check_integrity))
+        // Storefronts (townhall_verification_complete)
+        .route("/api/storefront/search", web::get().to(townhall_verification_complete::api_search_storefronts))
+        .route("/api/storefront/{pubkey}", web::get().to(townhall_verification_complete::api_get_storefront))
+        .route("/api/storefront/{pubkey}/visit", web::post().to(townhall_verification_complete::api_record_visit))
+        .route("/api/storefront/{pubkey}/stats", web::get().to(townhall_verification_complete::api_get_storefront_stats))
+        .route("/api/storefront/{pubkey}/products", web::get().to(townhall_verification_complete::api_get_products))
+        .route("/api/storefront", web::post().to(townhall_verification_complete::api_save_storefront));
 }
 
 // ============================================================================
