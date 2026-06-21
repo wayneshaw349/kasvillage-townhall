@@ -1207,6 +1207,11 @@ pub struct AggregatedL1Stats {
     pub last_deadlock_daa: u64,
     pub unique_counterparties_deadlocked: HashSet<String>,
     pub repeat_deadlock_counterparties: HashSet<String>,
+    pub unique_counterparties_all: HashSet<String>,
+
+    // Self-trade detection
+    pub unique_counterparties_completed: HashSet<String>,
+    pub repeat_success_same_counterparty: u64,
     
     // For Merkle root
     pub event_hashes: Vec<String>,
@@ -1239,6 +1244,7 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
         let counterparty = if is_buyer { &event.seller_pubkey } else { &event.buyer_pubkey };
         
         stats.event_hashes.push(event.tx_id.clone());
+        stats.unique_counterparties_all.insert(counterparty.clone());
 
         match event.event_type {
             FrostEventType::AgreementCreated => {
@@ -1273,6 +1279,11 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
                 // Check if this resolves a previous deadlock with same counterparty
                 if deadlock_counterparties.contains_key(counterparty) {
                     stats.resolved_after_deadlock += 1;
+                // Track unique completed counterparties (self-trade detection)
+                if stats.unique_counterparties_completed.contains(counterparty) {
+                    stats.repeat_success_same_counterparty += 1;
+                }
+                stats.unique_counterparties_completed.insert(counterparty.clone());
                 }
             }
             
@@ -2347,6 +2358,7 @@ impl CounterpartyStats {
             last_activity_ms: None,
             arweave_tx: None,
             last_updated_ms: current_timestamp() * 1000,
+            unique_counterparties: 0,
         }
     }
 }
@@ -3137,6 +3149,8 @@ pub struct PledgeStatus {
     pub elapsed_days: u64,
     pub pledge_usd: f64,
     pub balance_usd: f64,
+    pub last_check_daa: u64,
+    pub balance_stale: bool,
 }
 
 /// Full visibility result
@@ -3149,6 +3163,8 @@ pub struct DAppVisibility {
     pub xp_factor: f64,
     pub stats_factor: f64,
     pub recency_factor: f64,
+    pub unique_counterparties: u64,
+    pub self_trade_flag: bool,  // >50% trades with same counterparty
 }
 
 /// Query Arweave for DApp pledge record
@@ -3218,6 +3234,8 @@ pub async fn compute_full_dapp_visibility(pubkey: &str) -> DAppVisibility {
             elapsed_days: elapsed_daa / 86400,
             pledge_usd: p.pledge_kas * kas_price,
             balance_usd: balance_kas * kas_price,
+            last_check_daa: current_daa,
+            balance_stale: false, // Just checked
         }
     } else {
         // No pledge = not visible
@@ -3225,7 +3243,7 @@ pub async fn compute_full_dapp_visibility(pubkey: &str) -> DAppVisibility {
             active: false, pledge_met: false, expired: true,
             pledge_kas: 0.0, current_balance_kas: 0.0,
             duration_days: 0, remaining_days: 0, elapsed_days: 0,
-            pledge_usd: 0.0, balance_usd: 0.0,
+            pledge_usd: 0.0, balance_usd: 0.0, last_check_daa: 0, balance_stale: true,
         }
     };
     
@@ -3235,6 +3253,7 @@ pub async fn compute_full_dapp_visibility(pubkey: &str) -> DAppVisibility {
             visible: false, pledge: pledge_status,
             ranking_score: 0.0, commitment_factor: 0.0,
             xp_factor: 0.0, stats_factor: 0.0, recency_factor: 0.0,
+            unique_counterparties: 0, self_trade_flag: false,
         };
     }
     
@@ -3260,10 +3279,16 @@ pub async fn compute_full_dapp_visibility(pubkey: &str) -> DAppVisibility {
         else if stats.agreements_last_30d_daa > 0 { 0.6 }
         else { 0.2 };
     
-    let ranking_score = (0.35 * commitment_factor)
+    let unique_cp = stats.unique_counterparties_completed.len() as u64;
+    let self_trade_flag = if stats.successes > 3 && unique_cp > 0 {
+        (stats.successes as f64 / unique_cp as f64) > 2.0 // avg >2 trades per counterparty = suspicious
+    } else { false };
+    let self_trade_penalty = if self_trade_flag { 0.5 } else { 1.0 };
+
+    let ranking_score = ((0.35 * commitment_factor)
                       + (0.25 * stats_factor)
                       + (0.20 * xp_factor)
-                      + (0.20 * recency_factor);
+                      + (0.20 * recency_factor)) * self_trade_penalty;
     
     DAppVisibility {
         visible: true,
@@ -3273,6 +3298,8 @@ pub async fn compute_full_dapp_visibility(pubkey: &str) -> DAppVisibility {
         xp_factor,
         stats_factor,
         recency_factor,
+        unique_counterparties: unique_cp,
+        self_trade_flag,
     }
 }
 

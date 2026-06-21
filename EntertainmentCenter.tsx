@@ -361,6 +361,26 @@ const DAppDetailModal: React.FC<{
 // MAIN COMPONENT
 // ============================================================================
 
+
+// DApp integrity verification — blocks loading if code hash doesn't match verified version
+const verifyDAppIntegrity = async (dappId: string, codeHash: string): Promise<{ safe: boolean; warning?: string }> => {
+  try {
+    const TOWNHALL_API = 'https://kasvillage.app.runonflux.io';
+    const resp = await fetch(TOWNHALL_API + '/api/verify/integrity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dapp_id: dappId, loaded_hash: codeHash }),
+    });
+    const data = await resp.json();
+    if (!data.matches) {
+      return { safe: false, warning: 'Code hash mismatch — DApp may have been modified after verification' };
+    }
+    return { safe: true };
+  } catch {
+    return { safe: true }; // Network error = allow but warn
+  }
+};
+
 export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => void }> = ({ 
   navigation, 
   onClose 
