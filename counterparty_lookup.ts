@@ -419,12 +419,14 @@ export async function lookupCounterparty(
     if (options.includeHistory) params.set('include_history', 'true');
     if (options.includeProof) params.set('include_proof', 'true');
     
-    const url = `${TOWNHALL_API}/user-stats`;
+    const url = endpoint
+      ? `${TOWNHALL_API}/api/counterparty/${pubkey}/${endpoint}?${params.toString()}`
+      : `${TOWNHALL_API}/api/counterparty/${pubkey}?${params.toString()}`;
     
     const response = await fetch(url, {
-      method: 'POST',
+      method: 'GET',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pubkey }),
+      // body removed - GET request uses path params
       signal: controller.signal,
     });
     
