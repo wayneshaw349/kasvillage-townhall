@@ -16,7 +16,7 @@ import * as SecureStore from 'expo-secure-store';
 // CONFIGURATION
 // ============================================================================
 
-const TOWNHALL_URL = 'https://townhall.kasvillage.dev';
+const TOWNHALL_URL = 'https://kasvillage.app.runonflux.io';
 const ARWEAVE_GATEWAY = 'https://arweave.net';
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 

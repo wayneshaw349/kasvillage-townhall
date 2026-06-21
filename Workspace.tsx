@@ -180,7 +180,7 @@ const COLORS = {
 // ============================================================================
 // TOWNHALL API (v2 integration)
 // ============================================================================
-const TOWNHALL_API = 'https://townhall.kasvillage.dev/api';
+const TOWNHALL_API = 'https://kasvillage.app.runonflux.io/api';
 
 // TownHallClient for signed, authenticated API calls
 import { townHall as townHallClient } from './townhall_client';
