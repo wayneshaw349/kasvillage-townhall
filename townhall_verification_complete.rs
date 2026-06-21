@@ -3215,6 +3215,7 @@ pub struct CounterpartyStats {
     // Source
     pub arweave_tx: Option<String>,
     pub last_updated_ms: u64,
+    pub unique_counterparties: u64,
 }
 
 /// Neighbor agreement statistics
