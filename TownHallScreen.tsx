@@ -895,20 +895,38 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     setIsSending(true);
     
     try {
-      const payload: any = {
-        type: sendType,
-        name: sendName,
-        pubkey: myPubkey,
-        apt: myApt,
-        description: sendDescription,
-      };
+      let payload: any;
       
       if (sendType === 'dapp') {
-        payload.codebase_url = sendCodeUrl;
-      } else if (sendType === 'stats') {
-        // Include current stats for verification
-        payload.stats = myStats;
-        payload.stats_hash = await generateStatsHash(myStats);
+        payload = {
+          owner_pubkey: myPubkey || '',
+          apt_number: myApt || '',
+          dapp_name: sendName,
+          dapp_code: '', // Code fetched by TownHall from URL
+          dapp_url: sendCodeUrl,
+          category: 'UtilityTool',
+          xp_commitment: 500,
+          trait_count: traitCount,
+          signature: 'self-attest',
+          device_attestation: 'pending',
+        };
+      } else if (sendType === 'store') {
+        payload = {
+          owner_pubkey: myPubkey || '',
+          apt_number: myApt || '',
+          name: sendName,
+          description: sendDescription,
+          signature: 'self-attest',
+        };
+      } else {
+        // Stats verification
+        payload = {
+          owner_pubkey: myPubkey || '',
+          apt_number: myApt || '',
+          stats: myStats || { xp: 0, successes: 0, deadlocks: 0, total_transactions: 0, created_at: 0, last_active_at: Date.now() },
+          stats_signature: 'self-attest',
+          device_attestation: 'pending',
+        };
       }
       
       const sendEndpoint = sendType === 'dapp' ? '/api/verify/dapp'
