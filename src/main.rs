@@ -7758,6 +7758,10 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         // Counterparty Stats (townhall_verification_complete)
         .route("/api/counterparty/batch", web::post().to(townhall_verification_complete::api_get_counterparty_stats_batch))
         .route("/api/counterparty/apt/{apt}", web::get().to(townhall_verification_complete::api_counterparty_by_apt))
+        .route("/api/storefront/apt/{apt}", web::get().to(townhall_verification_complete::api_storefront_by_apt))
+        .route("/api/storefront/apt/{apt}/products", web::get().to(townhall_verification_complete::api_products_by_apt))
+        .route("/api/dapp/{pubkey}", web::get().to(townhall_verification_complete::api_get_dapps_by_owner))
+        .route("/api/dapp/apt/{apt}", web::get().to(townhall_verification_complete::api_dapps_by_apt))
         .route("/api/counterparty/{pubkey}", web::get().to(townhall_verification_complete::api_get_counterparty_stats))
         .route("/api/counterparty/{pubkey}/proof", web::get().to(townhall_verification_complete::api_get_counterparty_stats_with_proof))
         // Verification
