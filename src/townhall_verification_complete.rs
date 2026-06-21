@@ -2502,6 +2502,31 @@ pub async fn api_get_dapps_by_owner(path: web::Path<String>) -> HttpResponse {
             }));
         }
     }
+    // Enrich with pledge status for each DApp owner
+    let mut visible_dapps = Vec::new();
+    for dapp in &dapps {
+        let owner = dapp.get("owner").and_then(|v| v.as_str()).unwrap_or_default();
+        if !owner.is_empty() {
+            let pledge = query_dapp_pledge(owner).await;
+            let pledge_active = if let Some(ref p) = pledge {
+                let bal = query_kaspa_balance(&p.pledge_address).await.unwrap_or(0);
+                let current_daa = query_current_daa_score().await.unwrap_or(0);
+                bal >= p.pledge_sompi && current_daa <= p.end_daa
+            } else { false };
+            let mut enriched = dapp.clone();
+            if let Some(obj) = enriched.as_object_mut() {
+                obj.insert("pledge_active".into(), serde_json::json!(pledge_active));
+                if let Some(ref p) = pledge {
+                    obj.insert("pledge_kas".into(), serde_json::json!(p.pledge_kas));
+                    obj.insert("pledge_duration_days".into(), serde_json::json!(p.duration_daa / 86400));
+                }
+            }
+            visible_dapps.push(enriched);
+        } else {
+            visible_dapps.push(dapp.clone());
+        }
+    }
+    let dapps = visible_dapps;
     HttpResponse::Ok().json(serde_json::json!({ "ok": true, "dapps": dapps, "count": dapps.len() }))
 }
 

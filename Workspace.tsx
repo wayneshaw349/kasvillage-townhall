@@ -947,7 +947,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                   onPress={() => setStep(2)}
                   disabled={!canProceed}
                 >
-                  <Text style={qgStyles.proceedBtnText}>{!scanResult ? 'Scan Code First' : !scanResult.passed ? 'Fix Violations to Continue' : 'Continue to XP Stake'}</Text>
+                  <Text style={qgStyles.proceedBtnText}>{!scanResult ? 'Scan Code First' : !scanResult.passed ? 'Fix Violations to Continue' : 'Continue to KAS Pledge'}</Text>
                   <ChevronRight size={rs.s(18)} color={COLORS.white} />
                 </TouchableOpacity>
                 
@@ -961,56 +961,134 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
             
             {step === 2 && (
               <View style={qgStyles.stepContent}>
-                <Text style={qgStyles.stepTitle}>Commit XP Reputation</Text>
-                <Text style={qgStyles.stepSubtitle}>Higher commitment = better board placement</Text>
+                <Text style={qgStyles.stepTitle}>KAS Pledge</Text>
+                <Text style={qgStyles.stepSubtitle}>
+                  Hold KAS in your wallet for the pledge duration. If balance drops below pledge, your DApp becomes invisible.
+                </Text>
                 
+                {/* Pledge Amount */}
                 <View style={qgStyles.xpBox}>
-                  <Text style={qgStyles.xpLabel}>XP Commitment</Text>
-                  <Text style={qgStyles.xpValue}>{manifest.stakeAmount * 10} XP</Text>
+                  <Text style={qgStyles.xpLabel}>Pledge Amount (KAS)</Text>
+                  <Text style={qgStyles.xpValue}>{manifest.pledgeKas || 100} KAS</Text>
                   <View style={qgStyles.xpButtons}>
-                    {[50, 100, 250, 500].map(val => (
-                      <TouchableOpacity key={val} style={[qgStyles.xpBtn, manifest.stakeAmount === val && qgStyles.xpBtnActive]} onPress={() => setManifest({ ...manifest, stakeAmount: val })}>
-                        <Text style={[qgStyles.xpBtnText, manifest.stakeAmount === val && qgStyles.xpBtnTextActive]}>{val * 10}</Text>
+                    {[100, 500, 1000, 5000].map(val => (
+                      <TouchableOpacity
+                        key={val}
+                        style={[
+                          qgStyles.xpBtn,
+                          (manifest.pledgeKas || 100) === val && qgStyles.xpBtnActive
+                        ]}
+                        onPress={() => setManifest({ ...manifest, pledgeKas: val })}
+                      >
+                        <Text style={[
+                          qgStyles.xpBtnText,
+                          (manifest.pledgeKas || 100) === val && qgStyles.xpBtnTextActive
+                        ]}>
+                          {val >= 1000 ? val/1000 + 'K' : val}
+                        </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 </View>
                 
+                {/* Duration */}
+                <View style={qgStyles.xpBox}>
+                  <Text style={qgStyles.xpLabel}>Pledge Duration</Text>
+                  <View style={qgStyles.xpButtons}>
+                    {[
+                      { days: 30, label: '30d' },
+                      { days: 90, label: '90d' },
+                      { days: 180, label: '6mo' },
+                      { days: 365, label: '1yr' },
+                    ].map(d => (
+                      <TouchableOpacity
+                        key={d.days}
+                        style={[
+                          qgStyles.xpBtn,
+                          (manifest.pledgeDays || 90) === d.days && qgStyles.xpBtnActive
+                        ]}
+                        onPress={() => setManifest({ ...manifest, pledgeDays: d.days })}
+                      >
+                        <Text style={[
+                          qgStyles.xpBtnText,
+                          (manifest.pledgeDays || 90) === d.days && qgStyles.xpBtnTextActive
+                        ]}>
+                          {d.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+                
+                {/* Board Preview */}
                 <View style={[qgStyles.boardPreview, { borderColor: board.color }]}>
-                  <Text style={[qgStyles.boardName, { color: board.color }]}>{board.name}</Text>
+                  <Text style={[qgStyles.boardName, { color: board.color }]}>
+                    {(manifest.pledgeKas || 100) >= 2000 ? '🏆 Elite' :
+                     (manifest.pledgeKas || 100) >= 500 ? '📋 Main' : '🧪 Incubator'}
+                  </Text>
                   <Text style={qgStyles.boardDesc}>
-                    {manifest.stakeAmount >= 500 ? 'Premium placement, highest visibility' : manifest.stakeAmount >= 100 ? 'Verified apps, good visibility' : 'Testing/beta apps, limited visibility'}
+                    {(manifest.pledgeKas || 100) >= 2000 ? 'Premium placement, highest visibility' :
+                     (manifest.pledgeKas || 100) >= 500 ? 'Verified apps, good visibility' :
+                     'Testing/beta apps, limited visibility'}
+                  </Text>
+                  <Text style={[qgStyles.boardDesc, { marginTop: 4, fontStyle: 'italic' }]}>
+                    Pledge: {manifest.pledgeKas || 100} KAS for {manifest.pledgeDays || 90} days
                   </Text>
                 </View>
                 
                 <View style={qgStyles.buttonRow}>
-                  <TouchableOpacity style={qgStyles.backBtn} onPress={() => setStep(1)}><Text style={qgStyles.backBtnText}>← Back</Text></TouchableOpacity>
-                  <TouchableOpacity style={qgStyles.stakeBtn} onPress={async () => {
-                    try {
-                      // Prepare registration with real code hash
-                      const myPubkey = await SecureStore.getItemAsync('kv_public_key') || '';
-                      const reg = prepareDAppRegistration(pastedCode, SDK_TEMPLATE_HASH, myPubkey, 'DAPP_' + Date.now(), manifest.customDomains.split(',').map(d => d.trim()).filter(Boolean));
-                      console.log('[DApp-Reg] Hash:', reg.codeHash, 'SDK:', reg.sdkHash, 'passed:', reg.scanResult.passed);
-                      // Inscribe to Arweave
+                  <TouchableOpacity style={qgStyles.backBtn} onPress={() => setStep(1)}>
+                    <Text style={qgStyles.backBtnText}>← Back</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={qgStyles.stakeBtn}
+                    onPress={async () => {
                       try {
-                        const { uploadToIrys } = await import('./arweave_upload');
-                        await uploadToIrys(JSON.stringify({ ...reg, name: manifest.name, category: manifest.category, description: manifest.description, board: board.name, xpStake: manifest.stakeAmount * 10 }), [
-                          { name: 'App-Name', value: 'KasVillage' },
-                          { name: 'KV-Type', value: 'DApp' },
-                          { name: 'KV-DAppName', value: manifest.name },
-                          { name: 'KV-Category', value: manifest.category },
-                          { name: 'KV-CodeHash', value: reg.codeHash },
-                          { name: 'KV-SDKHash', value: reg.sdkHash },
-                          { name: 'KV-Board', value: board.name },
-                          { name: 'KV-Owner', value: myPubkey },
-                          { name: 'Content-Type', value: 'application/json' },
-                        ]);
-                        console.log('[DApp-Reg] Inscribed to Arweave');
-                      } catch (e) { console.warn('[DApp-Reg] Arweave failed (local only):', e); }
-                      Alert.alert('XP Committed', manifest.stakeAmount * 10 + ' XP locked for ' + manifest.name);
-                      setStep(3);
-                    } catch (e) { Alert.alert('Error', String(e)); }
-                  }}><Text style={qgStyles.stakeBtnText}>Commit & Publish</Text></TouchableOpacity>
+                        const pledgeKas = manifest.pledgeKas || 100;
+                        const pledgeDays = manifest.pledgeDays || 90;
+                        const pledgeSompi = pledgeKas * 100000000;
+                        const durationDaa = pledgeDays * 86400;
+                        const pubkey = await SecureStore.getItemAsync('kv_public_key');
+                        const address = await SecureStore.getItemAsync('kv_address');
+                        
+                        // Get current DAA from Kaspa API
+                        let startDaa = Math.floor(Date.now() / 1000); // fallback
+                        try {
+                          const daaResp = await fetch('https://api-tn.kaspa.org/info/virtual-chain-blue-score');
+                          const daaData = await daaResp.json();
+                          if (daaData.blueScore) startDaa = daaData.blueScore;
+                        } catch {}
+                        
+                        // Inscribe pledge on Arweave via Irys
+                        if (typeof uploadToIrys === 'function') {
+                          await uploadToIrys(JSON.stringify({
+                            type: 'KV_DAPP_PLEDGE_V1',
+                            pledgeSompi,
+                            durationDaa,
+                            startDaa,
+                            dappName: manifest.name,
+                          }), [
+                            { name: 'App-Name', value: 'KasVillage' },
+                            { name: 'Type', value: 'KV_DAPP_PLEDGE_V1' },
+                            { name: 'Pubkey-Hash', value: hashPubkey(pubkey || '') },
+                            { name: 'Owner-Pubkey', value: pubkey || '' },
+                            { name: 'KV-Pledge-Sompi', value: pledgeSompi.toString() },
+                            { name: 'KV-Pledge-Start-DAA', value: startDaa.toString() },
+                            { name: 'KV-Pledge-Duration-DAA', value: durationDaa.toString() },
+                            { name: 'KV-Pledge-Address', value: address || '' },
+                            { name: 'KV-DAppName', value: manifest.name },
+                          ]);
+                        }
+                        
+                        Alert.alert('Pledge Inscribed', pledgeKas + ' KAS pledged for ' + pledgeDays + ' days. Your wallet balance will be monitored.');
+                        setStep(3);
+                      } catch (err) {
+                        Alert.alert('Pledge Failed', String(err));
+                      }
+                    }}
+                  >
+                    <Text style={qgStyles.stakeBtnText}>Pledge & Publish</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             )}
