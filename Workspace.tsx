@@ -465,7 +465,7 @@ const PassportGate: React.FC<PassportGateProps> = ({ filledTraits, missingTraits
     </View>
     <Text style={gateStyles.title}>🛂 Passport Required</Text>
     <Text style={gateStyles.subtitle}>
-      Complete all 12 Lore traits to unlock your Storefront Workspace.
+      Complete 6 identity traits to unlock your Storefront Workspace.
     </Text>
     
     {/* Progress Bar */}
@@ -476,7 +476,7 @@ const PassportGate: React.FC<PassportGateProps> = ({ filledTraits, missingTraits
           gateStyles.progressCount,
           filledTraits >= 5 && { color: COLORS.green600 }
         ]}>
-          {filledTraits}/12
+          {filledTraits}/6
         </Text>
       </View>
       <View style={gateStyles.progressBar}>
@@ -492,10 +492,10 @@ const PassportGate: React.FC<PassportGateProps> = ({ filledTraits, missingTraits
       <View style={gateStyles.progressLabels}>
         <Text style={gateStyles.tierLabel}>Guest</Text>
         <Text style={[gateStyles.tierLabel, filledTraits >= 5 && { color: COLORS.green600 }]}>
-          Resident (8)
+          Resident (5)
         </Text>
         <Text style={[gateStyles.tierLabel, filledTraits >= 6 && { color: COLORS.green600 }]}>
-          Passport (12)
+          Passport (6)
         </Text>
       </View>
     </View>
