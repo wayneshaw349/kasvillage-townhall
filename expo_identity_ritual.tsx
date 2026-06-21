@@ -5319,6 +5319,7 @@ export default function IdentityRitual({ onRecoveryRequest, onComplete }: Identi
     quizQuestions: [],
     currentQuizIndex: 0,
     quizScore: 0,
+    quizFailedAt: null as number | null,
     quizRetries: 0,
     showQuizResult: 'none' as const,
     livenessScore: 0,
@@ -6248,6 +6249,55 @@ export default function IdentityRitual({ onRecoveryRequest, onComplete }: Identi
           }}
         />;
       case 7:
+
+        // Quiz lockout & retry
+        if (state.quizFailedAt && !state.recipe.quizPassed) {
+          const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
+          const elapsed = Date.now() - state.quizFailedAt;
+          const remaining = Math.max(0, LOCKOUT_MS - elapsed);
+          const canRetry = remaining <= 0;
+          const mins = Math.floor(remaining / 60000);
+          const secs = Math.floor((remaining % 60000) / 1000);
+          
+          return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+              <Text style={{ fontSize: 48, marginBottom: 16 }}>🛡️</Text>
+              <Text style={{ fontSize: 20, fontWeight: '700', color: '#dc2626', marginBottom: 8, textAlign: 'center' }}>
+                The Sentry Denies Entry
+              </Text>
+              <Text style={{ fontSize: 14, color: '#78716c', marginBottom: 24, textAlign: 'center' }}>
+                You scored {state.quizScore}/{state.quizQuestions.length}. Need {Math.ceil(state.quizQuestions.length * 0.6)} to pass.
+              </Text>
+              {canRetry ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    const newQuiz = generateQuiz(state.recipe, state.colorMixHistory);
+                    setState(prev => ({
+                      ...prev,
+                      quizQuestions: newQuiz,
+                      currentQuizIndex: 0,
+                      quizScore: 0,
+                      quizFailedAt: null,
+                      recipe: { ...prev.recipe, quizPassed: false },
+                    }));
+                  }}
+                  style={{ backgroundColor: '#f59e0b', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>⚔️ Challenge the Sentry Again</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 32, fontWeight: '700', color: '#f59e0b', marginBottom: 4 }}>
+                    {mins}:{secs.toString().padStart(2, '0')}
+                  </Text>
+                  <Text style={{ fontSize: 13, color: '#a8a29e' }}>
+                    The Sentry requires patience before retry
+                  </Text>
+                </View>
+              )}
+            </View>
+          );
+        }
         // QUIZ RESULT SCREEN — shows before continuing or retrying
         if (state.showQuizResult === 'passed') {
           return (
