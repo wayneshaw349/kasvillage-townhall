@@ -870,61 +870,6 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           error: data.error || 'Not found',
         });
       }
-      // Call Town Hall API (routes matched to configure_routes_v3)
-      let response;
-      let data: any;
-      
-      if (searchType === 'stats' || searchType === 'address') {
-        // User stats lookup via /user-stats POST
-        response = await fetch(`${TOWNHALL_BASE}/user-stats`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pubkey: query.replace('kaspa:', '').replace('kaspatest:', '') }),
-        });
-        data = await response.json();
-        if (data.successes !== undefined || data.xp !== undefined) {
-          const s = data.successes || 0;
-          const d = data.deadlocks || 0;
-          const n = s + d;
-          setSearchResult({
-            found: true,
-            type: 'stats',
-            verified: n > 0,
-            name: data.citadel_tier || 'Guest',
-            xp: data.xp || 0,
-            pComplete: n > 0 ? (1 + s) / (2 + n) : 0.5,
-            successes: s,
-            deadlocks: d,
-          });
-        } else {
-          setSearchResult({ found: false, error: data.error || 'Not found' });
-        }
-      } else if (searchType === 'dapp') {
-        // DApp lookup via /api/query/dapp POST (doesn't exist yet — fallback to not found)
-        // TODO: wire when /api/query/dapp is deployed
-        setSearchResult({ found: false, error: 'DApp search not yet available on this TownHall instance' });
-      } else {
-        // APT or generic — try identity verify
-        // Query Arweave directly for verification proof
-                const aptNum = query.replace(/^APT-/i, '');
-                console.log('[Search] Looking up APT:', aptNum);
-                const gql = JSON.stringify({ query: `{transactions(tags:[{name:"App-Name",values:["KasVillage"]},{name:"KV-Type",values:["verification-proof"]}],first:10){edges{node{id tags{name value}}}}}` });
-                const arRes = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: gql });
-                const arData = await arRes.json();
-                const edges = arData?.data?.transactions?.edges || [];
-                console.log('[Search] Arweave results:', edges.length);
-                const match = edges.find((e2: any) => {
-                  const pk = e2.node.tags.find((t: any) => t.name === 'KV-Pubkey');
-                  return pk && deriveApt(pk.value) === aptNum;
-                });
-                if (match) {
-                  const tier = match.node.tags.find((t: any) => t.name === 'KV-Tier')?.value || 'Guest';
-                  console.log('[Search] Found! TX:', match.node.id);
-                  setSearchResult({ found: true, type: "apt", verified: true, aptNumber: "APT-" + aptNum, arweaveTx: match.node.id, name: tier });
-                } else {
-                  setSearchResult({ found: false, error: 'No verification proof on Arweave for APT-' + aptNum });
-                }
-      }
     } catch (error) {
       setSearchResult({
         found: false,
