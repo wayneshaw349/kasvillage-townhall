@@ -7762,6 +7762,7 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/storefront/apt/{apt}/products", web::get().to(townhall_verification_complete::api_products_by_apt))
         .route("/api/dapp/{pubkey}", web::get().to(townhall_verification_complete::api_get_dapps_by_owner))
         .route("/api/dapp/apt/{apt}", web::get().to(townhall_verification_complete::api_dapps_by_apt))
+        .route("/api/dapp/{pubkey}/visibility", web::get().to(townhall_verification_complete::api_check_dapp_visibility))
         .route("/api/counterparty/{pubkey}", web::get().to(townhall_verification_complete::api_get_counterparty_stats))
         .route("/api/counterparty/{pubkey}/proof", web::get().to(townhall_verification_complete::api_get_counterparty_stats_with_proof))
         // Verification
