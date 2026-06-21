@@ -2354,6 +2354,7 @@ impl CounterpartyStats {
 /// Request for single counterparty lookup
 #[derive(Debug, Deserialize)]
 pub struct CounterpartyLookupRequest {
+    #[serde(default)]
     pub pubkey: String,
     #[serde(default)]
     pub include_history: bool,
