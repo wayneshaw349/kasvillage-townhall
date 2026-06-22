@@ -929,14 +929,18 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         };
       }
       
-      const sendEndpoint = sendType === 'dapp' ? '/api/verify/dapp'
-        : sendType === 'store' ? '/api/verify/store'
-        : '/api/verify/user/full';
-      const response = await fetch(`${TOWNHALL_BASE}${sendEndpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      let response;
+      if (sendType === 'stats') {
+        // SNARK proof via counterparty endpoint
+        response = await fetch(`${TOWNHALL_BASE}/api/counterparty/${myPubkey}/proof?include_proof=true`);
+      } else {
+        const sendEndpoint = sendType === 'dapp' ? '/api/verify/dapp' : '/api/verify/store';
+        response = await fetch(`${TOWNHALL_BASE}${sendEndpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
       
       const data = await response.json();
       
