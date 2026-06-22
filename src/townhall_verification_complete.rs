@@ -37,6 +37,9 @@ use rand_core::OsRng;
 const VERIFICATION_FEE_SOMPI: u64 = 0; // FREE verification
 const MAX_CODE_SIZE_BYTES: usize = 5 * 1024 * 1024; // 5MB
 
+// Kaspa network API — swap comment to switch mainnet/testnet
+const KASPA_API: &str = "https://api-tn10.kaspa.org"; // testnet-10
+
 // ============================================================================
 // CODE SCANNER - PROHIBITED PATTERNS
 // ============================================================================
@@ -1377,11 +1380,7 @@ pub fn compute_events_merkle_root(event_hashes: &[String]) -> [u8; 32] {
 
 /// Query L1 for FROST events (via Kaspa API)
 pub async fn query_l1_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, String> {
-    // Query Kaspa testnet-10 API for transactions with KV2T tags
-    let url = format!(
-        "https://api-tn10.kaspa.org/addresses/{}/full-transactions?limit=100",
-        pubkey
-    );
+   let url = format!("{}/addresses/{}/full-transactions?limit=100", KASPA_API, pubkey);
 
     let client = reqwest::Client::new();
     let response = client.get(&url)
@@ -1412,7 +1411,7 @@ pub async fn query_l1_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, Stri
 
 /// Query current DAA score from L1 (via Kaspa API)
 pub async fn query_current_daa_score() -> Result<u64, String> {
-    let url = "https://api-tn10.kaspa.org/info/virtual-chain-blue-score";
+    let url = format!("{}/info/virtual-chain-blue-score", KASPA_API);
 
     let client = reqwest::Client::new();
     let response = client.get(url)
@@ -3106,7 +3105,7 @@ const SOMPI_PER_KAS: f64 = 100_000_000.0;
 
 /// Query Kaspa address balance from L1
 async fn query_kaspa_balance(address: &str) -> Result<u64, String> {
-    let url = format!("https://api-tn10.kaspa.org/addresses/{}/balance", address);
+   let url = format!("{}/addresses/{}/balance", KASPA_API, address);
     let client = reqwest::Client::new();
     let response = client.get(&url)
         .timeout(std::time::Duration::from_secs(5))
