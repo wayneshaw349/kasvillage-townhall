@@ -8269,7 +8269,7 @@ async fn api_verify_stats_proof(body: web::Json<serde_json::Value>) -> HttpRespo
         _ => return HttpResponse::BadRequest().json(serde_json::json!({"error": "pubkey required"})),
     };
     
-    match townhall_verification_complete::aggregate_and_prove_stats(&pubkey).await {
+    match townhall_verification_complete::aggregate_and_prove_stats(&pubkey, None).await {
         Ok((stats, proof)) => {
             HttpResponse::Ok().json(serde_json::json!({
                 "ok": true,
