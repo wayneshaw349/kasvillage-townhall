@@ -945,7 +945,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
       
       const data = await response.json();
       
-      if (data.ok) {
+      if (data.ok || data.found || data.proof) {
         // Add to verification events
         const newEvent: VerificationEvent = {
           id: data.verification_id,
@@ -955,6 +955,11 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           timestamp: Date.now(),
         };
         
+        // Save proof for later retrieval
+        if (data.proof) {
+          await SecureStore.setItemAsync('kv_last_stats_proof', JSON.stringify(data.proof));
+          await SecureStore.setItemAsync('kv_last_stats', JSON.stringify(data.stats));
+        }
         const updatedEvents = [newEvent, ...verificationEvents];
         setVerificationEvents(updatedEvents);
         await SecureStore.setItemAsync('kv_verification_events', JSON.stringify(updatedEvents));
@@ -1059,7 +1064,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
       
       const data = await response.json();
       
-      if (data.ok) {
+      if (data.ok || data.found || data.proof) {
         setMyApt(newApt);
         await SecureStore.setItemAsync('kv_apt_number', newApt);
         setShowAptConflict(false);
