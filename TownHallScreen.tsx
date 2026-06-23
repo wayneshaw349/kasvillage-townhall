@@ -751,6 +751,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
   const [sendName, setSendName] = useState('');
   const [sendCodeUrl, setSendCodeUrl] = useState('');
   const [sendDescription, setSendDescription] = useState('');
+  const [sendAddress, setSendAddress] = useState('');
   const [isSending, setIsSending] = useState(false);
   
   // Receive proofs modal
@@ -932,7 +933,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
       let response;
       if (sendType === 'stats') {
         // SNARK proof via counterparty endpoint
-        response = await fetch(`${TOWNHALL_BASE}/api/counterparty/${myPubkey}/proof?include_proof=true&address=${encodeURIComponent(myAddress || "")}`);
+        response = await fetch(`${TOWNHALL_BASE}/api/counterparty/${myPubkey}/proof?include_proof=true&address=${encodeURIComponent(sendAddress || myAddress || "")}`);
       } else {
         const sendEndpoint = sendType === 'dapp' ? '/api/verify/dapp' : '/api/verify/store';
         response = await fetch(`${TOWNHALL_BASE}${sendEndpoint}`, {
@@ -1426,7 +1427,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
                   <Download size={rs.s(20)} color={COLORS.white} />
                   <Text style={styles.actionBtnText}>Receive Proofs</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, styles.sendBtn]} onPress={() => setShowSendModal(true)}>
+                <TouchableOpacity style={[styles.actionBtn, styles.sendBtn]} onPress={() => { setSendAddress(myAddress || ''); setShowSendModal(true); }}>
                   <Upload size={rs.s(20)} color={COLORS.white} />
                   <Text style={styles.actionBtnText}>Send for Verify</Text>
                 </TouchableOpacity>
@@ -1659,6 +1660,24 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
                   Trust: {((1 + myStats.successes) / (2 + myStats.successes + myStats.deadlocks) * 100).toFixed(1)}%
                 </Text>
               </View>
+            )}
+
+            {/* Kaspa Address for L1 queries */}
+            {sendType === 'stats' && (
+              <>
+                <Text style={styles.inputLabel}>Kaspa Address (for L1 proof)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={sendAddress}
+                  onChangeText={setSendAddress}
+                  placeholder="kaspa:qr0n..."
+                  placeholderTextColor={COLORS.stone400}
+                  autoCapitalize="none"
+                />
+                <Text style={styles.inputHint}>
+                  Your on-chain address — needed to verify L1 transaction history
+                </Text>
+              </>
             )}
             
             {/* Description */}
