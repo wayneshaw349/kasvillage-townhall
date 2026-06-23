@@ -932,7 +932,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
       let response;
       if (sendType === 'stats') {
         // SNARK proof via counterparty endpoint
-        response = await fetch(`${TOWNHALL_BASE}/api/counterparty/${myPubkey}/proof?include_proof=true`);
+        response = await fetch(`${TOWNHALL_BASE}/api/counterparty/${myPubkey}/proof?include_proof=true&address=${encodeURIComponent(myAddress || "")}`);
       } else {
         const sendEndpoint = sendType === 'dapp' ? '/api/verify/dapp' : '/api/verify/store';
         response = await fetch(`${TOWNHALL_BASE}${sendEndpoint}`, {

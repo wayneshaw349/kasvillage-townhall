@@ -1569,12 +1569,13 @@ pub async fn query_arweave_stats(pubkey: &str) -> Result<Option<ArweaveStatsReco
 }
 
 /// Full stats aggregation: L1 + Arweave + proof generation (DAA-based timing)
-pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStats, StatsProof), String> {
+pub async fn aggregate_and_prove_stats(pubkey: &str, address: Option<&str>) -> Result<(CounterpartyStats, StatsProof), String> {
     // 1. Query current DAA score from L1
     let current_daa = query_current_daa_score().await?;
     
     // 2. Query L1 for FROST events
-    let l1_events = query_l1_frost_events(pubkey).await?;
+    let l1_query_id = address.unwrap_or(pubkey);
+    let l1_events = query_l1_frost_events(l1_query_id).await?;
     let l1_stats = aggregate_l1_events_full(&l1_events, pubkey, current_daa);
     let l1_events_root = compute_events_merkle_root(&l1_stats.event_hashes);
 
@@ -1722,6 +1723,8 @@ pub struct CounterpartyProofRequest {
     pub include_proof: bool,
     #[serde(default)]
     pub include_history: bool,
+    #[serde(default)]
+    pub address: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1753,7 +1756,7 @@ pub async fn api_get_counterparty_stats_with_proof(
 
     if query.include_proof {
         // Full aggregation with proof
-        match aggregate_and_prove_stats(&pubkey).await {
+        match aggregate_and_prove_stats(&pubkey, query.address.as_deref()).await {
             Ok((stats, proof)) => {
                 HttpResponse::Ok().json(CounterpartyProofResponse {
                     found: true,
