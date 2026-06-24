@@ -861,7 +861,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           pComplete: stats.p_complete || 0.5,
           successes: stats.successes || 0,
           deadlocks: stats.deadlocks || 0,
-          statsProofTx: null,
+          statsProofTx: undefined,
           rulesFollowed: true,
           violations: [],
         });
@@ -959,6 +959,39 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
         if (data.proof) {
           await SecureStore.setItemAsync('kv_last_stats_proof', JSON.stringify(data.proof));
           await SecureStore.setItemAsync('kv_last_stats', JSON.stringify(data.stats));
+        }
+        // Inscribe stats proof to Arweave
+        if (data.proof && myPubkey) {
+          try {
+            const { uploadToIrys: statsUpload } = await import('./arweave_upload');
+            const proofPayload = JSON.stringify({
+              v: 1,
+              type: 'stats-proof',
+              pubkey: myPubkey,
+              apt: myApt,
+              stats: data.stats,
+              proof: data.proof,
+              timestamp: Date.now(),
+            });
+            const tags = [
+              { name: 'App-Name', value: 'KasVillage' },
+              { name: 'KV-Type', value: 'stats-proof' },
+              { name: 'KV-Pubkey', value: myPubkey },
+              { name: 'KV-ProofType', value: data.proof.proof_type || 'Halo2-IPA-Stats-Mock-V2' },
+              { name: 'KV-Successes', value: String(data.stats?.successes || 0) },
+              { name: 'KV-Deadlocks', value: String(data.stats?.deadlocks || 0) },
+              { name: 'KV-XP', value: String(data.stats?.xp || 0) },
+              { name: 'Content-Type', value: 'application/json' },
+            ];
+            const result = await statsUpload(proofPayload, tags);
+            const txId = result?.txId || '';
+            if (txId) {
+              await SecureStore.setItemAsync('kv_stats_proof_tx', txId);
+              console.log('[TownHall] Stats proof inscribed:', txId);
+            }
+          } catch (e) {
+            console.warn('[TownHall] Stats proof inscription failed:', e);
+          }
         }
         const updatedEvents = [newEvent, ...verificationEvents];
         setVerificationEvents(updatedEvents);
