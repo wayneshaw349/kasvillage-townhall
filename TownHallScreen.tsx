@@ -221,6 +221,10 @@ interface StatsResult {
   lastAttested?: number;
   deviceHashPrefix?: string;
   attestationFound: boolean;
+  proofTxId?: string;
+  proofType?: string;
+  l1EventsRoot?: string;
+  proofVerified?: boolean;
   error?: string;
 }
 
@@ -299,6 +303,26 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
           console.warn('[StatsLookup] Attestation query failed:', e);
         }
 
+        // Query Arweave for stats proof
+        let proofTxId = "";
+        let proofType = "";
+        let l1EventsRoot = "";
+        let proofVerified = false;
+        try {
+          const proofGql = JSON.stringify({ query: `{transactions(tags:[{name:"App-Name",values:["KasVillage"]},{name:"KV-Type",values:["stats-proof"]},{name:"KV-Pubkey",values:["${lookupResult.pubkey}"]}],first:1,sort:HEIGHT_DESC){edges{node{id tags{name value}}}}}` });
+          const proofRes = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: proofGql });
+          if (proofRes.ok) {
+            const proofData = await proofRes.json();
+            const proofEdge = proofData?.data?.transactions?.edges?.[0];
+            if (proofEdge) {
+              proofTxId = proofEdge.node.id;
+              proofVerified = true;
+              const tags = proofEdge.node.tags || [];
+              proofType = tags.find((t: any) => t.name === 'KV-ProofType')?.value || 'Halo2-IPA';
+            }
+          }
+        } catch (e) { console.warn('[StatsLookup] Proof query failed:', e); }
+
         setResult({
           pubkey: lookupResult.pubkey,
           apt: 'APT-' + deriveApt(lookupResult.pubkey),
@@ -310,6 +334,10 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
           lastAttested,
           deviceHashPrefix,
           attestationFound,
+          proofTxId,
+          proofType,
+          l1EventsRoot,
+          proofVerified,
         });
       } else {
         setResult({ pubkey: '', apt: '', xp: 0, pComplete: 0, successes: 0, deadlocks: 0, attestationFound: false, error: 'Not found — user may not have completed a transaction yet' });
@@ -431,6 +459,50 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         </View>
       )}
 
+
+      {result && !result.error && result.proofVerified && (
+        <TouchableOpacity
+          onPress={() => result.proofTxId && Linking.openURL("https://arweave.net/" + result.proofTxId)}
+          style={{
+            marginTop: rs.s(8),
+            padding: rs.s(10),
+            backgroundColor: '#f0fdf4',
+            borderRadius: rs.s(6),
+            borderWidth: 1,
+            borderColor: '#bbf7d0',
+          }}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#166534' }}>
+              🔒 SNARK Proof Verified
+            </Text>
+            <Text style={{ fontSize: rs.font(10), color: '#166534' }}>
+              {result.proofType}
+            </Text>
+          </View>
+          <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, marginTop: rs.s(4) }}>
+            TX: {result.proofTxId?.slice(0, 24)}... (tap to view on Arweave)
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {result && !result.error && !result.proofVerified && (
+        <View style={{
+          marginTop: rs.s(8),
+          padding: rs.s(10),
+          backgroundColor: '#fffbeb',
+          borderRadius: rs.s(6),
+          borderWidth: 1,
+          borderColor: '#fde68a',
+        }}>
+          <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#92400e' }}>
+            ⚠️ No SNARK proof on Arweave
+          </Text>
+          <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginTop: 2 }}>
+            This user has not generated a verifiable stats proof yet
+          </Text>
+        </View>
+      )}
       {result?.error && (
         <View style={{
           marginTop: rs.s(12),
@@ -1033,24 +1105,23 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
     setIsLoadingProofs(true);
     
     try {
-      const response = await fetch(`${TOWNHALL_BASE}/api/proofs/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject_id: myAddress || myApt || '' }),
+      // Query Arweave directly for user proofs
+      const gql = JSON.stringify({ query: `{transactions(tags:[{name:"App-Name",values:["KasVillage"]},{name:"KV-Pubkey",values:["${myPubkey}"]}],first:10,sort:HEIGHT_DESC){edges{node{id tags{name value} block{timestamp}}}}}` });
+      const arRes = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: gql });
+      const arData = await arRes.json();
+      const edges = arData?.data?.transactions?.edges || [];
+      const proofs = edges.map((e: any) => {
+        const getTag = (name: string) => e.node.tags?.find((t: any) => t.name === name)?.value || '';
+        return {
+          id: e.node.id,
+          type: getTag('KV-Type').includes('stats') ? 'stats' : getTag('KV-Type').includes('verification') ? 'identity' : 'dapp',
+          name: getTag('KV-Type') || 'Proof',
+          status: 'verified' as const,
+          arweaveTx: e.node.id,
+          timestamp: e.node.block?.timestamp ? e.node.block.timestamp * 1000 : Date.now(),
+        };
       });
-      
-      const data = await response.json();
-      
-      if (data.ok && data.proofs) {
-        setMyProofs(data.proofs.map((p: any) => ({
-          id: p.id,
-          type: p.type,
-          name: p.name,
-          status: p.status,
-          arweaveTx: p.arweave_tx,
-          timestamp: p.timestamp,
-        })));
-      }
+      setMyProofs(proofs);
     } catch (error) {
       Alert.alert('Error', 'Failed to load proofs');
     }
