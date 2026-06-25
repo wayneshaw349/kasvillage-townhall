@@ -37,9 +37,6 @@ use rand_core::OsRng;
 const VERIFICATION_FEE_SOMPI: u64 = 0; // FREE verification
 const MAX_CODE_SIZE_BYTES: usize = 5 * 1024 * 1024; // 5MB
 
-// Kaspa network API — swap comment to switch mainnet/testnet
-const KASPA_API: &str = "https://api-tn10.kaspa.org"; // testnet-10
-
 // ============================================================================
 // CODE SCANNER - PROHIBITED PATTERNS
 // ============================================================================
@@ -1091,32 +1088,13 @@ pub fn verify_stats_proof(proof: &StatsProof, expected_pubkey_hash: &[u8; 32]) -
         return false;
     }
 
-   let witness = StatsWitness {
+    // Regenerate proof and compare
+    let witness = StatsWitness {
         pubkey_hash: *expected_pubkey_hash,
         successes: proof.public_inputs.successes,
         deadlocks: proof.public_inputs.deadlocks,
         xp: proof.public_inputs.xp,
         p_complete_fixed: proof.public_inputs.p_complete_fixed,
-        completed: proof.public_inputs.completed,
-        deadlocked: proof.public_inputs.deadlocked,
-        refunded: proof.public_inputs.refunded,
-        pending: proof.public_inputs.pending,
-        total_agreements: proof.public_inputs.total_agreements,
-        as_buyer: proof.public_inputs.as_buyer,
-        as_seller: proof.public_inputs.as_seller,
-        total_volume_sompi: proof.public_inputs.total_volume_sompi,
-        largest_agreement_sompi: proof.public_inputs.largest_agreement_sompi,
-        agreements_last_7d_daa: proof.public_inputs.agreements_last_7d,
-        agreements_last_30d_daa: proof.public_inputs.agreements_last_30d,
-        deadlock_as_buyer: proof.public_inputs.deadlock_as_buyer,
-        deadlock_as_seller: proof.public_inputs.deadlock_as_seller,
-        reason_no_delivery: proof.public_inputs.reason_no_delivery,
-        reason_quality_dispute: proof.public_inputs.reason_quality_dispute,
-        reason_timeout: proof.public_inputs.reason_timeout,
-        reason_other: proof.public_inputs.reason_other,
-        resolved_after_deadlock: proof.public_inputs.resolved_after_deadlock,
-        unique_counterparties_deadlocked: proof.public_inputs.unique_counterparties_deadlocked,
-        repeat_deadlock_same_counterparty: proof.public_inputs.repeat_deadlock_same_counterparty,
         l1_events_root: hex::decode(&proof.public_inputs.l1_events_root)
             .unwrap_or_default()
             .try_into()
@@ -1126,7 +1104,6 @@ pub fn verify_stats_proof(proof: &StatsProof, expected_pubkey_hash: &[u8; 32]) -
             .try_into()
             .unwrap_or([0u8; 32]),
         timestamp: proof.generated_at,
-        ..Default::default()
     };
 
     match generate_stats_proof(&witness) {
@@ -1210,11 +1187,6 @@ pub struct AggregatedL1Stats {
     pub last_deadlock_daa: u64,
     pub unique_counterparties_deadlocked: HashSet<String>,
     pub repeat_deadlock_counterparties: HashSet<String>,
-    pub unique_counterparties_all: HashSet<String>,
-
-    // Self-trade detection
-    pub unique_counterparties_completed: HashSet<String>,
-    pub repeat_success_same_counterparty: u64,
     
     // For Merkle root
     pub event_hashes: Vec<String>,
@@ -1247,7 +1219,6 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
         let counterparty = if is_buyer { &event.seller_pubkey } else { &event.buyer_pubkey };
         
         stats.event_hashes.push(event.tx_id.clone());
-        stats.unique_counterparties_all.insert(counterparty.clone());
 
         match event.event_type {
             FrostEventType::AgreementCreated => {
@@ -1282,11 +1253,6 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
                 // Check if this resolves a previous deadlock with same counterparty
                 if deadlock_counterparties.contains_key(counterparty) {
                     stats.resolved_after_deadlock += 1;
-                // Track unique completed counterparties (self-trade detection)
-                if stats.unique_counterparties_completed.contains(counterparty) {
-                    stats.repeat_success_same_counterparty += 1;
-                }
-                stats.unique_counterparties_completed.insert(counterparty.clone());
                 }
             }
             
@@ -1380,7 +1346,11 @@ pub fn compute_events_merkle_root(event_hashes: &[String]) -> [u8; 32] {
 
 /// Query L1 for FROST events (via Kaspa API)
 pub async fn query_l1_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, String> {
-   let url = format!("{}/addresses/{}/full-transactions?limit=100", KASPA_API, pubkey);
+    // Query Kaspa testnet-10 API for transactions with KV2T tags
+    let url = format!(
+        "https://api-tn.kaspa.org/addresses/{}/full-transactions?limit=100",
+        pubkey
+    );
 
     let client = reqwest::Client::new();
     let response = client.get(&url)
@@ -1411,7 +1381,7 @@ pub async fn query_l1_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, Stri
 
 /// Query current DAA score from L1 (via Kaspa API)
 pub async fn query_current_daa_score() -> Result<u64, String> {
-    let url = format!("{}/info/virtual-chain-blue-score", KASPA_API);
+    let url = "https://api-tn.kaspa.org/info/virtual-chain-blue-score";
 
     let client = reqwest::Client::new();
     let response = client.get(url)
@@ -1569,76 +1539,12 @@ pub async fn query_arweave_stats(pubkey: &str) -> Result<Option<ArweaveStatsReco
 }
 
 /// Full stats aggregation: L1 + Arweave + proof generation (DAA-based timing)
-/// Query Arweave for FROST events (the real stats source)
-async fn query_arweave_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, String> {
-    let pubkey_hash = compute_hash_index(&format!("PK:{}", pubkey));
-    let query = format!(
-        r#"query {{ transactions( tags: [ {{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "Type", values: ["KV_FROST_V1"] }}, {{ name: "Participant-Hash", values: ["{}"] }} ], first: 100, sort: HEIGHT_DESC ) {{ edges {{ node {{ id tags {{ name value }} block {{ timestamp }} }} }} }} }}"#,
-        pubkey_hash
-    );
-    let client = reqwest::Client::new();
-    let response = match client.post("https://arweave.net/graphql")
-        .json(&serde_json::json!({ "query": query }))
-        .timeout(std::time::Duration::from_secs(15)).send().await {
-        Ok(r) => r,
-        Err(_) => client.post("https://arweave-search.goldsky.com/graphql")
-            .json(&serde_json::json!({ "query": query }))
-            .timeout(std::time::Duration::from_secs(15)).send().await
-            .map_err(|e| format!("Arweave FROST query failed: {}", e))?,
-    };
-    let data: serde_json::Value = response.json().await.map_err(|e| format!("Parse: {}", e))?;
-    let edges = data.pointer("/data/transactions/edges").and_then(|e| e.as_array());
-    let mut events = Vec::new();
-    if let Some(edges) = edges {
-        for edge in edges {
-            let tags = edge.pointer("/node/tags").and_then(|t| t.as_array());
-            let get_tag = |name: &str| -> Option<String> {
-                tags.and_then(|ts| ts.iter()
-                    .find(|t| t.get("name").and_then(|n| n.as_str()) == Some(name))
-                    .and_then(|t| t.get("value").and_then(|v| v.as_str()))
-                    .map(|s| s.to_string()))
-            };
-            let event_type = match get_tag("Event-Type").as_deref() {
-                Some("completed") => FrostEventType::AgreementCompleted,
-                Some("deadlocked") => FrostEventType::AgreementDeadlocked,
-                Some("refunded") => FrostEventType::AgreementRefunded,
-                Some("expired") => FrostEventType::AgreementExpired,
-                Some("created") => FrostEventType::AgreementCreated,
-                _ => FrostEventType::AgreementCreated,
-            };
-            let timestamp = edge.pointer("/node/block/timestamp")
-                .and_then(|v| v.as_u64()).unwrap_or(0);
-            events.push(FrostEvent {
-                tx_id: edge.pointer("/node/id").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-                event_type,
-                agreement_id: get_tag("Agreement-ID").unwrap_or_default(),
-                buyer_pubkey: get_tag("Buyer-Pubkey").unwrap_or_default(),
-                seller_pubkey: get_tag("Seller-Pubkey").unwrap_or_default(),
-                amount_sompi: get_tag("Amount-Sompi").and_then(|s| s.parse().ok()).unwrap_or(0),
-                timestamp,
-                daa_score: get_tag("DAA-Score").and_then(|s| s.parse().ok()).unwrap_or(timestamp),
-                deadlock_reason: match get_tag("Deadlock-Reason").as_deref() {
-                    Some("no_delivery") => Some(DeadlockReason::NoDelivery),
-                    Some("quality") => Some(DeadlockReason::QualityDispute),
-                    Some("timeout") => Some(DeadlockReason::Timeout),
-                    Some(r) if !r.is_empty() => Some(DeadlockReason::Other),
-                    _ => None,
-                },
-                completion_time_ms: None,
-            });
-        }
-    }
-    Ok(events)
-}
-
-
-pub async fn aggregate_and_prove_stats(pubkey: &str, address: Option<&str>) -> Result<(CounterpartyStats, StatsProof), String> {
+pub async fn aggregate_and_prove_stats(pubkey: &str) -> Result<(CounterpartyStats, StatsProof), String> {
     // 1. Query current DAA score from L1
     let current_daa = query_current_daa_score().await?;
     
     // 2. Query L1 for FROST events
-    // Query Arweave for FROST events (primary stats source)
-    let l1_events = query_arweave_frost_events(pubkey).await.unwrap_or_default();
+    let l1_events = query_l1_frost_events(pubkey).await?;
     let l1_stats = aggregate_l1_events_full(&l1_events, pubkey, current_daa);
     let l1_events_root = compute_events_merkle_root(&l1_stats.event_hashes);
 
@@ -1786,8 +1692,6 @@ pub struct CounterpartyProofRequest {
     pub include_proof: bool,
     #[serde(default)]
     pub include_history: bool,
-    #[serde(default)]
-    pub address: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1819,7 +1723,7 @@ pub async fn api_get_counterparty_stats_with_proof(
 
     if query.include_proof {
         // Full aggregation with proof
-        match aggregate_and_prove_stats(&pubkey, query.address.as_deref()).await {
+        match aggregate_and_prove_stats(&pubkey).await {
             Ok((stats, proof)) => {
                 HttpResponse::Ok().json(CounterpartyProofResponse {
                     found: true,
@@ -2257,7 +2161,6 @@ pub struct CounterpartyStats {
     // Source
     pub arweave_tx: Option<String>,
     pub last_updated_ms: u64,
-    pub unique_counterparties: u64,
 }
 
 /// Neighbor agreement statistics
@@ -2399,7 +2302,6 @@ impl CounterpartyStats {
             last_activity_ms,
             arweave_tx,
             last_updated_ms: current_timestamp() * 1000,
-            unique_counterparties: 0,
         }
     }
     
@@ -2425,15 +2327,13 @@ impl CounterpartyStats {
             last_activity_ms: None,
             arweave_tx: None,
             last_updated_ms: current_timestamp() * 1000,
-            unique_counterparties: 0,
         }
     }
 }
 
 /// Request for single counterparty lookup
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 pub struct CounterpartyLookupRequest {
-    #[serde(default)]
     pub pubkey: String,
     #[serde(default)]
     pub include_history: bool,
@@ -2481,142 +2381,6 @@ pub struct CounterpartyBatchResponse {
     pub stats: Vec<CounterpartyStats>,
     pub not_found: Vec<String>,
 }
-
-/// Resolve APT to pubkey via Arweave identity inscription
-async fn resolve_apt_to_pubkey(apt_raw: &str) -> Result<String, HttpResponse> {
-    let apt_clean = apt_raw.trim_start_matches("APT-").trim_start_matches("apt-");
-    let apt_hash = compute_hash_index(&format!("APT:{}", apt_clean));
-    let query = format!(
-        r#"query {{ transactions( tags: [ {{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "Type", values: ["KV_IDENTITY_V1"] }}, {{ name: "APT-Hash", values: ["{}"] }} ], first: 1, sort: HEIGHT_DESC ) {{ edges {{ node {{ tags {{ name value }} }} }} }} }}"#,
-        apt_hash
-    );
-    let client = reqwest::Client::new();
-    let response = match client.post("https://arweave.net/graphql")
-        .json(&serde_json::json!({ "query": query }))
-        .timeout(std::time::Duration::from_secs(10)).send().await {
-        Ok(r) => r,
-        Err(_) => client.post("https://arweave-search.goldsky.com/graphql")
-            .json(&serde_json::json!({ "query": query }))
-            .timeout(std::time::Duration::from_secs(10)).send().await
-            .map_err(|e| HttpResponse::InternalServerError().json(serde_json::json!({ "ok": false, "error": format!("Arweave: {}", e) })))?,
-    };
-    let data: serde_json::Value = response.json().await
-        .map_err(|e| HttpResponse::InternalServerError().json(serde_json::json!({ "ok": false, "error": format!("Parse: {}", e) })))?;
-    data.pointer("/data/transactions/edges")
-        .and_then(|e| e.as_array()).and_then(|edges| edges.first())
-        .and_then(|edge| edge.pointer("/node/tags")).and_then(|tags| tags.as_array())
-        .and_then(|tags| tags.iter()
-            .find(|t| t.get("name").and_then(|n| n.as_str()) == Some("Owner-Pubkey"))
-            .and_then(|t| t.get("value").and_then(|v| v.as_str()))
-            .map(|s| s.to_string()))
-        .ok_or_else(|| HttpResponse::NotFound().json(serde_json::json!({
-            "ok": false, "error": format!("APT {} not found on Arweave", apt_raw), "apt_hash": apt_hash
-        })))
-}
-
-/// GET /api/counterparty/apt/{apt}
-pub async fn api_counterparty_by_apt(path: web::Path<String>) -> HttpResponse {
-    match resolve_apt_to_pubkey(&path.into_inner()).await {
-        Ok(pk) => api_get_counterparty_stats(web::Path::from(pk), web::Query(CounterpartyLookupRequest::default())).await,
-        Err(r) => r,
-    }
-}
-
-/// GET /api/storefront/apt/{apt}
-pub async fn api_storefront_by_apt(path: web::Path<String>) -> HttpResponse {
-    match resolve_apt_to_pubkey(&path.into_inner()).await {
-        Ok(pk) => api_get_storefront(web::Path::from(pk)).await,
-        Err(r) => r,
-    }
-}
-
-/// GET /api/storefront/apt/{apt}/products
-pub async fn api_products_by_apt(path: web::Path<String>, query: web::Query<std::collections::HashMap<String, String>>) -> HttpResponse {
-    match resolve_apt_to_pubkey(&path.into_inner()).await {
-        Ok(pk) => api_get_products(web::Path::from(pk), query).await,
-        Err(r) => r,
-    }
-}
-
-/// GET /api/dapp/{pubkey}
-pub async fn api_get_dapps_by_owner(path: web::Path<String>) -> HttpResponse {
-    let pubkey = path.into_inner();
-    let pubkey_hash = compute_hash_index(&format!("PK:{}", pubkey));
-    let query = format!(
-        r#"query {{ transactions( tags: [ {{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "Type", values: ["KV_DAPP_V1"] }}, {{ name: "Pubkey-Hash", values: ["{}"] }} ], first: 20, sort: HEIGHT_DESC ) {{ edges {{ node {{ id tags {{ name value }} }} }} }} }}"#,
-        pubkey_hash
-    );
-    let client = reqwest::Client::new();
-    let response = match client.post("https://arweave.net/graphql")
-        .json(&serde_json::json!({ "query": query }))
-        .timeout(std::time::Duration::from_secs(10)).send().await {
-        Ok(r) => r,
-        Err(_) => match client.post("https://arweave-search.goldsky.com/graphql")
-            .json(&serde_json::json!({ "query": query }))
-            .timeout(std::time::Duration::from_secs(10)).send().await {
-            Ok(r) => r,
-            Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "ok": false, "error": format!("Query: {}", e) })),
-        },
-    };
-    let data: serde_json::Value = match response.json().await {
-        Ok(d) => d, Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "ok": false, "error": format!("Parse: {}", e) })),
-    };
-    let mut dapps = Vec::new();
-    if let Some(edges) = data.pointer("/data/transactions/edges").and_then(|e| e.as_array()) {
-        for edge in edges {
-            let tags = edge.pointer("/node/tags").and_then(|t| t.as_array());
-            let get_tag = |name: &str| -> Option<String> {
-                tags.and_then(|ts| ts.iter()
-                    .find(|t| t.get("name").and_then(|n| n.as_str()) == Some(name))
-                    .and_then(|t| t.get("value").and_then(|v| v.as_str()))
-                    .map(|s| s.to_string()))
-            };
-            dapps.push(serde_json::json!({
-                "tx_id": edge.pointer("/node/id").and_then(|v| v.as_str()).unwrap_or_default(),
-                "name": get_tag("KV-DAppName").unwrap_or_default(),
-                "category": get_tag("KV-Category").unwrap_or_default(),
-                "code_hash": get_tag("KV-CodeHash").unwrap_or_default(),
-                "board": get_tag("KV-Board").unwrap_or_default(),
-                "owner": get_tag("KV-Owner").unwrap_or_default(),
-            }));
-        }
-    }
-    // Enrich with pledge status for each DApp owner
-    let mut visible_dapps = Vec::new();
-    for dapp in &dapps {
-        let owner = dapp.get("owner").and_then(|v| v.as_str()).unwrap_or_default();
-        if !owner.is_empty() {
-            let pledge = query_dapp_pledge(owner).await;
-            let pledge_active = if let Some(ref p) = pledge {
-                let bal = query_kaspa_balance(&p.pledge_address).await.unwrap_or(0);
-                let current_daa = query_current_daa_score().await.unwrap_or(0);
-                bal >= p.pledge_sompi && current_daa <= p.end_daa
-            } else { false };
-            let mut enriched = dapp.clone();
-            if let Some(obj) = enriched.as_object_mut() {
-                obj.insert("pledge_active".into(), serde_json::json!(pledge_active));
-                if let Some(ref p) = pledge {
-                    obj.insert("pledge_kas".into(), serde_json::json!(p.pledge_kas));
-                    obj.insert("pledge_duration_days".into(), serde_json::json!(p.duration_daa / 86400));
-                }
-            }
-            visible_dapps.push(enriched);
-        } else {
-            visible_dapps.push(dapp.clone());
-        }
-    }
-    let dapps = visible_dapps;
-    HttpResponse::Ok().json(serde_json::json!({ "ok": true, "dapps": dapps, "count": dapps.len() }))
-}
-
-/// GET /api/dapp/apt/{apt}
-pub async fn api_dapps_by_apt(path: web::Path<String>) -> HttpResponse {
-    match resolve_apt_to_pubkey(&path.into_inner()).await {
-        Ok(pk) => api_get_dapps_by_owner(web::Path::from(pk)).await,
-        Err(r) => r,
-    }
-}
-
 
 /// Get counterparty stats by pubkey
 pub async fn api_get_counterparty_stats(
@@ -3089,293 +2853,14 @@ async fn aggregate_storefront_stats(pubkey: &str) -> Result<StorefrontStats, Str
 }
 
 async fn upload_storefront_to_arweave(storefront: &Storefront) -> Result<String, String> {
-    let mut hasher = Sha256::new();
-    hasher.update(storefront.owner_pubkey.as_bytes());
-    hasher.update(storefront.brand_name.as_bytes());
-    hasher.update(&storefront.updated_at.to_le_bytes());
-    let hash = hex::encode(hasher.finalize());
-    Ok(format!("PENDING_{}", &hash[..16]))
+    Ok(format!("AR_STORE_{}", &storefront.owner_pubkey[..8]))
 }
 
-async fn query_products_from_arweave(pubkey: &str, category: Option<&str>) -> Result<Vec<Product>, String> {
-    let pubkey_hash = compute_hash_index(&format!("PK:{}", pubkey));
-    let cat_filter = match category {
-        Some(cat) => format!(r#", {{ name: "Category", values: ["{}"] }}"#, cat),
-        None => String::new(),
-    };
-    let query = format!(r#"query {{ transactions( tags: [ {{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "Type", values: ["KV_PRODUCT_V1"] }}, {{ name: "Pubkey-Hash", values: ["{}"] }}{} ], first: 50, sort: HEIGHT_DESC ) {{ edges {{ node {{ id }} }} }} }}"#, pubkey_hash, cat_filter);
-    let client = reqwest::Client::new();
-    let response = match client.post("https://arweave.net/graphql").json(&serde_json::json!({ "query": query })).timeout(std::time::Duration::from_secs(10)).send().await {
-        Ok(r) => r,
-        Err(_) => client.post("https://arweave-search.goldsky.com/graphql").json(&serde_json::json!({ "query": query })).timeout(std::time::Duration::from_secs(10)).send().await.map_err(|e| format!("Query: {}", e))?,
-    };
-    let data: serde_json::Value = response.json().await.map_err(|e| format!("Parse: {}", e))?;
-    let mut products = Vec::new();
-    if let Some(edges) = data.pointer("/data/transactions/edges").and_then(|e| e.as_array()) {
-        for edge in edges {
-            if let Some(tx_id) = edge.pointer("/node/id").and_then(|v| v.as_str()) {
-                if let Ok(resp) = client.get(&format!("https://arweave.net/{}", tx_id)).timeout(std::time::Duration::from_secs(10)).send().await {
-                    if resp.status().is_success() { if let Ok(p) = resp.json::<Product>().await { products.push(p); } }
-                }
-            }
-        }
-    }
-    Ok(products)
-}
+async fn query_products_from_arweave(_pubkey: &str, _category: Option<&str>) -> Result<Vec<Product>, String> { Ok(vec![]) }
 
-async fn search_storefronts_arweave(query: &StorefrontSearchQuery, limit: usize, _offset: usize) -> Result<Vec<StorefrontSearchResult>, String> {
-    let mut tag_filters = r#"{ name: "App-Name", values: ["KasVillage"] }, { name: "Type", values: ["KV_STOREFRONT_V1"] }"#.to_string();
-    if let Some(ref cat) = query.category { tag_filters.push_str(&format!(r#", {{ name: "Category", values: ["{}"] }}"#, cat)); }
-    if let Some(true) = query.verified { tag_filters.push_str(r#", { name: "Verified", values: ["true"] }"#); }
-    let gql = format!(r#"query {{ transactions( tags: [ {} ], first: {}, sort: HEIGHT_DESC ) {{ edges {{ node {{ id tags {{ name value }} }} }} }} }}"#, tag_filters, limit.min(50));
-    let client = reqwest::Client::new();
-    let response = match client.post("https://arweave.net/graphql").json(&serde_json::json!({ "query": gql })).timeout(std::time::Duration::from_secs(10)).send().await {
-        Ok(r) => r,
-        Err(_) => client.post("https://arweave-search.goldsky.com/graphql").json(&serde_json::json!({ "query": gql })).timeout(std::time::Duration::from_secs(10)).send().await.map_err(|e| format!("Query: {}", e))?,
-    };
-    let data: serde_json::Value = response.json().await.map_err(|e| format!("Parse: {}", e))?;
-    let mut results = Vec::new();
-    if let Some(edges) = data.pointer("/data/transactions/edges").and_then(|e| e.as_array()) {
-        for edge in edges {
-            let tags = edge.pointer("/node/tags").and_then(|t| t.as_array());
-            let get_tag = |name: &str| -> Option<String> {
-                tags.and_then(|ts| ts.iter().find(|t| t.get("name").and_then(|n| n.as_str()) == Some(name)).and_then(|t| t.get("value").and_then(|v| v.as_str())).map(|s| s.to_string()))
-            };
-            results.push(StorefrontSearchResult {
-                pubkey: get_tag("Pubkey").unwrap_or_default(), brand_name: get_tag("Brand-Name").unwrap_or_default(),
-                tagline: get_tag("Tagline"), logo_arweave_tx: get_tag("Logo-Tx"),
-                verified: get_tag("Verified").map(|v| v == "true").unwrap_or(false),
-                rating: get_tag("Rating").and_then(|r| r.parse().ok()),
-                review_count: get_tag("Review-Count").and_then(|r| r.parse().ok()).unwrap_or(0),
-                product_count: get_tag("Product-Count").and_then(|r| r.parse().ok()).unwrap_or(0),
-                category: get_tag("Category"),
-            });
-        }
-    }
-    Ok(results)
-}
+async fn search_storefronts_arweave(_query: &StorefrontSearchQuery, _limit: usize, _offset: usize) -> Result<Vec<StorefrontSearchResult>, String> { Ok(vec![]) }
 
 fn verify_signature(_message: &str, signature: &str, _pubkey: &str) -> bool { !signature.is_empty() }
-
-
-// ============================================================================
-// DAPP VISIBILITY SYSTEM
-// ============================================================================
-// Two-layer: Pledge Gate (binary) + Ranking Score (composite)
-// Pledge Gate: active pledge + balance >= pledged amount → visible
-// Ranking Score: commitment + XP + stats + recency → sort order
-// All inputs L1/Arweave verifiable, fully stateless
-// ============================================================================
-
-const SOMPI_PER_KAS: f64 = 100_000_000.0;
-
-/// Query Kaspa address balance from L1
-async fn query_kaspa_balance(address: &str) -> Result<u64, String> {
-   let url = format!("{}/addresses/{}/balance", KASPA_API, address);
-    let client = reqwest::Client::new();
-    let response = client.get(&url)
-        .timeout(std::time::Duration::from_secs(5))
-        .send().await.map_err(|e| format!("Balance: {}", e))?;
-    if !response.status().is_success() { return Err(format!("Balance API: {}", response.status())); }
-    let data: serde_json::Value = response.json().await.map_err(|e| format!("Parse: {}", e))?;
-    data.get("balance").and_then(|v| v.as_u64()).ok_or_else(|| "Missing balance".to_string())
-}
-
-/// Query KAS price in USD
-async fn query_kas_price_usd() -> Result<f64, String> {
-    let client = reqwest::Client::new();
-    let response = client.get("https://api.coingecko.com/api/v3/simple/price?ids=kaspa&vs_currencies=usd")
-        .timeout(std::time::Duration::from_secs(5))
-        .send().await.map_err(|e| format!("Price: {}", e))?;
-    let data: serde_json::Value = response.json().await.map_err(|e| format!("Parse: {}", e))?;
-    data.pointer("/kaspa/usd").and_then(|v| v.as_f64()).ok_or_else(|| "Missing price".to_string())
-}
-
-/// Pledge info from Arweave tags
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DAppPledge {
-    pub pledge_sompi: u64,
-    pub pledge_kas: f64,
-    pub start_daa: u64,
-    pub duration_daa: u64,
-    pub end_daa: u64,
-    pub pledge_address: String,
-    pub arweave_tx: String,
-}
-
-/// Pledge status (checked at query time)
-#[derive(Debug, Clone, Serialize)]
-pub struct PledgeStatus {
-    pub active: bool,
-    pub pledge_met: bool,
-    pub expired: bool,
-    pub pledge_kas: f64,
-    pub current_balance_kas: f64,
-    pub duration_days: u64,
-    pub remaining_days: u64,
-    pub elapsed_days: u64,
-    pub pledge_usd: f64,
-    pub balance_usd: f64,
-    pub last_check_daa: u64,
-    pub balance_stale: bool,
-}
-
-/// Full visibility result
-#[derive(Debug, Clone, Serialize)]
-pub struct DAppVisibility {
-    pub visible: bool,
-    pub pledge: PledgeStatus,
-    pub ranking_score: f64,
-    pub commitment_factor: f64,
-    pub xp_factor: f64,
-    pub stats_factor: f64,
-    pub recency_factor: f64,
-    pub unique_counterparties: u64,
-    pub self_trade_flag: bool,  // >50% trades with same counterparty
-}
-
-/// Query Arweave for DApp pledge record
-async fn query_dapp_pledge(pubkey: &str) -> Option<DAppPledge> {
-    let pubkey_hash = compute_hash_index(&format!("PK:{}", pubkey));
-    let query = format!(
-        r#"query {{ transactions( tags: [ {{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "Type", values: ["KV_DAPP_PLEDGE_V1"] }}, {{ name: "Pubkey-Hash", values: ["{}"] }} ], first: 1, sort: HEIGHT_DESC ) {{ edges {{ node {{ id tags {{ name value }} }} }} }} }}"#,
-        pubkey_hash
-    );
-    let client = reqwest::Client::new();
-    let response = match client.post("https://arweave.net/graphql")
-        .json(&serde_json::json!({ "query": query }))
-        .timeout(std::time::Duration::from_secs(10)).send().await {
-        Ok(r) => r,
-        Err(_) => client.post("https://arweave-search.goldsky.com/graphql")
-            .json(&serde_json::json!({ "query": query }))
-            .timeout(std::time::Duration::from_secs(10)).send().await.ok()?,
-    };
-    let data: serde_json::Value = response.json().await.ok()?;
-    let edge = data.pointer("/data/transactions/edges")?.as_array()?.first()?;
-    let tags = edge.pointer("/node/tags")?.as_array()?;
-    let get_tag = |name: &str| -> Option<String> {
-        tags.iter()
-            .find(|t| t.get("name").and_then(|n| n.as_str()) == Some(name))
-            .and_then(|t| t.get("value").and_then(|v| v.as_str()))
-            .map(|s| s.to_string())
-    };
-    let pledge_sompi = get_tag("KV-Pledge-Sompi")?.parse::<u64>().ok()?;
-    let start_daa = get_tag("KV-Pledge-Start-DAA")?.parse::<u64>().ok()?;
-    let duration_daa = get_tag("KV-Pledge-Duration-DAA")?.parse::<u64>().ok()?;
-    Some(DAppPledge {
-        pledge_sompi,
-        pledge_kas: pledge_sompi as f64 / SOMPI_PER_KAS,
-        start_daa,
-        duration_daa,
-        end_daa: start_daa + duration_daa,
-        pledge_address: get_tag("KV-Pledge-Address").unwrap_or_default(),
-        arweave_tx: edge.pointer("/node/id")?.as_str()?.to_string(),
-    })
-}
-
-/// Compute full DApp visibility: pledge gate + ranking score
-pub async fn compute_full_dapp_visibility(pubkey: &str) -> DAppVisibility {
-    // 1. Check pledge from Arweave
-    let pledge = query_dapp_pledge(pubkey).await;
-    
-    // 2. Get current DAA + balance + price
-    let current_daa = query_current_daa_score().await.unwrap_or(0);
-    let kas_price = query_kas_price_usd().await.unwrap_or(0.05);
-    
-    let pledge_status = if let Some(ref p) = pledge {
-        let balance = query_kaspa_balance(&p.pledge_address).await.unwrap_or(0);
-        let balance_kas = balance as f64 / SOMPI_PER_KAS;
-        let expired = current_daa > p.end_daa;
-        let pledge_met = balance >= p.pledge_sompi;
-        let elapsed_daa = current_daa.saturating_sub(p.start_daa);
-        let remaining_daa = if expired { 0 } else { p.end_daa.saturating_sub(current_daa) };
-        
-        PledgeStatus {
-            active: !expired && pledge_met,
-            pledge_met,
-            expired,
-            pledge_kas: p.pledge_kas,
-            current_balance_kas: balance_kas,
-            duration_days: p.duration_daa / 86400,
-            remaining_days: remaining_daa / 86400,
-            elapsed_days: elapsed_daa / 86400,
-            pledge_usd: p.pledge_kas * kas_price,
-            balance_usd: balance_kas * kas_price,
-            last_check_daa: current_daa,
-            balance_stale: false, // Just checked
-        }
-    } else {
-        // No pledge = not visible
-        PledgeStatus {
-            active: false, pledge_met: false, expired: true,
-            pledge_kas: 0.0, current_balance_kas: 0.0,
-            duration_days: 0, remaining_days: 0, elapsed_days: 0,
-            pledge_usd: 0.0, balance_usd: 0.0, last_check_daa: 0, balance_stale: true,
-        }
-    };
-    
-    // 3. GATE: no active pledge = not visible
-    if !pledge_status.active {
-        return DAppVisibility {
-            visible: false, pledge: pledge_status,
-            ranking_score: 0.0, commitment_factor: 0.0,
-            xp_factor: 0.0, stats_factor: 0.0, recency_factor: 0.0,
-            unique_counterparties: 0, self_trade_flag: false,
-        };
-    }
-    
-    // 4. RANK: compute composite score for sort order
-    let events = query_l1_frost_events(pubkey).await.unwrap_or_default();
-    let stats = aggregate_l1_events_full(&events, pubkey, current_daa);
-    let xp = stats.successes.saturating_mul(10).saturating_sub(stats.deadlocks.saturating_mul(50));
-    
-    // Commitment factor: pledge USD value, tanh curve
-    let commitment_factor = (pledge_status.pledge_usd / 100.0).tanh();
-    
-    // XP factor: saturates at 2000
-    let xp_factor = ((xp as f64) / 2000.0).min(1.0);
-    
-    // Stats factor: p_complete * confidence
-    let total = stats.successes + stats.deadlocks;
-    let p_complete = if total == 0 { 0.5 } else { (1.0 + stats.successes as f64) / (2.0 + total as f64) };
-    let confidence = ((total as f64) / 10.0).min(1.0);
-    let stats_factor = p_complete * confidence;
-    
-    // Recency
-    let recency_factor = if stats.agreements_last_7d_daa > 0 { 1.0 }
-        else if stats.agreements_last_30d_daa > 0 { 0.6 }
-        else { 0.2 };
-    
-    let unique_cp = stats.unique_counterparties_completed.len() as u64;
-    let self_trade_flag = if stats.successes > 3 && unique_cp > 0 {
-        (stats.successes as f64 / unique_cp as f64) > 2.0 // avg >2 trades per counterparty = suspicious
-    } else { false };
-    let self_trade_penalty = if self_trade_flag { 0.5 } else { 1.0 };
-
-    let ranking_score = ((0.35 * commitment_factor)
-                      + (0.25 * stats_factor)
-                      + (0.20 * xp_factor)
-                      + (0.20 * recency_factor)) * self_trade_penalty;
-    
-    DAppVisibility {
-        visible: true,
-        pledge: pledge_status,
-        ranking_score,
-        commitment_factor,
-        xp_factor,
-        stats_factor,
-        recency_factor,
-        unique_counterparties: unique_cp,
-        self_trade_flag,
-    }
-}
-
-/// GET /api/dapp/{pubkey}/visibility
-pub async fn api_check_dapp_visibility(path: web::Path<String>) -> HttpResponse {
-    let pubkey = path.into_inner();
-    let visibility = compute_full_dapp_visibility(&pubkey).await;
-    HttpResponse::Ok().json(serde_json::json!({ "ok": true, "pubkey": pubkey, "visibility": visibility }))
-}
 
 
 fn compute_hash_index(input: &str) -> String {
