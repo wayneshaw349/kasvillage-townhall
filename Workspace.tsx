@@ -4038,7 +4038,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(4) }}>
                       {group.mods.map(m => (
                         <TouchableOpacity key={m} onPress={() => {
-                          const nameMap: Record<string, string> = { 'procedural_sdk': 'procedural_sdk', 'game_input': 'kasvillage_game_input_paint' };
+                          const nameMap = { 'procedural_sdk': 'procedural_sdk', 'game_input': 'kasvillage_game_input_paint' };
                           const fileName = nameMap[m] || ('kasvillage_' + m);
                           const rawUrl = 'https://raw.githubusercontent.com/wayneshaw349/kasvillage-townhall/main/' + fileName + '.ts';
                           Clipboard.setStringAsync('Fetch this file and use it to build: ' + rawUrl);
