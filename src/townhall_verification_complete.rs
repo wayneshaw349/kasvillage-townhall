@@ -955,9 +955,9 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
 
     // 4. Role counts: total = as_buyer + as_seller
     // Relaxed: deduped events skip Created status
-    // return Err(format!("Role count mismatch: total {} != buyer {} + seller {}", 
     // }
-    }
+
+
 
     // 5. Deadlock consistency: deadlocks == deadlocked && deadlocks == sum of reasons
     if witness.deadlocks != witness.deadlocked {
