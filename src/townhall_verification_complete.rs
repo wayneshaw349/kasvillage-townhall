@@ -1628,6 +1628,32 @@ async fn query_arweave_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, Str
             });
         }
     }
+    // Dedup: keep only latest status per agreement ID
+    // Arweave has Agreed→Accepted→Signed→Released as separate records
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut deduped: Vec<FrostEvent> = Vec::new();
+    // Status priority: Released > Deadlocked > Refunded > Expired > Signed > Accepted > Agreed
+    let status_priority = |e: &FrostEvent| -> u8 {
+        match e.event_type {
+            FrostEventType::AgreementCompleted => 6,
+            FrostEventType::AgreementDeadlocked => 5,
+            FrostEventType::AgreementRefunded => 4,
+            FrostEventType::AgreementExpired => 3,
+            FrostEventType::AgreementCreated => 1,
+        }
+    };
+    for (idx, event) in events.iter().enumerate() {
+        if event.agreement_id.is_empty() { deduped.push(event.clone()); continue; }
+        if let Some(&prev_idx) = seen.get(&event.agreement_id) {
+            if status_priority(event) > status_priority(&deduped[prev_idx]) {
+                deduped[prev_idx] = event.clone();
+            }
+        } else {
+            seen.insert(event.agreement_id.clone(), deduped.len());
+            deduped.push(event.clone());
+        }
+    }
+    let events = deduped;
     Ok(events)
 }
 
