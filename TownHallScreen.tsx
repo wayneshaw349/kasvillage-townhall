@@ -326,7 +326,7 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         setResult({
           pubkey: lookupResult.pubkey,
           apt: 'APT-' + deriveApt(lookupResult.pubkey),
-          xp: s.xp ?? 250,
+          xp: s.xp ?? 0,
           pComplete: s.p_complete ?? s.pComplete ?? 0.5,
           successes: s.successes ?? 0,
           deadlocks: s.deadlocks ?? 0,

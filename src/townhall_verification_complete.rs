@@ -2343,7 +2343,7 @@ pub struct DeadlockStats {
 }
 
 /// Snail mode constants
-const SNAIL_MODE_XP_THRESHOLD: u64 = 150;
+const SNAIL_MODE_XP_THRESHOLD: u64 = 0;  // Snail only from bad p_complete
 const SNAIL_MODE_P_COMPLETE_THRESHOLD: f64 = 0.5;
 const SNAIL_MODE_MIN_SAMPLES: u64 = 3;
 const SNAIL_MODE_BASE_DELAY_MS: u64 = 180_000;   // 3 minutes

@@ -371,7 +371,7 @@ impl UserCompletionStats {
         Self {
             successes: 0,
             deadlocks: 0,
-            xp: DEFAULT_STARTING_XP,
+            xp: 0, // No starting XP bonus
             total_samples: 0,
             pubkey: String::new(),
             citadel_tier: "Guest".to_string(),
