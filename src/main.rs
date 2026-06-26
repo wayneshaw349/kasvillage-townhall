@@ -662,19 +662,19 @@ impl ArweaveStateReader {
     }
 
     pub async fn get_user_stats(&self, pubkey: &str) -> Result<UserCompletionStats, String> {
-        // Count completed agreements (Accepted) where pubkey is party A or counterparty
+        // Count completed agreements (Released = funds released) where pubkey is party A or counterparty
         let q_accepted = format!(
             r#"query {{
                 asPartyA: transactions(first: 100, tags: [
                     {{ name: "KV-Type", values: ["frost-agreement"] }},
-                    {{ name: "KV-Status", values: ["Accepted"] }},
+                    {{ name: "KV-Status", values: ["Released"] }},
                     {{ name: "KV-Pubkey", values: ["{}"] }}
                 ]) {{
                     edges {{ node {{ id, tags {{ name, value }} }} }}
                 }}
                 asCounterparty: transactions(first: 100, tags: [
                     {{ name: "KV-Type", values: ["frost-agreement"] }},
-                    {{ name: "KV-Status", values: ["Accepted"] }},
+                    {{ name: "KV-Status", values: ["Released"] }},
                     {{ name: "KV-Counterparty", values: ["{}"] }}
                 ]) {{
                     edges {{ node {{ id, tags {{ name, value }} }} }}
@@ -751,9 +751,9 @@ impl ArweaveStateReader {
         }
 
         // Compute XP on the fly: base + completions - deadlock penalties
-        let xp = (DEFAULT_STARTING_XP as u64)
-            .saturating_add(successes * 10)
-            .saturating_sub(deadlocks * 50);
+        let xp = (successes * 10).saturating_sub(deadlocks * 50);
+
+
 
         // Count lamport attestations + UTXO proofs by KV-PubKeyHash
         use sha2::Digest;
@@ -8792,3 +8792,4 @@ mod tests_remaining {
         assert_eq!(XPTier::from_xp(9999), XPTier::Archon);
     }
 }
+

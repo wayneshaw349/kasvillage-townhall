@@ -1267,6 +1267,8 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
             
             FrostEventType::AgreementCompleted => {
                 stats.completed += 1;
+                stats.total_agreements += 1;
+                if is_buyer { stats.as_buyer += 1; } else { stats.as_seller += 1; }
                 stats.successes += 1;
                 if stats.pending > 0 { stats.pending -= 1; }
                 
@@ -1292,6 +1294,7 @@ pub fn aggregate_l1_events_full(events: &[FrostEvent], pubkey: &str, current_daa
             
             FrostEventType::AgreementDeadlocked => {
                 stats.deadlocked += 1;
+                stats.total_agreements += 1;
                 stats.deadlocks += 1;
                 if stats.pending > 0 { stats.pending -= 1; }
                 
