@@ -364,8 +364,8 @@ pub fn verify_snark_proof(proof: &VerificationProof, inputs: &ProofInputs) -> bo
 // ============================================================================
 
 /// XP constants (6-decimal fixed point)
-const XP_PER_SUCCESS: u64 = 10_000000;      // 10.0
-const XP_PENALTY_PER_DEADLOCK: u64 = 50_000000;  // 50.0
+const XP_PER_SUCCESS: u64 = 10;      // 10 XP per success
+const XP_PENALTY_PER_DEADLOCK: u64 = 50;  // 50 XP penalty per deadlock
 const FIXED_POINT_SCALE: u64 = 1_000000;    // 6 decimals
 
 // Enhanced Bayesian factor weights (fixed-point, 6 decimals)

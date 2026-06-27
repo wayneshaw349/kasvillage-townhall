@@ -164,7 +164,7 @@ function getFeeRateForPriority(
       if (estimate.lowBuckets.length > 0) {
         return estimate.lowBuckets[0].feeRate;
       }
-      return 1; // Minimum relay fee
+      return 100; // Toccata minimum: 100 sompi/gram
     default:
       return 1;
   }
@@ -331,8 +331,19 @@ export class KaspaClient {
     
     const utxos = await this.getUtxos([address]);
     
-    // Filter out immature coinbase UTXOs
+    // Filter out immature coinbase UTXOs and covenant UTXOs
     return utxos.filter(utxo => {
+      // Reject covenant/programmed UTXOs (non-standard scriptPublicKey)
+      // Standard Kaspa P2PK: 35 bytes (70 hex chars) = OP_DATA_32 <pubkey> OP_CHECKSIG
+      // Standard P2SH: 36 bytes (72 hex chars)
+      // Anything longer is likely a covenant script — reject for FROST escrow safety
+      const spkHex = typeof utxo.scriptPublicKey === 'string' 
+        ? utxo.scriptPublicKey 
+        : utxo.scriptPublicKey?.scriptPublicKey || '';
+      if (spkHex.length > 72) {
+        console.warn('[KaspaClient] Rejecting covenant UTXO:', utxo.txId, 'script length:', spkHex.length);
+        return false;
+      }
       if (!utxo.isCoinbase) return true;
       const age = currentDaaScore - utxo.blockDaaScore;
       return age >= COINBASE_MATURITY;

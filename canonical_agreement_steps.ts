@@ -270,7 +270,36 @@ export function buildReleaseTemplate(params: {
 // CONSTANTS
 // ============================================================================
 
-export const MIN_FEE_SOMPI = 300000n;         // KIP-9 safe minimum
+export const MIN_FEE_SOMPI = 300000n;         // KIP-9 safe minimum (above Toccata 100 sompi/gram)
+
+// Toccata-compatible: fetch fee estimate from REST API
+// Falls back to hardcoded formula if API unavailable
+export async function fetchFeeEstimate(
+  network: 'mainnet' | 'testnet-10' = 'testnet-10'
+): Promise<bigint> {
+  const api = network === 'mainnet' ? 'api.kaspa.org' : 'api-tn10.kaspa.org';
+  try {
+    const resp = await fetch(`https://${api}/info/fee-estimate`);
+    if (!resp.ok) throw new Error(`Fee API: ${resp.status}`);
+    const data = await resp.json();
+    // priorityBucket.feerate is sompi/gram â€” multiply by estimated mass
+    const feeRate = data?.priorityBucket?.feerate || data?.priority_bucket?.feerate || 100;
+    // Typical FROST tx: ~2500 grams (2-in, 2-out)
+    const estimatedMass = 2500;
+    const fee = BigInt(Math.ceil(feeRate * estimatedMass));
+    return fee < MIN_FEE_SOMPI ? MIN_FEE_SOMPI : fee;
+  } catch {
+    // Toccata fallback formula: fee = 100 * max(compute_grams, 2 * tx_bytes)
+    // Typical FROST tx: 2 inputs, 2 outputs
+    // tx_bytes ˜ 35 + 2*(41+65) + 2*(9+34) = 333 bytes
+    // compute_grams ˜ 333 + 2*340 + 2*1000 = 3013
+    // fee = 100 * max(3013, 2*333) = 100 * 3013 = 301300 sompi
+    const txBytes = 333; // typical FROST 2-in-2-out
+    const computeGrams = txBytes + 2 * 340 + 2 * 1000;
+    const toccataFee = BigInt(100 * Math.max(computeGrams, 2 * txBytes));
+    return toccataFee < MIN_FEE_SOMPI ? MIN_FEE_SOMPI : toccataFee;
+  }
+}
 export const SUBNETWORK_NATIVE = '0000000000000000000000000000000000000000';
 export const MAX_COUNTER_SEARCH = 10;         // L1 loop max iterations
 export const P2PK_SCRIPT_LENGTH = 68;         // 20{32bytes}ac = 68 hex chars
@@ -1119,3 +1148,4 @@ export function computeAgrId(
 // State Machine:   STEPS, canTransition, K_ALLOWED_STEPS, K_DESTROY_STEPS
 // Ceremony:        buyerBuildTemplate, sellerSignTemplate, buyerAggregate
 // Identity:        computeAgrId
+
