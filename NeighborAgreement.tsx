@@ -109,7 +109,8 @@ import {// Types
   generateFrostNonce,
   computeFrostPartialS,
   aggregateFrostSig,
-  cleanup as cleanupFrost, aggregateToAddress, completeFrost2Round} from './frost_complete';
+  cleanup as cleanupFrost, aggregateToAddress, completeFrost2Round} from '
+import { validateEscrowDestination } from './frost_complete./frost_complete';
 import { sendPushToCounterparty } from './push_notifications';
 
 // REST API for real L1 transactions
