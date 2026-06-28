@@ -1,11 +1,16 @@
-﻿[package]
+[package]
 name = "kasvillage-townhall"
 version = "4.0.0"
 edition = "2021" 
 authors = ["KasVillage"]
 description = "Complete Town Hall with  real Halo2 SNARK"
 
+
 [dependencies]
+neptune = "12.0"
+typenum = "1.17"
+group = "0.13"
+rand = "0.8"
 # Halo2 - PSE fork with IPA
 halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2", tag = "v2023_04_20" }
 
@@ -24,7 +29,6 @@ hex = "0.4"
 secp256k1 = { version = "0.29", features = ["global-context"] }
 
 # Random
-rand = "0.8"
 rand_core = "0.6"
 
 # Web framework
@@ -64,3 +68,4 @@ lto = true
 # rsa = "0.9"
 # pkcs8 = "0.10"
 # trust-dns-resolver = "0.23"
+

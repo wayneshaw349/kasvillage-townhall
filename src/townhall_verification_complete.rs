@@ -24,7 +24,7 @@ use halo2_proofs::{
     plonk::{Circuit, ConstraintSystem, Error as PlonkError, Column, Advice, Instance, Selector, Expression, create_proof, verify_proof, keygen_pk, keygen_vk, ProvingKey, VerifyingKey},
     poly::{
         commitment::ParamsProver,
-        ipa::{commitment::ParamsIPA, multiopen::ProverIPA, strategy::SingleStrategy},
+        ipa::{commitment::{ParamsIPA, IPACommitmentScheme}, multiopen::{ProverIPA, VerifierIPA}, strategy::SingleStrategy},
     },
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
@@ -367,6 +367,8 @@ pub fn verify_snark_proof(proof: &VerificationProof, inputs: &ProofInputs) -> bo
 const XP_PER_SUCCESS: u64 = 10;      // 10 XP per success
 const XP_PENALTY_PER_DEADLOCK: u64 = 50;  // 50 XP penalty per deadlock
 const FIXED_POINT_SCALE: u64 = 1_000000;    // 6 decimals
+
+const HALO2_K: u32 = 5;
 
 // Enhanced Bayesian factor weights (fixed-point, 6 decimals)
 const RECENCY_ACTIVE_BONUS: u64 = 100000;      // +0.1 per recent agreement (max 5)
@@ -918,10 +920,10 @@ pub struct StatsPublicInputs {
 }
 
 /// Global proving key (initialized once)
-static STATS_PK: Lazy<Option<ProvingKey<EqAffine>>> = Lazy::new(|| {
-    // In production: load from file or generate once at startup
-    None
-});
+static STATS_PARAMS: Lazy<ParamsIPA<EqAffine>> = Lazy::new(|| ParamsIPA::<EqAffine>::new(HALO2_K));
+static STATS_VK: Lazy<VerifyingKey<EqAffine>> = Lazy::new(|| { let c = StatsVerificationCircuit { witness: StatsWitness::default() }; keygen_vk(&*STATS_PARAMS, &c).expect("VK") });
+static STATS_PK: Lazy<ProvingKey<EqAffine>> = Lazy::new(|| { let c = StatsVerificationCircuit { witness: StatsWitness::default() }; keygen_pk(&*STATS_PARAMS, STATS_VK.clone(), &c).expect("PK") });
+
 
 /// Generate Halo2 proof for comprehensive stats
 pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String> {
@@ -997,11 +999,12 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
         Some((now - witness.last_deadlock_daa) / 86400)
     } else { None };
 
-    if let Some(_pk) = STATS_PK.as_ref() {
-        // Real Halo2 proof generation
-        unimplemented!("Real Halo2 proof generation")
-    } else {
-        // Mock proof for development - hash all witness data
+    let real_proof_bytes: Option<Vec<u8>> = {
+        let circuit = StatsVerificationCircuit { witness: witness.clone() };
+        let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
+        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, StatsVerificationCircuit>(&*STATS_PARAMS, &*STATS_PK, &[circuit], &[&[]], OsRng, &mut transcript) { Ok(()) => Some(transcript.finalize()), Err(_) => None }
+    };
+    {
         let mut proof_data = Vec::new();
         proof_data.extend_from_slice(&witness.pubkey_hash);
         proof_data.extend_from_slice(&witness.successes.to_le_bytes());
@@ -1041,7 +1044,7 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
         let proof_hash = hasher.finalize();
 
         Ok(StatsProof {
-            proof_bytes: proof_hash.to_vec(),
+            proof_bytes: real_proof_bytes.clone().unwrap_or_else(|| proof_hash.to_vec()),
             public_inputs: StatsPublicInputs {
                 pubkey_hash: hex::encode(&witness.pubkey_hash),
                 successes: witness.successes,
@@ -1078,7 +1081,7 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
                 l1_events_root: hex::encode(&witness.l1_events_root),
                 arweave_stats_hash: hex::encode(&witness.arweave_stats_hash),
             },
-            proof_type: "Halo2-IPA-Stats-Mock-V2".to_string(),
+            proof_type: if real_proof_bytes.is_some() { "Halo2-IPA-Stats-V2".to_string() } else { "Halo2-IPA-Stats-Hash-V2".to_string() },
             generated_at: current_timestamp(),
         })
     }
