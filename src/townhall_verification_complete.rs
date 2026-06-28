@@ -2251,6 +2251,62 @@ pub async fn api_get_stats_vk() -> HttpResponse {
 }
 
 
+#[derive(Debug, Deserialize)]
+pub struct MerkleProofRequest {
+    pub event_hash: String,
+}
+
+/// POST /api/verify/merkle-proof/{pubkey} - Prove an event exists in the L1 events root
+pub async fn api_get_merkle_membership_proof(
+    path: web::Path<String>,
+    body: web::Json<MerkleProofRequest>,
+) -> HttpResponse {
+    use crate::halo2_snark_module::{SparseMerkleTree, poseidon_leaf_hash};
+    use pasta_curves::Fp;
+    let pubkey = path.into_inner();
+    let events = match query_arweave_frost_events(&pubkey).await {
+        Ok(e) => e,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"ok": false, "error": e})),
+    };
+    if events.is_empty() {
+        return HttpResponse::Ok().json(serde_json::json!({"ok": false, "error": "No events found"}));
+    }
+    let hashes: Vec<String> = events.iter().map(|e| e.tx_id.clone()).collect();
+    let depth = if hashes.len() <= 256 { 8 } else if hashes.len() <= 65536 { 16 } else { 32 };
+    let mut tree = SparseMerkleTree::new(depth);
+    let mut target_index: Option<u64> = None;
+    for (i, h) in hashes.iter().enumerate() {
+        let mut hasher = Sha256::new();
+        hasher.update(h.as_bytes());
+        let hash_bytes: [u8; 32] = hasher.finalize().into();
+        let leaf_val = Fp::from(u64::from_le_bytes(hash_bytes[..8].try_into().unwrap()));
+        tree.update(i as u64, poseidon_leaf_hash(leaf_val));
+        if *h == body.event_hash { target_index = Some(i as u64); }
+    }
+    let target_index = match target_index {
+        Some(i) => i,
+        None => return HttpResponse::Ok().json(serde_json::json!({"ok": false, "error": "Event not found in tree"})),
+    };
+    let proof = tree.generate_proof(target_index);
+    let root_hex = {
+        let mut h2 = Sha256::new();
+        h2.update(format!("{:?}", tree.root()).as_bytes());
+        hex::encode(h2.finalize())
+    };
+    let siblings: Vec<String> = proof.path.iter().map(|p| format!("{:?}", p.sibling)).collect();
+    let directions: Vec<bool> = proof.path.iter().map(|p| p.is_left).collect();
+    HttpResponse::Ok().json(serde_json::json!({
+        "ok": true,
+        "event_hash": body.event_hash,
+        "leaf_index": target_index,
+        "root": root_hex,
+        "depth": depth,
+        "total_events": hashes.len(),
+        "proof": {"siblings": siblings, "directions": directions},
+        "verify_instructions": "Hash event ? Poseidon leaf ? walk siblings up tree ? compare root"
+    }))
+}
+
 
 
 
