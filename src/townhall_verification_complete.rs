@@ -2214,6 +2214,31 @@ fn current_timestamp() -> u64 {
 }
 
 // ============================================================================
+/// GET /api/verify/stats-vk - Export stats verifying key for independent verification
+pub async fn api_get_stats_vk() -> HttpResponse {
+    let vk_fingerprint = {
+        let mut hasher = Sha256::new();
+        hasher.update(format!("{:?}", *STATS_VK).as_bytes());
+        hex::encode(hasher.finalize())
+    };
+    HttpResponse::Ok().json(serde_json::json!({"ok": true, "vk_fingerprint": vk_fingerprint, "k": 8, "gates": 8, "advice_columns": 20, "instance_columns": 1, "proof_type": "Halo2-IPA-Stats-V2",
+        "circuit": {"gate_1":"xp=S*10-F*50","gate_2":"p*(2+S+F)=(1+S)*SCALE","gate_3":"total=completed+refunded+deadlocked+pending","gate_4":"total=buyer+seller","gate_5":"deadlocks=deadlocked","gate_6":"successes=completed","gate_7":"adjusted_p*SCALE^5=base*recency*pattern*resolution*speed*role","gate_8":"final_p*SCALE=confidence*adjusted+(SCALE-confidence)*prior"},
+        "verify_instructions": "Reconstruct StatsVerificationCircuit, generate VK from ParamsIPA(K=8), compare fingerprint"}))
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ROUTE REGISTRATION
 // ============================================================================
 // Add these routes to your Actix-web app:

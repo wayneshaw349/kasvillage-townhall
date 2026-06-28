@@ -39,6 +39,7 @@
 #![allow(unused_imports)]
 
 
+mod halo2_snark_module;
 mod townhall_verification_complete;
 
 use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, Responder, middleware::Logger};
@@ -7724,6 +7725,7 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/verify/store", web::post().to(verify_store))
         .route("/api/verify/dapp", web::post().to(townhall_verification_complete::api_verify_dapp))
         .route("/api/verify/game", web::post().to(verify_game))
+        .route("/api/verify/stats-vk", web::get().to(townhall_verification_complete::api_get_stats_vk))
         .route("/api/verify/academic", web::post().to(verify_academic))
         .route("/api/verify/service", web::post().to(verify_service))
         .route("/api/verify/review", web::post().to(verify_review))
