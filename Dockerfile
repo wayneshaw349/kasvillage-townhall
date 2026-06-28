@@ -7,6 +7,7 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release 2>/dev/null || true
 COPY src/main.rs src/main.rs
 COPY src/townhall_verification_complete.rs src/townhall_verification_complete.rs
+COPY src/halo2_snark_module.rs src/halo2_snark_module.rs
 RUN touch src/main.rs && cargo build --release
 RUN ldd target/release/kasvillage-townhall || echo "Static binary"
 RUN ls -la target/release/kasvillage-townhall
