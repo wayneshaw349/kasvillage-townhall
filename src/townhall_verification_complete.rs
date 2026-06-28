@@ -999,10 +999,10 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
         Some((now - witness.last_deadlock_daa) / 86400)
     } else { None };
 
-    let real_proof_bytes: Option<Vec<u8>> = {
+    let (snark_error, real_proof_bytes): (String, Option<Vec<u8>>) = {
         let circuit = StatsVerificationCircuit { witness: witness.clone() };
         let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
-        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, StatsVerificationCircuit>(&*STATS_PARAMS, &*STATS_PK, &[circuit], &[&[]], OsRng, &mut transcript) { Ok(()) => Some(transcript.finalize()), Err(e) => { eprintln!("SNARK failed: {:?}", e); None } }
+        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, StatsVerificationCircuit>(&*STATS_PARAMS, &*STATS_PK, &[circuit], &[&[]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
     };
     {
         let mut proof_data = Vec::new();
@@ -1081,7 +1081,7 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
                 l1_events_root: hex::encode(&witness.l1_events_root),
                 arweave_stats_hash: hex::encode(&witness.arweave_stats_hash),
             },
-            proof_type: if real_proof_bytes.is_some() { "Halo2-IPA-Stats-V2".to_string() } else { "Halo2-IPA-Stats-Hash-V2".to_string() },
+            proof_type: if real_proof_bytes.is_some() { "Halo2-IPA-Stats-V2".to_string() } else { format!("Hash-V2-ERR:{}", snark_error) },
             generated_at: current_timestamp(),
         })
     }
