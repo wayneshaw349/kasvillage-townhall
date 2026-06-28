@@ -368,7 +368,7 @@ const XP_PER_SUCCESS: u64 = 10;      // 10 XP per success
 const XP_PENALTY_PER_DEADLOCK: u64 = 50;  // 50 XP penalty per deadlock
 const FIXED_POINT_SCALE: u64 = 1_000000;    // 6 decimals
 
-const HALO2_K: u32 = 5;
+const HALO2_K: u32 = 8;  // 2^8 = 256 rows
 
 // Enhanced Bayesian factor weights (fixed-point, 6 decimals)
 const RECENCY_ACTIVE_BONUS: u64 = 100000;      // +0.1 per recent agreement (max 5)
@@ -1002,7 +1002,7 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
     let real_proof_bytes: Option<Vec<u8>> = {
         let circuit = StatsVerificationCircuit { witness: witness.clone() };
         let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
-        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, StatsVerificationCircuit>(&*STATS_PARAMS, &*STATS_PK, &[circuit], &[&[]], OsRng, &mut transcript) { Ok(()) => Some(transcript.finalize()), Err(_) => None }
+        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, StatsVerificationCircuit>(&*STATS_PARAMS, &*STATS_PK, &[circuit], &[&[]], OsRng, &mut transcript) { Ok(()) => Some(transcript.finalize()), Err(e) => { eprintln!("SNARK failed: {:?}", e); None } }
     };
     {
         let mut proof_data = Vec::new();
