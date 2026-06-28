@@ -26,7 +26,7 @@ use halo2_proofs::{
         commitment::ParamsProver,
         ipa::{commitment::{ParamsIPA, IPACommitmentScheme}, multiopen::{ProverIPA, VerifierIPA}, strategy::SingleStrategy},
     },
-    transcript::{Blake2bRead, Blake2bWrite, Challenge255},
+    transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptWriterBuffer},
 };
 use pasta_curves::{pallas, vesta, Fp, EqAffine};
 use rand_core::OsRng;
