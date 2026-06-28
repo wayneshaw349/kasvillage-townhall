@@ -30,6 +30,7 @@ use halo2_proofs::{
 };
 use pasta_curves::{pallas, vesta, Fp, EqAffine};
 use rand_core::OsRng;
+use crate::halo2_snark_module::{SparseMerkleTree, poseidon_leaf_hash};
 
 // ============================================================================
 // CONSTANTS
@@ -1384,6 +1385,29 @@ pub fn compute_events_merkle_root(event_hashes: &[String]) -> [u8; 32] {
     leaves[0]
 }
 
+
+/// Compute Poseidon Merkle root using SparseMerkleTree (SNARK-friendly)
+pub fn compute_poseidon_events_root(event_hashes: &[String]) -> [u8; 32] {
+    use pasta_curves::Fp;
+    if event_hashes.is_empty() { return [0u8; 32]; }
+    let depth = if event_hashes.len() <= 256 { 8 } else if event_hashes.len() <= 65536 { 16 } else { 32 };
+    let mut tree = SparseMerkleTree::new(depth);
+    for (i, h) in event_hashes.iter().enumerate() {
+        let mut hasher = Sha256::new();
+        hasher.update(h.as_bytes());
+        let hash_bytes: [u8; 32] = hasher.finalize().into();
+        let leaf_val = Fp::from(u64::from_le_bytes(hash_bytes[..8].try_into().unwrap()));
+        tree.update(i as u64, poseidon_leaf_hash(leaf_val));
+    }
+    let root = tree.root();
+    let root_bytes = format!("{:?}", root);
+    let mut out = [0u8; 32];
+    let mut h2 = Sha256::new();
+    h2.update(root_bytes.as_bytes());
+    out.copy_from_slice(&h2.finalize());
+    out
+}
+
 /// Query L1 for FROST events (via Kaspa API)
 pub async fn query_l1_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, String> {
    let url = format!("{}/addresses/{}/full-transactions?limit=100", KASPA_API, pubkey);
@@ -1672,7 +1696,7 @@ pub async fn aggregate_and_prove_stats(pubkey: &str, address: Option<&str>) -> R
     // Query Arweave for FROST events (primary stats source)
     let l1_events = query_arweave_frost_events(pubkey).await.unwrap_or_default();
     let l1_stats = aggregate_l1_events_full(&l1_events, pubkey, current_daa);
-    let l1_events_root = compute_events_merkle_root(&l1_stats.event_hashes);
+    let l1_events_root = compute_poseidon_events_root(&l1_stats.event_hashes);
 
     // 3. Query Arweave for cached stats (optional, L1 is authoritative)
     let arweave_stats = query_arweave_stats(pubkey).await?;
