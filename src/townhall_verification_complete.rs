@@ -873,6 +873,8 @@ pub struct StatsProof {
     pub public_inputs: StatsPublicInputs,
     pub proof_type: String,
     pub generated_at: u64,
+    pub vk_fingerprint: String,
+    pub merkle_root: String,
 }
 
 /// All publicly verifiable stats (proven by SNARK)
@@ -1084,6 +1086,12 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
             },
             proof_type: if real_proof_bytes.is_some() { "Halo2-IPA-Stats-V2".to_string() } else { format!("Hash-V2-ERR:{}", snark_error) },
             generated_at: current_timestamp(),
+            vk_fingerprint: {
+                let mut h = Sha256::new();
+                h.update(format!("{:?}", *STATS_VK).as_bytes());
+                hex::encode(h.finalize())
+            },
+            merkle_root: hex::encode(&witness.l1_events_root),
         })
     }
 }
