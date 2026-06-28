@@ -22,7 +22,7 @@ use halo2_proofs::{
             multiopen::{ProverIPA, VerifierIPA},
             strategy::SingleStrategy,
         },
-        Rotation,
+        Rotation, VerificationStrategy,
     },
     transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptWriterBuffer, TranscriptReadBuffer},
 };
