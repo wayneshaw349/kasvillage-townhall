@@ -434,7 +434,7 @@ pub fn generate_verification_proof(inputs: &ProofInputs) -> Result<VerificationP
     let proof_hash = hasher.finalize();
     let public_inputs_hash = hex::encode(&proof_hash);
     Ok(VerificationProof {
-        proof_bytes: dapp_proof.unwrap_or_else(|| proof_hash.to_vec()),
+        proof_bytes: dapp_proof.clone().unwrap_or_else(|| proof_hash.to_vec()),
         public_inputs_hash,
         proof_type: if dapp_proof.is_some() { "Halo2-IPA-DApp-V1".to_string() } else { format!("DApp-Hash-ERR:{}", dapp_err) },
         generated_at: current_timestamp(),
@@ -2524,7 +2524,7 @@ pub fn generate_academic_proof(witness: &AcademicWitness) -> Result<Verification
     };
     let mut hasher = Sha256::new(); hasher.update(&witness.content_hash_lo.to_le_bytes()); hasher.update(b"KASVILLAGE_ACADEMIC_V1"); let hash_fb = hasher.finalize();
     let mut ph = Sha256::new(); ph.update(&witness.content_hash_lo.to_le_bytes()); ph.update(&witness.email_verified.to_le_bytes()); let pih = hex::encode(ph.finalize());
-    Ok(VerificationProof { proof_bytes: real_proof.unwrap_or_else(|| hash_fb.to_vec()), public_inputs_hash: pih, proof_type: if real_proof.is_some() { "Halo2-IPA-Academic-V1".to_string() } else { format!("Academic-Hash-ERR:{}", snark_error) }, generated_at: current_timestamp() })
+    Ok(VerificationProof { proof_bytes: real_proof.clone().unwrap_or_else(|| hash_fb.to_vec()), public_inputs_hash: pih, proof_type: if real_proof.is_some() { "Halo2-IPA-Academic-V1".to_string() } else { format!("Academic-Hash-ERR:{}", snark_error) }, generated_at: current_timestamp() })
 }
 
 pub async fn api_verify_academic(body: web::Json<serde_json::Value>) -> HttpResponse {
