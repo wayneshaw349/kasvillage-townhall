@@ -201,7 +201,7 @@ impl PoseidonChipFq {
         cfg.sbox_full_sel.enable(region, offset)?;
         let mut sv: [Value<Fq>; 3] = [Value::unknown(); 3];
         for i in 0..3 {
-            let rc = self.constants.round_constants.as_ref().unwrap()[round][i];
+            let rc = self.constants.round_constants.as_ref().unwrap()[round * 3 + i];
             sv[i] = state[i].value().map(|v| *v + rc);
             region.assign_advice(|| "rc", cfg.state[i], offset, || sv[i])?;
         }
@@ -230,7 +230,7 @@ impl PoseidonChipFq {
         cfg.sbox_partial_sel.enable(region, offset)?;
         let mut sv: [Value<Fq>; 3] = [Value::unknown(); 3];
         for i in 0..3 {
-            let rc = self.constants.round_constants.as_ref().unwrap()[round][i];
+            let rc = self.constants.round_constants.as_ref().unwrap()[round * 3 + i];
             sv[i] = state[i].value().map(|v| *v + rc);
             region.assign_advice(|| "rc", cfg.state[i], offset, || sv[i])?;
         }
