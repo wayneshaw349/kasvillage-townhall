@@ -7727,6 +7727,9 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/verify/game", web::post().to(verify_game))
         .route("/api/verify/stats-vk", web::get().to(townhall_verification_complete::api_get_stats_vk))
         .route("/api/verify/merkle-proof/{pubkey}", web::post().to(townhall_verification_complete::api_get_merkle_membership_proof))
+        .route("/api/verify/academic", web::post().to(townhall_verification_complete::api_verify_academic))
+        .route("/api/verify/academic", web::post().to(townhall_verification_complete::api_verify_academic))
+
         .route("/api/verify/academic", web::post().to(verify_academic))
         .route("/api/verify/service", web::post().to(verify_service))
         .route("/api/verify/review", web::post().to(verify_review))

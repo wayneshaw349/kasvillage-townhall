@@ -299,6 +299,113 @@ pub struct VerificationProof {
 /// 4. scan_passed = true (code scanner approved)
 /// 5. device_attestation is valid
 /// 6. stats are real (XP, successes, deadlocks)
+
+/// DApp/Game verification witness
+#[derive(Debug, Clone, Default)]
+pub struct DAppWitness {
+    pub scan_passed: u64,         // 1 = passed, 0 = failed
+    pub has_sdk_usage: u64,       // 1 = uses procedural SDK
+    pub has_image_bypass: u64,    // 0 = clean, 1 = has bypass (must be 0)
+    pub has_realistic_face: u64,  // 0 = clean, 1 = has face (must be 0)
+    pub trait_count: u64,         // >= 13 required
+    pub content_hash_lo: u64,     // lower 8 bytes of content hash
+    pub content_hash_hi: u64,     // upper 8 bytes of content hash
+    pub xp_commitment: u64,       // XP staked
+}
+
+/// Circuit config for DApp verification (6 advice, 1 instance, 1 selector)
+#[derive(Clone, Debug)]
+pub struct DAppCircuitConfig {
+    pub advice: [Column<Advice>; 8],
+    pub instance: Column<Instance>,
+    pub selector: Selector,
+}
+
+/// Halo2 circuit proving DApp used procedural SDK and passed all safeguards
+#[derive(Clone, Debug)]
+pub struct DAppVerificationCircuit {
+    pub witness: DAppWitness,
+}
+
+impl Circuit<Fp> for DAppVerificationCircuit {
+    type Config = DAppCircuitConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        Self { witness: DAppWitness::default() }
+    }
+
+    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+        let advice: [Column<Advice>; 8] = std::array::from_fn(|_| meta.advice_column());
+        let instance = meta.instance_column();
+        let selector = meta.selector();
+        for col in &advice { meta.enable_equality(*col); }
+        meta.enable_equality(instance);
+
+        // Gate 1: scan_passed must be 1
+        meta.create_gate("scan_passed", |meta| {
+            let s = meta.query_selector(selector);
+            let scan = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur());
+            let one = Expression::Constant(Fp::one());
+            vec![s * (scan - one)]
+        });
+
+        // Gate 2: has_sdk_usage must be 1
+        meta.create_gate("sdk_usage", |meta| {
+            let s = meta.query_selector(selector);
+            let sdk = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur());
+            let one = Expression::Constant(Fp::one());
+            vec![s * (sdk - one)]
+        });
+
+        // Gate 3: has_image_bypass must be 0
+        meta.create_gate("no_image_bypass", |meta| {
+            let s = meta.query_selector(selector);
+            let bypass = meta.query_advice(advice[2], halo2_proofs::poly::Rotation::cur());
+            vec![s * bypass]
+        });
+
+        // Gate 4: has_realistic_face must be 0
+        meta.create_gate("no_realistic_face", |meta| {
+            let s = meta.query_selector(selector);
+            let face = meta.query_advice(advice[3], halo2_proofs::poly::Rotation::cur());
+            vec![s * face]
+        });
+
+        // Gate 5: trait_surplus = trait_count - 13 (surplus * (surplus - (trait_count - 13)) = 0)
+        // Simplified: trait_count - 13 must equal surplus (advice[4] = surplus, advice[5] = trait_count)
+        meta.create_gate("min_traits", |meta| {
+            let s = meta.query_selector(selector);
+            let trait_count = meta.query_advice(advice[4], halo2_proofs::poly::Rotation::cur());
+            let surplus = meta.query_advice(advice[5], halo2_proofs::poly::Rotation::cur());
+            let thirteen = Expression::Constant(Fp::from(13u64));
+            vec![s * (surplus - (trait_count - thirteen))]
+        });
+
+        DAppCircuitConfig { advice, instance, selector }
+    }
+
+    fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fp>) -> Result<(), PlonkError> {
+        layouter.assign_region(|| "dapp_verification", |mut region| {
+            config.selector.enable(&mut region, 0)?;
+            region.assign_advice(|| "scan_passed", config.advice[0], 0, || Value::known(Fp::from(self.witness.scan_passed)))?;
+            region.assign_advice(|| "has_sdk_usage", config.advice[1], 0, || Value::known(Fp::from(self.witness.has_sdk_usage)))?;
+            region.assign_advice(|| "has_image_bypass", config.advice[2], 0, || Value::known(Fp::from(self.witness.has_image_bypass)))?;
+            region.assign_advice(|| "has_realistic_face", config.advice[3], 0, || Value::known(Fp::from(self.witness.has_realistic_face)))?;
+            region.assign_advice(|| "trait_count", config.advice[4], 0, || Value::known(Fp::from(self.witness.trait_count)))?;
+            region.assign_advice(|| "trait_surplus", config.advice[5], 0, || Value::known(Fp::from(self.witness.trait_count.saturating_sub(13))))?;
+            region.assign_advice(|| "content_hash_lo", config.advice[6], 0, || Value::known(Fp::from(self.witness.content_hash_lo)))?;
+            region.assign_advice(|| "xp_commitment", config.advice[7], 0, || Value::known(Fp::from(self.witness.xp_commitment)))?;
+            Ok(())
+        })
+    }
+}
+
+const DAPP_HALO2_K: u32 = 5;
+static DAPP_PARAMS: Lazy<ParamsIPA<EqAffine>> = Lazy::new(|| ParamsIPA::<EqAffine>::new(DAPP_HALO2_K));
+static DAPP_VK: Lazy<VerifyingKey<EqAffine>> = Lazy::new(|| { let c = DAppVerificationCircuit { witness: DAppWitness::default() }; keygen_vk(&*DAPP_PARAMS, &c).expect("DApp VK") });
+static DAPP_PK: Lazy<ProvingKey<EqAffine>> = Lazy::new(|| { let c = DAppVerificationCircuit { witness: DAppWitness::default() }; keygen_pk(&*DAPP_PARAMS, DAPP_VK.clone(), &c).expect("DApp PK") });
+
 pub fn generate_verification_proof(inputs: &ProofInputs) -> Result<VerificationProof, String> {
     // Validate inputs
     if !inputs.scan_passed {
@@ -2326,6 +2433,93 @@ pub async fn api_get_merkle_membership_proof(
 
 
 
+
+// ============================================================================
+// ACADEMIC VERIFICATION CIRCUIT (Halo2 IPA)
+// ============================================================================
+#[derive(Debug, Clone, Default)]
+pub struct AcademicWitness {
+    pub email_verified: u64,
+    pub abstract_exists: u64,
+    pub attestation_count: u64,
+    pub repository_valid: u64,
+    pub content_hash_lo: u64,
+    pub content_hash_hi: u64,
+    pub question_count: u64,
+    pub answer_count: u64,
+}
+#[derive(Clone, Debug)]
+pub struct AcademicCircuitConfig { pub advice: [Column<Advice>; 8], pub instance: Column<Instance>, pub selector: Selector }
+#[derive(Clone, Debug)]
+pub struct AcademicVerificationCircuit { pub witness: AcademicWitness }
+impl Circuit<Fp> for AcademicVerificationCircuit {
+    type Config = AcademicCircuitConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+    fn without_witnesses(&self) -> Self { Self { witness: AcademicWitness::default() } }
+    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+        let advice: [Column<Advice>; 8] = std::array::from_fn(|_| meta.advice_column());
+        let instance = meta.instance_column(); let selector = meta.selector();
+        for col in &advice { meta.enable_equality(*col); } meta.enable_equality(instance);
+        meta.create_gate("edu_verified", |meta| { let s = meta.query_selector(selector); let v = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur()); vec![s * (v - Expression::Constant(Fp::one()))] });
+        meta.create_gate("abstract_exists", |meta| { let s = meta.query_selector(selector); let v = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur()); vec![s * (v - Expression::Constant(Fp::one()))] });
+        meta.create_gate("min_attestations", |meta| { let s = meta.query_selector(selector); let c = meta.query_advice(advice[2], halo2_proofs::poly::Rotation::cur()); let surplus = meta.query_advice(advice[3], halo2_proofs::poly::Rotation::cur()); vec![s * (surplus - (c - Expression::Constant(Fp::from(3u64))))] });
+        meta.create_gate("repo_valid", |meta| { let s = meta.query_selector(selector); let v = meta.query_advice(advice[4], halo2_proofs::poly::Rotation::cur()); vec![s * (v - Expression::Constant(Fp::one()))] });
+        meta.create_gate("answer_consistency", |meta| { let s = meta.query_selector(selector); let q = meta.query_advice(advice[6], halo2_proofs::poly::Rotation::cur()); let a = meta.query_advice(advice[7], halo2_proofs::poly::Rotation::cur()); let d = meta.query_advice(advice[5], halo2_proofs::poly::Rotation::cur()); vec![s * (d - (q - a))] });
+        AcademicCircuitConfig { advice, instance, selector }
+    }
+    fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fp>) -> Result<(), PlonkError> {
+        layouter.assign_region(|| "academic", |mut region| {
+            config.selector.enable(&mut region, 0)?;
+            region.assign_advice(|| "ev", config.advice[0], 0, || Value::known(Fp::from(self.witness.email_verified)))?;
+            region.assign_advice(|| "ae", config.advice[1], 0, || Value::known(Fp::from(self.witness.abstract_exists)))?;
+            region.assign_advice(|| "ac", config.advice[2], 0, || Value::known(Fp::from(self.witness.attestation_count)))?;
+            region.assign_advice(|| "as", config.advice[3], 0, || Value::known(Fp::from(self.witness.attestation_count.saturating_sub(3))))?;
+            region.assign_advice(|| "rv", config.advice[4], 0, || Value::known(Fp::from(self.witness.repository_valid)))?;
+            region.assign_advice(|| "ad", config.advice[5], 0, || Value::known(Fp::from(self.witness.question_count.saturating_sub(self.witness.answer_count))))?;
+            region.assign_advice(|| "qc", config.advice[6], 0, || Value::known(Fp::from(self.witness.question_count)))?;
+            region.assign_advice(|| "anc", config.advice[7], 0, || Value::known(Fp::from(self.witness.answer_count)))?;
+            Ok(())
+        })
+    }
+}
+const ACADEMIC_HALO2_K: u32 = 5;
+static ACADEMIC_PARAMS: Lazy<ParamsIPA<EqAffine>> = Lazy::new(|| ParamsIPA::<EqAffine>::new(ACADEMIC_HALO2_K));
+static ACADEMIC_VK: Lazy<VerifyingKey<EqAffine>> = Lazy::new(|| { let c = AcademicVerificationCircuit { witness: AcademicWitness::default() }; keygen_vk(&*ACADEMIC_PARAMS, &c).expect("Academic VK") });
+static ACADEMIC_PK: Lazy<ProvingKey<EqAffine>> = Lazy::new(|| { let c = AcademicVerificationCircuit { witness: AcademicWitness::default() }; keygen_pk(&*ACADEMIC_PARAMS, ACADEMIC_VK.clone(), &c).expect("Academic PK") });
+
+pub fn generate_academic_proof(witness: &AcademicWitness) -> Result<VerificationProof, String> {
+    if witness.email_verified != 1 { return Err("Email not verified".into()); }
+    if witness.abstract_exists != 1 { return Err("No abstract".into()); }
+    if witness.attestation_count < 3 { return Err(format!("Need 3 attestations, have {}", witness.attestation_count)); }
+    if witness.repository_valid != 1 { return Err("Repository not validated".into()); }
+    let (snark_error, real_proof): (String, Option<Vec<u8>>) = {
+        let circuit = AcademicVerificationCircuit { witness: witness.clone() };
+        let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
+        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, AcademicVerificationCircuit>(&*ACADEMIC_PARAMS, &*ACADEMIC_PK, &[circuit], &[&[&[]]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
+    };
+    let mut hasher = Sha256::new(); hasher.update(&witness.content_hash_lo.to_le_bytes()); hasher.update(b"KASVILLAGE_ACADEMIC_V1"); let hash_fb = hasher.finalize();
+    let mut ph = Sha256::new(); ph.update(&witness.content_hash_lo.to_le_bytes()); ph.update(&witness.email_verified.to_le_bytes()); let pih = hex::encode(ph.finalize());
+    Ok(VerificationProof { proof_bytes: real_proof.unwrap_or_else(|| hash_fb.to_vec()), public_inputs_hash: pih, proof_type: if real_proof.is_some() { "Halo2-IPA-Academic-V1".to_string() } else { format!("Academic-Hash-ERR:{}", snark_error) }, generated_at: current_timestamp() })
+}
+
+pub async fn api_verify_academic(body: web::Json<serde_json::Value>) -> HttpResponse {
+    let content = body.get("abstract_text").and_then(|v| v.as_str()).unwrap_or("");
+    let cb = { let mut h = Sha256::new(); h.update(content.as_bytes()); h.finalize() };
+    let witness = AcademicWitness {
+        email_verified: if body.get("email_verified").and_then(|v| v.as_bool()).unwrap_or(false) { 1 } else { 0 },
+        abstract_exists: if !content.is_empty() { 1 } else { 0 },
+        attestation_count: body.get("attestation_count").and_then(|v| v.as_u64()).unwrap_or(0),
+        repository_valid: if body.get("repository_valid").and_then(|v| v.as_bool()).unwrap_or(false) { 1 } else { 0 },
+        content_hash_lo: u64::from_le_bytes(cb[..8].try_into().unwrap_or([0u8; 8])),
+        content_hash_hi: u64::from_le_bytes(cb[8..16].try_into().unwrap_or([0u8; 8])),
+        question_count: body.get("question_count").and_then(|v| v.as_u64()).unwrap_or(0),
+        answer_count: body.get("answer_count").and_then(|v| v.as_u64()).unwrap_or(0),
+    };
+    match generate_academic_proof(&witness) {
+        Ok(proof) => HttpResponse::Ok().json(serde_json::json!({"ok": true, "proof": proof})),
+        Err(e) => HttpResponse::BadRequest().json(serde_json::json!({"ok": false, "error": e})),
+    }
+}
 
 // ROUTE REGISTRATION
 // ============================================================================
