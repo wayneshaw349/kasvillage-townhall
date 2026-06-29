@@ -187,9 +187,11 @@ impl PoseidonChipFq {
                 region.assign_advice(|| "r", cfg.state[2], 0, || input[1])?,
             ];
             let mut offset = 1;
-            for r in 0..4 { offset = self.apply_full_round(&mut region, &mut state, r, offset)?; }
-            for r in 4..60 { offset = self.apply_partial_round(&mut region, &mut state, r, offset)?; }
-            for r in 60..64 { offset = self.apply_full_round(&mut region, &mut state, r, offset)?; }
+            let hf = self.constants.half_full_rounds;
+            let pr = self.constants.partial_rounds;
+            for r in 0..hf { offset = self.apply_full_round(&mut region, &mut state, r, offset)?; }
+            for r in hf..(hf+pr) { offset = self.apply_partial_round(&mut region, &mut state, r, offset)?; }
+            for r in (hf+pr)..(2*hf+pr) { offset = self.apply_full_round(&mut region, &mut state, r, offset)?; }
             Ok(state)
         })
     }
@@ -199,7 +201,7 @@ impl PoseidonChipFq {
         cfg.sbox_full_sel.enable(region, offset)?;
         let mut sv: [Value<Fq>; 3] = [Value::unknown(); 3];
         for i in 0..3 {
-            let rc = self.constants.compressed_round_constants[round * 3 + i];
+            let rc = self.constants.round_constants.as_ref().unwrap()[round][i];
             sv[i] = state[i].value().map(|v| *v + rc);
             region.assign_advice(|| "rc", cfg.state[i], offset, || sv[i])?;
         }
@@ -228,7 +230,7 @@ impl PoseidonChipFq {
         cfg.sbox_partial_sel.enable(region, offset)?;
         let mut sv: [Value<Fq>; 3] = [Value::unknown(); 3];
         for i in 0..3 {
-            let rc = self.constants.compressed_round_constants[round * 3 + i];
+            let rc = self.constants.round_constants.as_ref().unwrap()[round][i];
             sv[i] = state[i].value().map(|v| *v + rc);
             region.assign_advice(|| "rc", cfg.state[i], offset, || sv[i])?;
         }
