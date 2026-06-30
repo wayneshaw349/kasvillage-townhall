@@ -99,7 +99,7 @@ static PROHIBITED_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 static SUSPICIOUS_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     vec![
         // Data exfiltration (fetch to non-allowed domains)
-        Regex::new(r#"(?i)fetch\s*\(\s*['"]https?://(?!arweave\.net|kasvillage\.dev)"#).unwrap(),
+        Regex::new(r#"(?i)fetch\s*\(\s*['"]https?://"#).unwrap(),
         Regex::new(r"(?i)XMLHttpRequest").unwrap(),
         Regex::new(r"(?i)navigator\.sendBeacon").unwrap(),
         Regex::new(r"(?i)document\.cookie").unwrap(),
