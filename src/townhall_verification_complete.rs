@@ -110,7 +110,7 @@ static SUSPICIOUS_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
         Regex::new(r"(?i)minero").unwrap(),
         
         // Iframe injection
-        Regex::new(r#"(?i)<iframe[^>]*src\s*=\s*['"](?!https://(arweave\.net|kasvillage\.dev))"#).unwrap(),
+        Regex::new(r#"(?i)<iframe[^>]*src\s*=\s*['"]https?://"#).unwrap(),
         
         // Eval/dynamic code execution
         Regex::new(r"(?i)\beval\s*\(").unwrap(),
