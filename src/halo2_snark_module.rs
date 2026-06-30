@@ -152,6 +152,8 @@ impl PoseidonChipFq {
             constraints
         });
 
+        for col in &state { meta.enable_equality(*col); }
+        for col in &state_sbox { meta.enable_equality(*col); }
         PoseidonConfig { state, state_sq, state_4th, state_sbox, sbox_full_sel, sbox_partial_sel, mds_sel }
     }
 
