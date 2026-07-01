@@ -1,3 +1,4 @@
+import { validateContentText } from './content_validator';
 // ============================================================================
 // KASVILLAGE EXPO - WORKSPACE COMPONENT v2.1 (MERGED)
 // ============================================================================
@@ -3124,6 +3125,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     const isAllowed = allowed.some(d => url.includes(d));
     if (!isAllowed && url.startsWith('http')) { Alert.alert('Whitelist Only', 'Links must be from: Instagram, Pinterest, Etsy, TikTok, Facebook, YouTube, or eBay'); return; }
     
+    const contentErr = validateContentText(itemForm.name) || validateContentText(itemForm.description); if (contentErr) { Alert.alert('Blocked', contentErr); return; }
     const item = {
       id: editingItem?.id || 'item_' + Date.now(),
       name: itemForm.name.trim(),

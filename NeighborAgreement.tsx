@@ -1,3 +1,4 @@
+import { validateContentText } from './content_validator';
 // ============================================================================
 // KASVILLAGE EXPO - MARKETPLACE & NEIGHBOR AGREEMENT
 // ============================================================================
@@ -3510,7 +3511,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                     <TextInput
                       style={styles.input}
                       value={contract.itemDescription}
-                      onChangeText={(text) => setContract(p => ({ ...p, itemDescription: text }))}
+                      onChangeText={(text) => { const err = validateContentText(text); if (err) { Alert.alert("Blocked", err); return; } setContract(p => ({ ...p, itemDescription: text })); }}
                       placeholder="e.g., Vintage Watch, iPhone 15, etc."
                       placeholderTextColor={COLORS.stone400}
                     />
@@ -3932,18 +3933,30 @@ const handleAcceptFromInbox = async (agreement: any) => {
                       <TouchableOpacity onPress={buildReleaseTemplate} disabled={templateBuilt} style={{ backgroundColor: templateBuilt ? '#9ca3af' : '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{templateBuilt ? 'Template Built ✓ (paste response below)' : 'Build TX Template (generates k + R)'}</Text>
                       </TouchableOpacity>
-                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#4f46e5', marginTop: 4, marginBottom: 4 }}>Paste Seller Response</Text>
-                      <TextInput
-                        style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', minHeight: 60, marginBottom: 8 }}
-                        placeholder="Paste seller response here (base64)..."
-                        placeholderTextColor="#a8a29e"
-                        multiline
-                        onChangeText={(txt) => { const v = txt.trim(); if (v.length > 20) setSellerResponseB64(v); }}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                      />
-                      <TouchableOpacity onPress={async () => { if (sellerResponseB64 && sellerResponseB64.length > 20) { try { await Clipboard.setStringAsync(sellerResponseB64); } catch {} } processSellerResponse(); }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 14, alignItems: 'center' }}>
-                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Process Seller Response'}</Text>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#4f46e5', marginTop: 4, marginBottom: 4 }}>Paste Seller Response</Text>
+
+                      <TextInput
+
+                        style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', minHeight: 60, marginBottom: 8 }}
+
+                        placeholder="Paste seller response here (base64)..."
+
+                        placeholderTextColor="#a8a29e"
+
+                        multiline
+
+                        onChangeText={(txt) => { const v = txt.trim(); if (v.length > 20) setSellerResponseB64(v); }}
+
+                        autoCapitalize="none"
+
+                        autoCorrect={false}
+
+                      />
+
+                      <TouchableOpacity onPress={async () => { if (sellerResponseB64 && sellerResponseB64.length > 20) { try { await Clipboard.setStringAsync(sellerResponseB64); } catch {} } processSellerResponse(); }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 14, alignItems: 'center' }}>
+
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Process Seller Response'}</Text>
+
                       </TouchableOpacity>
                       <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center' }}>{'k lives only during this signing ceremony (~seconds)'}</Text>
                     </>
