@@ -2366,6 +2366,11 @@ static EXPLOITATION_PHRASES: Lazy<Vec<Regex>> = Lazy::new(|| {
         Regex::new(r"(?i)\b(lolita|jailbait|pedo|paedo)\b").unwrap(),
         Regex::new(r"(?i)\b(fresh|new|virgin)\s+(meat|girl|boy|stock)\b").unwrap(),
         Regex::new(r"(?i)\b(human\s+trafficking|sex\s+trade|flesh\s+trade)\b").unwrap(),
+        Regex::new(r"(?i)\b(buy|sell|order)\s+(gun|firearm|rifle|pistol|shotgun|ammo|ammunition)\b").unwrap(),
+        Regex::new(r"(?i)\b(buy|sell|order)\s+(cocaine|heroin|meth|fentanyl|mdma|ecstasy|lsd)\b").unwrap(),
+        Regex::new(r"(?i)\b(buy|sell|order)\s+(knife|sword|machete|switchblade|brass\s*knuckles)\b").unwrap(),
+        Regex::new(r"(?i)\b(illegal\s+weapon|ghost\s*gun|unregistered\s+(gun|firearm))\b").unwrap(),
+        Regex::new(r"(?i)\b(drug\s+dealer|narcotics\s+for\s+sale|controlled\s+substance)\b").unwrap(),
     ]
 });
 
