@@ -2364,6 +2364,7 @@ pub struct AgreementStore {
 impl AgreementStore {
     pub fn new() -> Self { Self { agreements: RwLock::new(HashMap::new()) } }
     pub fn create(&self, agr: NeighborAgreement) -> String {
+        if let Err(e) = townhall_verification_complete::validate_content_text(&agr.description) { return e; }
         let id = agr.agreement_id.clone();
         self.agreements.write().unwrap().insert(id.clone(), agr);
         id
@@ -2412,6 +2413,7 @@ impl FrostRelayStore {
     pub fn propose(&self, agr: FrostAgreementData) -> Result<String, String> {
         let id = agr.agreement_id.clone();
         let mut s = self.agreements.write().unwrap();
+        if let Err(e) = townhall_verification_complete::validate_content_text(&agr.description) { return Err(e); }
         if s.contains_key(&id) { return Err("Agreement ID already exists".into()); }
         s.insert(id.clone(), agr); Ok(id)
     }

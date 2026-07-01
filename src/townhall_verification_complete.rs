@@ -88,6 +88,15 @@ static PROHIBITED_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
         Regex::new(r"(?i)\bpyramid\s*scheme\b").unwrap(),
         Regex::new(r"(?i)\bponzi\b").unwrap(),
         Regex::new(r"(?i)\bget\s*rich\s*quick\b").unwrap(),
+        // Exploitation/Trafficking phrases
+        Regex::new(r"(?i)\b(buy|sell|rent|hire|order)\s+(girl|boy|child|minor|teen|kid|infant)\b").unwrap(),
+        Regex::new(r"(?i)\b(young|underage|minor)\s+(female|male|escort|companion|model)\b").unwrap(),
+        Regex::new(r"(?i)\b(child|kid|minor|teen)\s+(for\s+sale|available|services|labor)\b").unwrap(),
+        Regex::new(r"(?i)\b(sex|slave|traffic)\s*(child|minor|girl|boy|teen|kid)\b").unwrap(),
+        Regex::new(r"(?i)\b(child|minor|teen|kid)\s*(sex|slave|traffic|bride|groom)\b").unwrap(),
+        Regex::new(r"(?i)\b(lolita|jailbait|pedo|paedo)\b").unwrap(),
+        Regex::new(r"(?i)\b(escort|companion)\s+(service|available)\s+(young|teen|minor)\b").unwrap(),
+        Regex::new(r"(?i)\b(fresh|new|virgin)\s+(meat|girl|boy|stock)\b").unwrap(),
     ]
 });
 
@@ -117,6 +126,11 @@ static SUSPICIOUS_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
         Regex::new(r"(?i)Function\s*\(").unwrap(),
         Regex::new(r#"(?i)setTimeout\s*\(\s*['"]\s*[^'"]*['"]"#).unwrap(),
         Regex::new(r#"(?i)setInterval\s*\(\s*['"]\s*[^'"]*['"]"#).unwrap(),
+        // CSS image bypass
+        Regex::new(r#"(?i)background(-image)?\s*:\s*url\s*\("#).unwrap(),
+        Regex::new(r#"(?i)<object\b"#).unwrap(),
+        Regex::new(r#"(?i)<embed\b"#).unwrap(),
+        Regex::new(r#"(?i)<video[^>]*poster\s*="#).unwrap(),
     ]
 });
 
@@ -2341,6 +2355,29 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
+/// Validate text content for exploitation phrases (FROST descriptions, storefront products)
+static EXPLOITATION_PHRASES: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
+        Regex::new(r"(?i)\b(buy|sell|rent|hire|order)\s+(girl|boy|child|minor|teen|kid|infant)\b").unwrap(),
+        Regex::new(r"(?i)\b(young|underage|minor)\s+(female|male|escort|companion|model)\b").unwrap(),
+        Regex::new(r"(?i)\b(child|kid|minor|teen)\s+(for\s+sale|available|services|labor)\b").unwrap(),
+        Regex::new(r"(?i)\b(sex|slave|traffic)\s*(child|minor|girl|boy|teen|kid)\b").unwrap(),
+        Regex::new(r"(?i)\b(child|minor|teen|kid)\s*(sex|slave|traffic|bride|groom)\b").unwrap(),
+        Regex::new(r"(?i)\b(lolita|jailbait|pedo|paedo)\b").unwrap(),
+        Regex::new(r"(?i)\b(fresh|new|virgin)\s+(meat|girl|boy|stock)\b").unwrap(),
+        Regex::new(r"(?i)\b(human\s+trafficking|sex\s+trade|flesh\s+trade)\b").unwrap(),
+    ]
+});
+
+pub fn validate_content_text(text: &str) -> Result<(), String> {
+    for regex in EXPLOITATION_PHRASES.iter() {
+        if regex.is_match(text) {
+            return Err(format!("Content rejected: prohibited exploitation phrase detected"));
+        }
+    }
+    Ok(())
+}
+
 // ============================================================================
 /// GET /api/verify/stats-vk - Export stats verifying key for independent verification
 pub async fn api_get_stats_vk() -> HttpResponse {
@@ -3344,6 +3381,11 @@ pub async fn api_save_storefront(body: web::Json<StorefrontSaveRequest>) -> Http
     if !verify_signature(&message, &body.signature, &body.storefront.owner_pubkey) {
         return HttpResponse::Unauthorized().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some("Invalid signature".into()) });
     }
+    // Validate content for exploitation phrases
+    if let Err(e) = validate_content_text(&body.storefront.brand_name) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); }
+    if let Some(ref desc) = body.storefront.description { if let Err(e) = validate_content_text(desc) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); } }
+    if let Some(ref tag) = body.storefront.tagline { if let Err(e) = validate_content_text(tag) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); } }
+    for product in &body.storefront.products { if let Err(e) = validate_content_text(&product.name) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); } if let Err(e) = validate_content_text(&product.description) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); } }
     match upload_storefront_to_arweave(&body.storefront).await {
         Ok(tx_id) => HttpResponse::Ok().json(StorefrontSaveResponse { success: true, arweave_tx: Some(tx_id), error: None }),
         Err(e) => HttpResponse::InternalServerError().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }),
