@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('Dashboard.tsx','utf8');s=s.replace(/onNavigatePhoneProof, activeMode/,"onNavigatePhoneProof, onNavigateBalanceSheet, activeMode");fs.writeFileSync('Dashboard.tsx',s);console.log('done');

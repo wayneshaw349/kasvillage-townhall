@@ -46,6 +46,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { type KaspaNetwork } from './KaspaClient';
 
 // Arweave
+import { allocateForIOU, releaseIOU } from './utxo_ledger';
 import { uploadToTurbo, uploadToIrys, type IrysUploadResult } from './arweave_upload';
 import { type ArweaveTag } from './arweave_module';
 
@@ -182,7 +183,7 @@ async function getApiBase(): Promise<string> {
 // ============================================================================
 
 function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const clean = (hex || '').startsWith('0x') ? (hex || '').slice(2) : (hex || '');
   const bytes = new Uint8Array(clean.length / 2);
   for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
   return bytes;
@@ -224,7 +225,9 @@ function mapStatus(s: SignedIOU['status']): CoinStatus {
 async function getWalletCredentials(): Promise<{ address: string; pubkey: string; privkey: string } | null> {
   try {
     const address = await SecureStore.getItemAsync(KEYS.ADDRESS);
+      if (!address) { console.log('[IOU] no address yet'); return; }
     const pubkey = await SecureStore.getItemAsync(KEYS.PUBKEY);
+      if (!pubkey) { console.log('[IOU] no pubkey yet'); return; }
     const privkey = await SecureStore.getItemAsync(KEYS.PRIVKEY_ENC);
     
     if (!address || !pubkey || !privkey) return null;
@@ -276,11 +279,11 @@ async function loadBatches(): Promise<Map<string, SompiBatch>> {
 async function saveBatches(batches: Map<string, SompiBatch>): Promise<void> {
   const arr = Array.from(batches.values()).map(b => ({
     ...b,
-    totalSompi: b.totalSompi.toString(),
-    allocatedSompi: b.allocatedSompi.toString(),
-    freeSompi: b.freeSompi.toString(),
-    receivedAtDaa: b.receivedAtDaa.toString(),
-    allocations: b.allocations.map(a => ({ ...a, amountSompi: a.amountSompi.toString() })),
+    totalSompi: (b.totalSompi || 0n).toString(),
+    allocatedSompi: (b.allocatedSompi || 0n).toString(),
+    freeSompi: (b.freeSompi || 0n).toString(),
+    receivedAtDaa: (b.receivedAtDaa || 0).toString(),
+    allocations: b.allocations.map(a => ({ ...a, amountSompi: (a.amountSompi || 0n).toString() })),
   }));
   await AsyncStorage.setItem(KEYS.BATCHES, JSON.stringify(arr));
 }
@@ -1034,7 +1037,7 @@ function SilverDollarCoin({ amountKAS, alias, status, size = 120 }: CoinProps) {
         {amountKAS.toFixed(2)} KAS
       </SvgText>
       
-      {alias && <SvgText x="50" y="15" textAnchor="middle" fontSize="7" fill="#666">{alias.slice(0, 12)}</SvgText>}
+      {alias && <SvgText x="50" y="15" textAnchor="middle" fontSize="7" fill="#666">{(alias || '').slice(0, 12)}</SvgText>}
     </Svg>
   );
 }
@@ -1088,7 +1091,7 @@ function SettleRequestCard({ request, counterpartyAlias, onAcknowledge }: Settle
     <View style={[styles.card, { borderLeftWidth: 3, borderLeftColor: '#e74c3c' }]}>
       <Text style={styles.settleTitle}>⚠️ Settlement Requested</Text>
       <Text style={styles.settleText}>
-        {counterpartyAlias || request.requesterPubkey.slice(0, 12) + '...'} wants to settle
+        {counterpartyAlias || (request?.requesterPubkey || '').slice(0, 12) + '...'} wants to settle
       </Text>
       <Text style={styles.settleAmount}>{formatKAS(amt)}</Text>
       <Text style={styles.settleTime}>{timeAgo}m ago</Text>
@@ -1113,7 +1116,7 @@ function FrostCollateralBox({ frost, myAlias, counterpartyAlias }: FrostCollater
   return (
     <View style={styles.frostBox}>
       <Text style={styles.frostTitle}>🔒 FROST 2-of-2 Multisig</Text>
-      <Text style={styles.frostAddress}>{frost.frostAddress.slice(0, 20)}...</Text>
+      <Text style={styles.frostAddress}>{(frost?.frostAddress || '').slice(0, 20)}...</Text>
       
       <View style={styles.frostRow}>
         <View style={styles.frostParty}>
@@ -1214,7 +1217,7 @@ export function IOUBalanceSheetModal(props: Props) {
   }, [frostAgreementId, frostTxId, frostAddress, myPubkey, myAddress, myCollateralSompi, counterpartyPubkey, counterpartyAddress, counterpartyCollateralSompi, counterpartyAlias]);
   
   useEffect(() => {
-    if (visible) loadData();
+    if (visible && frostAgreementId) { loadData(); } else if (visible) { setLoading(false); }
   }, [visible, loadData]);
   
   useEffect(() => {
@@ -1285,7 +1288,7 @@ export function IOUBalanceSheetModal(props: Props) {
   const handleApprove = useCallback(async (iou: SignedIOU) => {
     Alert.alert(
       'Approve IOU?',
-      `Accept ${formatKAS(BigInt(iou.amountSompi))} from ${counterpartyAlias || iou.issuerPubkey.slice(0, 12) + '...'}?`,
+      `Accept ${formatKAS(BigInt(iou.amountSompi))} from ${counterpartyAlias || (iou?.issuerPubkey || '').slice(0, 12) + '...'}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1295,7 +1298,7 @@ export function IOUBalanceSheetModal(props: Props) {
             if ('error' in result) {
               Alert.alert('Error', result.error);
             } else {
-              Alert.alert('Signed!', result.arweaveTxId ? `Archived: ${result.arweaveTxId.slice(0, 12)}...` : 'IOU accepted');
+              Alert.alert('Signed!', result.arweaveTxId ? `Archived: ${(result?.arweaveTxId || '').slice(0, 12)}...` : 'IOU accepted');
               await loadData(false);
             }
           },

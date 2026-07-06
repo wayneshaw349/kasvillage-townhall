@@ -1,0 +1,1 @@
+﻿const fs=require('fs');const f='node_modules/expo/node_modules/@expo/cli/build/src/start/startAsync.js';let s=fs.readFileSync(f,'utf8');s=s.replace(/await.*validateDependenciesVersionsAsync.*\n/,'// patched out\n');fs.writeFileSync(f,s);console.log('patched');

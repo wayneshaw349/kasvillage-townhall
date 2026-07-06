@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('NeighborAgreement.tsx','utf8');s=s.replace(/\/\/ IOU Balance Sheet\r?\nimport \{ IOUBalanceSheetModal \} from '\.\/IOUBalanceSheetShare';\r?\n/,'');fs.writeFileSync('NeighborAgreement.tsx',s);console.log('done');

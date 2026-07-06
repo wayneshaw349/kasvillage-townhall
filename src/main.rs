@@ -41,6 +41,7 @@
 
 mod halo2_snark_module;
 mod townhall_verification_complete;
+mod content_validator_sync;
 
 use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, Responder, middleware::Logger};
 use actix_cors::Cors;

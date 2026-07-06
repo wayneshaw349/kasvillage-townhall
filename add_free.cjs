@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('utxo_ledger.ts','utf8');s=s.replace("export function getFreeUtxos","export function getFreeSompi(ledger: UtxoLedger): bigint {\n  return getFreeUtxos(ledger).reduce((sum, u) => sum + BigInt(u.amountSompi), 0n);\n}\n\nexport function getFreeUtxos");fs.writeFileSync('utxo_ledger.ts',s);console.log('done');

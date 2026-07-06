@@ -1,4 +1,4 @@
-// QRPayNearby.tsx — KasVillage QR Code + WiFi Hotspot PayNearby
+// PayNearby.tsx — KasVillage QR Code + WiFi Hotspot PayNearby
 // Modes: Receive (show QR) | Send (paste address or APT)
 // Works offline via WiFi hotspot — no internet required for discovery
 
@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import { Linking } from 'react-native';
+import { IOUBalanceSheetShare } from './IOUBalanceSheetShare';
 import QRCode from 'react-native-qrcode-svg';
 import { useBluetoothPay } from './bluetooth_p2p';
 import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance } from './proposal_share';
@@ -25,6 +26,7 @@ const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
 type Mode = 'choose' | 'ble_send' | 'ble_receive' | 'send_proposal' | 'receive_proposal';
 
 interface QRPayload {
+  bleUUID?: string;
   type: 'kasvillage_pay';
   address: string;
   pubkey: string;
@@ -97,7 +99,8 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     amount: requestAmount ? parseFloat(requestAmount) : undefined,
     name: avatarName,
     network,
-  } as QRPayload);
+    bleUUID: '6b617376-696c-6c61-6765-000000000001',
+    } as QRPayload);
 
   // Handle paste/APT input
   const handlePasteSubmit = useCallback(async () => {

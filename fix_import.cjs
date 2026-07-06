@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');s=s.replace("import { allocateForIOU, releaseIOU, getUtxoLedger } from './utxo_ledger';","import { allocateForIOU, releaseIOU } from './utxo_ledger';");fs.writeFileSync('IOUBalanceSheetShare.tsx',s);console.log('done');

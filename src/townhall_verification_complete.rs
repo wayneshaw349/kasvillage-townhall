@@ -2374,14 +2374,8 @@ static EXPLOITATION_PHRASES: Lazy<Vec<Regex>> = Lazy::new(|| {
     ]
 });
 
-pub fn validate_content_text(text: &str) -> Result<(), String> {
-    for regex in EXPLOITATION_PHRASES.iter() {
-        if regex.is_match(text) {
-            return Err(format!("Content rejected: prohibited exploitation phrase detected"));
-        }
-    }
-    Ok(())
-}
+// moved to content_validator_sync.rs
+use crate::content_validator_sync::validate_content_text;
 
 // ============================================================================
 /// GET /api/verify/stats-vk - Export stats verifying key for independent verification

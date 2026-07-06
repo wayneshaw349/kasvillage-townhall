@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('src/main.rs','utf8');s=s.replace(/mod townhall_crypto;\r?\n/,'mod townhall_crypto;\nmod content_validator_sync;\n');fs.writeFileSync('src/main.rs',s);console.log('done');

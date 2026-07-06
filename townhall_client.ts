@@ -781,6 +781,7 @@ export async function inscribeAgreementToArweave(agreement: {
     { name: 'KV-AgreementId', value: agreement.agreementId },
     { name: 'KV-Status', value: agreement.status },
     { name: 'KV-Pubkey', value: agreement.pubkey },
+    { name: 'KV-APT', value: 'APT-' + agreement.pubkey.slice(2,9) },
     { name: 'KV-Network', value: agreement.network },
     { name: 'KV-Amount', value: String(agreement.amount_sompi) },
     { name: 'KV-BuyerAmount', value: String(agreement.buyerAmountSompi || (agreement as any).buyerAmountSompi || 0) },

@@ -28,10 +28,11 @@ import type { AvatarRecipe, QuizQuestion, ColorMix } from './expo_identity_ritua
 import { Dashboard } from './Dashboard';
 import { SendKAS } from './SendKAS';
 import { ReceiveScreen } from './ReceiveScreen';
+import IOUBalanceSheetModal from './IOUBalanceSheetShare';
+import { PhoneProofScreen } from './PhoneProofScreen';
 import { SnailModeScreen } from './SnailModeScreen';
 import { TownHallScreen } from './TownHallScreen';
 import { TransactionHistory } from './TransactionHistory';
-import { POBoxScreen } from './POBoxScreen';
 import VillageMailbox from './VillageMailbox';
 import { Workspace } from './Workspace';
 import { useBluetoothPay, PayablePeer } from './bluetooth_p2p';
@@ -62,6 +63,8 @@ type AppScreen =
   | 'dashboard'
   | 'send_kas'
   | 'receive_kas'
+  | 'phone_proof'
+  | 'balance_sheet'
   | 'snail_mode'
   | 'kaspa_test'
   | 'town_hall'
@@ -71,7 +74,6 @@ type AppScreen =
   | 'profile'
   | 'neighbor_agreement'
   | 'tx_history'
-  | 'po_box'
   | 'bathroom'
   | 'pay_nearby';
 
@@ -957,7 +959,6 @@ export const AppNavigator: React.FC = () => {
           onNavigateBathroom={() => setScreen('bathroom')}
           onNavigateReceive={() => setScreen('receive_kas')}
           onNavigateTxHistory={() => setScreen('tx_history')}
-          onNavigatePOBox={() => setScreen('po_box')}
           activeMode={activeMode}
           onSwitchMode={switchMode}
           onNavigateMailbox={() => setScreen('mailbox')}
@@ -965,6 +966,8 @@ export const AppNavigator: React.FC = () => {
           onNavigateEntertainment={() => setScreen('entertainment')}
           onNavigateProfile={() => setScreen('profile')}
           onNavigateNeighbor={() => setScreen('neighbor_agreement')}
+          onNavigatePhoneProof={() => setScreen('phone_proof')}
+          onNavigateBalanceSheet={() => setScreen('balance_sheet')}
         />
       );
 
@@ -981,6 +984,12 @@ export const AppNavigator: React.FC = () => {
           myAddress={kaspaAddress}
         />
       );
+
+    case 'balance_sheet':
+      return <IOUBalanceSheetModal visible={true} onClose={() => setScreen('dashboard')} />;
+
+    case 'phone_proof':
+      return <PhoneProofScreen visible={true} onClose={() => setScreen('dashboard')} />;
 
     case 'receive_kas':
       return (
@@ -1050,6 +1059,7 @@ export const AppNavigator: React.FC = () => {
     case 'profile':
       return <ProfileScreen
         navigation={{ goBack: () => setScreen('dashboard') }}
+          onNavigatePhoneProof={() => setScreen('phone_proof')}
         onNavigateEntertainment={() => setScreen('entertainment')}
         onNavigateTownHall={() => setScreen('town_hall')}
         onNavigateBookshelf={() => setScreen('entertainment')}
@@ -1062,8 +1072,6 @@ export const AppNavigator: React.FC = () => {
         onClose={() => setScreen('dashboard')}
       />;
 
-    case 'po_box':
-      return <POBoxScreen onClose={() => setScreen('dashboard')} />;
     case 'tx_history':
       return <TransactionHistory onClose={() => setScreen('dashboard')} />;
     case 'bathroom':

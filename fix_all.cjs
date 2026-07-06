@@ -1,0 +1,13 @@
+﻿const fs=require('fs');
+let d=fs.readFileSync('Dashboard.tsx','utf8');
+d=d.replace(/.*P\.O\. Box.*\r?\n/g,'');
+d=d.replace(/.*onNavigatePOBox.*\r?\n/g,'');
+fs.writeFileSync('Dashboard.tsx',d);
+let r=fs.readFileSync('ReceiveScreen.tsx','utf8');
+r=r.replace(/stealth:/g,'');
+fs.writeFileSync('ReceiveScreen.tsx',r);
+let s=fs.readFileSync('SendKAS.tsx','utf8');
+s=s.replace(/, or stealth:\.\.\./g,'');
+s=s.replace(/stealth:/g,'kaspa:');
+fs.writeFileSync('SendKAS.tsx',s);
+console.log('done');

@@ -158,7 +158,7 @@ function sompiToKas(sompi: bigint): number {
 }
 
 function isStealthInput(input: string): boolean {
-  if (!input.startsWith('stealth:')) return false;
+  if (!input.startsWith('kaspa:')) return false;
   const parts = input.split(':');
   return parts.length === 3 && parts[1].length === 66 && parts[2].length === 66;
 }
@@ -198,7 +198,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [showAmountInSompi, setShowAmountInSompi] = useState(false);
   const [balance, setBalance] = useState<bigint>(0n);
-  const { price: kasPrice } = useKaspaPrice();
+  const { usdPerKas } = useKaspaPrice();
   const [preview, setPreview] = useState<TransactionPreview | null>(null);
   const [txId, setTxId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -407,9 +407,9 @@ export const SendKAS: React.FC<SendKASProps> = ({
             <View>
               <Text style={styles.balanceAmount}>{displayBalance} KASPA</Text>
             <Text style={{ fontSize: 10, color: '#16a34a', fontWeight: 'bold' }}>Spendable</Text>
-              {kasPrice?.price ? (
+              {usdPerKas ? (
                 <Text style={styles.balanceUsd}>
-                  {String.fromCharCode(8776)} {'$' + (sompiToKas(balance) * kasPrice.price).toFixed(2)} USD
+                  {String.fromCharCode(8776)} {'$' + (sompiToKas(balance) * usdPerKas).toFixed(2)} USD
                 </Text>
               ) : null}
             </View>
@@ -430,7 +430,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
                     ]}
                     value={recipientInput}
                     onChangeText={setRecipientInput}
-                    placeholder="APT (303), kaspa:..., or stealth:..."
+                    placeholder="APT (303), kaspa:..."
                     placeholderTextColor={COLORS.stone400}
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -549,7 +549,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
                 <View style={styles.stealthAutoEnabled}>
                   <Shield size={rs.s(16)} color={COLORS.purple600} />
                   <Text style={styles.stealthAutoText}>
-                    {'PO Box mode auto-enabled for stealth: addresses'}
+                    {'PO Box mode auto-enabled for kaspa: addresses'}
                   </Text>
                 </View>
               )}
@@ -586,7 +586,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
                   <View style={styles.previewStealthBox}>
                     <Shield size={rs.s(20)} color={COLORS.purple600} />
                     <Text style={styles.previewStealthLabel}>PO Box Payment</Text>
-                    <Text style={styles.previewStealthDesc}>One-time address generated</Text>
+                    <Text style={styles.previewstealthDesc}>One-time address generated</Text>
                   </View>
                 )}
                 

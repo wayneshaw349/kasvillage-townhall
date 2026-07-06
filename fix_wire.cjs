@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('AppNaviagator.tsx','utf8');s=s.replace("onNavigateNeighbor={() => setScreen('neighbor_agreement')}\n        />","onNavigateNeighbor={() => setScreen('neighbor_agreement')}\n          onNavigatePhoneProof={() => setScreen('phone_proof')}\n        />");fs.writeFileSync('AppNaviagator.tsx',s);console.log('done');

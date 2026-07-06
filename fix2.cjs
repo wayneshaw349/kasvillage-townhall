@@ -1,0 +1,2 @@
+﻿const fs=require('fs');let s=fs.readFileSync('townhall_client.ts','utf8');s=s.replace("'APT-' + require('crypto').createHash('sha256').update(agreement.pubkey).digest('hex').slice(0,7)","'APT-' + agreement.pubkey.slice(2,9)");fs.writeFileSync('townhall_client.ts',s);console.log('1 done');
+let n=fs.readFileSync('NeighborAgreement.tsx','utf8');n=n.replace(/setShowBalanceSheet\(true\)/g,"console.log('[BalanceSheet] TODO')");fs.writeFileSync('NeighborAgreement.tsx',n);console.log('2 done');

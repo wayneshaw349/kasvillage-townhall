@@ -6,6 +6,7 @@ import { validateContentText } from './content_validator';
 // FROST crypto/P2P logic imported from frost_complete.ts
 // ============================================================================
 
+import IOUBalanceSheetModal from './IOUBalanceSheetShare';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -68,8 +69,6 @@ import {
   RelayMethod,
 } from './neighbor_relay';
 
-// IOU Balance Sheet
-import { IOUBalanceSheetModal } from './IOUBalanceSheetShare';
 
 // FROST 2-of-2 complete module (all crypto + P2P methods)
 import {// Types
@@ -110,8 +109,8 @@ import {// Types
   generateFrostNonce,
   computeFrostPartialS,
   aggregateFrostSig,
-  cleanup as cleanupFrost, aggregateToAddress, completeFrost2Round} from '
-import { validateEscrowDestination } from './frost_complete./frost_complete';
+  cleanup as cleanupFrost, aggregateToAddress, completeFrost2Round} from './frost_complete';
+import { validateEscrowDestination } from './frost_complete';
 import { sendPushToCounterparty } from './push_notifications';
 
 // REST API for real L1 transactions
@@ -1013,6 +1012,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
       console.log('[FLUSH-V2] One-time migration done, cleared', kv.length, 'keys');
     }
   } catch(e) { console.warn('[FLUSH]', e); } })(); }, []);
+  const [showBalanceSheet, setShowBalanceSheet] = useState(false);
+  const IOUSheet = showBalanceSheet ? require('./IOUBalanceSheetShare').IOUBalanceSheetShare : null;
   const [step, setStep] = useState(1);
   const [role, setRole] = useState<'buyer' | 'seller' | null>(null);
   const [agreementType, setAgreementType] = useState<'simple' | 'trade' | 'join' | null>(null);
@@ -2950,7 +2951,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
             <TouchableOpacity onPress={() => { if (step > 1) { setStep(1); } else { onClose(); } }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#2563eb", fontSize: 12, fontWeight: "bold" }}>{"< Back"}</Text></TouchableOpacity>
             <TouchableOpacity onPress={async () => { await clearAgreementSession(); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setRole(null); setAgreementType(null); setTemplateBuilt(false); setTemplateBuilt(false); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, itemDescription: "", stipulations: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "", expiryHours: 24 }); Alert.alert("Cleared", "Session reset"); }} style={{ padding: 8, backgroundColor: "#fee2e2", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "bold" }}>Reset</Text></TouchableOpacity>
             <TouchableOpacity onPress={async () => { const keys = await AsyncStorage.getAllKeys(); const kvKeys = keys.filter((k) => k.startsWith("kv_") || k.startsWith("frost_") || k.startsWith("FROST_")); await AsyncStorage.multiRemove(kvKeys); await AsyncStorage.removeItem("kv_agreement_session"); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, description: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "" }); Alert.alert("Cleared", "All FROST state cleared (" + kvKeys.length + " keys)"); }} style={{ padding: 8, backgroundColor: "#fef3c7", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#92400e", fontSize: 10, fontWeight: "bold" }}>Clear All</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => { setShowBalanceSheet(true); }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { setShowBalanceSheet(!showBalanceSheet); }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text></TouchableOpacity>
           </View>
           <Text style={{ fontSize: 10, color: "#78716c", textAlign: "center", paddingVertical: 4 }}>(Two-Party Collateral / Good Faith Deposit)</Text>
           <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled" onScrollBeginDrag={Keyboard.dismiss}>
@@ -4338,6 +4339,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 >
                   <Text style={styles.backLinkText}>← Back to release options</Text>
                 </TouchableOpacity>
+            {showBalanceSheet && <IOUBalanceSheetModal visible={showBalanceSheet} onClose={() => setShowBalanceSheet(false)} />}
               </View>
             )}
           </ScrollView>

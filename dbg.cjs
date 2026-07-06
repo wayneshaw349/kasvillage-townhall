@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('Dashboard.tsx','utf8');s=s.replace("onPress={() => onNavigatePhoneProof?.()}","onPress={() => { console.log('[PP] pressed', !!onNavigatePhoneProof); onNavigatePhoneProof?.(); }}");fs.writeFileSync('Dashboard.tsx',s);console.log('done');

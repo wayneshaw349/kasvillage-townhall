@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('AppNaviagator.tsx','utf8');s=s.replace("import { POBoxScreen } from './POBoxScreen';\n",'');s=s.replace("  | 'po_box'\n",'');s=s.replace(/.*onNavigatePOBox.*\n/g,'');s=s.replace(/.*case 'po_box':.*\n/g,'');s=s.replace(/.*POBoxScreen.*\n/g,'');fs.writeFileSync('AppNaviagator.tsx',s);console.log('done');

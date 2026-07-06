@@ -1003,13 +1003,17 @@ const WalletOverview: React.FC<{
   onNavigateProfile?: () => void;
   onNavigateNeighbor?: () => void;
   onNavigateTxHistory?: () => void;
+  onNavigatePhoneProof?: () => void;
+  onNavigateBalanceSheet?: () => void;
   onNavigatePOBox?: () => void;
+  onNavigatePhoneProof?: () => void;
   onSwitchMode?: (mode: 'tutorial' | 'real') => void;
   activeMode?: 'tutorial' | 'real';
   balanceSompi?: bigint;
   // Stats from hook
   ds: ReturnType<typeof useDashboardStats>;
-}> = ({ balance, xp, onDeposit, onWithdraw, onSend, onPayNearby, onNavigateProfile, onNavigateNeighbor, onNavigateTxHistory, onNavigatePOBox, activeMode, onSwitchMode, balanceSompi = 0n, ds }) => {
+}> = ({ balance, xp, onDeposit, onWithdraw, onSend, onPayNearby, onNavigateProfile, onNavigateNeighbor, onNavigateTxHistory, onNavigatePOBox,
+  onNavigatePhoneProof, onNavigateBalanceSheet, activeMode, onSwitchMode, balanceSompi = 0n, ds }) => {
   const { formattedPrice, usdPerKas, loading: priceLoading, isStale } = useKaspaPrice({ autoStart: true });
   const kasBalance = Number(balanceSompi) / 100_000_000;
   const usdValue = kasBalance * usdPerKas;
@@ -1080,10 +1084,6 @@ const WalletOverview: React.FC<{
         <Text style={walletStyles.actionIcon}>{' '}</Text>
         <Text style={walletStyles.actionLabel}>History</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={walletStyles.actionBtn} onPress={() => onNavigatePOBox?.()}>
-        <Text style={walletStyles.actionIcon}>{' '}</Text>
-        <Text style={walletStyles.actionLabel}>P.O. Box</Text>
-      </TouchableOpacity>
       
       <TouchableOpacity style={walletStyles.actionBtn} onPress={() => {
         require('react-native').Linking.openURL('https://www.kraken.com/prices/kaspa');
@@ -1105,11 +1105,15 @@ const WalletOverview: React.FC<{
         <Text style={walletStyles.actionIcon}>{' '}</Text>
         <Text style={walletStyles.actionLabel}>Cash Out</Text>
       </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={() => { console.log('[PP] pressed', !!onNavigatePhoneProof); onNavigatePhoneProof?.(); }}>
+        <Text style={walletStyles.actionIcon}>{' '}</Text>
+        <Text style={walletStyles.actionLabel}>Phone Proof</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={walletStyles.actionBtn} onPress={onNavigateNeighbor}>
         <Text style={walletStyles.actionIcon}>{' '}</Text>
         <Text style={walletStyles.actionLabel}>Agreement</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={walletStyles.actionBtn} onPress={onNavigateNeighbor}>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={() => onNavigateBalanceSheet?.()}>
         <Text style={walletStyles.actionIcon}>{' '}</Text>
         <Text style={walletStyles.actionLabel}>Balance Sheet</Text>
       </TouchableOpacity>
@@ -1417,6 +1421,7 @@ interface DashboardProps {
   onNavigateBathroom?: () => void;
   onNavigateReceive?: () => void;
   onNavigateTxHistory?: () => void;
+  onNavigatePhoneProof?: () => void;
   onNavigatePOBox?: () => void;
   activeMode?: 'tutorial' | 'real';
   onSwitchMode?: (mode: 'tutorial' | 'real') => void;
@@ -1443,6 +1448,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigateReceive,
   onNavigateTxHistory,
   onNavigatePOBox,
+  onNavigatePhoneProof,
+  onNavigateBalanceSheet,
   activeMode = 'tutorial',
   onSwitchMode,
   balanceSompi = 0n,
@@ -1529,6 +1536,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
               onNavigateNeighbor={onNavigateNeighbor}
               onNavigateTxHistory={onNavigateTxHistory}
               onNavigatePOBox={onNavigatePOBox}
+              onNavigatePhoneProof={onNavigatePhoneProof}
+              onNavigateBalanceSheet={onNavigateBalanceSheet}
               onPayNearby={() => onNavigatePayNearby?.()}
             />
           )}

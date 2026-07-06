@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('src/townhall_verification_complete.rs','utf8');s=s.replace(/pub fn validate_content_text[\s\S]*?^}/m,'// moved to content_validator_sync.rs\nuse crate::content_validator_sync::validate_content_text;');fs.writeFileSync('src/townhall_verification_complete.rs',s);console.log('done');
