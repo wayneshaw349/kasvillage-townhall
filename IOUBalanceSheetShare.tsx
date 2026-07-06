@@ -1513,7 +1513,13 @@ export function IOUBalanceSheetModal(props: Props) {
                 <TextInput value={proposalAmount} onChangeText={setProposalAmount} placeholder="0.00" placeholderTextColor="#555" keyboardType="decimal-pad" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 16, borderWidth: 1, borderColor: '#333' }} />
                 <Text style={{ color: '#888', fontSize: 12, marginTop: 10, marginBottom: 8 }}>Description</Text>
                 <TextInput value={proposalDesc} onChangeText={setProposalDesc} placeholder="What's this for?" placeholderTextColor="#555" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 14, borderWidth: 1, borderColor: '#333' }} />
-                <TouchableOpacity onPress={async () => { setProposalSending(true); try { const p = await createProposal(parseFloat(proposalAmount) * 1e8, proposalDesc); await shareProposal(p); } catch(e:any) { Alert.alert('Error', e.message); } setProposalSending(false); }} disabled={proposalSending || !proposalAmount} style={{ marginTop: 12, backgroundColor: '#D4AF37', padding: 12, borderRadius: 8, alignItems: 'center', opacity: proposalSending || !proposalAmount ? 0.5 : 1 }}>
+                <TouchableOpacity onPress={async () => { setProposalSending(true); try { const amtSompi = BigInt(Math.round(parseFloat(proposalAmount) * 1e8));
+                  const addr = await SecureStore.getItemAsync('kv_kaspa_address');
+                  if (!addr) throw new Error('No address');
+                  const spendable = await getSpendableUtxos(addr);
+                  if (spendable.total < amtSompi) throw new Error('Insufficient free balance: ' + (Number(spendable.total)/1e8).toFixed(4) + ' KAS available');
+                  await allocateForIOU(addr, amtSompi.toString(), 'iou-' + Date.now());
+                  const p = await createProposal(Number(amtSompi), proposalDesc); await shareProposal(p); } catch(e:any) { Alert.alert('Error', e.message); } setProposalSending(false); }} disabled={proposalSending || !proposalAmount} style={{ marginTop: 12, backgroundColor: '#D4AF37', padding: 12, borderRadius: 8, alignItems: 'center', opacity: proposalSending || !proposalAmount ? 0.5 : 1 }}>
                   <Text style={{ color: '#000', fontWeight: 'bold' }}>{proposalSending ? 'Creating...' : 'Create & Share'}</Text>
                 </TouchableOpacity>
               </View>
