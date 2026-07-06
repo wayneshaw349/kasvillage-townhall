@@ -47,6 +47,7 @@ import { type KaspaNetwork } from './KaspaClient';
 
 // Arweave
 import { allocateForIOU, releaseIOU } from './utxo_ledger';
+import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance } from './proposal_share';
 import { uploadToTurbo, uploadToIrys, type IrysUploadResult } from './arweave_upload';
 import { type ArweaveTag } from './arweave_module';
 
@@ -76,7 +77,7 @@ const KEYS = {
   USER_STATS: 'kv_user_stats',
   PRIVKEY_ENC: 'kv_l1_privkey_enc',
   ADDRESS: 'kaspa_address',
-  PUBKEY: 'kaspa_pubkey',
+  PUBKEY: 'kv_l1_pubkey',
   NETWORK: 'kaspa_network',
   TAILSCALE_PEERS: 'kv_tailscale_peers',
   BLUETOOTH_PEERS: 'kv_bluetooth_peers',
@@ -226,8 +227,9 @@ async function getWalletCredentials(): Promise<{ address: string; pubkey: string
   try {
     const address = await SecureStore.getItemAsync(KEYS.ADDRESS);
       if (!address) { console.log('[IOU] no address yet'); return; }
-    const pubkey = await SecureStore.getItemAsync(KEYS.PUBKEY);
-      if (!pubkey) { console.log('[IOU] no pubkey yet'); return; }
+    const pubkey = await SecureStore.getItemAsync('kv_l1_pubkey') || await SecureStore.getItemAsync('public_key') || await SecureStore.getItemAsync('kv_public_key');
+      console.log('[IOU] resolved pubkey:', !!pubkey);
+      if (!pubkey) { console.log('[IOU] no pubkey in any key'); return; }
     const privkey = await SecureStore.getItemAsync(KEYS.PRIVKEY_ENC);
     
     if (!address || !pubkey || !privkey) return null;
@@ -1170,6 +1172,17 @@ export function IOUBalanceSheetModal(props: Props) {
   const [settleRequests, setSettleRequests] = useState<SettleRequest[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [frostAddr, setFrostAddr] = useState('');
+  const [counterpartyInput, setCounterpartyInput] = useState('');
+  const [frostBalance, setFrostBalance] = useState(0n);
+  const [showActive, setShowActive] = useState(false);
+  const [newIOUMode, setNewIOUMode] = useState<'none'|'send'|'receive'>('none');
+  const [proposalAmount, setProposalAmount] = useState('');
+  const [proposalDesc, setProposalDesc] = useState('');
+  const [proposalSending, setProposalSending] = useState(false);
+  const [pasteInput, setPasteInput] = useState('');
+  const [incomingProposal, setIncomingProposal] = useState<any>(null);
+  const [proposalVerified, setProposalVerified] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [amount, setAmount] = useState('');
   const [desc, setDesc] = useState('');
@@ -1456,7 +1469,77 @@ export function IOUBalanceSheetModal(props: Props) {
           {/* Signed IOUs */}
           <Text style={styles.section}>IOUs ({ledger?.ious.length || 0})</Text>
           {!ledger?.ious.length ? (
-            <Text style={styles.empty}>No IOUs yet</Text>
+            <><Text style={styles.empty}>No IOUs yet</Text>
+            <Text style={{ color: '#888', fontSize: 12, marginTop: 8, textAlign: 'center' }}>Create a FROST 2-of-2 collateral wallet with your counterparty, then issue IOUs backed by locked KAS.</Text>
+            {/* FROST Address Input */}
+            <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 10, padding: 14 }}>
+              <Text style={{ color: '#D4AF37', fontWeight: 'bold', fontSize: 13, marginBottom: 8 }}>FROST 2-of-2 Collateral</Text>
+              <Text style={{ color: '#888', fontSize: 11, marginBottom: 8 }}>Enter your shared FROST escrow address to track collateral and issue IOUs.</Text>
+              <TextInput value={frostAddr} onChangeText={setFrostAddr} placeholder="kaspa:... or kaspatest:..." placeholderTextColor="#555" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 13, borderWidth: 1, borderColor: '#333', fontFamily: 'monospace' }} />
+              <Text style={{ color: '#888', fontSize: 11, marginTop: 10, marginBottom: 4 }}>Counterparty Pubkey or APT</Text>
+              <TextInput value={counterpartyInput} onChangeText={setCounterpartyInput} placeholder="02... or APT-XXXX" placeholderTextColor="#555" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 13, borderWidth: 1, borderColor: '#333', fontFamily: 'monospace' }} />
+              {frostAddr ? (
+                <TouchableOpacity onPress={async () => { try { const { getBalance } = await import('./kaspa_unified'); const bal = await getBalance(frostAddr); setFrostBalance(bal); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 10, backgroundColor: '#49d6aa20', padding: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#49d6aa' }}>
+                  <Text style={{ color: '#49d6aa', fontWeight: '600', fontSize: 13 }}>Check Collateral Balance</Text>
+                </TouchableOpacity>
+              ) : null}
+              {frostBalance > 0n && (
+                <Text style={{ color: '#49d6aa', fontSize: 14, fontWeight: 'bold', marginTop: 8, textAlign: 'center' }}>Locked: {(Number(frostBalance) / 1e8).toFixed(4)} KAS</Text>
+              )}
+            </View>
+
+            {/* Active IOUs */}
+            <TouchableOpacity onPress={() => setShowActive(!showActive)} style={{ marginTop: 12, backgroundColor: '#1a1a2e', padding: 12, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ color: '#D4AF37', fontWeight: 'bold', fontSize: 13 }}>Active IOUs</Text>
+              <Text style={{ color: '#888', fontSize: 12 }}>{showActive ? 'Hide' : 'Show'}</Text>
+            </TouchableOpacity>
+            {showActive && (
+              <View style={{ backgroundColor: '#0a0a0a', borderRadius: 8, padding: 10, marginTop: 4 }}>
+                <Text style={{ color: '#888', fontSize: 12, textAlign: 'center' }}>No active IOUs — create one below</Text>
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+              <TouchableOpacity onPress={() => setNewIOUMode('send')} style={{ flex: 1, backgroundColor: '#D4AF37', padding: 14, borderRadius: 10, alignItems: 'center' }}>
+                <Text style={{ color: '#000', fontWeight: 'bold', fontSize: 15 }}>New IOU</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setNewIOUMode('receive')} style={{ flex: 1, backgroundColor: '#49d6aa20', padding: 14, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#49d6aa' }}>
+                <Text style={{ color: '#49d6aa', fontWeight: 'bold', fontSize: 15 }}>Receive IOU</Text>
+              </TouchableOpacity>
+            </View>
+            {newIOUMode === 'send' && (
+              <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 10, padding: 14 }}>
+                <Text style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>Amount (KAS)</Text>
+                <TextInput value={proposalAmount} onChangeText={setProposalAmount} placeholder="0.00" placeholderTextColor="#555" keyboardType="decimal-pad" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 16, borderWidth: 1, borderColor: '#333' }} />
+                <Text style={{ color: '#888', fontSize: 12, marginTop: 10, marginBottom: 8 }}>Description</Text>
+                <TextInput value={proposalDesc} onChangeText={setProposalDesc} placeholder="What's this for?" placeholderTextColor="#555" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 14, borderWidth: 1, borderColor: '#333' }} />
+                <TouchableOpacity onPress={async () => { setProposalSending(true); try { const p = await createProposal(parseFloat(proposalAmount) * 1e8, proposalDesc); await shareProposal(p); } catch(e:any) { Alert.alert('Error', e.message); } setProposalSending(false); }} disabled={proposalSending || !proposalAmount} style={{ marginTop: 12, backgroundColor: '#D4AF37', padding: 12, borderRadius: 8, alignItems: 'center', opacity: proposalSending || !proposalAmount ? 0.5 : 1 }}>
+                  <Text style={{ color: '#000', fontWeight: 'bold' }}>{proposalSending ? 'Creating...' : 'Create & Share'}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {newIOUMode === 'receive' && (
+              <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 10, padding: 14 }}>
+                <Text style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>Paste proposal from sender</Text>
+                <TextInput value={pasteInput} onChangeText={setPasteInput} placeholder="Paste proposal here..." placeholderTextColor="#555" multiline style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 12, borderWidth: 1, borderColor: '#333', minHeight: 80 }} />
+                <TouchableOpacity onPress={async () => { try { const d = decodeProposal(pasteInput.trim()); const v = await verifyProposal(d); setIncomingProposal(d); setProposalVerified(v); } catch(e:any) { Alert.alert('Invalid', e.message); } }} disabled={!pasteInput.trim()} style={{ marginTop: 12, backgroundColor: '#49d6aa', padding: 12, borderRadius: 8, alignItems: 'center', opacity: !pasteInput.trim() ? 0.5 : 1 }}>
+                  <Text style={{ color: '#000', fontWeight: 'bold' }}>Verify Proposal</Text>
+                </TouchableOpacity>
+                {incomingProposal && (
+                  <View style={{ marginTop: 12, backgroundColor: '#0a0a0a', padding: 12, borderRadius: 8 }}>
+                    <Text style={{ color: '#fff', fontSize: 14 }}>Amount: {(incomingProposal.amountSompi / 1e8).toFixed(4)} KAS</Text>
+                    <Text style={{ color: '#888', fontSize: 12 }}>From: {incomingProposal.senderPubkey?.slice(0,16)}...</Text>
+                    <Text style={{ color: proposalVerified ? '#27AE60' : '#e74c3c', fontSize: 12, marginTop: 4 }}>{proposalVerified ? 'Verified' : 'INVALID'}</Text>
+                    {proposalVerified && (
+                      <TouchableOpacity onPress={async () => { try { const a = await acceptProposal(incomingProposal); await shareAcceptance(a); Alert.alert('Accepted', 'IOU accepted and shared'); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 8, backgroundColor: '#27AE60', padding: 10, borderRadius: 8, alignItems: 'center' }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>Accept IOU</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}</>
+
           ) : (
             ledger.ious.map(i => <IOUCard key={i.id} iou={i} myPubkey={myPubkey} alias={counterpartyAlias} />)
           )}

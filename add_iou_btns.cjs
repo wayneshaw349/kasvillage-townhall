@@ -1,0 +1,4 @@
+﻿const fs=require('fs');let s=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');
+if(!s.includes("proposal_share"))s=s.replace("import { uploadToTurbo","import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance } from './proposal_share';\nimport { uploadToTurbo");
+if(!s.includes("newIOUMode"))s=s.replace("const [loading, setLoading] = useState(true);","const [loading, setLoading] = useState(true);\n  const [newIOUMode, setNewIOUMode] = useState<'none'|'send'|'receive'>('none');\n  const [proposalAmount, setProposalAmount] = useState('');\n  const [proposalDesc, setProposalDesc] = useState('');\n  const [proposalSending, setProposalSending] = useState(false);\n  const [pasteInput, setPasteInput] = useState('');\n  const [incomingProposal, setIncomingProposal] = useState<any>(null);\n  const [proposalVerified, setProposalVerified] = useState(false);");
+fs.writeFileSync('IOUBalanceSheetShare.tsx',s);console.log('done');
