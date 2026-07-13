@@ -67,7 +67,7 @@ export function generateProposal(params: {
   
   const _body = ['KV', params.agrId, params.buyerAddress, params.sellerAddress,
     params.buyerAmountSompi.toString(), params.sellerAmountSompi.toString(),
-    params.network, params.buyerR, params.verificationCode, desc, (params as any).buyerPubkey || '', String((params as any).frostCounter ?? '')].join('|');
+    params.network, params.buyerR, params.verificationCode, desc, (params as any).buyerPubkey || '', String((params as any).frostCounter ?? ''), (params as any).sellerPubkey || ''].join('|');
   let _sig = '';
   try {
     if ((params as any).buyerPrivKeyHex) {
@@ -92,11 +92,12 @@ export function parseProposal(text: string): KVProposal | null {
     buyerPubkeyRaw: parts[10] || '',
     frostCounter: (parts[11] !== undefined && parts[11] !== '') ? parseInt(parts[11], 10) : undefined,
   };
-  const _sig = parts[12] || '';
-  const _bodyOnly = parts.slice(1, 12).join('|');
+  const sellerPubkeyRaw = parts[12] || '';
+  const _sig = parts[13] || '';
+  const _bodyOnly = parts.slice(1, 13).join('|');
 
   proposal.buyerPubkey = proposal.buyerPubkeyRaw || addressToPubkey(proposal.buyerAddress);
-  proposal.sellerPubkey = addressToPubkey(proposal.sellerAddress);
+  proposal.sellerPubkey = sellerPubkeyRaw || addressToPubkey(proposal.sellerAddress);
 
   if (!proposal.buyerPubkey || !proposal.sellerPubkey) {
     proposal.valid = false;

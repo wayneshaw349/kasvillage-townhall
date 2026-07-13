@@ -3768,6 +3768,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                             buyerR: buyerR_saved,
                             verificationCode: contract.verificationCode || '',
                             buyerPubkey: contract.buyerPubkey || '',
+                            sellerPubkey: contract.sellerPubkey || '',
                             buyerPrivKeyHex: _wallet?.privKeyHex || '', frostCounter: (contract.frostData ? contract.frostData.frostCounter : undefined) ?? 0,
                             description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });
