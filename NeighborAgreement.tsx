@@ -124,6 +124,8 @@ import { uploadToIrys } from './arweave_upload';
 import { encryptPartialSig, decryptPartialSig } from './frost_encrypted_relay';
 import { computeSighash, buildCanonicalFrostTx, canonicalSighash } from './kaspa_rest_tx';
 import { hexToBytes as h2b, bytesToHex as b2h } from '@noble/hashes/utils';
+import * as _secpNA from '@noble/secp256k1';
+function secpPub(privHex: string): Uint8Array { return (_secpNA as any).getPublicKey(h2b(privHex), true); }
 import { blake2b as blk } from '@noble/hashes/blake2b';
 import { secp256k1 as secpCurve } from '@noble/curves/secp256k1';
 import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave, postFrostR, getFrostR, listProposedAgreements, submitPartialSig } from './townhall_client';
@@ -1114,7 +1116,7 @@ function parseClipboard(raw: string): {
   const [sellerResponseB64, setSellerResponseB64] = useState('');
   const [sellerTrackingNum, setSellerTrackingNum] = useState('');
   const [templateBuilt, setTemplateBuilt] = useState(false);
-  const [releaseMode, setReleaseMode] = useState<'release' | 'cancel'>('release');
+  const [releaseMode, setReleaseMode] = useState<'release' | 'cancel' | 'split'>('release');
 
   // Collateral agreements always use cancel mode (both parties get deposit back)
   useEffect(() => { if (agreementType === 'simple') setReleaseMode('cancel'); }, [agreementType]);
@@ -1167,7 +1169,7 @@ function parseClipboard(raw: string): {
         let myPubkey = '';
         if (result[0] === 0x00 && result.length >= 33) {
           const xOnly = result.slice(1, 33);
-          myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
+          myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(wallet.privKeyHex)); // [PUBKEY-PREFIX-FIX] real compressed prefix
         }
         if (!myPubkey) return;
 
@@ -1282,7 +1284,7 @@ function parseClipboard(raw: string): {
         }
         if (arweaveEntries.length > 0) {
           console.log('[Arweave-List] Populating', arweaveEntries.length, 'active agreements');
-          setFrostActiveList(arweaveEntries);
+          if(false) setFrostActiveList(arweaveEntries); /* KV active-list off */
         }
 
         console.log('[Arweave-Restore] No funded agreements — start fresh, use inbox');
@@ -1340,7 +1342,7 @@ function parseClipboard(raw: string): {
           try {
             const wallet = await loadMainWallet();
             if (wallet) {
-              const myPk = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + wallet.address.split(':')[1].slice(0,64));
+              const myPk = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(wallet.privKeyHex)); // [PUBKEY-PREFIX-FIX] real compressed prefix
               // Query Arweave for my agreements
               const arAll = await queryAgreementsFromArweave({ network: 'testnet-10' });
               const mine = arAll.filter((a: any) => (a.pubkey || '').startsWith(myPk.slice(0,16)) || (a.counterpartyPubkey || '').startsWith(myPk.slice(0,16)));
@@ -1480,6 +1482,13 @@ function parseClipboard(raw: string): {
           // If other party sent their part, auto-send ours
           // Only BUYER auto-sends from poll. Seller already sent from handleAcceptFromInbox.
           if (role === 'buyer' && balance >= otherExpected && myExpected > 0) {
+            // PARTIAL-GATE: require exactly the seller UTXO (count===1, amount within 5%) — blocks residue false-trigger
+            const _amts = frostUtxos.map((u: any) => Number(u.utxoEntry?.amount || '0'));
+            const _okOne = _amts.length === 1 && Math.abs(_amts[0] - otherExpected) <= otherExpected * 0.05;
+            if (!_okOne) {
+              console.log('[FROST-Poll] Buyer send BLOCKED — expected 1 seller UTXO ~', otherExpected/1e8, 'but saw', _amts.map(a=>a/1e8), '(residue?) — not sending');
+              return;
+            }
             const sentKey = 'kv_frost_poll_sent_' + contract.agreementId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
             if (!alreadySent && !cancelled) {
@@ -1687,7 +1696,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         let myPubkey = '';
         if (result[0] === 0x00 && result.length >= 33) {
           const xOnly = result.slice(1, 33);
-          myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
+          myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(wallet.privKeyHex));
         }
         if (!myPubkey || cancelled) return;
         // Layer 1: TownHall (instant)
@@ -1698,7 +1707,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
           setInboxAgreements(prev => {
             const ids = new Set(prev.map(p => p.agreementId || p.agreement_id));
             const newOnes = thPending.filter((a: any) => !ids.has(a.agreementId || a.agreement_id));
-            return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+            return prev; /* KV inbox off */
           });
         }
         // Layer 2: arweave.net (0.3s)
@@ -1720,7 +1729,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
               setInboxAgreements(prev => {
                 const ids = new Set(prev.map(p => p.agreementId || p.agreement_id));
                 const newOnes = arProposals.filter((a: any) => !ids.has(a.agreementId));
-                return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+                return prev; /* KV inbox off */
               });
             }
           }
@@ -1777,7 +1786,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
           // L1 check: find first clean FROST address (counter 0,1,2...)
           let frostData: any = null;
           const _frostApi = network.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-          for (let _n = 0; _n < 25; _n++) {
+          for (let _n = 0; _n < 1; _n++) { // PASTE-ONLY: pin buyer to counter-0 (qppw56), no scan-away
             const _candidate = deriveFrostAddressLocal({ pubkeyA: contract.buyerPubkey, pubkeyB: contract.sellerPubkey, network, agreementId, frostCounter: _n });
             try {
               const _br = await fetch(_frostApi + '/addresses/' + _candidate.address + '/balance');
@@ -1912,7 +1921,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         for (const d of data5bit) { buff = (buff << 5) | d; bits += 5; while (bits >= 8) { bits -= 8; result.push((buff >> bits) & 0xff); } }
         if (result[0] === 0x00 && result.length >= 33) {
           const xOnly = result.slice(1, 33);
-          const pubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
+          const pubkey = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(wallet.privKeyHex));
           console.log('[Neighbor] My pubkey:', pubkey);
           // Only set pubkey if FROST hasn't been derived yet
           if (!contract.multisigAddress) {
@@ -1934,6 +1943,24 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
   
   const handleSetCounterparty = (addr: string) => {
     setCounterpartyKaspaAddr(addr);
+    // OPTION-B: counterparty pubkey pasted directly (66 hex, real 02/03 parity) — no address guessing
+    const _pk = (addr || '').trim().toLowerCase();
+    if (/^0[23][0-9a-f]{64}$/.test(_pk)) {
+      try {
+        const _net = (contract.frostData?.network || 'testnet-10');
+        const _xonly = _pk.slice(2);
+        let _derivedAddr = '';
+        try { _derivedAddr = deriveAddress(_xonly, _net as any); } catch (e) { console.warn('[OptionB] deriveAddress failed:', e); }
+        console.log('[Neighbor][OptionB] Counterparty pubkey used directly:', _pk.slice(0,16), 'addr:', (_derivedAddr||'').slice(0,30));
+        if (role === 'buyer') {
+          setContract(prev => ({ ...prev, sellerPubkey: _pk, counterpartyPubkey: _pk }));
+        } else {
+          setContract(prev => ({ ...prev, buyerPubkey: _pk, counterpartyPubkey: _pk }));
+        }
+        if (_derivedAddr) { setCounterpartyKaspaAddr(_derivedAddr); setCounterpartyAddress(_derivedAddr); }
+      } catch (e) { console.warn('[OptionB] pubkey branch failed:', e); }
+      return;
+    }
     if (addr.length > 40 && (addr.startsWith('kaspa:') || addr.startsWith('kaspatest:'))) {
       try {
         const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
@@ -1977,7 +2004,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
       let myPubkey = '';
       if (result[0] === 0x00 && result.length >= 33) {
         const xOnly = result.slice(1, 33);
-        myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
+        myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(wallet.privKeyHex));
       }
       if (!myPubkey) { setInboxLoading(false); return; }
       const agreements = await listMyAgreements(myPubkey);
@@ -2386,7 +2413,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
       let myPubkey = '';
       if (result[0] === 0x00 && result.length >= 33) {
         const xOnly = result.slice(1, 33);
-        myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || ('02' + xOnly.map((b: number) => b.toString(16).padStart(2, '0')).join(''));
+        myPubkey = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(wallet.privKeyHex));
       }
       // Step 1: Inscribe "Agreed" to Arweave (with dedup)
       const agrId = agreement.agreementId || agreement.agreement_id || '';
@@ -2421,8 +2448,8 @@ const handleAcceptFromInbox = async (agreement: any) => {
             frostAddress: contract.frostData?.address || contract.multisigAddress || '',
             signature: 'agree_' + Date.now(),
             counterpartyPubkey: proposerPubkey,
-              buyerAmountSompi: Math.floor((canon?.buyerAmountSompi || 0)),
-              sellerAmountSompi: Math.floor((canon?.sellerAmountSompi || 0)),
+              buyerAmountSompi: Math.floor((contract.itemPriceKas || 0) * 1e8),
+              sellerAmountSompi: Math.floor((contract.sellerCommitmentKas || 0) * 1e8),
           });
           await AsyncStorage.setItem(agrSessionKey, String(Date.now()));
           console.log('[Neighbor] Agreed inscribed to Arweave');
@@ -2542,7 +2569,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
           const frostNetwork = wallet.network || 'testnet-10';
           console.log('[FROST-DEBUG] pubkeyA:', myPubkey?.slice(0,16), 'pubkeyB:', proposerPubkey?.slice(0,16), 'network:', frostNetwork, 'agrId:', agrId);
           // Seller L1 loop: same algorithm as buyer, no relay dependency
-          let frostData: any = null;
+          let frostData: any = canon.frostData || null; /* PASTE-ONLY: use canon address, skip L1 scan */
           const _sApi = frostNetwork.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
           // FROST REUSE: if Arweave/TownHall has frostAddress with funds, find matching counter
           let agrFrostAddr = agreement.frostAddress || '';
@@ -2555,7 +2582,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
               if (_fTags) { const _fm: any = {}; _fTags.forEach((t: any) => { _fm[t.name] = t.value; }); if (_fm['KV-FrostAddress']) { agrFrostAddr = _fm['KV-FrostAddress']; console.log('[Seller-Reuse] Got frostAddress from Arweave proposal:', agrFrostAddr.slice(0, 30)); } }
             } catch (e) { console.warn('[Seller-Reuse] Arweave frost query failed:', e); }
           }
-          if (agrFrostAddr && agrFrostAddr.length > 20) {
+          if (!frostData && agrFrostAddr && agrFrostAddr.length > 20) {
             try {
               const _reuseResp = await fetch(_sApi + '/addresses/' + agrFrostAddr + '/utxos');
               if (_reuseResp.ok) {
@@ -2575,13 +2602,14 @@ const handleAcceptFromInbox = async (agreement: any) => {
             } catch (e) { console.warn('[Seller-Reuse] Check failed:', e); }
           }
           // Use buyer's counter if provided in proposal (avoids counter divergence)
-          const buyerCounter = (agreement as any)?.frostCounter ?? (agreement as any)?.KVFrostCounter;
-          if (frostData) {
-            console.log('[Seller-Reuse] Skipping L1 scan — already have FROST from Arweave');
-          } else if (buyerCounter !== undefined && buyerCounter !== null) {
+          const buyerCounter = (agreement as any)?.frostCounter ?? (agreement as any)?.KVFrostCounter ?? (agreement as any)?.['KV-FrostCounter'];
+          console.log('[Seller-Counter-DEBUG] buyerCounter=', buyerCounter, 'agrKeys=', Object.keys(agreement || {}).join(','));
+          if (buyerCounter !== undefined && buyerCounter !== null) {
             const directFrost = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: buyerCounter });
             frostData = directFrost;
-            console.log('[Seller-Counter] Using buyer counter:', buyerCounter, directFrost.address.slice(0,30));
+            console.log('[Seller-Counter] Using buyer counter (priority):', buyerCounter, directFrost.address.slice(0,30));
+          } else if (frostData) {
+            console.log('[Seller-Reuse] Skipping L1 scan (already have FROST)');
           } else {
           for (let _sc = 0; _sc < 25; _sc++) {
             const _sCand = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: _sc });
@@ -2597,6 +2625,14 @@ const handleAcceptFromInbox = async (agreement: any) => {
           if (!frostData) frostData = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: 0 });
           }
           console.log('[Neighbor] Inbox FROST address:', frostData.address);
+          // === HARD GATE: seller-derived FROST must match buyer's declared address ===
+          const _claimedFrost = (agreement as any)?.frostAddress || '';
+          if (_claimedFrost && frostData?.address && _claimedFrost !== frostData.address) {
+            console.error('[FROST-GATE] MISMATCH! derived:', frostData.address, 'claimed:', _claimedFrost);
+            Alert.alert('FROST Address Mismatch', 'The FROST address you derived does not match the buyer\'s proposal. Collateral will NOT be sent. Do not proceed with this trade.');
+            return;
+          }
+          if (_claimedFrost) console.log('[FROST-GATE] Address match confirmed:', frostData.address.slice(0,30));
           // === CANONICAL AUTO-SEND: each party finds their pubkey + amount ===
           // Proposer pubkey = KV-Pubkey, Acceptor pubkey = KV-Counterparty
           // Proposer = buyer (sets terms), Acceptor = seller (accepts terms)
@@ -3364,8 +3400,12 @@ const handleAcceptFromInbox = async (agreement: any) => {
                         try {
                           const { parseProposal } = require("./kv_proposal");
                           const kvClean = v.substring(kvStart).split("\n")[0].replace(/\s*Sent from my iPhone.*$/i, "").trim(); const parsed = parseProposal(kvClean);
-                          if (parsed) {
+                          if (parsed && parsed.valid === false) {
+                            console.warn("[Seller-Paste] REJECTED:", parsed.error);
+                            Alert.alert("Proposal Rejected", parsed.error || "Signature invalid \u2014 do not proceed.");
+                          } else if (parsed) {
                             console.log("[Seller-Paste] Parsed KV proposal:", parsed.agrId, parsed.description);
+                            console.log("[Seller-Paste-DEBUG] parsed.frostCounter:", parsed.frostCounter, "parsed keys:", Object.keys(parsed).join(","));
                             Alert.alert("Proposal Found", "Item: " + (parsed.description || "N/A") + "\nAmount: " + (Number(parsed.buyerAmountSompi || 0)/1e8) + " KAS\nCode: " + (parsed.verificationCode || ""), [
                               { text: "Cancel", style: "cancel" },
                               { text: "Accept", onPress: () => {
@@ -3640,18 +3680,41 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 {/* Counterparty Address Input */}
                 {!contract.multisigAddress && (
                   <View style={{ marginBottom: 16 }}>
-                    <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.stone600, marginBottom: 4 }}>Counterparty Kaspa Address</Text>
+                    {/* SHARE_MY_PUBKEY_BTN */}
+                    <TouchableOpacity
+                      onPress={async () => {
+                        try {
+                          let myPub = '';
+                          try {
+                            const _w = await loadMainWallet();
+                            myPub = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(_w.privKeyHex));
+                          } catch (_e) {
+                            myPub = (await SecureStore.getItemAsync('kv_public_key')) || (await SecureStore.getItemAsync('kaspa_pubkey')) || '';
+                          }
+                          if (myPub) {
+                            await Clipboard.setStringAsync(myPub);
+                            Alert.alert('Copied', 'Your pubkey is copied. Send it to your counterparty so they can build the FROST address.');
+                          } else {
+                            Alert.alert('Not found', 'Your pubkey is not available yet.');
+                          }
+                        } catch (e) { console.warn('[SharePubkey] failed:', e); }
+                      }}
+                      style={{ backgroundColor: COLORS.indigo50, borderWidth: 1, borderColor: COLORS.indigo200, borderRadius: 12, paddingVertical: 10, marginBottom: 10, alignItems: 'center' }}
+                    >
+                      <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.indigo600 }}>Share my pubkey</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.stone600, marginBottom: 4 }}>Seller's Response (pubkey)</Text>
                     <TextInput
                       style={{ backgroundColor: COLORS.white, borderWidth: 1, borderColor: COLORS.indigo200, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: rs.font(12), color: COLORS.stone800, fontFamily: 'monospace' }}
                       value={counterpartyKaspaAddr}
                       onChangeText={handleSetCounterparty}
-                      placeholder="kaspatest:qr..."
+                      placeholder="Paste seller's pubkey: 03..."
                       placeholderTextColor={COLORS.stone400}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
                     <Text style={{ fontSize: rs.font(10), color: COLORS.stone400, marginTop: 4 }}>
-                      {counterpartyKaspaAddr.length > 40 ? 'Deriving FROST address...' : "Paste your counterparty's wallet address"}
+                      {counterpartyKaspaAddr.length > 40 ? 'Deriving FROST address...' : "Paste the seller's pubkey (03...), from their response"}
                     </Text>
                   </View>
                 )}
@@ -3693,6 +3756,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                         )}
                         <TouchableOpacity onPress={async () => { 
                           // Generate KV proposal clipboard format
+                          const _wallet = await loadMainWallet();
                           const buyerR_saved = await (async () => { try { const s = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || '')); return s ? JSON.parse(s).R_hex || '' : ''; } catch { return ''; } })();
                           const shareText = generateProposal({
                             agrId: contract.agreementId || '',
@@ -3704,6 +3768,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                             buyerR: buyerR_saved,
                             verificationCode: contract.verificationCode || '',
                             buyerPubkey: contract.buyerPubkey || '',
+                            buyerPrivKeyHex: _wallet?.privKeyHex || '', frostCounter: (contract.frostData ? contract.frostData.frostCounter : undefined) ?? 0,
                             description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });
                           Clipboard.setStringAsync(shareText);

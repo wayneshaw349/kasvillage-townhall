@@ -634,10 +634,11 @@ export const AppNavigator: React.FC = () => {
         console.log('[AppNav] Network:', net, 'Address:', kaspaAddr.slice(0, 20) + '...');
         // Use REST API directly (wRPC fails in Expo Go)
         const apiBase = kaspaAddr.startsWith('kaspatest:') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+        let sompi = 0n;
         const balResp = await fetch(`${apiBase}/addresses/${kaspaAddr}/balance`);
         if (balResp.ok) {
           const balData = await balResp.json();
-          const sompi = BigInt(balData.balance);
+          sompi = BigInt(balData.balance);
           console.log('[AppNav] Balance loaded:', sompi.toString(), 'sompi');
           setBalanceSompi(sompi); // Show balance immediately
           // Fetch agreement data for financial summary
@@ -667,13 +668,10 @@ export const AppNavigator: React.FC = () => {
           // Merkle archive: snapshot only when balance CHANGES (new receive)
           if (sompi !== balanceSompi) {
             try {
-              const utxoResp = await fetch(balUrl.replace('/balance', '/utxos'));
+              const utxoResp = await fetch(`${apiBase}/addresses/${kaspaAddr}/utxos`);
               if (utxoResp.ok) {
                 const utxos = await utxoResp.json();
-                onUtxoRefresh(utxos, 'testnet', async (data, tags) => {
-                  const r = await uploadToIrys(data, tags);
-                  return r.txId || '';
-                }).catch(e => console.warn('[AppNav] UTXO snapshot failed:', e));
+                onUtxoRefresh(utxos, 'testnet').catch(e => console.warn('[AppNav] UTXO snapshot failed:', e));
               }
             } catch (e) { /* non-fatal */ }
           }
@@ -977,6 +975,7 @@ export const AppNavigator: React.FC = () => {
           visible={true}
           onClose={() => setScreen('dashboard')}
           onSuccess={(txId: string) => {
+            (globalThis as any).__kvLastTxId = txId;
             console.log('[AppNavigator] SendKAS success:', txId);
             console.log('[AppNavigator] SendKAS success:', txId); setTimeout(() => refreshBalance(), 2000);
           }}
@@ -1087,7 +1086,7 @@ export const AppNavigator: React.FC = () => {
         </View>
       );
     case 'pay_nearby':
-      return <QRPayNearby onClose={() => setScreen('dashboard')} />;
+      return <QRPayNearby onClose={() => setScreen('dashboard')} onNavigateSend={(addr?: string, sompi?: number) => { (globalThis as any).__kvSendPrefill = { addr, sompi }; setScreen('send_kas'); }} />;
 
     default:
       return <LoadingScreen />;

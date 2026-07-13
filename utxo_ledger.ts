@@ -89,6 +89,16 @@ export function classifyUtxo(scriptPubKey: string): { safety: UtxoSafety; reason
 // ============================================================================
 
 const LEDGER_KEY = 'kv_utxo_ledger';
+
+export async function releaseOrphanCollateral(activeAgreementIds: string[]): Promise<number> {
+  const arr = await loadLedger();
+  let n = 0;
+  for (const [, e] of arr) {
+    if ((e.status === 'iou-allocated' || e.status === 'collateral-committed' || e.status === 'collateral-locked') && (!e.commitReason || !activeAgreementIds.includes(e.commitReason))) { e.status = 'free'; e.commitReason = undefined; n++; }
+  }
+  await saveLedger(arr);
+  return n;
+}
 const NETWORK_KEY = 'kaspa_network';
 
 async function loadLedger(): Promise<Map<string, LedgerEntry>> {
@@ -127,6 +137,11 @@ async function getApiBase(): Promise<string> {
  * - UTXOs consumed on L1 (no longer in REST response) → removed from ledger
  * - Existing ledger entries keep their status (committed/allocated stays)
  */
+export async function getFreeUtxoKeys(address: string): Promise<Set<string>> {
+  const r = await syncLedger(address);
+  return new Set(r.utxos.map(e => e.utxoKey));
+}
+
 export async function syncLedger(address: string): Promise<SpendableResult> {
   const apiBase = await getApiBase();
   const resp = await fetch(`${apiBase}/addresses/${address}/utxos`);

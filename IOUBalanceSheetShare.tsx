@@ -46,7 +46,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { type KaspaNetwork } from './KaspaClient';
 
 // Arweave
-import { allocateForIOU, releaseIOU } from './utxo_ledger';
+import { allocateForIOU, releaseIOU, getSpendableUtxos } from './utxo_ledger';
 import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance } from './proposal_share';
 import { uploadToTurbo, uploadToIrys, type IrysUploadResult } from './arweave_upload';
 import { type ArweaveTag } from './arweave_module';
@@ -226,10 +226,10 @@ function mapStatus(s: SignedIOU['status']): CoinStatus {
 async function getWalletCredentials(): Promise<{ address: string; pubkey: string; privkey: string } | null> {
   try {
     const address = await SecureStore.getItemAsync(KEYS.ADDRESS);
-      if (!address) { console.log('[IOU] no address yet'); return; }
+      if (!address) { console.log('[IOU] no address yet'); return null; }
     const pubkey = await SecureStore.getItemAsync('kv_l1_pubkey') || await SecureStore.getItemAsync('public_key') || await SecureStore.getItemAsync('kv_public_key');
       console.log('[IOU] resolved pubkey:', !!pubkey);
-      if (!pubkey) { console.log('[IOU] no pubkey in any key'); return; }
+      if (!pubkey) { console.log('[IOU] no pubkey in any key'); return null; }
     const privkey = await SecureStore.getItemAsync(KEYS.PRIVKEY_ENC);
     
     if (!address || !pubkey || !privkey) return null;
@@ -369,6 +369,20 @@ async function allocateBatches(
   return { batches: allocated };
 }
 
+export async function releaseStaleAllocations(): Promise<number> {
+  const [batches, ledgers] = await Promise.all([loadBatches(), loadLedgers()]);
+  const liveIds = new Set(ledgers.flatMap(l => l.ious.map(i => i.id)));
+  let freed = 0n;
+  for (const b of batches.values()) {
+    const stale = b.allocations.filter(a => !liveIds.has(a.iouId));
+    const amt = stale.reduce((s2,a) => s2 + a.amountSompi, 0n);
+    b.allocations = b.allocations.filter(a => liveIds.has(a.iouId));
+    b.allocatedSompi -= amt; b.freeSompi += amt; freed += amt;
+  }
+  await saveBatches(batches);
+  return Number(freed);
+}
+
 async function releaseBatches(iouId: string): Promise<void> {
   const batches = await loadBatches();
   for (const batch of batches.values()) {
@@ -386,6 +400,7 @@ async function releaseBatches(iouId: string): Promise<void> {
 // ============================================================================
 
 export async function getWalletState(address: string): Promise<WalletState> {
+  try { await releaseStaleAllocations(); } catch {}
   const [batchMap, userXP] = await Promise.all([syncBatches(address), getUserXP()]);
   const batches = Array.from(batchMap.values());
   
@@ -598,6 +613,7 @@ export async function createIOU(
   };
   
   iou.issuerSignature = signIOUSync(iou, creds.privkey);
+  try { await SecureStore.setItemAsync('kv_pending_iou', JSON.stringify({ iouId, amount: formatKAS(amountSompi), created: Date.now(), expiresMs: 86400000 })); } catch {}
   return iou;
 }
 
@@ -1158,7 +1174,10 @@ interface Props {
   onSettleInitiated?: (ledgerId: string, amountSompi: bigint, payerAddress: string, payeeAddress: string) => void;
 }
 
-export function IOUBalanceSheetModal(props: Props) {
+export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boolean; onClose: () => void }) {
+  const props = { frostAgreementId: '', frostTxId: '', frostAddress: '', myPubkey: '', myAddress: '', myCollateralSompi: 0n, counterpartyPubkey: '', counterpartyAddress: '', counterpartyCollateralSompi: 0n, ...rawProps };
+  const [pendingIOU, setPendingIOU] = React.useState<any>(null);
+  React.useEffect(() => { (async () => { try { const pj = await SecureStore.getItemAsync('kv_pending_iou'); if (pj) { const p = JSON.parse(pj); if (Date.now() - p.created > p.expiresMs) { await releaseIOU(p.iouId); await SecureStore.deleteItemAsync('kv_pending_iou'); setPendingIOU(null); } else { setPendingIOU(p); } } } catch {} })(); }, []);
   const { 
     visible, frostAgreementId, frostTxId, frostAddress, 
     myPubkey, myAddress, myCollateralSompi,
@@ -1488,6 +1507,16 @@ export function IOUBalanceSheetModal(props: Props) {
               )}
             </View>
 
+            {pendingIOU && (
+              <View style={{ marginTop: 12, backgroundColor: '#3a2a1a', borderRadius: 10, padding: 14, borderWidth: 1, borderColor: '#D4AF37' }}>
+                <Text style={{ color: '#D4AF37', fontWeight: 'bold', fontSize: 13 }}>Pending IOU — awaiting signed acceptance</Text>
+                <Text style={{ color: '#fff', fontSize: 14, marginTop: 4 }}>{pendingIOU.amount} KAS held</Text>
+                <Text style={{ color: '#888', fontSize: 11, marginTop: 2 }}>Auto-releases {new Date(pendingIOU.created + pendingIOU.expiresMs).toLocaleString()}</Text>
+                <TouchableOpacity onPress={async () => { try { await releaseIOU(pendingIOU.iouId); await SecureStore.deleteItemAsync('kv_pending_iou'); setPendingIOU(null); Alert.alert('Released', 'IOU hold cancelled, funds freed'); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 10, backgroundColor: '#e74c3c20', padding: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#e74c3c' }}>
+                  <Text style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: 13 }}>Cancel IOU Hold</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             {/* Active IOUs */}
             <TouchableOpacity onPress={() => setShowActive(!showActive)} style={{ marginTop: 12, backgroundColor: '#1a1a2e', padding: 12, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={{ color: '#D4AF37', fontWeight: 'bold', fontSize: 13 }}>Active IOUs</Text>
@@ -1513,13 +1542,18 @@ export function IOUBalanceSheetModal(props: Props) {
                 <TextInput value={proposalAmount} onChangeText={setProposalAmount} placeholder="0.00" placeholderTextColor="#555" keyboardType="decimal-pad" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 16, borderWidth: 1, borderColor: '#333' }} />
                 <Text style={{ color: '#888', fontSize: 12, marginTop: 10, marginBottom: 8 }}>Description</Text>
                 <TextInput value={proposalDesc} onChangeText={setProposalDesc} placeholder="What's this for?" placeholderTextColor="#555" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 14, borderWidth: 1, borderColor: '#333' }} />
-                <TouchableOpacity onPress={async () => { setProposalSending(true); try { const amtSompi = BigInt(Math.round(parseFloat(proposalAmount) * 1e8));
-                  const addr = await SecureStore.getItemAsync('kv_kaspa_address');
+                <TouchableOpacity onPress={async () => { setProposalSending(true); try { const amtSompiNum = Math.floor(parseFloat(proposalAmount) * 1e8);
+                  console.log('[IOU] amtSompi:', amtSompiNum);
+                  const amtSompi = BigInt(amtSompiNum);
+                  const addr = await SecureStore.getItemAsync('kv_kaspa_address') || await SecureStore.getItemAsync('kaspa_address');
                   if (!addr) throw new Error('No address');
                   const spendable = await getSpendableUtxos(addr);
-                  if (spendable.total < amtSompi) throw new Error('Insufficient free balance: ' + (Number(spendable.total)/1e8).toFixed(4) + ' KAS available');
-                  await allocateForIOU(addr, amtSompi.toString(), 'iou-' + Date.now());
-                  const p = await createProposal(Number(amtSompi), proposalDesc); await shareProposal(p); } catch(e:any) { Alert.alert('Error', e.message); } setProposalSending(false); }} disabled={proposalSending || !proposalAmount} style={{ marginTop: 12, backgroundColor: '#D4AF37', padding: 12, borderRadius: 8, alignItems: 'center', opacity: proposalSending || !proposalAmount ? 0.5 : 1 }}>
+                  if (spendable.spendableBalance < amtSompi) throw new Error('Insufficient free balance: ' + (Number(spendable.spendableBalance)/1e8).toFixed(4) + ' KAS available');
+                  const alloc = await allocateForIOU(addr, amtSompi, 'iou-' + Date.now());
+                  if (!alloc.success) throw new Error(alloc.error || 'Allocation failed');
+                  const p = await createProposal('iou', parseFloat(proposalAmount), proposalDesc);
+                  if ('error' in p) throw new Error(p.error);
+                  await shareProposal(p.encoded, parseFloat(proposalAmount)||0); } catch(e:any) { Alert.alert('Error', e.message); } setProposalSending(false); }} disabled={proposalSending || !proposalAmount} style={{ marginTop: 12, backgroundColor: '#D4AF37', padding: 12, borderRadius: 8, alignItems: 'center', opacity: proposalSending || !proposalAmount ? 0.5 : 1 }}>
                   <Text style={{ color: '#000', fontWeight: 'bold' }}>{proposalSending ? 'Creating...' : 'Create & Share'}</Text>
                 </TouchableOpacity>
               </View>
@@ -1528,7 +1562,7 @@ export function IOUBalanceSheetModal(props: Props) {
               <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 10, padding: 14 }}>
                 <Text style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>Paste proposal from sender</Text>
                 <TextInput value={pasteInput} onChangeText={setPasteInput} placeholder="Paste proposal here..." placeholderTextColor="#555" multiline style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 12, borderWidth: 1, borderColor: '#333', minHeight: 80 }} />
-                <TouchableOpacity onPress={async () => { try { const d = decodeProposal(pasteInput.trim()); const v = await verifyProposal(d); setIncomingProposal(d); setProposalVerified(v); } catch(e:any) { Alert.alert('Invalid', e.message); } }} disabled={!pasteInput.trim()} style={{ marginTop: 12, backgroundColor: '#49d6aa', padding: 12, borderRadius: 8, alignItems: 'center', opacity: !pasteInput.trim() ? 0.5 : 1 }}>
+                <TouchableOpacity onPress={async () => { try { const d = decodeProposal(pasteInput.trim()); if(!d) throw new Error('Invalid proposal'); const v = await verifyProposal(d); setIncomingProposal(d); setProposalVerified(v.valid); } catch(e:any) { Alert.alert('Invalid', e.message); } }} disabled={!pasteInput.trim()} style={{ marginTop: 12, backgroundColor: '#49d6aa', padding: 12, borderRadius: 8, alignItems: 'center', opacity: !pasteInput.trim() ? 0.5 : 1 }}>
                   <Text style={{ color: '#000', fontWeight: 'bold' }}>Verify Proposal</Text>
                 </TouchableOpacity>
                 {incomingProposal && (
@@ -1537,7 +1571,7 @@ export function IOUBalanceSheetModal(props: Props) {
                     <Text style={{ color: '#888', fontSize: 12 }}>From: {incomingProposal.senderPubkey?.slice(0,16)}...</Text>
                     <Text style={{ color: proposalVerified ? '#27AE60' : '#e74c3c', fontSize: 12, marginTop: 4 }}>{proposalVerified ? 'Verified' : 'INVALID'}</Text>
                     {proposalVerified && (
-                      <TouchableOpacity onPress={async () => { try { const a = await acceptProposal(incomingProposal); await shareAcceptance(a); Alert.alert('Accepted', 'IOU accepted and shared'); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 8, backgroundColor: '#27AE60', padding: 10, borderRadius: 8, alignItems: 'center' }}>
+                      <TouchableOpacity onPress={async () => { try { const a = await acceptProposal(incomingProposal); if('error' in a) throw new Error(a.error); await shareAcceptance(a.encoded, parseFloat(incomingProposal?.amountKAS||incomingProposal?.amount||'0')||0); Alert.alert('Accepted', 'IOU accepted and shared'); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 8, backgroundColor: '#27AE60', padding: 10, borderRadius: 8, alignItems: 'center' }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold' }}>Accept IOU</Text>
                       </TouchableOpacity>
                     )}
@@ -1551,9 +1585,6 @@ export function IOUBalanceSheetModal(props: Props) {
           )}
           
           {/* Actions */}
-          <TouchableOpacity style={styles.createBtn} onPress={() => setShowCreate(true)}>
-            <Text style={styles.createBtnText}>+ New IOU</Text>
-          </TouchableOpacity>
           
           <TouchableOpacity style={styles.refreshBtn} onPress={() => loadData(false)}>
             <Text style={styles.refreshBtnText}>↻ Refresh</Text>

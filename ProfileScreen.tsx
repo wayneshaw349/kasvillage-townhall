@@ -389,7 +389,7 @@ const AvatarLikenessCard: React.FC<{
   );
 };
 
-export const ProfileScreen: React.FC<{ navigation?: any; onNavigateEntertainment?: () => void; onNavigateTownHall?: () => void; onNavigateBookshelf?: () => void }> = ({ navigation, onNavigateEntertainment, onNavigateTownHall, onNavigateBookshelf }) => {
+export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: () => void; onNavigateEntertainment?: () => void; onNavigateTownHall?: () => void; onNavigateBookshelf?: () => void }> = ({ navigation, onNavigateEntertainment, onNavigateTownHall, onNavigateBookshelf }) => {
   const [stats, setStats] = useState<UserStats>(mockStats);
   const [serialInput, setSerialInput] = React.useState('');
   const [serialHashed, setSerialHashed] = React.useState(false);

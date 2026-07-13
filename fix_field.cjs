@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');s=s.replace("if (BigInt(spendable.total) < amtSompi)","if (spendable.spendableBalance < amtSompi)");s=s.replace("(Number(spendable.total)/1e8).toFixed(4)","(Number(spendable.spendableBalance)/1e8).toFixed(4)");fs.writeFileSync('IOUBalanceSheetShare.tsx',s);console.log('done');

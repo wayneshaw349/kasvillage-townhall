@@ -1,15 +1,15 @@
 
 
 // ============================================================================
-// FROST 2-of-2 BIP340 — Proper Nonce Protocol
-// Round 1: generateFrostNonce() — called during Agreed-Send, R shared on TownHall
-// Round 2: computeFrostPartialS() — called after both R values known
-// Aggregate: aggregateFrostSig() — combines into valid BIP340 Schnorr sig
+// FROST 2-of-2 BIP340 ï¿½ Proper Nonce Protocol
+// Round 1: generateFrostNonce() ï¿½ called during Agreed-Send, R shared on TownHall
+// Round 2: computeFrostPartialS() ï¿½ called after both R values known
+// Aggregate: aggregateFrostSig() ï¿½ combines into valid BIP340 Schnorr sig
 // ============================================================================
 
 export interface FrostNonce {
   R_hex: string;           // 33-byte compressed point (public, safe to share)
-  k_private: string;       // scalar (PRIVATE — never leaves device)
+  k_private: string;       // scalar (PRIVATE ï¿½ never leaves device)
   d_tweaked: string;        // tweaked private key (PRIVATE)
   message_hex: string;      // the sighash both parties agree on
 }
@@ -76,7 +76,7 @@ export function generateFrostNonce(params: {
 /**
  * Round 2: Compute partial s value after receiving counterparty's R.
  * Called after both R values are known (from Agreed-Send exchange).
- * Returns s_i (32 bytes hex) — safe to share, cannot derive private key.
+ * Returns s_i (32 bytes hex) ï¿½ safe to share, cannot derive private key.
  */
 export function computeFrostPartialS(params: {
   myNonce: FrostNonce;
@@ -126,7 +126,7 @@ export function computeFrostPartialS(params: {
 
 /**
  * Aggregate: Combine two partial s values into a valid BIP340 Schnorr signature.
- * Both parties computed s with the SAME R_agg and e — so s_A + s_B is valid.
+ * Both parties computed s with the SAME R_agg and e ï¿½ so s_A + s_B is valid.
  */
 export function aggregateFrostSig(params: {
   s_A_hex: string;
@@ -160,7 +160,7 @@ import { blake2b } from '@noble/hashes/blake2b';
 const N_ORDER = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
 
 // ============================================================================
-// KASPA SIGHASH — Blake2b-256 with TransactionSigningHash domain key
+// KASPA SIGHASH ï¿½ Blake2b-256 with TransactionSigningHash domain key
 // Must match kaspa_rest_tx.ts computeSighash exactly
 // ============================================================================
 const KASPA_HASH_KEY = new TextEncoder().encode('TransactionSigningHash');
@@ -297,7 +297,7 @@ export function deriveAggregatePubkey(pubkeyA: string, pubkeyB: string, agreemen
 export function aggregateToAddress(aggregatePubkey: string, network: KaspaNetwork): string {
   const prefix = network === 'mainnet' ? 'kaspa' : 'kaspatest';
   // aggregatePubkey is a real 33-byte compressed EC point
-  // Use x-only (32 bytes) for P2PK address — looks like a normal Kaspa address
+  // Use x-only (32 bytes) for P2PK address ï¿½ looks like a normal Kaspa address
   const aggBytes = hexToBytes(aggregatePubkey);
   const xOnlyBytes = aggBytes.length === 33 ? aggBytes.slice(1) : aggBytes;
 
@@ -346,12 +346,17 @@ export function generateVerificationCode(pubkeyA: string, pubkeyB: string): stri
 }
 
 export function deriveFrostAddressLocal(params: {
+  frostCounter?: number;
   pubkeyA: string;
   pubkeyB: string;
   network: KaspaNetwork;
   agreementId?: string;
 }): FrostAddress {
-  const { pubkeyA, pubkeyB, network, agreementId, frostCounter } = params;
+  const { pubkeyA, pubkeyB, network, agreementId } = params;
+  let frostCounter = params.frostCounter; // agrNonceDerived
+  if (!(frostCounter && frostCounter > 0) && agreementId) {
+    frostCounter = Number(BigInt('0x' + bytesToHex(sha256(new TextEncoder().encode(agreementId)))) % 2147483646n) + 1;
+  }
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
   const aggregatedPubkey = deriveAggregatePubkey(pk1, pk2, agreementId, frostCounter);
   const address = aggregateToAddress(aggregatedPubkey, network);
@@ -413,7 +418,7 @@ export function createPartialSigLocal(params: {
   const myPubkey = bytesToHex((secp as any).getPublicKey(hexToBytes(privateKeyHex), true));
   
   // Determine which party we are (pk1 or pk2) based on sorted order
-  // We need the counterparty pubkey — derive from the aggregate
+  // We need the counterparty pubkey ï¿½ derive from the aggregate
   // Actually, we have both pubkeys in the FROST address derivation
   // For now, compute our own tweak factor
   const L_input = frostAddress.aggregatedPubkey; // This encodes both pubkeys
@@ -462,7 +467,7 @@ export function createPartialSigLocal(params: {
   // Note: R parity adjustment happens during aggregation, not here
   // Each party sends their R as-is
 
-  // 5. Compute partial s (without challenge e — that requires R_agg which we don't have yet)
+  // 5. Compute partial s (without challenge e ï¿½ that requires R_agg which we don't have yet)
   // Strategy: send (R, k, d) context as the "partial sig"
   // Actually: send R_x (32 bytes) as first half, and a commitment
   // 
@@ -506,7 +511,7 @@ export function aggregatePartialSigs(sigA: string, sigB: string): string {
   }
 
   // R_agg = R_A + R_B (EC point addition on secp256k1)
-  // R is x-only (32 bytes) — lift to full point, add, compress back to x-only
+  // R is x-only (32 bytes) ï¿½ lift to full point, add, compress back to x-only
   let R_A; try { R_A = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x02, ...sigABytes.slice(0, 32)])); } catch { R_A = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x03, ...sigABytes.slice(0, 32)])); }
   let R_B; try { R_B = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x02, ...sigBBytes.slice(0, 32)])); } catch { R_B = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x03, ...sigBBytes.slice(0, 32)])); }
   const R_agg = R_A.add(R_B);
@@ -1085,7 +1090,7 @@ export async function completeFrostAndBroadcast(params: {
         });
         console.log('[FROST] Partial sig submitted:', JSON.stringify(sigResult));
         if (sigResult.bothReady) {
-          // Both partial sigs available — find the counterparty's
+          // Both partial sigs available ï¿½ find the counterparty's
           const myPub = myResult.signerPubkey;
           if (sigResult.partialSigA && sigResult.partialSigB) {
             // Determine which is mine and which is theirs
@@ -1106,7 +1111,7 @@ export async function completeFrostAndBroadcast(params: {
 
     const aggregateSig = aggregatePartialSigs(myResult.partialSig, theirSig);
     // Build and submit FROST release TX using aggregate Schnorr signature
-    // No private key needed — the aggregate sig IS the authorization
+    // No private key needed ï¿½ the aggregate sig IS the authorization
     try {
       const { sendKaspaWithSignature } = await import('./kaspa_rest_tx');
       const result = await sendKaspaWithSignature({
@@ -1133,7 +1138,7 @@ export async function completeFrostAndBroadcast(params: {
 
 
 // ============================================================================
-// 2-ROUND FROST COMPLETION — uses proper nonce protocol
+// 2-ROUND FROST COMPLETION ï¿½ uses proper nonce protocol
 // ============================================================================
 export async function completeFrost2Round(params: {
   frostAddress: FrostAddress;
@@ -1177,8 +1182,8 @@ export async function completeFrost2Round(params: {
       // Derive buyer/seller addresses from pubkeys
       const buyerPk = params.frostAddress.pubkeyA;
       const sellerPk = params.frostAddress.pubkeyB;
-      const buyerAddr = aggregateToAddress('02' + (buyerPk.length === 66 ? buyerPk.slice(2) : buyerPk), params.frostAddress.network);
-      const sellerAddr = aggregateToAddress('02' + (sellerPk.length === 66 ? sellerPk.slice(2) : sellerPk), params.frostAddress.network);
+      const buyerAddr = aggregateToAddress(buyerPk.length === 66 ? buyerPk : ('02' + buyerPk), params.frostAddress.network); // [02-FIX] use real prefix from full key
+      const sellerAddr = aggregateToAddress(sellerPk.length === 66 ? sellerPk : ('02' + sellerPk), params.frostAddress.network); // [02-FIX] use real prefix from full key
       // Determine which is buyer/seller based on recipientAddress
       // recipientAddress is the seller's wallet (seller gets paid)
       // But in canonical: buyer output first, seller output second

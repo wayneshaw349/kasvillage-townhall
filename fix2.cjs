@@ -1,2 +1,13 @@
-﻿const fs=require('fs');let s=fs.readFileSync('townhall_client.ts','utf8');s=s.replace("'APT-' + require('crypto').createHash('sha256').update(agreement.pubkey).digest('hex').slice(0,7)","'APT-' + agreement.pubkey.slice(2,9)");fs.writeFileSync('townhall_client.ts',s);console.log('1 done');
-let n=fs.readFileSync('NeighborAgreement.tsx','utf8');n=n.replace(/setShowBalanceSheet\(true\)/g,"console.log('[BalanceSheet] TODO')");fs.writeFileSync('NeighborAgreement.tsx',n);console.log('2 done');
+﻿const fs=require('fs');let s=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');
+// remove duplicate state (first patch's line)
+s=s.replace("\n  const [pendingIOU, setPendingIOU] = useState<any>(null);","");
+// shareProposal arg
+s=s.replace("await shareProposal(p.encoded);","await shareProposal(p.encoded, parseFloat(proposalAmount)||0);");
+// decode/verify types
+s=s.replace("const d = decodeProposal(pasteInput.trim()); const v = await verifyProposal(d); setIncomingProposal(d); setProposalVerified(v);","const d = decodeProposal(pasteInput.trim()); if(!d) throw new Error('Invalid proposal'); const v = await verifyProposal(d); setIncomingProposal(d); setProposalVerified(v.valid);");
+// shareAcceptance arg
+s=s.replace("await shareAcceptance(a);","await shareAcceptance(a, parseFloat(incomingProposal?.amountKAS||incomingProposal?.amount||'0')||0);");
+fs.writeFileSync('IOUBalanceSheetShare.tsx',s);
+let q=fs.readFileSync('QRPayNearby.tsx','utf8');
+q=q.replace("import { IOUBalanceSheetShare } from './IOUBalanceSheetShare';","import { IOUBalanceSheetModal as IOUBalanceSheetShare } from './IOUBalanceSheetShare';");
+fs.writeFileSync('QRPayNearby.tsx',q);console.log('done');

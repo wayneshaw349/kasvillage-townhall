@@ -1,0 +1,1 @@
+﻿const fs=require('fs');let s=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');s=s.replace("createProposal(parseFloat(proposalAmount), proposalDesc)","createProposal('iou', parseFloat(proposalAmount), proposalDesc)");fs.writeFileSync('IOUBalanceSheetShare.tsx',s);console.log('done');

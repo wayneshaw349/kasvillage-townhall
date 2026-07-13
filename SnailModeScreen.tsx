@@ -23,6 +23,10 @@ interface SnailModeScreenProps {
   pComplete: number;
   deadlocks: number;
   onDelayComplete?: () => void;
+  inAgreementsSompi?: bigint;
+  iousOwedSompi?: bigint;
+  iousOwedToYouSompi?: bigint;
+  agreementReturnsSompi?: bigint;
 }
 
 export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({

@@ -162,7 +162,7 @@ export async function createProposal(
   const creds = await getMyCredentials();
   if (!creds) return { error: 'Wallet not initialized' };
 
-  const amountSompi = BigInt(Math.round(amountKAS * 1e8));
+  const amountSompi = BigInt(String(Math.floor(amountKAS * 1e8)));
 
   // Balance check
   const balCheck = await checkBalance(creds.address, amountSompi, creds.network);

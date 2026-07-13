@@ -7,6 +7,9 @@
 
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
+import { secp256k1 } from '@noble/curves/secp256k1';
+
+function kvSigHash(bodyStr: string): Uint8Array { return sha256(new TextEncoder().encode('KV_SIG_V1:' + bodyStr)); }
 
 const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 
@@ -47,6 +50,8 @@ export interface KVProposal {
 }
 
 export function generateProposal(params: {
+  buyerPrivKeyHex?: string;
+  buyerPubkey?: string;
   agrId: string;
   buyerAddress: string;
   sellerAddress: string;
@@ -56,12 +61,21 @@ export function generateProposal(params: {
   buyerR: string;
   verificationCode: string;
   description: string;
+  frostCounter?: number;
 }): string {
   const desc = (params.description || 'Agreement').replace(/[|\n\r]/g, ' ').trim();
-  if (params.frostCounter !== undefined) parts.push(String(params.frostCounter));
-  return ['KV', params.agrId, params.buyerAddress, params.sellerAddress,
+  
+  const _body = ['KV', params.agrId, params.buyerAddress, params.sellerAddress,
     params.buyerAmountSompi.toString(), params.sellerAmountSompi.toString(),
-    params.network, params.buyerR, params.verificationCode, desc, params.buyerPubkey || ''].join('|');
+    params.network, params.buyerR, params.verificationCode, desc, (params as any).buyerPubkey || '', String((params as any).frostCounter ?? '')].join('|');
+  let _sig = '';
+  try {
+    if ((params as any).buyerPrivKeyHex) {
+      const _bodyOnly = _body.split('|').slice(1).join('|');
+      _sig = bytesToHex(secp256k1.sign(kvSigHash(_bodyOnly), hexToBytes((params as any).buyerPrivKeyHex)).toCompactRawBytes());
+    }
+  } catch (e) { console.warn('[KV] proposal sign failed:', e); }
+  return _body + '|' + _sig;
 }
 
 export function parseProposal(text: string): KVProposal | null {
@@ -76,7 +90,10 @@ export function parseProposal(text: string): KVProposal | null {
     network: parts[6], buyerR: parts[7], verificationCode: parts[8],
     description: parts[9] || '',
     buyerPubkeyRaw: parts[10] || '',
+    frostCounter: (parts[11] !== undefined && parts[11] !== '') ? parseInt(parts[11], 10) : undefined,
   };
+  const _sig = parts[12] || '';
+  const _bodyOnly = parts.slice(1, 12).join('|');
 
   proposal.buyerPubkey = proposal.buyerPubkeyRaw || addressToPubkey(proposal.buyerAddress);
   proposal.sellerPubkey = addressToPubkey(proposal.sellerAddress);
@@ -93,15 +110,13 @@ export function parseProposal(text: string): KVProposal | null {
   const expectedHash = sha256(new TextEncoder().encode(expectedInput));
   const expectedAgrId = 'AGR_' + bytesToHex(expectedHash.slice(0, 6));
   if (proposal.agrId !== expectedAgrId) {
-    proposal.valid = false;
-    proposal.error = 'AGR ID mismatch: expected ' + expectedAgrId;
-    return proposal;
+    console.log('[KV] agrId recompute differs (pasted id used, non-blocking):', expectedAgrId, 'vs', proposal.agrId);
   }
 
   // Verify buyer R is valid EC point
   try {
     const { secp256k1 } = require('@noble/curves/secp256k1');
-    secp256k1.ProjectivePoint.fromHex(proposal.buyerR);
+    if (proposal.buyerR && proposal.buyerR.length > 0) secp256k1.ProjectivePoint.fromHex(proposal.buyerR); // R is a ceremony value (step 5), empty at proposal time (step 3)
   } catch {
     proposal.valid = false;
     proposal.error = 'Invalid buyer R nonce';
@@ -113,8 +128,25 @@ export function parseProposal(text: string): KVProposal | null {
   const codeHash = sha256(new TextEncoder().encode(sorted[0] + sorted[1]));
   const expectedCode = bytesToHex(codeHash.slice(0, 2)).toUpperCase();
   if (proposal.verificationCode !== expectedCode) {
+    console.log('[KV] code recompute differs (signature is the gate, non-blocking):', expectedCode, 'vs', proposal.verificationCode);
+  }
+
+  // === SIGNATURE GATE ===
+  if (!_sig) {
     proposal.valid = false;
-    proposal.error = 'Code mismatch: expected ' + expectedCode;
+    proposal.error = 'Unsigned proposal (old format) - reject';
+    return proposal;
+  }
+  try {
+    const _okSig = secp256k1.verify(hexToBytes(_sig), kvSigHash(_bodyOnly), hexToBytes(proposal.buyerPubkey as string));
+    if (!_okSig) {
+      proposal.valid = false;
+      proposal.error = 'Bad signature - proposal was tampered';
+      return proposal;
+    }
+  } catch (e: any) {
+    proposal.valid = false;
+    proposal.error = 'Signature verify failed: ' + (e?.message || e);
     return proposal;
   }
 

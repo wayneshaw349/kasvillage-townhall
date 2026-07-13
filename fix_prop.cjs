@@ -1,0 +1,2 @@
+﻿const fs=require('fs');let s=fs.readFileSync('proposal_share.ts','utf8');s=s.replace("BigInt(Math.round(amountKAS * 1e8))","BigInt(String(Math.floor(amountKAS * 1e8)))");fs.writeFileSync('proposal_share.ts',s);
+let s2=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');s2=s2.replace("const p = await createProposal(Number(amtSompi), proposalDesc)","const p = await createProposal(parseFloat(proposalAmount), proposalDesc)");fs.writeFileSync('IOUBalanceSheetShare.tsx',s2);console.log('done');

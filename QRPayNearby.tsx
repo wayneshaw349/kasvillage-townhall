@@ -11,8 +11,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import { Linking } from 'react-native';
-import { IOUBalanceSheetShare } from './IOUBalanceSheetShare';
+import { IOUBalanceSheetModal as IOUBalanceSheetShare } from './IOUBalanceSheetShare';
 import QRCode from 'react-native-qrcode-svg';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { sha256 } from '@noble/hashes/sha256';
+import { schnorr } from '@noble/curves/secp256k1';
+import * as secp from '@noble/secp256k1';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useKaspaPrice } from './useKaspaPrice';
 import { useBluetoothPay } from './bluetooth_p2p';
 import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance } from './proposal_share';
 
@@ -23,9 +29,12 @@ const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
 // TYPES
 // ============================================================================
 
-type Mode = 'choose' | 'ble_send' | 'ble_receive' | 'send_proposal' | 'receive_proposal';
+type Mode = 'choose' | 'ble_send' | 'ble_receive' | 'send_proposal' | 'receive_proposal' | 'tally' | 'catalog' | 'shop' | 'verify';
+interface CatalogItem { id: string; name: string; priceKas: number; }
+interface CartLine { item: CatalogItem; qty: number; }
 
 interface QRPayload {
+  requestAmountKAS?: number;
   bleUUID?: string;
   type: 'kasvillage_pay';
   address: string;
@@ -51,14 +60,60 @@ function deriveAPT(pubkey: string): string {
 // MAIN COMPONENT
 // ============================================================================
 
-export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+export const QRPayNearby: React.FC<{ onClose: () => void; onNavigateSend?: (addr?: string, sompi?: number) => void }> = ({ onClose, onNavigateSend }) => {
   const [mode, setMode] = useState<Mode>('choose');
+  const [showIOUSheet, setShowIOUSheet] = useState(false);
+  const [requestedAmt, setRequestedAmt] = useState(0);
   const [address, setAddress] = useState('');
   const [pubkey, setPubkey] = useState('');
   const [apt, setApt] = useState('APT-...');
   const [network, setNetwork] = useState('testnet-10');
   const [avatarName, setAvatarName] = useState('Villager');
   const [requestAmount, setRequestAmount] = useState('');
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemPrice, setNewItemPrice] = useState('');
+  const [storeName, setStoreName] = useState('');
+  const [storeLocation, setStoreLocation] = useState('');
+  const [itemQR, setItemQR] = useState<{ name: string; data: string } | null>(null);
+  useEffect(() => { (async () => { try { const sn = await AsyncStorage.getItem('kv_store_name'); if (sn) setStoreName(sn); const sl = await AsyncStorage.getItem('kv_store_location'); if (sl) setStoreLocation(sl); } catch {} })(); }, []);
+  const kasPrice = (() => { try { return useKaspaPrice(); } catch { return null as any; } })();
+  useEffect(() => { (async () => { try { const c = await AsyncStorage.getItem('kv_store_catalog'); if (c) setCatalog(JSON.parse(c)); } catch {} })(); }, []);
+  const saveCatalog = useCallback(async (items: CatalogItem[]) => { setCatalog(items); try { await AsyncStorage.setItem('kv_store_catalog', JSON.stringify(items)); } catch {} }, []);
+  const cartTotal = cart.reduce((s, l) => s + l.item.priceKas * l.qty, 0);
+  const addToCart = (item: CatalogItem) => setCart(prev => { const ex = prev.find(l => l.item.id === item.id); return ex ? prev.map(l => l.item.id === item.id ? { ...l, qty: l.qty + 1 } : l) : [...prev, { item, qty: 1 }]; });
+  const [cameraActive, setCameraActive] = useState(false);
+  const [receiptQR, setReceiptQR] = useState('');
+  const [receiptItems, setReceiptItems] = useState<CartLine[]>([]);
+  const [verifyResult, setVerifyResult] = useState<'valid'|'invalid'|null>(null);
+  const [scannedReceipt, setScannedReceipt] = useState<any>(null);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const bytesToHex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
+  const hexToBytesQ = (h: string) => { const a = new Uint8Array(h.length/2); for (let i=0;i<a.length;i++) a[i]=parseInt(h.substr(i*2,2),16); return a; };
+  const signItem = async (id: string, name: string, priceKas: number): Promise<{ sig: string; pubkey: string } | null> => {
+    try {
+      const { loadMainWallet } = await import('./kasvillage_cold_wallet');
+      const w = await (loadMainWallet as any)();
+      if (!w?.privKeyHex) return null;
+      const priv = hexToBytesQ(w.privKeyHex);
+      const msg = sha256(new TextEncoder().encode(`${id}|${name}|${priceKas}`));
+      const sig = schnorr.sign(msg, priv);
+      const xonly = bytesToHex(schnorr.getPublicKey(priv));
+      return { sig: bytesToHex(sig), pubkey: xonly };
+    } catch (e) { console.warn('[ItemSign] failed:', e); return null; }
+  };
+  const verifyItem = (id: string, name: string, priceKas: number, sig: string, pubkey: string): boolean => {
+    try {
+      const msg = sha256(new TextEncoder().encode(`${id}|${name}|${priceKas}`));
+      return schnorr.verify(hexToBytesQ(sig), msg, hexToBytesQ(pubkey));
+    } catch { return false; }
+  };
+  const buildReceiptHash = (lines: CartLine[], txId: string) => {
+    const canonical = JSON.stringify(lines.sort((a,b)=>a.item.id.localeCompare(b.item.id)).map(l=>({id:l.item.id,name:l.item.name,priceKas:l.item.priceKas,qty:l.qty})));
+    return bytesToHex(sha256(new TextEncoder().encode(canonical + txId)));
+  };
+  const removeFromCart = (id: string) => setCart(prev => prev.map(l => l.item.id === id ? { ...l, qty: l.qty - 1 } : l).filter(l => l.qty > 0));
   const [pasteInput, setPasteInput] = useState('');
   const [resolvedAddress, setResolvedAddress] = useState('');
   const { scanning, advertising, payees, startReceiving, stopReceiving, startScanning, stopScanning } = useBluetoothPay();
@@ -100,6 +155,7 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     name: avatarName,
     network,
     bleUUID: '6b617376-696c-6c61-6765-000000000001',
+    requestAmountKAS: parseFloat(requestAmount) || 0,
     } as QRPayload);
 
   // Handle paste/APT input
@@ -158,6 +214,7 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <TouchableOpacity onPress={onClose} style={styles.backBtn}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
+        {showIOUSheet && <IOUBalanceSheetShare visible={true} onClose={() => setShowIOUSheet(false)} />}
         <Text style={styles.title}>📡 Pay Nearby</Text>
         <View style={{ width: 60 }} />
       </View>
@@ -173,42 +230,36 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
             
 
-            {/* Text/DM Proposal */}
-            <TouchableOpacity style={styles.modeCard} onPress={() => setMode('send_proposal')}>
-              <Text style={styles.modeIcon}>📤</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modeCardTitle}>Send Proposal</Text>
-                <Text style={styles.modeCardSub}>Create signed proposal — share via text or DM</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.modeCard} onPress={() => setMode('receive_proposal')}>
-              <Text style={styles.modeIcon}>📥</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modeCardTitle}>Receive Proposal</Text>
-                <Text style={styles.modeCardSub}>Paste a proposal to verify and accept</Text>
-              </View>
-            </TouchableOpacity>
-
             {/* Bluetooth Option */}
             <View style={{ marginTop: rs(8), borderTopWidth: 1, borderTopColor: '#222', paddingTop: rs(12) }}>
-              <Text style={{ color: '#666', fontSize: rs(11), textAlign: 'center', marginBottom: rs(8) }}>Connect with nearby users</Text>
+              <Text style={{ color: '#666', fontSize: rs(11), textAlign: 'center', marginBottom: rs(8) }}>Pair via QR + Bluetooth — works iPhone & Android</Text>
               <View style={{ flexDirection: 'row', gap: rs(8) }}>
                 <TouchableOpacity
                   style={{ flex: 1, backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#4169E1' }}
-                  onPress={() => { setMode('ble_receive'); startReceiving(address, avatarName); }}
+                  onPress={() => { setMode('ble_receive'); try { startReceiving(address, avatarName); } catch(e) { console.warn('[BLE] Not available:', e); } }}
                 >
                   <Text style={{ color: '#4169E1', fontSize: rs(13), fontWeight: '600' }}>📶 BLE Receive</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={{ flex: 1, backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#4CAF50' }}
-                  onPress={() => { setMode('ble_send'); startScanning(20000); }}
+                  onPress={() => { setMode('ble_send'); try { startScanning(20000); } catch(e) { console.warn('[BLE] Not available:', e); } }}
                 >
                   <Text style={{ color: '#4CAF50', fontSize: rs(13), fontWeight: '600' }}>📶 BLE Send</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
+            <TouchableOpacity style={{ marginTop: rs(8), backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#49d6aa' }} onPress={() => setMode('tally')}>
+                <Text style={{ color: '#49d6aa', fontSize: rs(13), fontWeight: '600' }}>🧮 Store Tally / Cash Register</Text>
+              </TouchableOpacity>
+            
+
+            <TouchableOpacity style={{ marginTop: rs(8), backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#49d6aa' }} onPress={() => { setCart([]); setMode('shop'); }}>
+                <Text style={{ color: '#49d6aa', fontSize: rs(13), fontWeight: '600' }}>Shop Here (scan items)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{ marginTop: rs(8), backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#e74c3c' }} onPress={() => setMode('verify')}>
+                <Text style={{ color: '#e74c3c', fontSize: rs(13), fontWeight: '600' }}>🔍 Security Verify</Text>
+              </TouchableOpacity>
             {/* Hotspot Info */}
             <View style={styles.hotspotCard}>
               <Text style={styles.hotspotTitle}>📶 Works Offline!</Text>
@@ -379,6 +430,194 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           </View>
         )}
 
+        {/* SHOP MODE - customer scans items */}
+        {mode === 'shop' && (
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs(12) }}>
+              <TouchableOpacity onPress={() => { setCameraActive(false); setMode('choose'); setCart([]); }}>
+                <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={{ color: '#49d6aa', fontSize: rs(16), fontWeight: '700' }}>Scan Items</Text>
+              <Text style={{ color: '#FFF', fontSize: rs(14) }}>{cart.length} items</Text>
+            </View>
+            {!cameraPermission?.granted ? (
+              <TouchableOpacity onPress={requestCameraPermission} style={{ backgroundColor: '#49d6aa', borderRadius: rs(10), padding: rs(14), alignItems: 'center' }}>
+                <Text style={{ color: '#000', fontWeight: '700' }}>Allow Camera</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{ borderRadius: rs(12), overflow: 'hidden', height: rs(240) }}>
+                <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                  onBarcodeScanned={({ data }) => {
+                    try {
+                      const parsed = JSON.parse(data);
+                      if (parsed.type === 'kv_item' && parsed.id) {
+                        if (!parsed.sig || !parsed.pubkey || !verifyItem(parsed.id, parsed.name, parsed.priceKas, parsed.sig, parsed.pubkey)) { console.warn('[Shop] Rejected unsigned/forged item:', parsed.id); return; }
+                        addToCart({ id: parsed.id, name: parsed.name, priceKas: parsed.priceKas });
+                      }
+                    } catch {}
+                  }}
+                />
+              </View>
+            )}
+            {cart.length > 0 && (
+              <View style={{ marginTop: rs(12), backgroundColor: '#0D0D1A', borderRadius: rs(12), padding: rs(14) }}>
+                <Text style={{ color: '#49d6aa', fontWeight: '700', marginBottom: rs(8), fontSize: rs(13) }}>Cart</Text>
+                {cart.map(line => (
+                  <View key={line.item.id} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: rs(4) }}>
+                    <Text style={{ color: '#FFF', fontSize: rs(12) }}>{line.item.name} x{line.qty}</Text>
+                    <Text style={{ color: '#87CEEB', fontSize: rs(12) }}>{(line.item.priceKas * line.qty).toFixed(2)} KAS</Text>
+                  </View>
+                ))}
+                <View style={{ borderTopWidth: 1, borderTopColor: '#333', marginTop: rs(8), paddingTop: rs(8), flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ color: '#FFF', fontWeight: '700', fontSize: rs(14) }}>Total</Text>
+                  <Text style={{ color: '#49d6aa', fontWeight: '700', fontSize: rs(14) }}>{cartTotal.toFixed(2)} KAS</Text>
+                </View>
+                <TouchableOpacity onPress={() => {
+                  setCameraActive(false);
+                  setRequestAmount(String(cartTotal));
+                  setReceiptItems([...cart]);
+                  setMode('ble_receive');
+                  try { startReceiving(address, avatarName); } catch {}
+                }} style={{ marginTop: rs(12), backgroundColor: '#49d6aa', borderRadius: rs(10), padding: rs(14), alignItems: 'center' }}>
+                  <Text style={{ color: '#000', fontWeight: '700', fontSize: rs(14) }}>Finish Shopping — Pay {cartTotal.toFixed(2)} KAS</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+        {/* VERIFY MODE - security scans receipt QR */}
+        {mode === 'verify' && (
+          <View>
+            <TouchableOpacity onPress={() => { setMode('choose'); setVerifyResult(null); setScannedReceipt(null); }} style={{ marginBottom: rs(12) }}>
+              <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>Back</Text>
+            </TouchableOpacity>
+            <Text style={{ color: '#FFF', fontSize: rs(18), fontWeight: '700', marginBottom: rs(12) }}>Security Verify</Text>
+            {!verifyResult ? (
+              !cameraPermission?.granted ? (
+                <TouchableOpacity onPress={requestCameraPermission} style={{ backgroundColor: '#49d6aa', borderRadius: rs(10), padding: rs(14), alignItems: 'center' }}>
+                  <Text style={{ color: '#000', fontWeight: '700' }}>Allow Camera</Text>
+                </TouchableOpacity>
+              ) : (
+                <View>
+                  <Text style={{ color: '#888', fontSize: rs(12), textAlign: 'center', marginBottom: rs(8) }}>Scan customer receipt QR</Text>
+                  <View style={{ borderRadius: rs(12), overflow: 'hidden', height: rs(260) }}>
+                    <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                      onBarcodeScanned={({ data }) => {
+                        try {
+                          const r = JSON.parse(data);
+                          if (r.type === 'kv_receipt' && r.hash && r.txId) {
+                            setScannedReceipt(r);
+                            const recheck = buildReceiptHash(r.items, r.txId);
+                            setVerifyResult(recheck === r.hash ? 'valid' : 'invalid');
+                          }
+                        } catch {}
+                      }}
+                    />
+                  </View>
+                </View>
+              )
+            ) : (
+              <View style={{ borderRadius: rs(16), padding: rs(20), alignItems: 'center', backgroundColor: verifyResult === 'valid' ? '#0D2818' : '#2a0a0a', borderWidth: 2, borderColor: verifyResult === 'valid' ? '#10B981' : '#e74c3c' }}>
+                <Text style={{ fontSize: rs(48) }}>{verifyResult === 'valid' ? '✅' : '❌'}</Text>
+                <Text style={{ color: verifyResult === 'valid' ? '#10B981' : '#e74c3c', fontSize: rs(22), fontWeight: '900', marginTop: rs(8) }}>{verifyResult === 'valid' ? 'PAID & VERIFIED' : 'INVALID RECEIPT'}</Text>
+                {scannedReceipt && verifyResult === 'valid' && (
+                  <View style={{ marginTop: rs(12), width: '100%' }}>
+                    {scannedReceipt.store?.name ? <Text style={{ color: '#FFF', fontWeight: '700', fontSize: rs(14), marginBottom: rs(6) }}>{scannedReceipt.store.name}{scannedReceipt.store.location ? ' — ' + scannedReceipt.store.location : ''}</Text> : null}
+                    <Text style={{ color: '#49d6aa', fontWeight: '700', marginBottom: rs(6), fontSize: rs(13) }}>Items paid for:</Text>
+                    {scannedReceipt.items?.map((l: CartLine) => (
+                      <View key={l.item.id} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: rs(4) }}>
+                        <Text style={{ color: '#FFF', fontSize: rs(12) }}>{l.item.name} x{l.qty}</Text>
+                        <Text style={{ color: '#87CEEB', fontSize: rs(12) }}>{(l.item.priceKas * l.qty).toFixed(2)} KAS</Text>
+                      </View>
+                    ))}
+                    <Text style={{ color: '#FFF', fontWeight: '700', marginTop: rs(8) }}>TX: {scannedReceipt.txId?.slice(0,20)}...</Text>
+                  </View>
+                )}
+                <TouchableOpacity onPress={() => { setVerifyResult(null); setScannedReceipt(null); }} style={{ marginTop: rs(16), backgroundColor: '#333', borderRadius: rs(10), padding: rs(12), alignItems: 'center', width: '100%' }}>
+                  <Text style={{ color: '#FFF', fontSize: rs(13) }}>Scan Next Customer</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+        {/* STORE TALLY */}
+        {mode === 'tally' && (
+          <View>
+            <TouchableOpacity onPress={() => setMode('choose')} style={{ marginBottom: rs(12) }}>
+              <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>Back</Text>
+            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs(12) }}>
+              <Text style={{ color: '#49d6aa', fontSize: rs(18), fontWeight: '700' }}>Cash Register</Text>
+              <TouchableOpacity onPress={() => setMode('catalog')} style={{ backgroundColor: '#1A1A2E', borderRadius: rs(8), paddingVertical: rs(6), paddingHorizontal: rs(12), borderWidth: 1, borderColor: '#333' }}>
+                <Text style={{ color: '#87CEEB', fontSize: rs(12) }}>Manage Items</Text>
+              </TouchableOpacity>
+            </View>
+            {catalog.length === 0 && <Text style={{ color: '#666', textAlign: 'center', marginVertical: rs(20), fontSize: rs(13) }}>No items yet. Tap Manage Items to add.</Text>}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs(8) }}>
+              {catalog.map(item => (
+                <TouchableOpacity key={item.id} onPress={() => addToCart(item)} style={{ backgroundColor: '#1A1A2E', borderRadius: rs(10), padding: rs(12), borderWidth: 1, borderColor: '#333', minWidth: '30%' }}>
+                  <Text style={{ color: '#FFF', fontSize: rs(13), fontWeight: '600' }}>{item.name}</Text>
+                  <Text style={{ color: '#49d6aa', fontSize: rs(12) }}>{item.priceKas} KAS</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {cart.length > 0 && (
+              <View style={{ marginTop: rs(16), backgroundColor: '#0D0D1A', borderRadius: rs(12), padding: rs(14) }}>
+                <Text style={{ color: '#49d6aa', fontSize: rs(14), fontWeight: '700', marginBottom: rs(8) }}>Cart</Text>
+                {cart.map(line => (
+                  <View key={line.item.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs(6) }}>
+                    <Text style={{ color: '#FFF', fontSize: rs(13), flex: 1 }}>{line.item.name} x{line.qty}</Text>
+                    <Text style={{ color: '#87CEEB', fontSize: rs(13), marginRight: rs(10) }}>{(line.item.priceKas * line.qty).toFixed(2)}</Text>
+                    <TouchableOpacity onPress={() => removeFromCart(line.item.id)}><Text style={{ color: '#FF6B6B', fontSize: rs(16) }}>-</Text></TouchableOpacity>
+                  </View>
+                ))}
+                <View style={{ borderTopWidth: 1, borderTopColor: '#333', marginTop: rs(8), paddingTop: rs(8), flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ color: '#FFF', fontSize: rs(15), fontWeight: '700' }}>Total</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ color: '#49d6aa', fontSize: rs(15), fontWeight: '700' }}>{cartTotal.toFixed(2)} KAS</Text>
+                    {kasPrice?.usdPerKas > 0 && <Text style={{ color: '#666', fontSize: rs(11) }}>~${(cartTotal * kasPrice.usdPerKas).toFixed(2)}</Text>}
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => { setRequestAmount(String(cartTotal)); setReceiptItems([...cart]); setCart([]); setMode('ble_receive'); try { startReceiving(address, avatarName); } catch {} }} style={{ marginTop: rs(12), backgroundColor: '#49d6aa', borderRadius: rs(10), padding: rs(14), alignItems: 'center' }}>
+                  <Text style={{ color: '#000', fontSize: rs(14), fontWeight: '700' }}>Charge {cartTotal.toFixed(2)} KAS</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+        {/* CATALOG */}
+        {mode === 'catalog' && (
+          <View>
+            <TouchableOpacity onPress={() => setMode('tally')} style={{ marginBottom: rs(12) }}>
+              <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>Back to Register</Text>
+            </TouchableOpacity>
+            {itemQR && (<View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 999, alignItems: 'center', justifyContent: 'center' }}><View style={{ backgroundColor: '#1A1A2E', borderRadius: rs(16), padding: rs(20), alignItems: 'center' }}><Text style={{ color: '#FFF', fontSize: rs(16), fontWeight: '700', marginBottom: rs(12) }}>{itemQR.name}</Text><View style={{ backgroundColor: '#FFF', padding: rs(12), borderRadius: rs(10) }}><QRCode value={itemQR.data} size={rs(200)} /></View><Text style={{ color: '#87CEEB', fontSize: rs(10), marginTop: rs(10), textAlign: 'center' }}>Print + place on item. Signed — tamper-proof.</Text><TouchableOpacity onPress={() => setItemQR(null)} style={{ marginTop: rs(14), backgroundColor: '#49d6aa', borderRadius: rs(10), padding: rs(12), paddingHorizontal: rs(30) }}><Text style={{ color: '#000', fontWeight: '700' }}>Close</Text></TouchableOpacity></View></View>)}
+            <Text style={{ color: '#49d6aa', fontSize: rs(18), fontWeight: '700', marginBottom: rs(12) }}>Store Setup</Text>
+            <TextInput value={storeName} onChangeText={(t) => { setStoreName(t); AsyncStorage.setItem('kv_store_name', t).catch(()=>{}); }} placeholder="Store name" placeholderTextColor="#666" style={{ backgroundColor: '#1A1A2E', color: '#FFF', borderRadius: rs(8), padding: rs(10), borderWidth: 1, borderColor: '#333', marginBottom: rs(8) }} />
+            <TextInput value={storeLocation} onChangeText={(t) => { setStoreLocation(t); AsyncStorage.setItem('kv_store_location', t).catch(()=>{}); }} placeholder="Location (address or city)" placeholderTextColor="#666" style={{ backgroundColor: '#1A1A2E', color: '#FFF', borderRadius: rs(8), padding: rs(10), borderWidth: 1, borderColor: '#333', marginBottom: rs(8) }} />
+            <TouchableOpacity onPress={() => Linking.openURL('https://kasmap.org')} style={{ backgroundColor: '#1A1A2E', borderRadius: rs(8), padding: rs(12), alignItems: 'center', marginBottom: rs(16), borderWidth: 1, borderColor: '#49d6aa' }}>
+              <Text style={{ color: '#49d6aa', fontSize: rs(13), fontWeight: '600' }}>List your store on KasMap</Text>
+            </TouchableOpacity>
+            <Text style={{ color: '#49d6aa', fontSize: rs(16), fontWeight: '700', marginBottom: rs(12) }}>Item Catalog</Text>
+            <View style={{ flexDirection: 'row', gap: rs(8), marginBottom: rs(12) }}>
+              <TextInput value={newItemName} onChangeText={setNewItemName} placeholder="Item name" placeholderTextColor="#666" style={{ flex: 2, backgroundColor: '#1A1A2E', color: '#FFF', borderRadius: rs(8), padding: rs(10), borderWidth: 1, borderColor: '#333' }} />
+              <TextInput value={newItemPrice} onChangeText={setNewItemPrice} placeholder="KAS" placeholderTextColor="#666" keyboardType="decimal-pad" style={{ flex: 1, backgroundColor: '#1A1A2E', color: '#FFF', borderRadius: rs(8), padding: rs(10), borderWidth: 1, borderColor: '#333' }} />
+            </View>
+            <TouchableOpacity onPress={() => { const p = parseFloat(newItemPrice); if (!newItemName.trim() || !(p > 0)) { Alert.alert('Invalid', 'Enter name and price'); return; } saveCatalog([...catalog, { id: 'i' + Date.now(), name: newItemName.trim(), priceKas: p }]); setNewItemName(''); setNewItemPrice(''); }} style={{ backgroundColor: '#49d6aa', borderRadius: rs(10), padding: rs(12), alignItems: 'center', marginBottom: rs(16) }}>
+              <Text style={{ color: '#000', fontSize: rs(14), fontWeight: '700' }}>Add Item</Text>
+            </TouchableOpacity>
+            {catalog.map(item => (
+              <View key={item.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1A1A2E', borderRadius: rs(10), padding: rs(12), marginBottom: rs(8) }}>
+                <Text style={{ color: '#FFF', fontSize: rs(13) }}>{item.name}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs(12) }}>
+                  <Text style={{ color: '#49d6aa', fontSize: rs(13) }}>{item.priceKas} KAS</Text>
+                  <TouchableOpacity onPress={async () => { const s = await signItem(item.id, item.name, item.priceKas); if (!s) { Alert.alert('Error', 'Could not sign item'); return; } setItemQR({ name: item.name, data: JSON.stringify({ type: 'kv_item', id: item.id, name: item.name, priceKas: item.priceKas, sig: s.sig, pubkey: s.pubkey }) }); }}><Text style={{ color: '#49d6aa', fontSize: rs(13), marginRight: rs(10) }}>Show QR</Text></TouchableOpacity>
+                  <TouchableOpacity onPress={() => saveCatalog(catalog.filter(c => c.id !== item.id))}><Text style={{ color: '#FF6B6B', fontSize: rs(14) }}>Delete</Text></TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
         {/* BLE RECEIVE */}
         {mode === 'ble_receive' && (
           <View style={{ alignItems: 'center' }}>
@@ -394,6 +633,29 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 Your address is visible to nearby senders via Bluetooth
               </Text>
               <Text style={{ color: '#666', fontSize: rs(10), marginTop: rs(12), textAlign: 'center' }}>{address}</Text>
+              <View style={{ backgroundColor: '#FFF', padding: rs(12), borderRadius: rs(10), marginTop: rs(16) }}>
+                <QRCode value={qrPayload} size={rs(180)} />
+              </View>
+              <Text style={{ color: '#87CEEB', fontSize: rs(10), marginTop: rs(8), textAlign: 'center' }}>Scan to connect + get address{parseFloat(requestAmount) > 0 ? ' + ' + requestAmount + ' KAS request' : ''}</Text>
+              <TextInput value={requestAmount} onChangeText={setRequestAmount} placeholder="Request amount (KAS)" placeholderTextColor="#666" keyboardType="decimal-pad" style={{ width: '100%', backgroundColor: '#0D0D1A', color: '#FFF', borderRadius: rs(10), padding: rs(10), marginTop: rs(12), borderWidth: 1, borderColor: '#333', textAlign: 'center' }} />
+              {receiptItems.length > 0 && (
+                <View style={{ marginTop: rs(14), backgroundColor: '#0D2818', borderRadius: rs(12), padding: rs(14), width: '100%', alignItems: 'center', borderWidth: 1, borderColor: '#10B981' }}>
+                  <Text style={{ color: '#10B981', fontWeight: '700', fontSize: rs(13), marginBottom: rs(8) }}>Deterministic Receipt</Text>
+                  <View style={{ backgroundColor: '#FFF', padding: rs(10), borderRadius: rs(8) }}>
+                    <QRCode value={JSON.stringify({ type: 'kv_receipt', items: receiptItems, txId: (globalThis as any).__kvLastTxId || 'PENDING', hash: buildReceiptHash(receiptItems, (globalThis as any).__kvLastTxId || 'PENDING'), store: { name: storeName, location: storeLocation } })} size={rs(150)} />
+                  </View>
+                  <Text style={{ color: '#87CEEB', fontSize: rs(10), marginTop: rs(8), textAlign: 'center' }}>Show at exit — security scans to verify payment</Text>
+                  <TouchableOpacity onPress={() => setReceiptItems([])} style={{ marginTop: rs(8) }}><Text style={{ color: '#666', fontSize: rs(11) }}>Clear receipt</Text></TouchableOpacity>
+                </View>
+              )}
+            </View>
+            <View style={{ flexDirection: 'row', gap: rs(8), marginTop: rs(14), width: '100%' }}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: '#F59E0B', borderRadius: rs(12), padding: rs(14), alignItems: 'center' }} onPress={() => { stopReceiving(); setMode('send_proposal'); }}>
+                <Text style={{ color: '#000', fontWeight: '700', fontSize: rs(14) }}>Send KAS</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#D4AF37' }} onPress={() => { stopReceiving(); setShowIOUSheet(true); }}>
+                <Text style={{ color: '#D4AF37', fontWeight: '700', fontSize: rs(14) }}>Create IOU</Text>
+              </TouchableOpacity>
             </View>
             <TouchableOpacity
               style={{ marginTop: rs(16), backgroundColor: '#333', borderRadius: rs(10), paddingVertical: rs(12), paddingHorizontal: rs(24) }}
@@ -431,7 +693,7 @@ export const QRPayNearby: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 onPress={() => {
                   setResolvedAddress(p.kaspaAddress);
                   stopScanning();
-                  setMode('send');
+                  setMode('send_proposal');
                   setPasteInput(p.kaspaAddress);
                 }}
               >

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react-native';
 import { useKaspaPrice } from './useKaspaPrice';
 import * as SecureStore from 'expo-secure-store';
+import * as Clipboard from 'expo-clipboard';
 import ProceduralBackground from './expo_procedural_backgrounds';
 import { SlothPoisonBar } from './SlothPoisonMeter';
 import type { IOULedger } from './IOUBalanceSheetShare';
@@ -135,6 +136,8 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
       // 1) UTXO ledger from AsyncStorage
       let totalBalanceSompi = 0n;
       let spendableBalanceSompi = 0n;
+      try { const { releaseOrphanCollateral } = require('./utxo_ledger'); let _live: string[]=[]; try { const raw = await AsyncStorage.getItem('kv_frost_active_list'); if (raw) _live = (JSON.parse(raw)||[]).map((x: any) => x.agrId || x.agreementId).filter(Boolean); } catch {}
+      const n = await releaseOrphanCollateral(_live); if (n > 0) console.log('[DashStats] freed', n, 'orphan UTXOs'); } catch {}
       let committedSompi = 0n;
       let iouAllocatedSompi = 0n;
       try {
@@ -333,7 +336,7 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
         }
       } catch (e) { console.warn('[DashStats] Proposals error:', e); }
 
-      setStats({
+      setStats(prev => ({ ...prev,
         agreementsCompleted, deadlocks, pComplete, xp, totalVolumeSompi,
         totalBalanceSompi, spendableBalanceSompi, committedSompi, iouAllocatedSompi,
         iousOwedSompi, iousOwedToYouSompi, agreementReturnsSompi,
@@ -344,7 +347,7 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
         townhallVolumeSompi, townhallAvgCompletionMs, townhallSuccesses, townhallDeadlocks,
         enhancedFactors,
         loading: false,
-      });
+      }));
     } catch (e) {
       console.warn('[DashStats] OUTER error:', e);
       setStats(s => ({ ...s, loading: false }));
@@ -1006,7 +1009,6 @@ const WalletOverview: React.FC<{
   onNavigatePhoneProof?: () => void;
   onNavigateBalanceSheet?: () => void;
   onNavigatePOBox?: () => void;
-  onNavigatePhoneProof?: () => void;
   onSwitchMode?: (mode: 'tutorial' | 'real') => void;
   activeMode?: 'tutorial' | 'real';
   balanceSompi?: bigint;
@@ -1051,6 +1053,23 @@ const WalletOverview: React.FC<{
     {/* Action Buttons */}
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 4 }}>
     <View style={[walletStyles.actions, { paddingHorizontal: 4 }]}>
+      {/* DASH_PUBKEY_BTN */}
+      <TouchableOpacity style={[walletStyles.actionBtn, { borderRadius: 8 }]} onPress={async () => {
+        try {
+          const myPub = (await SecureStore.getItemAsync('kv_public_key'))
+            || (await SecureStore.getItemAsync('kaspa_pubkey'))
+            || (await SecureStore.getItemAsync('kv_l1_pubkey')) || '';
+          if (myPub && /^0[23][0-9a-f]{64}$/i.test(myPub)) {
+            await Clipboard.setStringAsync(myPub);
+            Alert.alert('Copied', 'Your pubkey is copied. Share it with a counterparty to start a trade.');
+          } else {
+            Alert.alert('Not available', 'Your pubkey is not ready yet.');
+          }
+        } catch (e) { console.warn('[Dashboard][Pubkey] failed:', e); }
+      }}>
+        <Text style={walletStyles.actionIcon}>🔑</Text>
+        <Text style={walletStyles.actionLabel}>My Pubkey</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={[walletStyles.actionBtn, { backgroundColor: activeMode === 'real' ? '#10B981' : '#F59E0B', borderRadius: 8 }]} onPress={() => {
         console.log('[Toggle] onSwitchMode exists:', !!onSwitchMode);
         if (!onSwitchMode) { console.log('[Toggle] onSwitchMode is undefined!'); return; }
@@ -1400,6 +1419,7 @@ const walletStyles = StyleSheet.create({
 // MAIN DASHBOARD COMPONENT
 // ============================================================================
 interface DashboardProps {
+  onNavigateBalanceSheet?: () => void;
   user: {
     apartment: string;
     xp: number;

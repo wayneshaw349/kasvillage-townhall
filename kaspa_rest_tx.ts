@@ -85,6 +85,55 @@ function hashBlake2b(data: Uint8Array): Uint8Array {
 }
 
 // ============================================================================
+// TRANSACTION ID (v0) — verified against rusty-kaspa consensus test vectors
+// Serialize: version u16 | inputs_len u64 | per-input[outpoint 32 + index u32 +
+//   empty-var-bytes(sig excluded) + sequence u64] | outputs_len u64 |
+//   per-output[value u64 + spk_version u16 + script var-bytes] | lockTime u64 |
+//   subnetwork 20b | gas u64 | payload var-bytes.  (mass + sig_op_count excluded)
+// Hash: blake2b-256 keyed with utf8 "TransactionID".
+// ============================================================================
+const TXID_HASH_KEY = new TextEncoder().encode('TransactionID');
+function _varBytes(b: Uint8Array): Uint8Array { return concat(writeU64LE(BigInt(b.length)), b); }
+
+export interface TxIdInput { prevTxId: string; prevIndex: number; sequence: bigint; }
+export interface TxIdOutput { amount: bigint; scriptVersion: number; scriptHex: string; }
+export interface TxIdTx {
+  version: number;
+  inputs: TxIdInput[];
+  outputs: TxIdOutput[];
+  lockTime: bigint;
+  subnetworkId: string; // 40-hex (20 bytes)
+  gas: bigint;
+  payloadHex: string;   // '' for empty
+}
+
+export function computeTxId(tx: TxIdTx): string {
+  if (tx.version !== 0) throw new Error('computeTxId: only v0 supported');
+  const parts: Uint8Array[] = [];
+  parts.push(writeU16LE(tx.version));
+  parts.push(writeU64LE(BigInt(tx.inputs.length)));
+  for (const inp of tx.inputs) {
+    parts.push(hexToBytes(inp.prevTxId));
+    parts.push(writeU32LE(inp.prevIndex));
+    parts.push(_varBytes(new Uint8Array(0)));      // signature script excluded
+    parts.push(writeU64LE(inp.sequence));          // sig_op_count excluded (inside excluded block)
+  }
+  parts.push(writeU64LE(BigInt(tx.outputs.length)));
+  for (const out of tx.outputs) {
+    parts.push(writeU64LE(out.amount));
+    parts.push(writeU16LE(out.scriptVersion));
+    parts.push(_varBytes(hexToBytes(out.scriptHex)));
+  }
+  parts.push(writeU64LE(tx.lockTime));
+  parts.push(hexToBytes(tx.subnetworkId));
+  parts.push(writeU64LE(tx.gas));
+  parts.push(_varBytes(tx.payloadHex ? hexToBytes(tx.payloadHex) : new Uint8Array(0)));
+  const preimage = concat(...parts);
+  return bytesToHex(blake2b(preimage, { dkLen: 32, key: TXID_HASH_KEY } as any));
+}
+
+
+// ============================================================================
 // TX SIZE ESTIMATION (from rusty-kaspa)
 // ============================================================================
 function estimateTxSize(inputCount: number, outputScriptLengths: number[], sigScriptLen: number, payloadLen: number): bigint {
@@ -305,6 +354,17 @@ export async function sendKaspaViaRest(params: {
     console.log('[REST-TX] UTXOs fetched:', utxos.length, 'from', senderAddress);
     if (!utxos.length) return { success: false, error: 'No UTXOs available' };
 
+    // Filter to ledger-free UTXOs (exclude collateral + IOU-backed)
+    try {
+      const { getFreeUtxoKeys } = await import('./utxo_ledger');
+      const freeKeys = await getFreeUtxoKeys(senderAddress);
+      if (freeKeys && freeKeys.size > 0) {
+        const before = utxos.length;
+        const filtered = utxos.filter(u => freeKeys.has(`${(u as any).outpoint?.transactionId || (u as any).transactionId}:${(u as any).outpoint?.index ?? (u as any).index ?? 0}`));
+        if (filtered.length > 0) { utxos.length = 0; utxos.push(...filtered); console.log('[REST-TX] Ledger filter:', before, '->', utxos.length, 'free'); }
+      }
+    } catch (e) { console.warn('[REST-TX] Ledger filter skipped:', e); }
+
     console.log('[REST-TX] First UTXO:', JSON.stringify(utxos[0]));
     
     // 2. Derive keys
@@ -432,6 +492,20 @@ export async function sendKaspaViaRest(params: {
       payload: payload || '',
     };
     
+    // PREDICT_TXID_CHECKPOINT — predict this tx's id before broadcast (for refund escrow-UTXO prediction)
+    let _predictedTxId = '';
+    try {
+      _predictedTxId = computeTxId({
+        version: 0,
+        inputs: inputsData.map(inp => ({ prevTxId: bytesToHex(inp.txId), prevIndex: inp.index, sequence: inp.sequence })),
+        outputs: outputsData.map(o => ({ amount: o.value, scriptVersion: o.scriptVersion, scriptHex: bytesToHex(o.script) })),
+        lockTime: 0n,
+        subnetworkId: SUBNETWORK_ID_NATIVE,
+        gas: 0n,
+        payloadHex: payload || '',
+      });
+      console.log('[REST-TX] PREDICTED txid:', _predictedTxId, '| escrow outpoint =', _predictedTxId + ':0');
+    } catch (e) { console.warn('[REST-TX] txid prediction failed (non-fatal):', e); }
     console.log('[REST-TX] === SUBMITTING TX ===');
     console.log('[REST-TX] Inputs:', signedInputs.length);
     console.log('[REST-TX] Outputs:', outputsData.length);
@@ -452,6 +526,10 @@ export async function sendKaspaViaRest(params: {
     
     const result = await submitResp.json();
     console.log('[REST-TX] Submit response:', JSON.stringify(result));
+    if (_predictedTxId) {
+      const _nodeTxId = result.transactionId || '';
+      console.log('[REST-TX] PREDICT CHECK:', _predictedTxId === _nodeTxId ? 'MATCH ✓' : ('MISMATCH ✗ node=' + _nodeTxId));
+    }
     const txId = result.transactionId || bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(tx))));
     const explorerBase = network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';
     
@@ -541,6 +619,42 @@ export interface CanonicalFrostTx {
   outputs: { value: bigint; scriptVersion: number; script: Uint8Array }[];
   fee: bigint;
   totalIn: bigint;
+  lockTime?: bigint; // 0/undefined for release/cancel; set for timelocked refund
+}
+
+export interface RefundFrostTxParams {
+  predictedTxId: string;      // escrow output txid predicted via computeTxId
+  escrowOutputIndex: number;  // 0
+  depositSompi: bigint;       // the funder's deposit sitting at the escrow
+  escrowScriptHex: string;    // scriptPubKey of the escrow output (frost address script)
+  ownAddress: string;         // where the refund returns funds (the funder)
+  fundDAA: bigint;            // current DAA score at funding time
+  N: bigint;                  // timeout window in DAA
+}
+
+// Builds a timelocked refund tx: spends the (predicted) escrow UTXO back to the funder,
+// valid only after fundDAA + N. Signing uses the same FROST 2-of-2 ceremony as release.
+export function buildRefundFrostTx(params: RefundFrostTxParams): CanonicalFrostTx {
+  const FEE = 10000n;
+  const { predictedTxId, escrowOutputIndex, depositSompi, escrowScriptHex, ownAddress, fundDAA, N } = params;
+  if (depositSompi <= FEE) throw new Error('Refund: deposit too low for fee');
+  const escrowScript = hexToBytes(escrowScriptHex);
+  const ownScript = addressToScript(ownAddress);
+  const inputs = [{
+    txId: hexToBytes(predictedTxId),
+    index: escrowOutputIndex,
+    sequence: 0n,
+    sigOpCount: 1,
+    scriptVersion: 0,
+    scriptPubKey: escrowScript,
+    value: depositSompi,
+  }];
+  const outputs = [{ value: depositSompi - FEE, scriptVersion: 0, script: ownScript }];
+  const utxos = [{
+    outpoint: { transactionId: predictedTxId, index: escrowOutputIndex },
+    utxoEntry: { amount: depositSompi.toString(), scriptPublicKey: { scriptPublicKey: escrowScriptHex } },
+  }];
+  return { utxos, inputs, outputs, fee: FEE, totalIn: depositSompi, lockTime: fundDAA + N };
 }
 
 export async function buildCanonicalFrostTx(params: CanonicalFrostTxParams): Promise<CanonicalFrostTx> {
@@ -611,7 +725,7 @@ export async function buildCanonicalFrostTx(params: CanonicalFrostTxParams): Pro
 
 export function canonicalSighash(tx: CanonicalFrostTx, inputIndex: number): Uint8Array {
   const subnetId = hexToBytes('0000000000000000000000000000000000000000');
-  return computeSighash(0, tx.inputs, tx.outputs, inputIndex, subnetId, 0n, 0n, true, new Uint8Array(0));
+  return computeSighash(0, tx.inputs, tx.outputs, inputIndex, subnetId, tx.lockTime ?? 0n, 0n, true, new Uint8Array(0));
 }
 
 export async function submitCanonicalFrostTx(params: {
@@ -641,7 +755,7 @@ export async function submitCanonicalFrostTx(params: {
   const txBody = {
     transaction: {
       version: 0, inputs: signedInputs, outputs,
-      lockTime: '0', subnetworkId: '0000000000000000000000000000000000000000', gas: '0', payload: '',
+      lockTime: (tx.lockTime ?? 0n).toString(), subnetworkId: '0000000000000000000000000000000000000000', gas: '0', payload: '',
     },
   };
 

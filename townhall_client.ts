@@ -793,7 +793,7 @@ export async function inscribeAgreementToArweave(agreement: {
   ];
   if (agreement.frostAddress) {
     tags.push({ name: 'KV-FrostAddress', value: agreement.frostAddress });
-    if (agreement.frostCounter !== undefined) tags.push({ name: 'KV-FrostCounter', value: String(agreement.frostCounter) });
+    if ((agreement as any).frostCounter !== undefined) tags.push({ name: 'KV-FrostCounter', value: String((agreement as any).frostCounter) });
   }
   if (agreement.frostR) {
     // Store hash(R) on Arweave, not raw R (defense-in-depth)
@@ -925,8 +925,8 @@ export async function queryAgreementsFromArweave(opts?: {
       const edges = data?.data?.transactions?.edges || [];
       
       // Parse tags into agreement objects
-      const agreements = await Promise.all(edges.map(async (edge) => {
-        const tags = edge.node.tags.reduce((acc, t) => {
+      const agreements = await Promise.all(edges.map(async (edge: any) => {
+        const tags = edge.node.tags.reduce((acc: any, t: any) => {
           acc[t.name] = t.value;
           return acc;
         }, {});
@@ -947,7 +947,7 @@ export async function queryAgreementsFromArweave(opts?: {
           agreement_id: tags['KV-AgreementId'] || '',
           agreementId: tags['KV-AgreementId'] || '',
           status: tags['KV-Status'] || 'Proposed',
-          description: agreementData.description || tags['KV-AgreementId'] || '',
+          description: (agreementData as any).description || tags['KV-AgreementId'] || '',
           network: tags['KV-Network'] || 'testnet-10',
           party_a: {
             pubkey: tags['KV-Pubkey'] || '',
