@@ -920,6 +920,36 @@ export function canTransition(
  *
  * k lifetime starts HERE.
  */
+// ============================================================================
+// SELLER REFUND (timelocked reclaim) — pure wrapper over the refund-mode ceremony.
+// The SELLER is the reclaiming party (partyA): they get the single output back.
+// Party mapping: seller pubkey -> buyerPubkey slot (partyA/scriptA in refund mode).
+// The predicted escrow UTXO is computed by the caller (computeTxId) and passed in.
+// lockTime = fundDAA + N; both parties co-sign; broadcastable only after N.
+// ============================================================================
+export function buildSellerRefund(params: {
+  sellerPrivKeyHex: string;
+  sellerPubkey: string;   // reclaiming party (partyA) — receives the refund output
+  buyerPubkey: string;    // counterparty (partyB)
+  counter: number;
+  predictedEscrowUtxo: { txId: string; index: number; amount: string; scriptPubKey: string };
+  fundDAA: bigint;
+  N: bigint;              // timeout window in DAA (from proposal)
+  agrId: string;
+}): { template: TxTemplate; templateB64: string; nonce: FrostNonce; sighashes: string[] } {
+  return buyerBuildTemplate({
+    privateKeyHex: params.sellerPrivKeyHex,
+    buyerPubkey: params.sellerPubkey,   // partyA = seller = gets the refund output
+    sellerPubkey: params.buyerPubkey,   // partyB = buyer = counterparty
+    counter: params.counter,
+    utxos: [params.predictedEscrowUtxo],
+    buyerAmountSompi: BigInt(params.predictedEscrowUtxo.amount), // full escrow amount (fee deducted in outputs)
+    releaseMode: 'refund',
+    lockTime: params.fundDAA + params.N,
+    agrId: params.agrId,
+  });
+}
+
 export function buyerBuildTemplate(params: {
   privateKeyHex: string;
   buyerPubkey: string;
@@ -938,7 +968,7 @@ export function buyerBuildTemplate(params: {
   nonce: FrostNonce;
   sighashes: string[];
 } {
-  const numOutputs = (params.releaseMode || 'release') === 'release' ? 1 : 2;
+  const numOutputs = ((params.releaseMode || 'release') === 'cancel') ? 2 : 1; // release & refund = 1 output, cancel = 2
   const fee = params.fee || BigInt(params.utxos.length * 115000 + numOutputs * 48000 + 5000);
 
   // Generate nonce (k born)
