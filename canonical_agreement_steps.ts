@@ -155,6 +155,7 @@ export interface TxTemplate {
   f: string;              // Fee sompi
   R: string;              // Buyer R nonce (compressed point hex)
   agr: string;            // Agreement ID
+  lt?: string;            // lockTime (DAA) â€” '0' for release/cancel, set for refund
 }
 
 // ============================================================================
@@ -171,7 +172,7 @@ export interface SellerResponse {
 // ============================================================================
 
 /** How funds leave the FROST address */
-export type ReleaseMode = 'release' | 'cancel';
+export type ReleaseMode = 'release' | 'cancel' | 'refund';
 
 /**
  * Compute outputs for each release mode.
@@ -194,6 +195,12 @@ export function computeReleaseOutputs(
   const scriptB = p2pkScript(partyB_xOnly);
 
   switch (mode) {
+    case 'refund': {
+      return {
+        outputs: [{ v: net.toString(), s: scriptA }],
+        description: 'Timelocked refund: ' + (Number(net) / 1e8).toFixed(4) + ' KAS returned',
+      };
+    }
     case 'release': {
       // Trade complete: seller (party receiving payment) gets everything
       // Caller determines which party is the recipient
@@ -291,8 +298,8 @@ export async function fetchFeeEstimate(
   } catch {
     // Toccata fallback formula: fee = 100 * max(compute_grams, 2 * tx_bytes)
     // Typical FROST tx: 2 inputs, 2 outputs
-    // tx_bytes ˜ 35 + 2*(41+65) + 2*(9+34) = 333 bytes
-    // compute_grams ˜ 333 + 2*340 + 2*1000 = 3013
+    // tx_bytes ï¿½ 35 + 2*(41+65) + 2*(9+34) = 333 bytes
+    // compute_grams ï¿½ 333 + 2*340 + 2*1000 = 3013
     // fee = 100 * max(3013, 2*333) = 100 * 3013 = 301300 sompi
     const txBytes = 333; // typical FROST 2-in-2-out
     const computeGrams = txBytes + 2 * 340 + 2 * 1000;
@@ -505,7 +512,8 @@ function hashOutputs(outputs: CanonicalOutput[]): Uint8Array {
 export function computeSighash(
   inputs: CanonicalInput[],
   outputs: CanonicalOutput[],
-  inputIndex: number
+  inputIndex: number,
+  lockTime: bigint = 0n
 ): Uint8Array {
   const inp = inputs[inputIndex];
   const spk = hexToBytes(inp.scriptPubKey);
@@ -526,7 +534,7 @@ export function computeSighash(
       w64(0n),                        // sequence
       w8(1),                          // sigOpCount
       hashOutputs(outputs),
-      w64(0n),                        // lockTime
+      w64(lockTime),                  // lockTime
       subnetId,                       // native subnetwork
       w64(0n),                        // gas
       new Uint8Array(32),             // payload hash (empty)
@@ -851,7 +859,7 @@ export function buildTxBody(
         amount: o.v,
         scriptPublicKey: { version: 0, scriptPublicKey: o.s },
       })),
-      lockTime: '0',
+      lockTime: template.lt || '0',
       subnetworkId: SUBNETWORK_NATIVE,
       gas: '0',
       payload: '',
@@ -923,6 +931,7 @@ export function buyerBuildTemplate(params: {
   releaseMode?: ReleaseMode;
   fee?: bigint;
   agrId: string;
+  lockTime?: bigint;
 }): {
   template: TxTemplate;
   templateB64: string;
@@ -963,6 +972,7 @@ export function buyerBuildTemplate(params: {
     f: fee.toString(),
     R: nonce.R_hex,
     agr: params.agrId,
+    lt: (params.lockTime ?? 0n).toString(),
   };
 
   // Compute sighashes
@@ -979,7 +989,7 @@ export function buyerBuildTemplate(params: {
 
   const sighashes: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    sighashes.push(bytesToHex(computeSighash(inputs, canonOutputs, i)));
+    sighashes.push(bytesToHex(computeSighash(inputs, canonOutputs, i, BigInt(template.lt || '0'))));
   }
 
   return {
@@ -1037,7 +1047,7 @@ export function sellerSignTemplate(params: {
 
   const partials: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    const shHex = bytesToHex(computeSighash(inputs, outputs, i));
+    const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
     const ps = partialSign(nonce, template.R, agg.aggXOnly, shHex);
     partials.push(ps.s_hex);
   }
@@ -1084,7 +1094,7 @@ export function buyerAggregate(params: {
   const signatures: string[] = [];
 
   for (let i = 0; i < inputs.length; i++) {
-    const shHex = bytesToHex(computeSighash(inputs, outputs, i));
+    const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
 
     // Buyer partial
     const buyerPartial = partialSign(nonce, sellerResponse.R, agg.aggXOnly, shHex);
