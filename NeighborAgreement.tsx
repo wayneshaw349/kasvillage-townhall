@@ -358,6 +358,7 @@ const API_BASE = 'https://api.kasvillage.dev';
 interface Contract {
   itemPriceKas: number;
   sellerCommitmentKas: number;
+  timeoutMinutes?: number;
   stipulations: string;
   itemDescription: string;
   expiryHours: number;
@@ -1101,6 +1102,7 @@ function parseClipboard(raw: string): {
   const [contract, setContract] = useState<Contract>({
     itemPriceKas: initialCoupon?.discountedKaspa || 0,
     sellerCommitmentKas: 0,
+    timeoutMinutes: 5,
     stipulations: '',
     itemDescription: initialCoupon?.description || '',
     expiryHours: 24,
@@ -3581,6 +3583,17 @@ const handleAcceptFromInbox = async (agreement: any) => {
                       />
                       <Text style={styles.inputNote}>Good faith deposit</Text>
                     </View>
+                    <View style={[styles.inputGroup, { flex: 1 }]}>
+                      <Text style={styles.inputLabel}>Refund Timeout (min)</Text>
+                      <TextInput
+                        style={[styles.input, { borderColor: COLORS.blue200 }]}
+                        value={(contract.timeoutMinutes ?? 5).toString()}
+                        onChangeText={(text) => setContract(p => ({ ...p, timeoutMinutes: parseInt(text) || 0 }))}
+                        keyboardType="numeric"
+                        placeholder="5"
+                      />
+                      <Text style={styles.inputNote}>Seller reclaim window</Text>
+                    </View>
                   </View>
                   
                   <View style={styles.inputGroup}>
@@ -3769,6 +3782,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                             verificationCode: contract.verificationCode || '',
                             buyerPubkey: contract.buyerPubkey || '',
                             sellerPubkey: contract.sellerPubkey || '',
+                            timeoutN: Math.floor((contract.timeoutMinutes || 5) * 60),
                             buyerPrivKeyHex: _wallet?.privKeyHex || '', frostCounter: (contract.frostData ? contract.frostData.frostCounter : undefined) ?? 0,
                             description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });

@@ -45,6 +45,7 @@ export interface KVProposal {
   buyerPubkey?: string | null;
   sellerPubkey?: string | null;
   buyerPubkeyRaw?: string;
+  timeoutN?: number;          // refund timeout in DAA blocks (buyer sets)
   valid?: boolean;
   error?: string;
 }
@@ -62,12 +63,14 @@ export function generateProposal(params: {
   verificationCode: string;
   description: string;
   frostCounter?: number;
+  sellerPubkey?: string;
+  timeoutN?: number;
 }): string {
   const desc = (params.description || 'Agreement').replace(/[|\n\r]/g, ' ').trim();
   
   const _body = ['KV', params.agrId, params.buyerAddress, params.sellerAddress,
     params.buyerAmountSompi.toString(), params.sellerAmountSompi.toString(),
-    params.network, params.buyerR, params.verificationCode, desc, (params as any).buyerPubkey || '', String((params as any).frostCounter ?? ''), (params as any).sellerPubkey || ''].join('|');
+    params.network, params.buyerR, params.verificationCode, desc, (params as any).buyerPubkey || '', String((params as any).frostCounter ?? ''), (params as any).sellerPubkey || '', String((params as any).timeoutN ?? '')].join('|');
   let _sig = '';
   try {
     if ((params as any).buyerPrivKeyHex) {
@@ -93,11 +96,13 @@ export function parseProposal(text: string): KVProposal | null {
     frostCounter: (parts[11] !== undefined && parts[11] !== '') ? parseInt(parts[11], 10) : undefined,
   };
   const sellerPubkeyRaw = parts[12] || '';
-  const _sig = parts[13] || '';
-  const _bodyOnly = parts.slice(1, 13).join('|');
+  const timeoutNRaw = parts[13] || '';
+  const _sig = parts[14] || '';
+  const _bodyOnly = parts.slice(1, 14).join('|');
 
   proposal.buyerPubkey = proposal.buyerPubkeyRaw || addressToPubkey(proposal.buyerAddress);
   proposal.sellerPubkey = sellerPubkeyRaw || addressToPubkey(proposal.sellerAddress);
+  proposal.timeoutN = (timeoutNRaw !== '') ? parseInt(timeoutNRaw, 10) : undefined;
 
   if (!proposal.buyerPubkey || !proposal.sellerPubkey) {
     proposal.valid = false;
