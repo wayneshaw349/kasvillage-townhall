@@ -224,7 +224,6 @@ interface FrostActiveEntry {
   sellerPubkey: string;
   description: string;
   createdAt: number;
-  timeoutN?: number;
 }
 
 async function addToFrostList(entry: FrostActiveEntry): Promise<void> {
@@ -1384,22 +1383,7 @@ function parseClipboard(raw: string): {
             const eUtxos = await eUtxoResp.json();
             if (!Array.isArray(eUtxos) || eUtxos.length !== 1) continue; // exactly 1 UTXO = seller sent, buyer hasn't
             const sellerBal = Number(eUtxos[0]?.utxoEntry?.amount || '0');
-            if (sellerBal < expectedSeller * 0.95) continue;
-            // 5e PRE-FUND GUARD: refuse if seller's reclaim window has passed
-            try {
-              const _N = BigInt(entry.timeoutN || 0);
-              const _fundDAA = BigInt(eUtxos[0]?.utxoEntry?.blockDaaScore || 0);
-              if (_N > 0n && _fundDAA > 0n) {
-                const _dagR = await fetch(apiBase + '/info/blockdag');
-                const _dag = _dagR.ok ? await _dagR.json() : null;
-                const _now = BigInt(_dag?.virtualDaaScore || 0);
-                if (_now > 0n && _now >= _fundDAA + _N) {
-                  console.warn('[5e-Guard] Crash-recovery BLOCKED', entry.agrId.slice(0,12), 'now=', String(_now), 'fund=', String(_fundDAA), 'N=', String(_N));
-                  continue;
-                }
-                console.log('[5e-Guard] Crash-recovery OK', entry.agrId.slice(0,12), 'remaining DAA=', String(_fundDAA + _N - _now));
-              }
-            } catch (e) { console.warn('[5e-Guard] Crash-recovery check failed — NOT funding:', e); continue; } // seller's amount �5%
+            if (sellerBal < expectedSeller * 0.95) continue; // seller's amount �5%
             // Check we haven't already sent (idempotent guard)
             const sentKey = 'kv_frost_poll_sent_' + entry.agrId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
@@ -1507,22 +1491,6 @@ function parseClipboard(raw: string): {
               console.log('[FROST-Poll] Buyer send BLOCKED — expected 1 seller UTXO ~', otherExpected/1e8, 'but saw', _amts.map(a=>a/1e8), '(residue?) — not sending');
               return;
             }
-            // 5e PRE-FUND GUARD: refuse if seller's reclaim window has passed
-            try {
-              const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * 60));
-              const _fundDAA = BigInt(frostUtxos[0]?.utxoEntry?.blockDaaScore || 0);
-              if (_N > 0n && _fundDAA > 0n) {
-                const _dagR = await fetch(apiBase + '/info/blockdag');
-                const _dag = _dagR.ok ? await _dagR.json() : null;
-                const _now = BigInt(_dag?.virtualDaaScore || 0);
-                if (_now > 0n && _now >= _fundDAA + _N) {
-                  console.warn('[5e-Guard] FROST-Poll BLOCKED — timeout passed. now=', String(_now), 'fund=', String(_fundDAA), 'N=', String(_N));
-                  if (!cancelled) Alert.alert('Timeout passed', 'The seller can now reclaim their collateral. Not sending — start a new agreement.');
-                  return;
-                }
-                console.log('[5e-Guard] FROST-Poll OK — remaining DAA=', String(_fundDAA + _N - _now));
-              }
-            } catch (e) { console.warn('[5e-Guard] FROST-Poll check failed — NOT funding:', e); return; }
             const sentKey = 'kv_frost_poll_sent_' + contract.agreementId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
             if (!alreadySent && !cancelled) {
@@ -1923,7 +1891,6 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
                 buyerAmount: contract.itemPriceKas, sellerAmount: contract.sellerCommitmentKas,
                 buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '',
                 description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''), createdAt: Date.now(),
-                timeoutN: Math.floor((contract.timeoutMinutes || 5) * 60),
               });
               if (proposeResult?.arweaveTxId) {
                 console.log('[Neighbor] Arweave TX ID:', proposeResult.arweaveTxId);
