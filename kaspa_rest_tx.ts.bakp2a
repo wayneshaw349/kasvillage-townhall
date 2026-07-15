@@ -55,8 +55,6 @@ const SUBNETWORK_ID_SIZE = 20;
 // ============================================================================
 export interface RestTxResult {
   success: boolean; txId?: string; explorerUrl?: string; error?: string;
-  predictedTxId?: string;   // set when prepareOnly — the frozen tx's id
-  preparedTx?: any;         // set when prepareOnly — signed body, NOT broadcast
 }
 
 interface UtxoResponse {
@@ -345,7 +343,6 @@ export async function sendKaspaViaRest(params: {
   privateKeyHex: string;
   network: KaspaNetwork;
   payload?: string;
-  prepareOnly?: boolean;    // freeze + predict txid, do NOT broadcast
 }): Promise<RestTxResult> {
   const { senderAddress, recipientAddress, amountSompi, privateKeyHex, network, payload } = params;
   
