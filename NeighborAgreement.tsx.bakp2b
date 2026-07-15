@@ -114,7 +114,7 @@ import { validateEscrowDestination } from './frost_complete';
 import { sendPushToCounterparty } from './push_notifications';
 
 // REST API for real L1 transactions
-import { sendKaspaViaRest, broadcastPreparedTx } from './kaspa_rest_tx';
+import { sendKaspaViaRest } from './kaspa_rest_tx';
 import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
 import { isPureP2PK, canonicalCommit, verifyCommitment, releaseExpiredCommitments, releaseCommitment, markLocked, isAlreadyCommitted, syncLedger } from './utxo_ledger';
 import { generateProposal, parseProposal, verifyProposalForMe, parseReleaseKey } from './kv_proposal';
@@ -150,10 +150,6 @@ import {
   verificationCode as computeVerificationCode,
   computeAgrId,
   buildTxBody,
-  buildSellerRefund,
-  cosignRefundTemplate,
-  verifyRefundTemplate,
-  p2pkScript,
   buildReleaseTemplate as buildReleaseTemplateFn,
   computeReleaseOutputs,
   ReleaseMode,
@@ -2696,12 +2692,6 @@ const handleAcceptFromInbox = async (agreement: any) => {
               }
             } catch {}
           }
-          // 2b GATE: refund is mandatory — never fund without a co-signed reclaim path
-          if (immediateSendAmount > 0 && !(Number(canon.timeoutN) > 0)) {
-            console.warn('[Refund] BLOCKED — proposal carries no timeout N. Not funding.');
-            Alert.alert('Cannot Accept', 'This proposal has no refund timeout, so your collateral would have no reclaim path. Ask the buyer for a fresh proposal.');
-            setIsLoading(false); setAcceptingId(null); return;
-          }
           if (immediateSendAmount > 0 && wallet.privKeyHex && !_skipSend) {
             const frostSentKey = 'kv_frost_sent_' + agrId;
             const alreadyFrostSent = await AsyncStorage.getItem(frostSentKey);
@@ -2723,9 +2713,8 @@ const handleAcceptFromInbox = async (agreement: any) => {
               }
             }
           } catch (e) { console.warn('[L1-Guard] Balance check failed, proceeding:', e); }
-        }
-        try {
-              console.log('[Neighbor] Seller preparing (freeze, no broadcast)', immediateSendAmount / 1e8, 'KASPA to FROST');
+        } else try {
+              console.log('[Neighbor] Seller auto-sending', immediateSendAmount / 1e8, 'KASPA to FROST');
               // sendKaspaViaRest is already imported/available in this scope
               const txResult = await sendKaspaViaRest({
                 senderAddress: wallet.address,
@@ -2733,51 +2722,11 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 amountSompi: BigInt(immediateSendAmount),
                 privateKeyHex: wallet.privKeyHex,
                 network: wallet.network || 'testnet-10',
-                prepareOnly: true,
                 payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await SecureStore.setItemAsync('kv_frost_nonce_' + agrId, JSON.stringify({ ...nonce, createdAt: Date.now() })); console.log('[FROST-R] Nonce saved (NOT in payload):', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: nonce.R_hex }).then(() => console.log('[FROST-R] R posted to TownHall')).catch(() => {}); } catch {} return ''; } catch(e) { console.warn('[FROST-R] Nonce gen failed:', e); return ''; } })(),
               });
-              if (!txResult.success || !txResult.predictedTxId || !txResult.preparedTx) {
-                console.warn('[Refund] Prepare failed:', txResult.error);
-                Alert.alert('Prepare Failed', txResult.error || 'Could not freeze the funding transaction. Nothing was sent.');
-                setIsLoading(false); setAcceptingId(null); return;
-              }
-              console.log('[Refund] Funding tx FROZEN. predicted txid:', txResult.predictedTxId, '| escrow =', txResult.predictedTxId + ':0');
-              // lockTime = now + N. The funding tx is not broadcast yet, so no fundDAA exists.
-              const _rDag = await fetch(_sApi + '/info/blockdag');
-              const _rNow = BigInt((_rDag.ok ? await _rDag.json() : {})?.virtualDaaScore || 0);
-              if (_rNow === 0n) { Alert.alert('Error', 'Could not read the current DAA score. Nothing was sent.'); setIsLoading(false); setAcceptingId(null); return; }
-              const _escrowScript = p2pkScript((frostData.aggregatedPubkey || '').slice(2));
-              const _refund = buildSellerRefund({
-                sellerPrivKeyHex: wallet.privKeyHex,
-                sellerPubkey: myPubkey,
-                buyerPubkey: proposerPubkey,
-                counter: frostData.frostCounter || 0,
-                predictedEscrowUtxo: { txId: txResult.predictedTxId, index: 0, amount: String(immediateSendAmount), scriptPubKey: _escrowScript },
-                fundDAA: _rNow,
-                N: BigInt(canon.timeoutN || 0),
-                agrId,
-              });
-              // DURABLE FIRST — this must survive app death; never React state.
-              await SecureStore.setItemAsync('kv_refund_pending_' + agrId, JSON.stringify({
-                preparedTx: txResult.preparedTx,
-                predictedTxId: txResult.predictedTxId,
-                template: _refund.template,
-                nonce: { k: _refund.nonce.k.toString(16), d_tweaked: _refund.nonce.d_tweaked.toString(16), R_hex: _refund.nonce.R_hex },
-                currentDAA: _rNow.toString(),
-                N: String(canon.timeoutN || 0),
-                amountSompi: String(immediateSendAmount),
-                escrowScript: _escrowScript,
-                counter: frostData.frostCounter || 0,
-                buyerPubkey: proposerPubkey,
-                sellerPubkey: myPubkey,
-                frostAddr: frostData.address,
-                network: wallet.network || 'testnet-10',
-                createdAt: Date.now(),
-              }));
-              try { await Clipboard.setStringAsync(_refund.templateB64); } catch {}
-              console.log('[Refund] Template built + persisted. lockTime =', String(_rNow + BigInt(canon.timeoutN || 0)), '— awaiting buyer co-signature.');
-              Alert.alert('Refund Template Copied', 'Send this to the buyer to co-sign.\n\nYour ' + (immediateSendAmount / 1e8) + ' KAS has NOT been sent. It goes out only after the buyer returns their signature.');
-            } catch (e) { console.warn('[Refund] Prepare/build failed — nothing sent:', e); Alert.alert('Error', 'Refund prepare failed. Nothing was sent.'); }
+              console.log('[Neighbor] Seller collateral TX:', txResult.txId);
+              // DISABLED: await AsyncStorage.setItem('kv_frost_sent_' + agrId, String(Date.now())); // L1 is source of truth
+            } catch (e) { console.warn('[Neighbor] Seller auto-send failed (poll will retry):', e); }
           }
 
           setContract(prev => ({
