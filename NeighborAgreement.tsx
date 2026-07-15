@@ -1897,6 +1897,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
               daaScore: currentDaa,
               buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
               sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
+              timeoutN: Math.floor((contract.timeoutMinutes || 5) * 60),
             } as any);
             // Reduce spendable for proposer (input cap)
             console.log('[Neighbor] Proposal sent ? waiting for counterparty to accept');

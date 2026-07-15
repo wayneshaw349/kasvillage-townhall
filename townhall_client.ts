@@ -587,6 +587,7 @@ export async function proposeAgreement(params: {
   frostCounter?: number;
   frostR?: string;
   daaScore?: number;
+  timeoutN?: number;
 }): Promise<{ success: boolean; agreementId?: string; error?: string; arweaveTxId?: string }> {
   try {
     const resp = await fetch(TOWN_HALL_BASE_URL + '/api/agreement/propose', {
@@ -609,6 +610,7 @@ export async function proposeAgreement(params: {
         daaScore: (params as any).daaScore || 0,
         buyerAmountSompi: (params as any).buyerAmountSompi || 0,
         sellerAmountSompi: (params as any).sellerAmountSompi || 0,
+        timeoutN: (params as any).timeoutN || 0,
       });
     if (arweaveResult?.txId) { result.arweaveTxId = arweaveResult.txId; console.log('[TownHall] Arweave TX ID:', arweaveResult.txId); }
     } catch (e) { console.warn('[TownHall] Arweave inscription failed (non-fatal):', e); }
