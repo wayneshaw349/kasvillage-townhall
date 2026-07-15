@@ -106,6 +106,7 @@ import {// Types
   // High-level
   exchangePubkeys,
   createFrostAgreement,
+  generateFrostNonce,
   computeFrostPartialS,
   aggregateFrostSig,
   cleanup as cleanupFrost, aggregateToAddress, completeFrost2Round} from './frost_complete';
@@ -2733,13 +2734,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 privateKeyHex: wallet.privKeyHex,
                 network: wallet.network || 'testnet-10',
                 prepareOnly: true,
-                // [NONCE-STRIP] dead nonce generator removed from this path.
-                // Its k was derived from {frost, aggPubkey, to, amount} with no sighash,
-                // so two spends of the same escrow with different outputs would share k
-                // and leak the key by subtraction. Nothing signed with it — the closure
-                // always returned '' anyway. Use generateNonce() from the canonical
-                // steps module (random k per call) for any signing.
-                payload: '',
+                payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await SecureStore.setItemAsync('kv_frost_nonce_' + agrId, JSON.stringify({ ...nonce, createdAt: Date.now() })); console.log('[FROST-R] Nonce saved (NOT in payload):', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: nonce.R_hex }).then(() => console.log('[FROST-R] R posted to TownHall')).catch(() => {}); } catch {} return ''; } catch(e) { console.warn('[FROST-R] Nonce gen failed:', e); return ''; } })(),
               });
               if (!txResult.success || !txResult.predictedTxId || !txResult.preparedTx) {
                 console.warn('[Refund] Prepare failed:', txResult.error);
