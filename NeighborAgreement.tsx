@@ -360,6 +360,7 @@ interface Contract {
   itemPriceKas: number;
   sellerCommitmentKas: number;
   timeoutMinutes?: number;
+  timeoutN?: number;
   stipulations: string;
   itemDescription: string;
   expiryHours: number;
@@ -3449,7 +3450,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                                 if (match) { handleAcceptFromInbox(match); }
                                 else {
                                   // Direct accept from clipboard data
-                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.sellerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } , frostCounter: parsed.frostCounter };
+                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.sellerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } , frostCounter: parsed.frostCounter, timeoutN: Number(parsed.timeoutN || 0) };
                                   handleAcceptFromInbox(fakeAgr);
                                 }
                               }}

@@ -16,7 +16,6 @@ export interface CanonicalAgreement {
   frostAddress: string;
   frostData: any;
   idValid: boolean;
-  timeoutN: number;
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -64,7 +63,6 @@ export function normalizeAgreement(raw: any): any {
     status: raw.status || '',
     frostAddress: raw.frostAddress || raw.frost_address || raw['KV-FrostAddress'] || '',
     signature: raw.signature || '',
-    timeoutN: Number(raw.timeoutN || raw['KV-TimeoutN'] || 0),
   };
 }
 
@@ -90,7 +88,6 @@ export function canonicalVerify(tags: any, myPubkey: string): CanonicalAgreement
   const kvNetwork = tags.network || 'testnet-10';
   const kvDaa = String(tags.daaScore || '0');
   const kvAgrId = tags.agreementId || tags.agreement_id || tags['KV-AgreementId'] || '';
-  const kvTimeoutN = parseInt(String(tags.timeoutN || tags['KV-TimeoutN'] || '0'), 10) || 0;
 
   // Step 1: Derive seller amount (CANONICAL MATH — no network needed)
   // sellerAmount = totalAmount - buyerAmount
@@ -151,7 +148,6 @@ export function canonicalVerify(tags: any, myPubkey: string): CanonicalAgreement
     frostAddress,
     frostData,
     idValid,
-    timeoutN: kvTimeoutN,
   };
 }
 
@@ -169,7 +165,6 @@ export function canonicalToContract(canon: CanonicalAgreement) {
     itemDescription: canon.description,
     multisigAddress: canon.frostAddress,
     frostData: canon.frostData,
-    timeoutN: canon.timeoutN,
   };
 }
 

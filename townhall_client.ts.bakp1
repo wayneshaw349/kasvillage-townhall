@@ -773,7 +773,6 @@ export async function inscribeAgreementToArweave(agreement: {
   daaScore?: number;
   buyerAmountSompi?: number;
   sellerAmountSompi?: number;
-  timeoutN?: number;
 }): Promise<IrysUploadResult> {
   const tags: ArweaveTag[] = [
     { name: 'App-Name', value: 'KasVillage' },
@@ -787,7 +786,6 @@ export async function inscribeAgreementToArweave(agreement: {
     { name: 'KV-Amount', value: String(agreement.amount_sompi) },
     { name: 'KV-BuyerAmount', value: String(agreement.buyerAmountSompi || (agreement as any).buyerAmountSompi || 0) },
     { name: 'KV-SellerAmount', value: String(agreement.sellerAmountSompi || (agreement as any).sellerAmountSompi || 0) },
-    ...(Number((agreement as any).timeoutN || 0) > 0 ? [{ name: 'KV-TimeoutN', value: String((agreement as any).timeoutN) }] : []),
     ...((agreement as any).trackingNumber ? [{ name: 'KV-TrackingNumber', value: (agreement as any).trackingNumber }] : []),
     { name: 'KV-Description', value: (agreement.description || '').slice(0, 100) },
     { name: 'KV-DAAScore', value: String(agreement.daaScore || 0) },
@@ -951,7 +949,6 @@ export async function queryAgreementsFromArweave(opts?: {
           status: tags['KV-Status'] || 'Proposed',
           description: (agreementData as any).description || tags['KV-AgreementId'] || '',
           network: tags['KV-Network'] || 'testnet-10',
-          timeoutN: parseInt(tags['KV-TimeoutN'] || '0', 10),
           party_a: {
             pubkey: tags['KV-Pubkey'] || '',
             amount_sompi: parseInt(tags['KV-Amount'] || '0', 10),
