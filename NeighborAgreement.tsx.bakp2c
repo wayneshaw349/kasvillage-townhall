@@ -3902,63 +3902,6 @@ const handleAcceptFromInbox = async (agreement: any) => {
                       )}
                     </View>
                     
-                    {/* 2c: BUYER CO-SIGNS SELLER REFUND */}
-                    {role === 'buyer' && contract.multisigAddress && (
-                      <View style={{ backgroundColor: '#fffbeb', borderRadius: 12, borderWidth: 2, borderColor: '#f59e0b', padding: 14, marginBottom: 16 }}>
-                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#92400e', marginBottom: 4 }}>Co-sign Seller's Refund</Text>
-                        <Text style={{ fontSize: rs.font(10), color: '#b45309', marginBottom: 8 }}>The seller has frozen their collateral but has NOT sent it yet. Paste their refund template to co-sign. This only lets them reclaim their own deposit if you never fund, after {contract.timeoutMinutes ?? 5} min. It cannot touch your money.</Text>
-                        <TextInput
-                          style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#f59e0b', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: rs.font(11), fontFamily: 'monospace', color: '#1c1917', minHeight: 60 }}
-                          placeholder="Paste seller's refund template (base64)..."
-                          placeholderTextColor="#a8a29e"
-                          multiline
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                          onChangeText={async (txt) => {
-                            const v = txt.trim();
-                            if (v.length < 20) return;
-                            try {
-                              setIsLoading(true);
-                              const _w = await loadMainWallet();
-                              if (!_w?.privKeyHex) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
-                              const _tmpl = parseTemplate(v);
-                              if (!_tmpl) { Alert.alert('Error', 'Invalid template format'); setIsLoading(false); return; }
-                              const _net = contract.frostData?.network || 'testnet-10';
-                              const _api = _net.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-                              const _dag = await fetch(_api + '/info/blockdag');
-                              const _now = BigInt((_dag.ok ? await _dag.json() : {})?.virtualDaaScore || 0);
-                              if (_now === 0n) { Alert.alert('Error', 'Could not read the current DAA score — cannot check the timeout.'); setIsLoading(false); return; }
-                              const _esc = p2pkScript((contract.frostData?.aggregatedPubkey || '').slice(2));
-                              const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * 60));
-                              // predictedTxId is the seller's own prediction — the buyer cannot recompute it
-                              // (they don't know the seller's UTXO selection). Lying there only breaks the
-                              // seller's own reclaim. Everything that protects the BUYER is checked below:
-                              // escrow script, sole output to the seller, and lockTime >= now + N.
-                              const _res = cosignRefundTemplate({
-                                privateKeyHex: _w.privKeyHex,
-                                myPubkey: contract.buyerPubkey || '',
-                                funderPubkey: contract.sellerPubkey || '',
-                                counter: contract.frostData?.frostCounter || 0,
-                                template: _tmpl,
-                                expected: { predictedTxId: _tmpl.u[0]?.t || '', escrowScript: _esc, N: _N, currentDAA: _now },
-                              });
-                              if ('error' in _res) {
-                                console.warn('[Refund-Cosign] REJECTED:', _res.error);
-                                Alert.alert('Refund Rejected', _res.error + '\n\nDo not proceed with this trade.');
-                                setIsLoading(false); return;
-                              }
-                              try { await Clipboard.setStringAsync(_res.responseB64); } catch {}
-                              console.log('[Refund-Cosign] Signed. lockTime =', _tmpl.lt, 'now =', String(_now), 'N =', String(_N));
-                              Alert.alert('Refund Co-signed', 'Signature copied. Send it back to the seller — they will fund the escrow once they have it.');
-                            } catch (e) {
-                              console.error('[Refund-Cosign] Error:', e);
-                              Alert.alert('Error', e instanceof Error ? e.message : 'Co-sign failed');
-                            } finally { setIsLoading(false); }
-                          }}
-                        />
-                      </View>
-                    )}
-
                     <CollateralBreakdown
                       buyerAmount={contract.itemPriceKas}
                       sellerAmount={contract.sellerCommitmentKas}

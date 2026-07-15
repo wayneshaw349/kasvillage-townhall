@@ -1151,6 +1151,89 @@ export function buyerAggregate(params: {
 }
 
 // ============================================================================
+// SECTION 8b: REFUND CO-SIGN (counterparty side)
+// The refund pays ONLY the funder. verifyTemplate() would reject it outright
+// ('your output not found'), which is correct for a release but wrong here.
+// The co-signer's safety argument is different: I receive nothing, but this tx
+//   (a) spends ONLY the predicted escrow UTXO (which does not exist yet),
+//   (b) pays ONLY the funder's own P2PK script,
+//   (c) cannot confirm before lockTime = now + N.
+// ============================================================================
+export function verifyRefundTemplate(
+  template: TxTemplate,
+  funderXOnly: string,
+  expected: {
+    predictedTxId: string;
+    escrowScript: string;   // p2pkScript(frost aggXOnly)
+    N: bigint;              // from the signed proposal
+    currentDAA: bigint;
+    slackDAA?: bigint;      // tolerance on lockTime (default 600 = 10 min)
+  },
+): { valid: boolean; error?: string } {
+  const slack = expected.slackDAA ?? 600n;
+
+  if (template.u.length !== 1) return { valid: false, error: 'Refund must spend exactly 1 input, saw ' + template.u.length };
+  const u = template.u[0];
+  if (u.t !== expected.predictedTxId) return { valid: false, error: 'Refund input is not the predicted escrow txid' };
+  if (u.i !== 0) return { valid: false, error: 'Refund input index must be 0, saw ' + u.i };
+  if (u.s !== expected.escrowScript) return { valid: false, error: 'Refund input script is not the FROST escrow script' };
+
+  if (template.o.length !== 1) return { valid: false, error: 'Refund must have exactly 1 output, saw ' + template.o.length };
+  const funderScript = p2pkScript(funderXOnly);
+  if (template.o[0].s !== funderScript) return { valid: false, error: 'Refund output does not pay the funder' };
+  if (!isPureP2PK(template.o[0].s)) return { valid: false, error: 'Refund output is not standard P2PK — possible covenant' };
+
+  const lt = BigInt(template.lt || '0');
+  if (lt === 0n) return { valid: false, error: 'Refund has no lockTime — would be spendable immediately' };
+  const expectedLt = expected.currentDAA + expected.N;
+  const drift = lt > expectedLt ? lt - expectedLt : expectedLt - lt;
+  if (drift > slack) return { valid: false, error: 'lockTime ' + lt + ' does not match the agreed timeout (expected ~' + expectedLt + ')' };
+
+  const totalIn = BigInt(u.a);
+  const totalOut = BigInt(template.o[0].v);
+  const fee = BigInt(template.f);
+  if (totalOut + fee > totalIn) return { valid: false, error: 'Inflation: output + fee exceed input' };
+  const minFee = BigInt(template.u.length * 115000 + template.o.length * 48000 + 5000);
+  if (fee < minFee) return { valid: false, error: 'Fee too low: ' + fee + ' < ' + minFee };
+
+  return { valid: true };
+}
+
+/** Counterparty co-signs the funder's timelocked refund. k born and dies here. */
+export function cosignRefundTemplate(params: {
+  privateKeyHex: string;
+  myPubkey: string;        // co-signer (buyer) — receives nothing
+  funderPubkey: string;    // seller — receives the refund output
+  counter: number;
+  template: TxTemplate;
+  expected: { predictedTxId: string; escrowScript: string; N: bigint; currentDAA: bigint; slackDAA?: bigint };
+}): { response: SellerResponse; responseB64: string } | { error: string } {
+  const { privateKeyHex, myPubkey, funderPubkey, counter, template } = params;
+
+  const funderXOnly = funderPubkey.length === 66 ? funderPubkey.slice(2) : funderPubkey;
+  const v = verifyRefundTemplate(template, funderXOnly, params.expected);
+  if (!v.valid) return { error: v.error || 'Refund verification failed' };
+
+  // Party mapping mirrors buildSellerRefund: the funder occupies the buyerPubkey slot.
+  // deriveAggregateKey/generateNonce sort internally, so the aggregate key is the
+  // same either way — the slot only selects which script receives the output.
+  const agg = deriveAggregateKey(funderPubkey, myPubkey, counter);
+  const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);
+
+  const inputs: CanonicalInput[] = template.u.map((u) => ({ txId: u.t, index: u.i, value: BigInt(u.a), scriptPubKey: u.s }));
+  const outputs: CanonicalOutput[] = template.o.map((o) => ({ value: BigInt(o.v), script: o.s }));
+
+  const partials: string[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
+    partials.push(partialSign(nonce, template.R, agg.aggXOnly, shHex).s_hex);
+  }
+
+  const response: SellerResponse = { R: nonce.R_hex, s: partials };
+  return { response, responseB64: encodeResponse(response) };
+}
+
+// ============================================================================
 // SECTION 9: AGR ID (deterministic from pubkeys + amounts + UTXO tag)
 // ============================================================================
 

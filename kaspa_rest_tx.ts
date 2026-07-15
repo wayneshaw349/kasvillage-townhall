@@ -509,6 +509,12 @@ export async function sendKaspaViaRest(params: {
       });
       console.log('[REST-TX] PREDICTED txid:', _predictedTxId, '| escrow outpoint =', _predictedTxId + ':0');
     } catch (e) { console.warn('[REST-TX] txid prediction failed (non-fatal):', e); }
+    // FREEZE POINT — return the signed-but-unbroadcast tx + its predicted id
+    if (params.prepareOnly) {
+      if (!_predictedTxId) return { success: false, error: 'txid prediction failed — cannot prepare refund' };
+      console.log('[REST-TX] PREPARE-ONLY — frozen, not broadcast. txid:', _predictedTxId);
+      return { success: true, predictedTxId: _predictedTxId, preparedTx: tx };
+    }
     console.log('[REST-TX] === SUBMITTING TX ===');
     console.log('[REST-TX] Inputs:', signedInputs.length);
     console.log('[REST-TX] Outputs:', outputsData.length);
@@ -556,6 +562,32 @@ export async function sendKaspaViaRest(params: {
   } catch (e: any) {
     console.error('[REST-TX] EXCEPTION:', e.message, e.stack?.slice(0, 200));
     return { success: false, error: e.message || 'Transaction failed' };
+  }
+}
+
+// ============================================================================
+// BROADCAST A PREPARED (FROZEN) TX — the body must be byte-identical to the one
+// whose txid was predicted, or the refund points at a UTXO that never exists.
+// ============================================================================
+export async function broadcastPreparedTx(tx: any, network: KaspaNetwork): Promise<RestTxResult> {
+  try {
+    const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transaction: tx, allowOrphan: false }),
+    });
+    if (!submitResp.ok) {
+      const errBody = await submitResp.text();
+      console.error('[REST-TX] Prepared submit FAILED:', submitResp.status, errBody);
+      return { success: false, error: `Submit failed (${submitResp.status}): ${errBody}` };
+    }
+    const result = await submitResp.json();
+    const txId = result.transactionId || '';
+    const explorerBase = network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';
+    console.log('[REST-TX] Prepared tx broadcast:', txId);
+    return { success: true, txId, explorerUrl: explorerBase + txId };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Broadcast failed' };
   }
 }
 
