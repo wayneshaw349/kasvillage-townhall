@@ -150,11 +150,8 @@ import {
   computeAgrId,
   buildTxBody,
   buildSellerRefund,
-  buildKillTx,
   cosignRefundTemplate,
   verifyRefundTemplate,
-  cosignKillTemplate,
-  verifyKillTemplate,
   p2pkScript,
   buildReleaseTemplate as buildReleaseTemplateFn,
   computeReleaseOutputs,
@@ -2765,27 +2762,12 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 N: BigInt(canon.timeoutN || 0),
                 agrId,
               });
-              // The kill tx: spends the SAME predicted UTXO A, pays it back to the escrow.
-              // Handing this to the buyer is what makes the refund safe to hold — the moment
-              // they fund, they broadcast this, A is consumed, and the refund dies. Without
-              // it the refund would stay live even after the buyer paid, letting a seller
-              // ship bricks, wait N, and walk with their collateral.
-              const _kill = buildKillTx({
-                sellerPrivKeyHex: wallet.privKeyHex,
-                sellerPubkey: myPubkey,
-                buyerPubkey: proposerPubkey,
-                counter: frostData.frostCounter || 0,
-                predictedEscrowUtxo: { txId: txResult.predictedTxId, index: 0, amount: String(immediateSendAmount), scriptPubKey: _escrowScript },
-                agrId,
-              });
               // DURABLE FIRST — this must survive app death; never React state.
               await SecureStore.setItemAsync('kv_refund_pending_' + agrId, JSON.stringify({
                 preparedTx: txResult.preparedTx,
                 predictedTxId: txResult.predictedTxId,
                 template: _refund.template,
                 nonce: { k: _refund.nonce.k.toString(16), d_tweaked: _refund.nonce.d_tweaked.toString(16), R_hex: _refund.nonce.R_hex },
-                killTemplate: _kill.template,
-                killNonce: { k: _kill.nonce.k.toString(16), d_tweaked: _kill.nonce.d_tweaked.toString(16), R_hex: _kill.nonce.R_hex },
                 currentDAA: _rNow.toString(),
                 N: String(canon.timeoutN || 0),
                 amountSompi: String(immediateSendAmount),
@@ -2797,9 +2779,9 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 network: wallet.network || 'testnet-10',
                 createdAt: Date.now(),
               }));
-              try { await Clipboard.setStringAsync(_refund.templateB64 + '|' + _kill.templateB64); } catch {}
+              try { await Clipboard.setStringAsync(_refund.templateB64); } catch {}
               console.log('[Refund] Template built + persisted. lockTime =', String(_rNow + BigInt(canon.timeoutN || 0)), '— awaiting buyer co-signature.');
-              Alert.alert('Templates Copied', 'Send both to the buyer to co-sign.\n\nYour ' + (immediateSendAmount / 1e8) + ' KAS has NOT been sent. It goes out only after they return their signatures.');
+              Alert.alert('Refund Template Copied', 'Send this to the buyer to co-sign.\n\nYour ' + (immediateSendAmount / 1e8) + ' KAS has NOT been sent. It goes out only after the buyer returns their signature.');
             } catch (e) { console.warn('[Refund] Prepare/build failed — nothing sent:', e); Alert.alert('Error', 'Refund prepare failed. Nothing was sent.'); }
           }
 
@@ -3849,13 +3831,8 @@ const handleAcceptFromInbox = async (agreement: any) => {
                               setIsLoading(true);
                               const _w = await loadMainWallet();
                               if (!_w?.privKeyHex) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
-                              const _pp = v.split('|');
-                              if (_pp.length !== 2) { Alert.alert('Error', 'Expected two templates (refund|kill). Ask the seller to re-copy.'); setIsLoading(false); return; }
-                              const _tmpl = parseTemplate(_pp[0]);
-                              const _killT = parseTemplate(_pp[1]);
-                              if (!_tmpl || !_killT) { Alert.alert('Error', 'Invalid template format'); setIsLoading(false); return; }
-                              // Both must spend the SAME utxo, or the kill would not kill this refund.
-                              if (_tmpl.u[0]?.t !== _killT.u[0]?.t) { Alert.alert('Rejected', 'The refund and kill templates spend different UTXOs. Do not proceed.'); setIsLoading(false); return; }
+                              const _tmpl = parseTemplate(v);
+                              if (!_tmpl) { Alert.alert('Error', 'Invalid template format'); setIsLoading(false); return; }
                               const _net = contract.frostData?.network || 'testnet-10';
                               const _api = _net.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
                               const _dag = await fetch(_api + '/info/blockdag');
@@ -3880,26 +3857,9 @@ const handleAcceptFromInbox = async (agreement: any) => {
                                 Alert.alert('Refund Rejected', _res.error + '\n\nDo not proceed with this trade.');
                                 setIsLoading(false); return;
                               }
-                              // The kill tx can only move A from escrow back to escrow, so signing
-                              // it costs the buyer nothing — and without it the refund would outlive
-                              // their payment.
-                              const _killRes = cosignKillTemplate({
-                                privateKeyHex: _w.privKeyHex,
-                                myPubkey: contract.buyerPubkey || '',
-                                funderPubkey: contract.sellerPubkey || '',
-                                counter: contract.frostData?.frostCounter || 0,
-                                template: _killT,
-                                expected: { predictedTxId: _killT.u[0]?.t || '', escrowScript: _esc },
-                              });
-                              if ('error' in _killRes) {
-                                console.warn('[Kill-Cosign] REJECTED:', _killRes.error);
-                                Alert.alert('Kill Tx Rejected', _killRes.error + '\n\nDo not proceed with this trade.');
-                                setIsLoading(false); return;
-                              }
-                              try { await Clipboard.setStringAsync(_res.responseB64 + '|' + _killRes.responseB64); } catch {}
+                              try { await Clipboard.setStringAsync(_res.responseB64); } catch {}
                               console.log('[Refund-Cosign] Signed. lockTime =', _tmpl.lt, 'now =', String(_now), 'N =', String(_N));
-                              console.log('[Kill-Cosign] Signed. kills utxo', (_killT.u[0]?.t || '').slice(0, 16) + ':0');
-                              Alert.alert('Both Co-signed', 'Signatures copied. Send them back to the seller — they will fund the escrow, then send you the kill tx.');
+                              Alert.alert('Refund Co-signed', 'Signature copied. Send it back to the seller — they will fund the escrow once they have it.');
                             } catch (e) {
                               console.error('[Refund-Cosign] Error:', e);
                               Alert.alert('Error', e instanceof Error ? e.message : 'Co-sign failed');
