@@ -1401,7 +1401,13 @@ function parseClipboard(raw: string): {
             if (sellerBal < expectedSeller * 0.95) continue;
             // 5e PRE-FUND GUARD: refuse if seller's reclaim window has passed
             try {
-              const _N = BigInt(entry.timeoutN || 0);
+              // L1 truth: escrow UTXO != seller funding output => refund input spent => refund dead.
+              const _crKj = await SecureStore.getItemAsync('kv_kill_' + entry.agrId);
+              const _crK = _crKj ? JSON.parse(_crKj) : null;
+              const _crEsc = eUtxos[0]?.outpoint?.transactionId || '';
+              const _crDead = !!(_crK && _crK.predictedTxId && _crEsc && _crEsc !== _crK.predictedTxId);
+              if (_crDead) console.log('[5e-Guard] Crash-recovery: refund input spent — refund dead, window moot', entry.agrId.slice(0,12));
+              const _N = _crDead ? 0n : BigInt(entry.timeoutN || 0);
               const _fundDAA = BigInt(eUtxos[0]?.utxoEntry?.blockDaaScore || 0);
               if (_N > 0n && _fundDAA > 0n) {
                 const _dagR = await fetch(apiBase + '/info/blockdag');
@@ -1536,7 +1542,13 @@ function parseClipboard(raw: string): {
             }
             // 5e PRE-FUND GUARD: refuse if seller's reclaim window has passed
             try {
-              const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN));
+              // L1 truth: escrow UTXO != seller funding output => refund input spent => refund dead.
+              const _fpKj = await SecureStore.getItemAsync('kv_kill_' + contract.agreementId);
+              const _fpK = _fpKj ? JSON.parse(_fpKj) : null;
+              const _fpEsc = frostUtxos[0]?.outpoint?.transactionId || '';
+              const _fpDead = !!(_fpK && _fpK.predictedTxId && _fpEsc && _fpEsc !== _fpK.predictedTxId);
+              if (_fpDead) console.log('[5e-Guard] FROST-Poll: refund input spent — refund dead, window moot');
+              const _N = _fpDead ? 0n : BigInt(Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN));
               const _fundDAA = BigInt(frostUtxos[0]?.utxoEntry?.blockDaaScore || 0);
               if (_N > 0n && _fundDAA > 0n) {
                 const _dagR = await fetch(apiBase + '/info/blockdag');

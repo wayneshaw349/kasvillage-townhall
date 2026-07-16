@@ -106,7 +106,6 @@ import {// Types
   // High-level
   exchangePubkeys,
   createFrostAgreement,
-  generateFrostNonce,
   computeFrostPartialS,
   aggregateFrostSig,
   cleanup as cleanupFrost, aggregateToAddress, completeFrost2Round} from './frost_complete';
@@ -114,7 +113,7 @@ import { validateEscrowDestination } from './frost_complete';
 import { sendPushToCounterparty } from './push_notifications';
 
 // REST API for real L1 transactions
-import { sendKaspaViaRest } from './kaspa_rest_tx';
+import { sendKaspaViaRest, broadcastPreparedTx } from './kaspa_rest_tx';
 import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
 import { isPureP2PK, canonicalCommit, verifyCommitment, releaseExpiredCommitments, releaseCommitment, markLocked, isAlreadyCommitted, syncLedger } from './utxo_ledger';
 import { generateProposal, parseProposal, verifyProposalForMe, parseReleaseKey } from './kv_proposal';
@@ -150,6 +149,13 @@ import {
   verificationCode as computeVerificationCode,
   computeAgrId,
   buildTxBody,
+  buildSellerRefund,
+  buildKillTx,
+  cosignRefundTemplate,
+  verifyRefundTemplate,
+  cosignKillTemplate,
+  verifyKillTemplate,
+  p2pkScript,
   buildReleaseTemplate as buildReleaseTemplateFn,
   computeReleaseOutputs,
   ReleaseMode,
@@ -211,6 +217,13 @@ async function clearAgreementSession(): Promise<void> {
   try { await AsyncStorage.removeItem(AGR_SESSION_KEY); } catch {}
 }
 
+// Kaspa targets 10 blocks/sec, so DAA advances ~10 per second — NOT 1.
+// Every timeout is expressed in DAA, so minutes must convert at 600, not 60.
+const DAA_PER_MIN = 600;
+// In-flight guard for the buyer's auto-send. Module scope on purpose: it must survive
+// the 10s poll re-firing, but NOT an app restart — after a restart the escrow's utxo
+// count is the honest answer, and a durable flag could only lie.
+const _sendInFlight = { current: new Set() };
 const FROST_ACTIVE_KEY = 'kv_frost_active_list';
 
 interface FrostActiveEntry {
@@ -224,6 +237,7 @@ interface FrostActiveEntry {
   sellerPubkey: string;
   description: string;
   createdAt: number;
+  timeoutN?: number;
 }
 
 async function addToFrostList(entry: FrostActiveEntry): Promise<void> {
@@ -359,6 +373,7 @@ interface Contract {
   itemPriceKas: number;
   sellerCommitmentKas: number;
   timeoutMinutes?: number;
+  timeoutN?: number;
   stipulations: string;
   itemDescription: string;
   expiryHours: number;
@@ -1383,7 +1398,35 @@ function parseClipboard(raw: string): {
             const eUtxos = await eUtxoResp.json();
             if (!Array.isArray(eUtxos) || eUtxos.length !== 1) continue; // exactly 1 UTXO = seller sent, buyer hasn't
             const sellerBal = Number(eUtxos[0]?.utxoEntry?.amount || '0');
-            if (sellerBal < expectedSeller * 0.95) continue; // seller's amount �5%
+            if (sellerBal < expectedSeller * 0.95) continue;
+            // 5e PRE-FUND GUARD: refuse if seller's reclaim window has passed
+            try {
+              const _N = BigInt(entry.timeoutN || 0);
+              const _fundDAA = BigInt(eUtxos[0]?.utxoEntry?.blockDaaScore || 0);
+              if (_N > 0n && _fundDAA > 0n) {
+                const _dagR = await fetch(apiBase + '/info/blockdag');
+                const _dag = _dagR.ok ? await _dagR.json() : null;
+                const _now = BigInt(_dag?.virtualDaaScore || 0);
+                if (_now > 0n && _now >= _fundDAA + _N) {
+                  console.warn('[5e-Guard] Crash-recovery BLOCKED', entry.agrId.slice(0,12), 'now=', String(_now), 'fund=', String(_fundDAA), 'N=', String(_N));
+                  continue;
+                }
+                console.log('[5e-Guard] Crash-recovery OK', entry.agrId.slice(0,12), 'remaining DAA=', String(_fundDAA + _N - _now));
+              }
+            } catch (e) { console.warn('[5e-Guard] Crash-recovery check failed — NOT funding:', e); continue; }
+            // KILL-TX GATE (crash-recovery) — same rule: no kill tx, no funding.
+            try {
+              const _kj = await SecureStore.getItemAsync('kv_kill_' + entry.agrId);
+              if (!_kj) { console.warn('[Kill-Gate] Crash-recovery: no kill tx — NOT funding', entry.agrId.slice(0, 12)); continue; }
+              const _k = JSON.parse(_kj);
+              const _eTxId = eUtxos[0]?.outpoint?.transactionId || '';
+              if (_eTxId === _k.predictedTxId) {
+                const _kr = await fetch(apiBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_k.txBody) });
+                if (!_kr.ok) { console.warn('[Kill-Gate] Crash-recovery: kill broadcast failed — NOT funding'); continue; }
+                console.log('[Kill-Gate] Crash-recovery: kill broadcast — will fund next cycle');
+                continue;
+              }
+            } catch (e) { console.warn('[Kill-Gate] Crash-recovery check failed — NOT funding:', e); continue; } // seller's amount �5%
             // Check we haven't already sent (idempotent guard)
             const sentKey = 'kv_frost_poll_sent_' + entry.agrId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
@@ -1491,13 +1534,46 @@ function parseClipboard(raw: string): {
               console.log('[FROST-Poll] Buyer send BLOCKED — expected 1 seller UTXO ~', otherExpected/1e8, 'but saw', _amts.map(a=>a/1e8), '(residue?) — not sending');
               return;
             }
+            // 5e PRE-FUND GUARD: refuse if seller's reclaim window has passed
+            try {
+              const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN));
+              const _fundDAA = BigInt(frostUtxos[0]?.utxoEntry?.blockDaaScore || 0);
+              if (_N > 0n && _fundDAA > 0n) {
+                const _dagR = await fetch(apiBase + '/info/blockdag');
+                const _dag = _dagR.ok ? await _dagR.json() : null;
+                const _now = BigInt(_dag?.virtualDaaScore || 0);
+                if (_now > 0n && _now >= _fundDAA + _N) {
+                  console.warn('[5e-Guard] FROST-Poll BLOCKED — timeout passed. now=', String(_now), 'fund=', String(_fundDAA), 'N=', String(_N));
+                  if (!cancelled) Alert.alert('Timeout passed', 'The seller can now reclaim their collateral. Not sending — start a new agreement.');
+                  return;
+                }
+                console.log('[5e-Guard] FROST-Poll OK — remaining DAA=', String(_fundDAA + _N - _now));
+              }
+            } catch (e) { console.warn('[5e-Guard] FROST-Poll check failed — NOT funding:', e); return; }
+            // KILL-TX GATE — the buyer never funds while the seller's refund can still fire.
+            // This is the enforcement; the 5d UI check is only a courtesy.
+            try {
+              const _kj = await SecureStore.getItemAsync('kv_kill_' + contract.agreementId);
+              if (!_kj) { console.warn('[Kill-Gate] No kill tx stored — NOT funding. Ask the seller to send it.'); return; }
+              const _k = JSON.parse(_kj);
+              const _escrowTxId = frostUtxos[0]?.outpoint?.transactionId || '';
+              if (_escrowTxId === _k.predictedTxId) {
+                console.log('[Kill-Gate] Escrow still holds the seller-funded UTXO — broadcasting kill tx first');
+                const _kr = await fetch(apiBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_k.txBody) });
+                if (!_kr.ok) { const _t = await _kr.text(); console.warn('[Kill-Gate] Kill broadcast failed — NOT funding:', _t.slice(0, 200)); return; }
+                const _kres = await _kr.json();
+                console.log('[Kill-Gate] Kill broadcast:', _kres.transactionId, '— refund is now dead. Funding on the next poll.');
+                return;
+              }
+              console.log('[Kill-Gate] Seller UTXO already consumed — refund dead, safe to fund');
+            } catch (e) { console.warn('[Kill-Gate] Check failed — NOT funding:', e); return; }
             const sentKey = 'kv_frost_poll_sent_' + contract.agreementId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
-            if (!alreadySent && !cancelled) {
+            if (!_sendInFlight.current.has(contract.agreementId || '') && !cancelled) {
               try {
                 const wallet = await loadMainWallet();
                 if (!wallet || cancelled) return;
-                console.log('[FROST-Poll] Counterparty sent! Auto-sending', myExpected / 1e8, 'KASPA');
+                _sendInFlight.current.add(contract.agreementId || ''); console.log('[FROST-Poll] Counterparty sent! Auto-sending', myExpected / 1e8, 'KASPA');
                 const sendResult = await sendKaspaViaRest({
                   senderAddress: wallet.address,
                   recipientAddress: contract.multisigAddress || '',
@@ -1515,9 +1591,9 @@ function parseClipboard(raw: string): {
                   // Merkle proof
                   uploadPerTxProof({ txId: sendResult.txId || '', txIndex: 0, amountSompi: BigInt(myExpected), scriptPubKey: '', daaScore: 0, txType: 'collateral', balanceAfter: 0, agreementId: contract.agreementId, uploadFn: async (data, tags) => { const r = await uploadToIrys(data, tags); return r.txId || ''; }, network: 'testnet' }).catch(() => {});
                 } else {
-                  console.warn('[FROST-Poll] Auto-send failed:', sendResult.error);
+                  _sendInFlight.current.delete(contract.agreementId || ''); console.warn('[FROST-Poll] Auto-send failed:', sendResult.error);
                 }
-              } catch (e) { console.warn('[FROST-Poll] Auto-send error:', e); }
+              } catch (e) { _sendInFlight.current.delete(contract.agreementId || ''); console.warn('[FROST-Poll] Auto-send error:', e); }
             }
           }
         } else {
@@ -1864,6 +1940,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
               daaScore: currentDaa,
               buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
               sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
+              timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN),
             } as any);
             // Reduce spendable for proposer (input cap)
             console.log('[Neighbor] Proposal sent ? waiting for counterparty to accept');
@@ -1891,6 +1968,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
                 buyerAmount: contract.itemPriceKas, sellerAmount: contract.sellerCommitmentKas,
                 buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '',
                 description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''), createdAt: Date.now(),
+                timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN),
               });
               if (proposeResult?.arweaveTxId) {
                 console.log('[Neighbor] Arweave TX ID:', proposeResult.arweaveTxId);
@@ -2657,6 +2735,12 @@ const handleAcceptFromInbox = async (agreement: any) => {
               }
             } catch {}
           }
+          // 2b GATE: refund is mandatory — never fund without a co-signed reclaim path
+          if (immediateSendAmount > 0 && !(Number(canon.timeoutN) > 0)) {
+            console.warn('[Refund] BLOCKED — proposal carries no timeout N. Not funding.');
+            Alert.alert('Cannot Accept', 'This proposal has no refund timeout, so your collateral would have no reclaim path. Ask the buyer for a fresh proposal.');
+            setIsLoading(false); setAcceptingId(null); return;
+          }
           if (immediateSendAmount > 0 && wallet.privKeyHex && !_skipSend) {
             const frostSentKey = 'kv_frost_sent_' + agrId;
             const alreadyFrostSent = await AsyncStorage.getItem(frostSentKey);
@@ -2678,8 +2762,9 @@ const handleAcceptFromInbox = async (agreement: any) => {
               }
             }
           } catch (e) { console.warn('[L1-Guard] Balance check failed, proceeding:', e); }
-        } else try {
-              console.log('[Neighbor] Seller auto-sending', immediateSendAmount / 1e8, 'KASPA to FROST');
+        }
+        try {
+              console.log('[Neighbor] Seller preparing (freeze, no broadcast)', immediateSendAmount / 1e8, 'KASPA to FROST');
               // sendKaspaViaRest is already imported/available in this scope
               const txResult = await sendKaspaViaRest({
                 senderAddress: wallet.address,
@@ -2687,11 +2772,72 @@ const handleAcceptFromInbox = async (agreement: any) => {
                 amountSompi: BigInt(immediateSendAmount),
                 privateKeyHex: wallet.privKeyHex,
                 network: wallet.network || 'testnet-10',
-                payload: await (async () => { try { const nonce = generateFrostNonce({ frostAddress: frostData, recipientAddress: frostData.address, amountSompi: BigInt(Math.floor((buyerKas + sellerKas) * 1e8)), privateKeyHex: wallet.privKeyHex }); await SecureStore.setItemAsync('kv_frost_nonce_' + agrId, JSON.stringify({ ...nonce, createdAt: Date.now() })); console.log('[FROST-R] Nonce saved (NOT in payload):', nonce.R_hex.slice(0,20)); try { postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: nonce.R_hex }).then(() => console.log('[FROST-R] R posted to TownHall')).catch(() => {}); } catch {} return ''; } catch(e) { console.warn('[FROST-R] Nonce gen failed:', e); return ''; } })(),
+                prepareOnly: true,
+                // [NONCE-STRIP] dead nonce generator removed from this path.
+                // Its k was derived from {frost, aggPubkey, to, amount} with no sighash,
+                // so two spends of the same escrow with different outputs would share k
+                // and leak the key by subtraction. Nothing signed with it — the closure
+                // always returned '' anyway. Use generateNonce() from the canonical
+                // steps module (random k per call) for any signing.
+                payload: '',
               });
-              console.log('[Neighbor] Seller collateral TX:', txResult.txId);
-              // DISABLED: await AsyncStorage.setItem('kv_frost_sent_' + agrId, String(Date.now())); // L1 is source of truth
-            } catch (e) { console.warn('[Neighbor] Seller auto-send failed (poll will retry):', e); }
+              if (!txResult.success || !txResult.predictedTxId || !txResult.preparedTx) {
+                console.warn('[Refund] Prepare failed:', txResult.error);
+                Alert.alert('Prepare Failed', txResult.error || 'Could not freeze the funding transaction. Nothing was sent.');
+                setIsLoading(false); setAcceptingId(null); return;
+              }
+              console.log('[Refund] Funding tx FROZEN. predicted txid:', txResult.predictedTxId, '| escrow =', txResult.predictedTxId + ':0');
+              // lockTime = now + N. The funding tx is not broadcast yet, so no fundDAA exists.
+              const _rDag = await fetch(_sApi + '/info/blockdag');
+              const _rNow = BigInt((_rDag.ok ? await _rDag.json() : {})?.virtualDaaScore || 0);
+              if (_rNow === 0n) { Alert.alert('Error', 'Could not read the current DAA score. Nothing was sent.'); setIsLoading(false); setAcceptingId(null); return; }
+              const _escrowScript = p2pkScript((frostData.aggregatedPubkey || '').slice(2));
+              const _refund = buildSellerRefund({
+                sellerPrivKeyHex: wallet.privKeyHex,
+                sellerPubkey: myPubkey,
+                buyerPubkey: proposerPubkey,
+                counter: frostData.frostCounter || 0,
+                predictedEscrowUtxo: { txId: txResult.predictedTxId, index: 0, amount: String(immediateSendAmount), scriptPubKey: _escrowScript },
+                fundDAA: _rNow,
+                N: BigInt(canon.timeoutN || 0),
+                agrId,
+              });
+              // The kill tx: spends the SAME predicted UTXO A, pays it back to the escrow.
+              // Handing this to the buyer is what makes the refund safe to hold — the moment
+              // they fund, they broadcast this, A is consumed, and the refund dies. Without
+              // it the refund would stay live even after the buyer paid, letting a seller
+              // ship bricks, wait N, and walk with their collateral.
+              const _kill = buildKillTx({
+                sellerPrivKeyHex: wallet.privKeyHex,
+                sellerPubkey: myPubkey,
+                buyerPubkey: proposerPubkey,
+                counter: frostData.frostCounter || 0,
+                predictedEscrowUtxo: { txId: txResult.predictedTxId, index: 0, amount: String(immediateSendAmount), scriptPubKey: _escrowScript },
+                agrId,
+              });
+              // DURABLE FIRST — this must survive app death; never React state.
+              await SecureStore.setItemAsync('kv_refund_pending_' + agrId, JSON.stringify({
+                preparedTx: txResult.preparedTx,
+                predictedTxId: txResult.predictedTxId,
+                template: _refund.template,
+                nonce: { k: _refund.nonce.k.toString(16), d_tweaked: _refund.nonce.d_tweaked.toString(16), R_hex: _refund.nonce.R_hex },
+                killTemplate: _kill.template,
+                killNonce: { k: _kill.nonce.k.toString(16), d_tweaked: _kill.nonce.d_tweaked.toString(16), R_hex: _kill.nonce.R_hex },
+                currentDAA: _rNow.toString(),
+                N: String(canon.timeoutN || 0),
+                amountSompi: String(immediateSendAmount),
+                escrowScript: _escrowScript,
+                counter: frostData.frostCounter || 0,
+                buyerPubkey: proposerPubkey,
+                sellerPubkey: myPubkey,
+                frostAddr: frostData.address,
+                network: wallet.network || 'testnet-10',
+                createdAt: Date.now(),
+              }));
+              try { await Clipboard.setStringAsync(_refund.templateB64 + '|' + _kill.templateB64); } catch {}
+              console.log('[Refund] Template built + persisted. lockTime =', String(_rNow + BigInt(canon.timeoutN || 0)), '— awaiting buyer co-signature.');
+              Alert.alert('Templates Copied', 'Send both to the buyer to co-sign.\n\nYour ' + (immediateSendAmount / 1e8) + ' KAS has NOT been sent. It goes out only after they return their signatures.');
+            } catch (e) { console.warn('[Refund] Prepare/build failed — nothing sent:', e); Alert.alert('Error', 'Refund prepare failed. Nothing was sent.'); }
           }
 
           setContract(prev => ({
@@ -3025,205 +3171,110 @@ const handleAcceptFromInbox = async (agreement: any) => {
             {/* Step 1: Create */}
             {step === 1 && !agreementType && (
               <View>
-                {/* RESUME AGREEMENT — pick role + paste AGR ID */}
+                {/* RESUME AGREEMENT — paste the signed proposal; role, FROST address and step are derived */}
                 <View style={{ marginBottom: 12, backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#93c5fd' }}>
-                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e40af', marginBottom: 8 }}>Resume Agreement</Text>
-
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e40af', marginBottom: 4 }}>Resume Agreement</Text>
+                  <Text style={{ fontSize: 10, color: '#4338ca', marginBottom: 8 }}>Paste the original proposal. Your role, the FROST address, the timeout and the current step all come from it — nothing to choose.</Text>
                   <TextInput
-                    style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#93c5fd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, fontFamily: 'monospace', color: '#1c1917', marginBottom: 10 }}
-                    placeholder="Paste AGR_ID here..."
+                    style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#93c5fd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 11, fontFamily: 'monospace', color: '#1c1917', marginBottom: 10, minHeight: 60 }}
+                    placeholder="Paste KV|AGR_...|... proposal here"
                     placeholderTextColor="#a8a29e"
                     value={manualAgrId}
                     onChangeText={setManualAgrId}
+                    multiline
                     autoCapitalize="none"
                     autoCorrect={false}
                   />
-                                    <TouchableOpacity onPress={() => { collateralRef.current = !collateralRef.current; setResumeAsCollateral(!resumeAsCollateral); }} style={{ marginBottom: 8, padding: 8, borderRadius: 8, backgroundColor: resumeAsCollateral ? '#ecfdf5' : '#f3f4f6', borderWidth: 2, borderColor: resumeAsCollateral ? '#059669' : '#d1d5db' }}>
+                  <TouchableOpacity onPress={() => { collateralRef.current = !collateralRef.current; setResumeAsCollateral(!resumeAsCollateral); }} style={{ marginBottom: 8, padding: 8, borderRadius: 8, backgroundColor: resumeAsCollateral ? '#ecfdf5' : '#f3f4f6', borderWidth: 2, borderColor: resumeAsCollateral ? '#059669' : '#d1d5db' }}>
                     <Text style={{ fontSize: 12, textAlign: 'center', fontWeight: 'bold', color: resumeAsCollateral ? '#059669' : '#888' }}>{resumeAsCollateral ? '\u2705 Collateral Agreement' : 'Tap for Collateral Mode'}</Text>
                   </TouchableOpacity>
-<View style={{ flexDirection: 'row', gap: 8 }}>
-                    <TouchableOpacity
-                      style={{ flex: 1, backgroundColor: '#059669', borderRadius: 8, padding: 12, alignItems: 'center' }}
-                      disabled={!manualAgrId || manualAgrId.length < 6}
-                      onPress={async () => {
-                        if (!manualAgrId || manualAgrId.length < 6) return;
-                        setIsLoading(true);
+                  <TouchableOpacity
+                    style={{ backgroundColor: (isLoading || !manualAgrId || manualAgrId.indexOf('KV|') < 0) ? '#9ca3af' : '#2563eb', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                    disabled={isLoading || !manualAgrId || manualAgrId.indexOf('KV|') < 0}
+                    onPress={async () => {
+                      const _raw = (manualAgrId || '').trim();
+                      const _kvStart = _raw.indexOf('KV|');
+                      if (_kvStart < 0) { Alert.alert('Invalid', 'Paste the full KV proposal, not just the AGR ID.'); return; }
+                      setIsLoading(true);
+                      try {
+                        const _wallet = await loadMainWallet();
+                        if (!_wallet?.privKeyHex) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
+                        const _myPk = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(_wallet.privKeyHex));
+                        const _kvClean = _raw.substring(_kvStart).split('\n')[0].replace(/\s*Sent from my iPhone.*$/i, '').trim();
+                        const _p = parseProposal(_kvClean);
+                        if (!_p) { Alert.alert('Invalid', 'Could not parse that proposal.'); setIsLoading(false); return; }
+                        // Same gate as accept: the buyer's signature over the body is the only integrity check.
+                        if (_p.valid === false) { Alert.alert('Proposal Rejected', _p.error || 'Signature invalid — do not proceed.'); setIsLoading(false); return; }
+                        const _bPk = _p.buyerPubkey || '';
+                        const _sPk = _p.sellerPubkey || '';
+                        // Role is DERIVED from the paste — never chosen.
+                        let _role: 'buyer' | 'seller';
+                        if (_myPk === _bPk) _role = 'buyer';
+                        else if (_myPk === _sPk) _role = 'seller';
+                        else { Alert.alert('Not Your Agreement', 'Neither party in this proposal matches your wallet.'); setIsLoading(false); return; }
+                        const _net = _p.network || 'testnet-10';
+                        // Counter comes from the paste — no 0..25 scan, no Arweave lookup.
+                        const _fd = deriveFrostAddressLocal({ pubkeyA: _bPk, pubkeyB: _sPk, network: _net as any, agreementId: _p.agrId, frostCounter: _p.frostCounter });
+                        const _api = _net.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+                        const _bAmt = Number(_p.buyerAmountSompi || 0);
+                        const _sAmt = Number(_p.sellerAmountSompi || 0);
+                        // Step is DERIVED from the escrow UTXO set.
+                        let _step = 3;
                         try {
-                          const wallet = await loadMainWallet();
-                          if (!wallet) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
-                          const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
-                          const dp = wallet.address.split(':')[1];
-                          const d5 = Array.from(dp).map((c) => CHARSET.indexOf(c));
-                          const rb = []; let bf = 0, bi = 0;
-                          for (const d of d5) { bf = (bf << 5) | d; bi += 5; while (bi >= 8) { bi -= 8; rb.push((bf >> bi) & 0xff); } }
-                          const myPk = rb[0] === 0x00 && rb.length >= 33 ? ((await SecureStore.getItemAsync('kv_public_key')) || ('02' + rb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join(''))) : '';
-                          // Look up from Arweave
-                          const all = await queryAgreementsFromArweave({ network: 'testnet-10' });
-                          const match = all.find((a) => (a.agreementId || a.agreement_id) === manualAgrId);
-                          if (!match) { Alert.alert('Not Found', 'AGR ID not found on Arweave'); setIsLoading(false); return; }
-                          let frostAddr = match.frostAddress || '';
-                          // [Resume-FrostFix] If frostAddress missing, query Arweave tags directly
-                          if (!frostAddr || frostAddr.length < 20) {
-                            try {
-                              const _fGql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + manualAgrId + '"] }], sort: HEIGHT_DESC) { edges { node { tags { name value } } } } }';
-                              const _fResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: _fGql }) });
-                              const _fJson = await _fResp.json();
-                              for (const _edge of (_fJson?.data?.transactions?.edges || [])) {
-                                const _tags = {};
-                                (_edge?.node?.tags || []).forEach(t => { _tags[t.name] = t.value; });
-                                if (_tags['KV-FrostAddress'] && _tags['KV-FrostAddress'].length > 20) {
-                                  frostAddr = _tags['KV-FrostAddress'];
-                                  console.log('[Resume-FrostFix] Got FROST addr from Arweave tag:', frostAddr.slice(0, 30));
-                                  break;
-                                }
-                              }
-                            } catch (e) { console.warn('[Resume-FrostFix] Arweave query failed:', e); }
-                          }
-                          if (!frostAddr || frostAddr.length < 20) {
-                            // Derive FROST address from pubkeys (both available from Arweave)
-                            try {
-                              const _bPk = match.pubkey || match.partyA?.pubkey || '';
-                              const _cPk = match.counterpartyPubkey || match.KVCounterparty || '';
-                              if (_bPk && _cPk) {
-                                for (let _dc = 0; _dc < 25; _dc++) {
-                                  const _da = deriveAggregateKey(_bPk, _cPk, _dc);
-                                  const _dAddr = deriveAddress(_da.aggXOnly, 'testnet-10');
-                                  const _dApi = wallet.network?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-                                  try {
-                                    const _dBr = await fetch(_dApi + '/addresses/' + _dAddr + '/balance');
-                                    if (_dBr.ok) {
-                                      const _dBal = Number((await _dBr.json()).balance || '0');
-                                      if (_dBal > 0) { frostAddr = _dAddr; console.log('[Resume-Derive] Found funded FROST at counter', _dc, ':', _dAddr.slice(0, 30), _dBal / 1e8, 'KAS'); break; }
-                                    }
-                                  } catch {}
-                                }
-                              }
-                            } catch (e) { console.warn('[Resume-Derive] Failed:', e); }
-                            if (!frostAddr || frostAddr.length < 20) {
-                              Alert.alert('Missing FROST Address', 'Could not find or derive FROST address. Check pubkeys and try again.');
-                              setIsLoading(false); return;
-                            }
-                          }
-                          const buyerAmt = (match.buyerAmountSompi || 0) / 1e8;
-                          const sellerAmt = (match.sellerAmountSompi || 0) / 1e8;
-                          const proposerPk = match.pubkey || match.partyA?.pubkey || '';
-                          const counterPk = match.counterpartyPubkey || '';
-                          const iAmProposer = proposerPk.startsWith(myPk.slice(0, 16));
-                          // Check L1 balance for step
-                          let derivedStep = 3;
-                          if (frostAddr && frostAddr.length > 20) {
-                            try {
-                              const api = wallet.network?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-                              const br = await fetch(api + '/addresses/' + frostAddr + '/balance');
-                              if (br.ok) { const bd = await br.json(); if (Number(bd.balance || '0') / 1e8 >= buyerAmt + sellerAmt && buyerAmt + sellerAmt > 0) derivedStep = 4; }
-                            } catch {}
-                          }
-                          // ROLE = BUYER
-                          setRole('buyer');
-                          setAgreementType(collateralRef.current ? 'simple' : 'trade');
-                          if (collateralRef.current) { setReleaseMode('cancel'); console.log('[Resume] Collateral mode: cancel (2 outputs)'); }
-                          collateralRef.current = false;
-                          setContract({ agreementId: manualAgrId, multisigAddress: frostAddr, itemPriceKas: buyerAmt, sellerCommitmentKas: sellerAmt, buyerPubkey: iAmProposer ? myPk : proposerPk, sellerPubkey: iAmProposer ? counterPk : myPk, itemDescription: match.description || manualAgrId.slice(0,12), stipulations: '', expiryHours: 24, frostData: frostAddr ? (() => { let _fc = 0; try { for (let _i = 0; _i < 25; _i++) { const _a = deriveAggregateKey(iAmProposer ? myPk : proposerPk, iAmProposer ? counterPk : myPk, _i); const _ad = deriveAddress(_a.aggXOnly, 'testnet-10'); if (_ad === frostAddr) { _fc = _i; console.log('[Resume] Counter recovered:', _i); break; } } } catch(e) { console.warn('[Resume] Counter scan failed:', e); } return { address: frostAddr, network: 'testnet-10', frostCounter: _fc }; })() : undefined });
-                          if (derivedStep >= 4) { setBuyerLocked(true); setSellerLocked(true); }
-                          setStep(derivedStep);
-                          console.log('[Resume] Loaded as BUYER, step:', derivedStep, 'frost:', frostAddr?.slice(0,25));
-                        } catch (e) { Alert.alert('Error', String(e)); }
-                        finally { setIsLoading(false); }
-                      }}
-                    >
-                      {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{'\u{1F6D2} ' + (resumeAsCollateral ? 'Party A' : 'Load as Buyer') + '}'}</Text>}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={{ flex: 1, backgroundColor: '#2563eb', borderRadius: 8, padding: 12, alignItems: 'center' }}
-                      disabled={!manualAgrId || manualAgrId.length < 6}
-                      onPress={async () => {
-                        if (!manualAgrId || manualAgrId.length < 6) return;
-                        setIsLoading(true);
-                        try {
-                          const wallet = await loadMainWallet();
-                          if (!wallet) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
-                          const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
-                          const dp = wallet.address.split(':')[1];
-                          const d5 = Array.from(dp).map((c) => CHARSET.indexOf(c));
-                          const rb = []; let bf = 0, bi = 0;
-                          for (const d of d5) { bf = (bf << 5) | d; bi += 5; while (bi >= 8) { bi -= 8; rb.push((bf >> bi) & 0xff); } }
-                          const myPk = rb[0] === 0x00 && rb.length >= 33 ? ((await SecureStore.getItemAsync('kv_public_key')) || ('02' + rb.slice(1, 33).map((b) => b.toString(16).padStart(2, '0')).join(''))) : '';
-                          const all = await queryAgreementsFromArweave({ network: 'testnet-10' });
-                          const match = all.find((a) => (a.agreementId || a.agreement_id) === manualAgrId);
-                          if (!match) { Alert.alert('Not Found', 'AGR ID not found on Arweave'); setIsLoading(false); return; }
-                          let frostAddr = match.frostAddress || '';
-                          // [Resume-FrostFix] If frostAddress missing, query Arweave tags directly
-                          if (!frostAddr || frostAddr.length < 20) {
-                            try {
-                              const _fGql = '{ transactions(first: 5, tags: [{ name: "KV-AgreementId", values: ["' + manualAgrId + '"] }], sort: HEIGHT_DESC) { edges { node { tags { name value } } } } }';
-                              const _fResp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: _fGql }) });
-                              const _fJson = await _fResp.json();
-                              for (const _edge of (_fJson?.data?.transactions?.edges || [])) {
-                                const _tags = {};
-                                (_edge?.node?.tags || []).forEach(t => { _tags[t.name] = t.value; });
-                                if (_tags['KV-FrostAddress'] && _tags['KV-FrostAddress'].length > 20) {
-                                  frostAddr = _tags['KV-FrostAddress'];
-                                  console.log('[Resume-FrostFix] Got FROST addr from Arweave tag:', frostAddr.slice(0, 30));
-                                  break;
-                                }
-                              }
-                            } catch (e) { console.warn('[Resume-FrostFix] Arweave query failed:', e); }
-                          }
-                          if (!frostAddr || frostAddr.length < 20) {
-                            // Derive FROST address from pubkeys (both available from Arweave)
-                            try {
-                              const _bPk = match.pubkey || match.partyA?.pubkey || '';
-                              const _cPk = match.counterpartyPubkey || match.KVCounterparty || '';
-                              if (_bPk && _cPk) {
-                                for (let _dc = 0; _dc < 25; _dc++) {
-                                  const _da = deriveAggregateKey(_bPk, _cPk, _dc);
-                                  const _dAddr = deriveAddress(_da.aggXOnly, 'testnet-10');
-                                  const _dApi = wallet.network?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-                                  try {
-                                    const _dBr = await fetch(_dApi + '/addresses/' + _dAddr + '/balance');
-                                    if (_dBr.ok) {
-                                      const _dBal = Number((await _dBr.json()).balance || '0');
-                                      if (_dBal > 0) { frostAddr = _dAddr; console.log('[Resume-Derive] Found funded FROST at counter', _dc, ':', _dAddr.slice(0, 30), _dBal / 1e8, 'KAS'); break; }
-                                    }
-                                  } catch {}
-                                }
-                              }
-                            } catch (e) { console.warn('[Resume-Derive] Failed:', e); }
-                            if (!frostAddr || frostAddr.length < 20) {
-                              Alert.alert('Missing FROST Address', 'Could not find or derive FROST address. Check pubkeys and try again.');
-                              setIsLoading(false); return;
-                            }
-                          }
-                          const buyerAmt = (match.buyerAmountSompi || 0) / 1e8;
-                          const sellerAmt = (match.sellerAmountSompi || 0) / 1e8;
-                          const proposerPk = match.pubkey || match.partyA?.pubkey || '';
-                          const counterPk = match.counterpartyPubkey || '';
-                          const iAmProposer = proposerPk.startsWith(myPk.slice(0, 16));
-                          let derivedStep = 3;
-                          if (frostAddr && frostAddr.length > 20) {
-                            try {
-                              const api = wallet.network?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-                              const br = await fetch(api + '/addresses/' + frostAddr + '/balance');
-                              if (br.ok) { const bd = await br.json(); if (Number(bd.balance || '0') / 1e8 >= buyerAmt + sellerAmt && buyerAmt + sellerAmt > 0) derivedStep = 4; }
-                            } catch {}
-                          }
-                          // ROLE = SELLER
-                          setRole('seller');
-                          setAgreementType(collateralRef.current ? 'simple' : 'trade');
-                          if (collateralRef.current) { setReleaseMode('cancel'); console.log('[Resume] Collateral mode: cancel (2 outputs)'); }
-                          collateralRef.current = false;
-                          setContract({ agreementId: manualAgrId, multisigAddress: frostAddr, itemPriceKas: buyerAmt, sellerCommitmentKas: sellerAmt, buyerPubkey: iAmProposer ? myPk : proposerPk, sellerPubkey: iAmProposer ? counterPk : myPk, itemDescription: match.description || manualAgrId.slice(0,12), stipulations: '', expiryHours: 24, frostData: frostAddr ? (() => { let _fc = 0; try { for (let _i = 0; _i < 25; _i++) { const _a = deriveAggregateKey(iAmProposer ? myPk : proposerPk, iAmProposer ? counterPk : myPk, _i); const _ad = deriveAddress(_a.aggXOnly, 'testnet-10'); if (_ad === frostAddr) { _fc = _i; console.log('[Resume] Counter recovered:', _i); break; } } } catch(e) { console.warn('[Resume] Counter scan failed:', e); } return { address: frostAddr, network: 'testnet-10', frostCounter: _fc }; })() : undefined });
-                          if (derivedStep >= 4) { setBuyerLocked(true); setSellerLocked(true); }
-                          setStep(derivedStep);
-                          console.log('[Resume] Loaded as SELLER, step:', derivedStep, 'frost:', frostAddr?.slice(0,25));
-                        } catch (e) { Alert.alert('Error', String(e)); }
-                        finally { setIsLoading(false); }
-                      }}
-                    >
-                      {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{'\u{1F3EA} ' + (resumeAsCollateral ? 'Party B' : 'Load as Seller') + '}'}</Text>}
-                    </TouchableOpacity>
-                  </View>
-                  </View>
+                          const _ur = await fetch(_api + '/addresses/' + _fd.address + '/utxos');
+                          const _u = _ur.ok ? await _ur.json() : [];
+                          const _amts: number[] = Array.isArray(_u) ? _u.map((x: any) => Number(x.utxoEntry?.amount || '0')) : [];
+                          const _near = (a: number, b: number) => b > 0 && Math.abs(a - b) <= b * 0.05;
+                          if (_amts.length === 0) { _step = 3; console.log('[Resume] Escrow empty — step 3'); }
+                          else if (_amts.length === 1 && _near(_amts[0], _sAmt)) { _step = 3; console.log('[Resume] Seller funded, buyer has not — step 3'); }
+                          else if (_amts.length === 2) {
+                            const _sorted = [..._amts].sort((a, b) => a - b);
+                            const _exp = [_bAmt, _sAmt].sort((a, b) => a - b);
+                            if (_near(_sorted[0], _exp[0]) && _near(_sorted[1], _exp[1])) { _step = 4; console.log('[Resume] Both funded — step 4'); }
+                            else { console.warn('[Resume] 2 UTXOs but amounts do not match:', _amts, 'expected', _exp); }
+                          } else { console.warn('[Resume] Unexpected escrow UTXO set:', _amts); }
+                        } catch (e) { console.warn('[Resume] UTXO query failed — assuming step 3:', e); }
+                        setRole(_role);
+                        setAgreementType(collateralRef.current ? 'simple' : 'trade');
+                        if (collateralRef.current) { setReleaseMode('cancel'); console.log('[Resume] Collateral mode: cancel (2 outputs)'); }
+                        collateralRef.current = false;
+                        setResumeAsCollateral(false);
+                        setContract({
+                          agreementId: _p.agrId,
+                          multisigAddress: _fd.address,
+                          frostData: _fd,
+                          itemPriceKas: _bAmt / 1e8,
+                          sellerCommitmentKas: _sAmt / 1e8,
+                          buyerPubkey: _bPk,
+                          sellerPubkey: _sPk,
+                          counterpartyPubkey: _role === 'buyer' ? _sPk : _bPk,
+                          itemDescription: _p.description || _p.agrId,
+                          stipulations: '',
+                          expiryHours: 24,
+                          verificationCode: _p.verificationCode || '',
+                          // N from the paste — without this the 5e guard would silently default to 5.
+                          timeoutMinutes: Math.max(1, Math.round(Number(_p.timeoutN || 3000) / DAA_PER_MIN)),
+                          timeoutN: Number(_p.timeoutN || 0),
+                        });
+                        if (_step >= 4) { setBuyerLocked(true); setSellerLocked(true); }
+                        setStep(_step);
+                        console.log('[Resume] role:', _role, 'step:', _step, 'frost:', _fd.address.slice(0, 25), 'counter:', _fd.frostCounter, 'N:', _p.timeoutN);
+                        addToFrostList({
+                          agrId: _p.agrId, frostAddr: _fd.address, role: _role, step: _step,
+                          buyerAmount: _bAmt / 1e8, sellerAmount: _sAmt / 1e8,
+                          buyerPubkey: _bPk, sellerPubkey: _sPk,
+                          description: _p.description || '', createdAt: Date.now(),
+                          timeoutN: Number(_p.timeoutN || 0),
+                        });
+                      } catch (e) {
+                        console.error('[Resume] Failed:', e);
+                        Alert.alert('Error', e instanceof Error ? e.message : String(e));
+                      } finally { setIsLoading(false); }
+                    }}
+                  >
+                    {isLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Resume from Proposal</Text>}
+                  </TouchableOpacity>
+                </View>
                 <Text style={{ fontSize: rs.font(16), fontWeight: 'bold', color: COLORS.indigo900, marginBottom: 12, textAlign: 'center' }}>What type of agreement?</Text>
                 <TouchableOpacity
                   onPress={() => { setAgreementType('simple'); setRole('buyer'); }}
@@ -3416,7 +3467,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                                 if (match) { handleAcceptFromInbox(match); }
                                 else {
                                   // Direct accept from clipboard data
-                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.sellerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } , frostCounter: parsed.frostCounter };
+                                  const fakeAgr = { agreementId: parsed.agrId, agreement_id: parsed.agrId, pubkey: parsed.buyerPubkey || "", counterpartyPubkey: parsed.sellerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0), buyerAmountSompi: Number(parsed.buyerAmountSompi || 0), sellerAmountSompi: Number(parsed.sellerAmountSompi || 0), description: parsed.description || "", network: parsed.network || "testnet-10", status: "Proposed", partyA: { pubkey: parsed.buyerPubkey || "", amount_sompi: Number(parsed.buyerAmountSompi || 0) + Number(parsed.sellerAmountSompi || 0) } , frostCounter: parsed.frostCounter, timeoutN: Number(parsed.timeoutN || 0) };
                                   handleAcceptFromInbox(fakeAgr);
                                 }
                               }}
@@ -3782,7 +3833,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                             verificationCode: contract.verificationCode || '',
                             buyerPubkey: contract.buyerPubkey || '',
                             sellerPubkey: contract.sellerPubkey || '',
-                            timeoutN: Math.floor((contract.timeoutMinutes || 5) * 60),
+                            timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN),
                             buyerPrivKeyHex: _wallet?.privKeyHex || '', frostCounter: (contract.frostData ? contract.frostData.frostCounter : undefined) ?? 0,
                             description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });
@@ -3816,6 +3867,293 @@ const handleAcceptFromInbox = async (agreement: any) => {
                       )}
                     </View>
                     
+                    {/* 2c: BUYER CO-SIGNS SELLER REFUND */}
+                    {role === 'buyer' && contract.multisigAddress && (
+                      <View style={{ backgroundColor: '#fffbeb', borderRadius: 12, borderWidth: 2, borderColor: '#f59e0b', padding: 14, marginBottom: 16 }}>
+                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#92400e', marginBottom: 4 }}>Co-sign Seller's Refund</Text>
+                        <Text style={{ fontSize: rs.font(10), color: '#b45309', marginBottom: 8 }}>The seller has frozen their collateral but has NOT sent it yet. Paste their refund template to co-sign. This only lets them reclaim their own deposit if you never fund, after {contract.timeoutMinutes ?? 5} min. It cannot touch your money.</Text>
+                        <TextInput
+                          style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#f59e0b', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: rs.font(11), fontFamily: 'monospace', color: '#1c1917', minHeight: 60 }}
+                          placeholder="Paste seller's refund template (base64)..."
+                          placeholderTextColor="#a8a29e"
+                          multiline
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          onChangeText={async (txt) => {
+                            const v = txt.trim();
+                            if (v.length < 20) return;
+                            try {
+                              setIsLoading(true);
+                              const _w = await loadMainWallet();
+                              if (!_w?.privKeyHex) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
+                              const _pp = v.split('|');
+                              if (_pp.length !== 2) { Alert.alert('Error', 'Expected two templates (refund|kill). Ask the seller to re-copy.'); setIsLoading(false); return; }
+                              const _tmpl = parseTemplate(_pp[0]);
+                              const _killT = parseTemplate(_pp[1]);
+                              if (!_tmpl || !_killT) { Alert.alert('Error', 'Invalid template format'); setIsLoading(false); return; }
+                              // Both must spend the SAME utxo, or the kill would not kill this refund.
+                              if (_tmpl.u[0]?.t !== _killT.u[0]?.t) { Alert.alert('Rejected', 'The refund and kill templates spend different UTXOs. Do not proceed.'); setIsLoading(false); return; }
+                              const _net = contract.frostData?.network || 'testnet-10';
+                              const _api = _net.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+                              const _dag = await fetch(_api + '/info/blockdag');
+                              const _now = BigInt((_dag.ok ? await _dag.json() : {})?.virtualDaaScore || 0);
+                              if (_now === 0n) { Alert.alert('Error', 'Could not read the current DAA score — cannot check the timeout.'); setIsLoading(false); return; }
+                              const _esc = p2pkScript((contract.frostData?.aggregatedPubkey || '').slice(2));
+                              const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN));
+                              // predictedTxId is the seller's own prediction — the buyer cannot recompute it
+                              // (they don't know the seller's UTXO selection). Lying there only breaks the
+                              // seller's own reclaim. Everything that protects the BUYER is checked below:
+                              // escrow script, sole output to the seller, and lockTime >= now + N.
+                              const _res = cosignRefundTemplate({
+                                privateKeyHex: _w.privKeyHex,
+                                myPubkey: contract.buyerPubkey || '',
+                                funderPubkey: contract.sellerPubkey || '',
+                                counter: contract.frostData?.frostCounter || 0,
+                                template: _tmpl,
+                                expected: { predictedTxId: _tmpl.u[0]?.t || '', escrowScript: _esc, N: _N, currentDAA: _now },
+                              });
+                              if ('error' in _res) {
+                                console.warn('[Refund-Cosign] REJECTED:', _res.error);
+                                Alert.alert('Refund Rejected', _res.error + '\n\nDo not proceed with this trade.');
+                                setIsLoading(false); return;
+                              }
+                              // The kill tx can only move A from escrow back to escrow, so signing
+                              // it costs the buyer nothing — and without it the refund would outlive
+                              // their payment.
+                              const _killRes = cosignKillTemplate({
+                                privateKeyHex: _w.privKeyHex,
+                                myPubkey: contract.buyerPubkey || '',
+                                funderPubkey: contract.sellerPubkey || '',
+                                counter: contract.frostData?.frostCounter || 0,
+                                template: _killT,
+                                expected: { predictedTxId: _killT.u[0]?.t || '', escrowScript: _esc },
+                              });
+                              if ('error' in _killRes) {
+                                console.warn('[Kill-Cosign] REJECTED:', _killRes.error);
+                                Alert.alert('Kill Tx Rejected', _killRes.error + '\n\nDo not proceed with this trade.');
+                                setIsLoading(false); return;
+                              }
+                              try { await Clipboard.setStringAsync(_res.responseB64 + '|' + _killRes.responseB64); } catch {}
+                              console.log('[Refund-Cosign] Signed. lockTime =', _tmpl.lt, 'now =', String(_now), 'N =', String(_N));
+                              console.log('[Kill-Cosign] Signed. kills utxo', (_killT.u[0]?.t || '').slice(0, 16) + ':0');
+                              Alert.alert('Both Co-signed', 'Signatures copied. Send them back to the seller — they will fund the escrow, then send you the kill tx.');
+                            } catch (e) {
+                              console.error('[Refund-Cosign] Error:', e);
+                              Alert.alert('Error', e instanceof Error ? e.message : 'Co-sign failed');
+                            } finally { setIsLoading(false); }
+                          }}
+                        />
+                      </View>
+                    )}
+
+                    {/* PASTE 4: BUYER STORES THE KILL TX */}
+                    {role === 'buyer' && contract.multisigAddress && (
+                      <View style={{ backgroundColor: '#eef2ff', borderRadius: 12, borderWidth: 2, borderColor: '#6366f1', padding: 14, marginBottom: 16 }}>
+                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#3730a3', marginBottom: 4 }}>Paste Kill Tx from Seller</Text>
+                        <Text style={{ fontSize: rs.font(10), color: '#4338ca', marginBottom: 8 }}>Required before your payment goes out. This tx cancels the seller's reclaim the moment you fund — without it they could take their collateral back after {contract.timeoutMinutes ?? 5} min and leave you with nothing.</Text>
+                        <TextInput
+                          style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: rs.font(11), fontFamily: 'monospace', color: '#1c1917', minHeight: 60 }}
+                          placeholder="Paste the kill tx (JSON) from the seller..."
+                          placeholderTextColor="#a8a29e"
+                          multiline
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          onChangeText={async (txt) => {
+                            const v = txt.trim();
+                            if (v.length < 20 || v.indexOf('transaction') < 0) return;
+                            try {
+                              const _kt = JSON.parse(v);
+                              const _in = _kt?.transaction?.inputs?.[0];
+                              const _out = _kt?.transaction?.outputs?.[0];
+                              const _pred = _in?.previousOutpoint?.transactionId || '';
+                              if (!_pred || _in?.previousOutpoint?.index !== 0) { Alert.alert('Invalid', 'Kill tx does not spend an escrow output at index 0.'); return; }
+                              if ((_kt.transaction.inputs || []).length !== 1 || (_kt.transaction.outputs || []).length !== 1) { Alert.alert('Invalid', 'Kill tx must have exactly 1 input and 1 output.'); return; }
+                              // It must pay back into the escrow, never to a person.
+                              const _esc = p2pkScript((contract.frostData?.aggregatedPubkey || '').slice(2));
+                              const _outScript = _out?.scriptPublicKey?.scriptPublicKey || _out?.scriptPublicKey || '';
+                              if (String(_outScript) !== _esc) { Alert.alert('Rejected', 'The kill tx does not return the collateral to the escrow. Do not fund.'); return; }
+                              if (Number(_kt.transaction.lockTime || 0) !== 0) { Alert.alert('Rejected', 'The kill tx has a lockTime — it must be broadcastable immediately.'); return; }
+                              await SecureStore.setItemAsync('kv_kill_' + (contract.agreementId || ''), JSON.stringify({ txBody: _kt, predictedTxId: _pred, createdAt: Date.now() }));
+                              console.log('[Kill] Stored. Kills utxo', _pred.slice(0, 16) + ':0');
+                              Alert.alert('Kill Tx Stored', 'Your payment can now go out. It will be broadcast automatically just before you fund.');
+                            } catch (e) {
+                              console.warn('[Kill] Store failed:', e);
+                              Alert.alert('Error', 'Could not read that kill tx.');
+                            }
+                          }}
+                        />
+                      </View>
+                    )}
+
+                    {/* 2d: SELLER AGGREGATES REFUND THEN FUNDS */}
+                    {role === 'seller' && contract.multisigAddress && (
+                      <View style={{ backgroundColor: '#f0fdf4', borderRadius: 12, borderWidth: 2, borderColor: '#22c55e', padding: 14, marginBottom: 16 }}>
+                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#166534', marginBottom: 4 }}>Paste Buyer's Refund Signature</Text>
+                        <Text style={{ fontSize: rs.font(10), color: '#15803d', marginBottom: 8 }}>Your collateral is frozen but NOT sent. Paste the buyer's co-signature — your reclaim is stored first, then the collateral goes out.</Text>
+                        <TextInput
+                          style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#86efac', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: rs.font(11), fontFamily: 'monospace', color: '#1c1917', minHeight: 60 }}
+                          placeholder="Paste buyer's co-signature (base64)..."
+                          placeholderTextColor="#a8a29e"
+                          multiline
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          onChangeText={async (txt) => {
+                            const v = txt.trim();
+                            if (v.length < 20) return;
+                            const _agrId = contract.agreementId || '';
+                            try {
+                              setIsLoading(true);
+                              const _pj = await SecureStore.getItemAsync('kv_refund_pending_' + _agrId);
+                              if (!_pj) { Alert.alert('No Pending Refund', 'Nothing is frozen for this agreement. Re-accept it to start over.'); setIsLoading(false); return; }
+                              const _p = JSON.parse(_pj);
+                              const _rp = v.split('|');
+                              if (_rp.length !== 2) { Alert.alert('Error', 'Expected two signatures (refund|kill). Ask the buyer to re-copy.'); setIsLoading(false); return; }
+                              const _resp = parseResponse(_rp[0]);
+                              const _killResp = parseResponse(_rp[1]);
+                              if (!_resp || !_killResp) { Alert.alert('Error', 'Invalid signature format'); setIsLoading(false); return; }
+                              const _nonce = { k: BigInt('0x' + _p.nonce.k), d_tweaked: BigInt('0x' + _p.nonce.d_tweaked), R_hex: _p.nonce.R_hex };
+                              // Party mapping mirrors buildSellerRefund: funder (me) in the buyerPubkey slot.
+                              const _agg = buyerAggregate({
+                                nonce: _nonce,
+                                buyerPubkey: _p.sellerPubkey,
+                                sellerPubkey: _p.buyerPubkey,
+                                counter: _p.counter,
+                                template: _p.template,
+                                sellerResponse: _resp,
+                              });
+                              if ('error' in _agg) {
+                                console.warn('[Refund-Agg] FAILED:', _agg.error);
+                                Alert.alert('Aggregation Failed', _agg.error + '\n\nNothing was sent.');
+                                setIsLoading(false); return;
+                              }
+                              // Aggregate the kill tx BEFORE funding: if the buyer's kill partial is
+                              // bad, the seller must not fund at all — a live refund with no kill is
+                              // exactly the setup that lets a seller strand the buyer's payment.
+                              const _killNonce = { k: BigInt('0x' + _p.killNonce.k), d_tweaked: BigInt('0x' + _p.killNonce.d_tweaked), R_hex: _p.killNonce.R_hex };
+                              const _killAgg = buyerAggregate({
+                                nonce: _killNonce,
+                                buyerPubkey: _p.sellerPubkey,
+                                sellerPubkey: _p.buyerPubkey,
+                                counter: _p.counter,
+                                template: _p.killTemplate,
+                                sellerResponse: _killResp,
+                              });
+                              if ('error' in _killAgg) {
+                                console.warn('[Kill-Agg] FAILED:', _killAgg.error);
+                                Alert.alert('Kill Aggregation Failed', _killAgg.error + '\n\nNothing was sent.');
+                                setIsLoading(false); return;
+                              }
+                              const _lockTime = String(BigInt(_p.currentDAA) + BigInt(_p.N));
+                              // 5c: the signed refund MUST be durable BEFORE the collateral moves.
+                              await SecureStore.setItemAsync('kv_refund_' + _agrId, JSON.stringify({
+                                txBody: _agg.txBody,
+                                lockTime: _lockTime,
+                                predictedTxId: _p.predictedTxId,
+                                amountSompi: _p.amountSompi,
+                                frostAddr: _p.frostAddr,
+                                network: _p.network,
+                                agrId: _agrId,
+                                createdAt: Date.now(),
+                              }));
+                              // Read back — never fund on the strength of a write we did not confirm.
+                              const _verify = await SecureStore.getItemAsync('kv_refund_' + _agrId);
+                              if (!_verify) { Alert.alert('Storage Failed', 'Could not save the signed refund. Nothing was sent.'); setIsLoading(false); return; }
+                              console.log('[Refund] Signed refund STORED. lockTime =', _lockTime, '— now funding.');
+                              const _br = await broadcastPreparedTx(_p.preparedTx, _p.network);
+                              if (!_br.success) {
+                                console.warn('[Refund] Funding broadcast failed:', _br.error);
+                                Alert.alert('Funding Failed', (_br.error || 'Broadcast failed') + '\n\nYour collateral was NOT sent.');
+                                setIsLoading(false); return;
+                              }
+                              const _match = _br.txId === _p.predictedTxId;
+                              console.log('[Refund] Funding broadcast:', _br.txId, '| predicted:', _p.predictedTxId, _match ? 'MATCH ✓' : 'MISMATCH ✗');
+                              if (!_match) {
+                                Alert.alert('WARNING — txid mismatch', 'Collateral was sent, but the broadcast txid differs from the prediction, so the stored refund will not spend it. Do not rely on the reclaim for this agreement.');
+                              }
+                              await SecureStore.deleteItemAsync('kv_refund_pending_' + _agrId).catch(() => {});
+                              setSellerLocked(true);
+                              setContract(prev => ({ ...prev, sellerLockTxId: _br.txId }));
+                              updateFrostEntry(_agrId, { timeoutN: Number(_p.N) });
+                              // Paste 4: the buyer needs this to fund. Safe to hand over — it can only
+                              // move the collateral from escrow back to escrow, never to a person.
+                              try { await Clipboard.setStringAsync(JSON.stringify(_killAgg.txBody)); } catch {}
+                              Alert.alert('Collateral Sent — Send Kill Tx', 'Reclaim secured, then funded.\nTX: ' + (_br.txId || '').slice(0, 16) + '...\n\nThe KILL TX is now on your clipboard. Send it to the buyer — they cannot fund without it.\n\nIf they never fund, reclaim after ' + (Number(_p.N) / DAA_PER_MIN) + ' min.');
+                            } catch (e) {
+                              console.error('[Refund-Agg] Error:', e);
+                              Alert.alert('Error', e instanceof Error ? e.message : 'Aggregate failed');
+                            } finally { setIsLoading(false); }
+                          }}
+                        />
+                      </View>
+                    )}
+
+                    {/* 5d: RECLAIM COLLATERAL */}
+                    {role === 'seller' && contract.agreementId && (
+                      <TouchableOpacity
+                        onPress={async () => {
+                          const _agrId = contract.agreementId || '';
+                          try {
+                            const _rj = await SecureStore.getItemAsync('kv_refund_' + _agrId);
+                            if (!_rj) { Alert.alert('No Reclaim Stored', 'There is no co-signed refund for this agreement. Your collateral can only be released by mutual signature.'); return; }
+                            const _r = JSON.parse(_rj);
+                            const _api = String(_r.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+                            const _dag = await fetch(_api + '/info/blockdag');
+                            const _now = BigInt((_dag.ok ? await _dag.json() : {})?.virtualDaaScore || 0);
+                            if (_now === 0n) { Alert.alert('Error', 'Could not read the current DAA score.'); return; }
+                            const _lt = BigInt(_r.lockTime || '0');
+                            if (_lt === 0n) { Alert.alert('Error', 'Stored refund has no lockTime.'); return; }
+                            if (_now < _lt) {
+                              const _rem = Number(_lt - _now);
+                              Alert.alert('Not Yet', 'The reclaim window opens in about ' + Math.ceil(_rem / DAA_PER_MIN) + ' min (' + _rem + ' DAA).\n\nBroadcasting early is rejected by consensus — the lockTime is inside the signature and cannot be altered.');
+                              return;
+                            }
+                            // Do not strand the buyer: if they funded too, this is a normal trade.
+                            const _uResp = await fetch(_api + '/addresses/' + _r.frostAddr + '/utxos');
+                            const _u = _uResp.ok ? await _uResp.json() : [];
+                            if (Array.isArray(_u) && _u.length > 1) {
+                              Alert.alert('Buyer Has Funded', 'The buyer also funded the escrow, so this is a live trade. Reclaiming now would strand their deposit. Use release or mutual cancel instead.');
+                              return;
+                            }
+                            if (Array.isArray(_u) && _u.length === 0) {
+                              Alert.alert('Nothing to Reclaim', 'The escrow is empty — the collateral has already moved.');
+                              return;
+                            }
+                            Alert.alert('Reclaim Collateral?', 'Broadcast the timelocked refund for ' + (Number(_r.amountSompi) / 1e8) + ' KAS back to your wallet?', [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Reclaim', onPress: async () => {
+                                try {
+                                  setIsLoading(true);
+                                  const _resp = await fetch(_api + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_r.txBody) });
+                                  if (!_resp.ok) {
+                                    const _t = await _resp.text();
+                                    console.warn('[Reclaim] L1 rejected:', _t.slice(0, 400));
+                                    Alert.alert('Rejected by L1', _t.slice(0, 300));
+                                    setIsLoading(false); return;
+                                  }
+                                  const _j = await _resp.json();
+                                  const _txId = _j.transactionId || '';
+                                  console.log('[Reclaim] Refund broadcast:', _txId);
+                                  await SecureStore.deleteItemAsync('kv_refund_' + _agrId).catch(() => {});
+                                  try { await releaseCommitment(_agrId); } catch {}
+                                  Alert.alert('Collateral Reclaimed', 'TX: ' + _txId.slice(0, 16) + '...\n\nYour deposit is on its way back.');
+                                } catch (e) {
+                                  console.error('[Reclaim] Error:', e);
+                                  Alert.alert('Error', e instanceof Error ? e.message : 'Reclaim failed');
+                                } finally { setIsLoading(false); }
+                              }},
+                            ]);
+                          } catch (e) {
+                            console.error('[Reclaim] Check failed:', e);
+                            Alert.alert('Error', e instanceof Error ? e.message : 'Reclaim check failed');
+                          }
+                        }}
+                        style={{ backgroundColor: '#fef3c7', borderWidth: 2, borderColor: '#d97706', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 16 }}
+                      >
+                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#92400e' }}>Reclaim Collateral</Text>
+                        <Text style={{ fontSize: rs.font(9), color: '#b45309', marginTop: 2 }}>Only if the buyer never funds, after {contract.timeoutMinutes ?? 5} min</Text>
+                      </TouchableOpacity>
+                    )}
+
                     <CollateralBreakdown
                       buyerAmount={contract.itemPriceKas}
                       sellerAmount={contract.sellerCommitmentKas}
