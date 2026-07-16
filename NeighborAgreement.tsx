@@ -1406,7 +1406,20 @@ function parseClipboard(raw: string): {
                 }
                 console.log('[5e-Guard] Crash-recovery OK', entry.agrId.slice(0,12), 'remaining DAA=', String(_fundDAA + _N - _now));
               }
-            } catch (e) { console.warn('[5e-Guard] Crash-recovery check failed — NOT funding:', e); continue; } // seller's amount �5%
+            } catch (e) { console.warn('[5e-Guard] Crash-recovery check failed — NOT funding:', e); continue; }
+            // KILL-TX GATE (crash-recovery) — same rule: no kill tx, no funding.
+            try {
+              const _kj = await SecureStore.getItemAsync('kv_kill_' + entry.agrId);
+              if (!_kj) { console.warn('[Kill-Gate] Crash-recovery: no kill tx — NOT funding', entry.agrId.slice(0, 12)); continue; }
+              const _k = JSON.parse(_kj);
+              const _eTxId = eUtxos[0]?.outpoint?.transactionId || '';
+              if (_eTxId === _k.predictedTxId) {
+                const _kr = await fetch(apiBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_k.txBody) });
+                if (!_kr.ok) { console.warn('[Kill-Gate] Crash-recovery: kill broadcast failed — NOT funding'); continue; }
+                console.log('[Kill-Gate] Crash-recovery: kill broadcast — will fund next cycle');
+                continue;
+              }
+            } catch (e) { console.warn('[Kill-Gate] Crash-recovery check failed — NOT funding:', e); continue; } // seller's amount �5%
             // Check we haven't already sent (idempotent guard)
             const sentKey = 'kv_frost_poll_sent_' + entry.agrId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
@@ -1530,6 +1543,23 @@ function parseClipboard(raw: string): {
                 console.log('[5e-Guard] FROST-Poll OK — remaining DAA=', String(_fundDAA + _N - _now));
               }
             } catch (e) { console.warn('[5e-Guard] FROST-Poll check failed — NOT funding:', e); return; }
+            // KILL-TX GATE — the buyer never funds while the seller's refund can still fire.
+            // This is the enforcement; the 5d UI check is only a courtesy.
+            try {
+              const _kj = await SecureStore.getItemAsync('kv_kill_' + contract.agreementId);
+              if (!_kj) { console.warn('[Kill-Gate] No kill tx stored — NOT funding. Ask the seller to send it.'); return; }
+              const _k = JSON.parse(_kj);
+              const _escrowTxId = frostUtxos[0]?.outpoint?.transactionId || '';
+              if (_escrowTxId === _k.predictedTxId) {
+                console.log('[Kill-Gate] Escrow still holds the seller-funded UTXO — broadcasting kill tx first');
+                const _kr = await fetch(apiBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_k.txBody) });
+                if (!_kr.ok) { const _t = await _kr.text(); console.warn('[Kill-Gate] Kill broadcast failed — NOT funding:', _t.slice(0, 200)); return; }
+                const _kres = await _kr.json();
+                console.log('[Kill-Gate] Kill broadcast:', _kres.transactionId, '— refund is now dead. Funding on the next poll.');
+                return;
+              }
+              console.log('[Kill-Gate] Seller UTXO already consumed — refund dead, safe to fund');
+            } catch (e) { console.warn('[Kill-Gate] Check failed — NOT funding:', e); return; }
             const sentKey = 'kv_frost_poll_sent_' + contract.agreementId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
             if (!alreadySent && !cancelled) {
@@ -3909,6 +3939,45 @@ const handleAcceptFromInbox = async (agreement: any) => {
                       </View>
                     )}
 
+                    {/* PASTE 4: BUYER STORES THE KILL TX */}
+                    {role === 'buyer' && contract.multisigAddress && (
+                      <View style={{ backgroundColor: '#eef2ff', borderRadius: 12, borderWidth: 2, borderColor: '#6366f1', padding: 14, marginBottom: 16 }}>
+                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#3730a3', marginBottom: 4 }}>Paste Kill Tx from Seller</Text>
+                        <Text style={{ fontSize: rs.font(10), color: '#4338ca', marginBottom: 8 }}>Required before your payment goes out. This tx cancels the seller's reclaim the moment you fund — without it they could take their collateral back after {contract.timeoutMinutes ?? 5} min and leave you with nothing.</Text>
+                        <TextInput
+                          style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#a5b4fc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: rs.font(11), fontFamily: 'monospace', color: '#1c1917', minHeight: 60 }}
+                          placeholder="Paste the kill tx (JSON) from the seller..."
+                          placeholderTextColor="#a8a29e"
+                          multiline
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          onChangeText={async (txt) => {
+                            const v = txt.trim();
+                            if (v.length < 20 || v.indexOf('transaction') < 0) return;
+                            try {
+                              const _kt = JSON.parse(v);
+                              const _in = _kt?.transaction?.inputs?.[0];
+                              const _out = _kt?.transaction?.outputs?.[0];
+                              const _pred = _in?.previousOutpoint?.transactionId || '';
+                              if (!_pred || _in?.previousOutpoint?.index !== 0) { Alert.alert('Invalid', 'Kill tx does not spend an escrow output at index 0.'); return; }
+                              if ((_kt.transaction.inputs || []).length !== 1 || (_kt.transaction.outputs || []).length !== 1) { Alert.alert('Invalid', 'Kill tx must have exactly 1 input and 1 output.'); return; }
+                              // It must pay back into the escrow, never to a person.
+                              const _esc = p2pkScript((contract.frostData?.aggregatedPubkey || '').slice(2));
+                              const _outScript = _out?.scriptPublicKey?.scriptPublicKey || _out?.scriptPublicKey || '';
+                              if (String(_outScript) !== _esc) { Alert.alert('Rejected', 'The kill tx does not return the collateral to the escrow. Do not fund.'); return; }
+                              if (Number(_kt.transaction.lockTime || 0) !== 0) { Alert.alert('Rejected', 'The kill tx has a lockTime — it must be broadcastable immediately.'); return; }
+                              await SecureStore.setItemAsync('kv_kill_' + (contract.agreementId || ''), JSON.stringify({ txBody: _kt, predictedTxId: _pred, createdAt: Date.now() }));
+                              console.log('[Kill] Stored. Kills utxo', _pred.slice(0, 16) + ':0');
+                              Alert.alert('Kill Tx Stored', 'Your payment can now go out. It will be broadcast automatically just before you fund.');
+                            } catch (e) {
+                              console.warn('[Kill] Store failed:', e);
+                              Alert.alert('Error', 'Could not read that kill tx.');
+                            }
+                          }}
+                        />
+                      </View>
+                    )}
+
                     {/* 2d: SELLER AGGREGATES REFUND THEN FUNDS */}
                     {role === 'seller' && contract.multisigAddress && (
                       <View style={{ backgroundColor: '#f0fdf4', borderRadius: 12, borderWidth: 2, borderColor: '#22c55e', padding: 14, marginBottom: 16 }}>
@@ -3930,8 +3999,11 @@ const handleAcceptFromInbox = async (agreement: any) => {
                               const _pj = await SecureStore.getItemAsync('kv_refund_pending_' + _agrId);
                               if (!_pj) { Alert.alert('No Pending Refund', 'Nothing is frozen for this agreement. Re-accept it to start over.'); setIsLoading(false); return; }
                               const _p = JSON.parse(_pj);
-                              const _resp = parseResponse(v);
-                              if (!_resp) { Alert.alert('Error', 'Invalid signature format'); setIsLoading(false); return; }
+                              const _rp = v.split('|');
+                              if (_rp.length !== 2) { Alert.alert('Error', 'Expected two signatures (refund|kill). Ask the buyer to re-copy.'); setIsLoading(false); return; }
+                              const _resp = parseResponse(_rp[0]);
+                              const _killResp = parseResponse(_rp[1]);
+                              if (!_resp || !_killResp) { Alert.alert('Error', 'Invalid signature format'); setIsLoading(false); return; }
                               const _nonce = { k: BigInt('0x' + _p.nonce.k), d_tweaked: BigInt('0x' + _p.nonce.d_tweaked), R_hex: _p.nonce.R_hex };
                               // Party mapping mirrors buildSellerRefund: funder (me) in the buyerPubkey slot.
                               const _agg = buyerAggregate({
@@ -3945,6 +4017,23 @@ const handleAcceptFromInbox = async (agreement: any) => {
                               if ('error' in _agg) {
                                 console.warn('[Refund-Agg] FAILED:', _agg.error);
                                 Alert.alert('Aggregation Failed', _agg.error + '\n\nNothing was sent.');
+                                setIsLoading(false); return;
+                              }
+                              // Aggregate the kill tx BEFORE funding: if the buyer's kill partial is
+                              // bad, the seller must not fund at all — a live refund with no kill is
+                              // exactly the setup that lets a seller strand the buyer's payment.
+                              const _killNonce = { k: BigInt('0x' + _p.killNonce.k), d_tweaked: BigInt('0x' + _p.killNonce.d_tweaked), R_hex: _p.killNonce.R_hex };
+                              const _killAgg = buyerAggregate({
+                                nonce: _killNonce,
+                                buyerPubkey: _p.sellerPubkey,
+                                sellerPubkey: _p.buyerPubkey,
+                                counter: _p.counter,
+                                template: _p.killTemplate,
+                                sellerResponse: _killResp,
+                              });
+                              if ('error' in _killAgg) {
+                                console.warn('[Kill-Agg] FAILED:', _killAgg.error);
+                                Alert.alert('Kill Aggregation Failed', _killAgg.error + '\n\nNothing was sent.');
                                 setIsLoading(false); return;
                               }
                               const _lockTime = String(BigInt(_p.currentDAA) + BigInt(_p.N));
@@ -3978,7 +4067,10 @@ const handleAcceptFromInbox = async (agreement: any) => {
                               setSellerLocked(true);
                               setContract(prev => ({ ...prev, sellerLockTxId: _br.txId }));
                               updateFrostEntry(_agrId, { timeoutN: Number(_p.N) });
-                              Alert.alert('Collateral Sent', 'Reclaim secured, then funded.\nTX: ' + (_br.txId || '').slice(0, 16) + '...\n\nIf the buyer never funds, you can reclaim after ' + (Number(_p.N) / 60) + ' min.');
+                              // Paste 4: the buyer needs this to fund. Safe to hand over — it can only
+                              // move the collateral from escrow back to escrow, never to a person.
+                              try { await Clipboard.setStringAsync(JSON.stringify(_killAgg.txBody)); } catch {}
+                              Alert.alert('Collateral Sent — Send Kill Tx', 'Reclaim secured, then funded.\nTX: ' + (_br.txId || '').slice(0, 16) + '...\n\nThe KILL TX is now on your clipboard. Send it to the buyer — they cannot fund without it.\n\nIf they never fund, reclaim after ' + (Number(_p.N) / 60) + ' min.');
                             } catch (e) {
                               console.error('[Refund-Agg] Error:', e);
                               Alert.alert('Error', e instanceof Error ? e.message : 'Aggregate failed');
