@@ -220,10 +220,6 @@ async function clearAgreementSession(): Promise<void> {
 // Kaspa targets 10 blocks/sec, so DAA advances ~10 per second — NOT 1.
 // Every timeout is expressed in DAA, so minutes must convert at 600, not 60.
 const DAA_PER_MIN = 600;
-// In-flight guard for the buyer's auto-send. Module scope on purpose: it must survive
-// the 10s poll re-firing, but NOT an app restart — after a restart the escrow's utxo
-// count is the honest answer, and a durable flag could only lie.
-const _sendInFlight = { current: new Set() };
 const FROST_ACTIVE_KEY = 'kv_frost_active_list';
 
 interface FrostActiveEntry {
@@ -1569,11 +1565,11 @@ function parseClipboard(raw: string): {
             } catch (e) { console.warn('[Kill-Gate] Check failed — NOT funding:', e); return; }
             const sentKey = 'kv_frost_poll_sent_' + contract.agreementId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
-            if (!_sendInFlight.current.has(contract.agreementId || '') && !cancelled) {
+            if (!alreadySent && !cancelled) {
               try {
                 const wallet = await loadMainWallet();
                 if (!wallet || cancelled) return;
-                _sendInFlight.current.add(contract.agreementId || ''); console.log('[FROST-Poll] Counterparty sent! Auto-sending', myExpected / 1e8, 'KASPA');
+                console.log('[FROST-Poll] Counterparty sent! Auto-sending', myExpected / 1e8, 'KASPA');
                 const sendResult = await sendKaspaViaRest({
                   senderAddress: wallet.address,
                   recipientAddress: contract.multisigAddress || '',
@@ -1591,9 +1587,9 @@ function parseClipboard(raw: string): {
                   // Merkle proof
                   uploadPerTxProof({ txId: sendResult.txId || '', txIndex: 0, amountSompi: BigInt(myExpected), scriptPubKey: '', daaScore: 0, txType: 'collateral', balanceAfter: 0, agreementId: contract.agreementId, uploadFn: async (data, tags) => { const r = await uploadToIrys(data, tags); return r.txId || ''; }, network: 'testnet' }).catch(() => {});
                 } else {
-                  _sendInFlight.current.delete(contract.agreementId || ''); console.warn('[FROST-Poll] Auto-send failed:', sendResult.error);
+                  console.warn('[FROST-Poll] Auto-send failed:', sendResult.error);
                 }
-              } catch (e) { _sendInFlight.current.delete(contract.agreementId || ''); console.warn('[FROST-Poll] Auto-send error:', e); }
+              } catch (e) { console.warn('[FROST-Poll] Auto-send error:', e); }
             }
           }
         } else {
