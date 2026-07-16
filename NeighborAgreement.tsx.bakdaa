@@ -217,9 +217,6 @@ async function clearAgreementSession(): Promise<void> {
   try { await AsyncStorage.removeItem(AGR_SESSION_KEY); } catch {}
 }
 
-// Kaspa targets 10 blocks/sec, so DAA advances ~10 per second — NOT 1.
-// Every timeout is expressed in DAA, so minutes must convert at 600, not 60.
-const DAA_PER_MIN = 600;
 const FROST_ACTIVE_KEY = 'kv_frost_active_list';
 
 interface FrostActiveEntry {
@@ -1532,7 +1529,7 @@ function parseClipboard(raw: string): {
             }
             // 5e PRE-FUND GUARD: refuse if seller's reclaim window has passed
             try {
-              const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN));
+              const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * 60));
               const _fundDAA = BigInt(frostUtxos[0]?.utxoEntry?.blockDaaScore || 0);
               if (_N > 0n && _fundDAA > 0n) {
                 const _dagR = await fetch(apiBase + '/info/blockdag');
@@ -1936,7 +1933,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
               daaScore: currentDaa,
               buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8),
               sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8),
-              timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN),
+              timeoutN: Math.floor((contract.timeoutMinutes || 5) * 60),
             } as any);
             // Reduce spendable for proposer (input cap)
             console.log('[Neighbor] Proposal sent ? waiting for counterparty to accept');
@@ -1964,7 +1961,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
                 buyerAmount: contract.itemPriceKas, sellerAmount: contract.sellerCommitmentKas,
                 buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '',
                 description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''), createdAt: Date.now(),
-                timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN),
+                timeoutN: Math.floor((contract.timeoutMinutes || 5) * 60),
               });
               if (proposeResult?.arweaveTxId) {
                 console.log('[Neighbor] Arweave TX ID:', proposeResult.arweaveTxId);
@@ -3249,7 +3246,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                           expiryHours: 24,
                           verificationCode: _p.verificationCode || '',
                           // N from the paste — without this the 5e guard would silently default to 5.
-                          timeoutMinutes: Math.max(1, Math.round(Number(_p.timeoutN || 3000) / DAA_PER_MIN)),
+                          timeoutMinutes: Math.max(1, Math.round(Number(_p.timeoutN || 300) / 60)),
                           timeoutN: Number(_p.timeoutN || 0),
                         });
                         if (_step >= 4) { setBuyerLocked(true); setSellerLocked(true); }
@@ -3829,7 +3826,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                             verificationCode: contract.verificationCode || '',
                             buyerPubkey: contract.buyerPubkey || '',
                             sellerPubkey: contract.sellerPubkey || '',
-                            timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN),
+                            timeoutN: Math.floor((contract.timeoutMinutes || 5) * 60),
                             buyerPrivKeyHex: _wallet?.privKeyHex || '', frostCounter: (contract.frostData ? contract.frostData.frostCounter : undefined) ?? 0,
                             description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });
@@ -3895,7 +3892,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                               const _now = BigInt((_dag.ok ? await _dag.json() : {})?.virtualDaaScore || 0);
                               if (_now === 0n) { Alert.alert('Error', 'Could not read the current DAA score — cannot check the timeout.'); setIsLoading(false); return; }
                               const _esc = p2pkScript((contract.frostData?.aggregatedPubkey || '').slice(2));
-                              const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN));
+                              const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * 60));
                               // predictedTxId is the seller's own prediction — the buyer cannot recompute it
                               // (they don't know the seller's UTXO selection). Lying there only breaks the
                               // seller's own reclaim. Everything that protects the BUYER is checked below:
@@ -4073,7 +4070,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                               // Paste 4: the buyer needs this to fund. Safe to hand over — it can only
                               // move the collateral from escrow back to escrow, never to a person.
                               try { await Clipboard.setStringAsync(JSON.stringify(_killAgg.txBody)); } catch {}
-                              Alert.alert('Collateral Sent — Send Kill Tx', 'Reclaim secured, then funded.\nTX: ' + (_br.txId || '').slice(0, 16) + '...\n\nThe KILL TX is now on your clipboard. Send it to the buyer — they cannot fund without it.\n\nIf they never fund, reclaim after ' + (Number(_p.N) / DAA_PER_MIN) + ' min.');
+                              Alert.alert('Collateral Sent — Send Kill Tx', 'Reclaim secured, then funded.\nTX: ' + (_br.txId || '').slice(0, 16) + '...\n\nThe KILL TX is now on your clipboard. Send it to the buyer — they cannot fund without it.\n\nIf they never fund, reclaim after ' + (Number(_p.N) / 60) + ' min.');
                             } catch (e) {
                               console.error('[Refund-Agg] Error:', e);
                               Alert.alert('Error', e instanceof Error ? e.message : 'Aggregate failed');
@@ -4100,7 +4097,7 @@ const handleAcceptFromInbox = async (agreement: any) => {
                             if (_lt === 0n) { Alert.alert('Error', 'Stored refund has no lockTime.'); return; }
                             if (_now < _lt) {
                               const _rem = Number(_lt - _now);
-                              Alert.alert('Not Yet', 'The reclaim window opens in about ' + Math.ceil(_rem / DAA_PER_MIN) + ' min (' + _rem + ' DAA).\n\nBroadcasting early is rejected by consensus — the lockTime is inside the signature and cannot be altered.');
+                              Alert.alert('Not Yet', 'The reclaim window opens in about ' + Math.ceil(_rem / 60) + ' min (' + _rem + ' DAA).\n\nBroadcasting early is rejected by consensus — the lockTime is inside the signature and cannot be altered.');
                               return;
                             }
                             // Do not strand the buyer: if they funded too, this is a normal trade.
