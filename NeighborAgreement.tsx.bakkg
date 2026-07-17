@@ -113,7 +113,7 @@ import { validateEscrowDestination } from './frost_complete';
 import { sendPushToCounterparty } from './push_notifications';
 
 // REST API for real L1 transactions
-import { sendKaspaViaRest, broadcastPreparedTx, computeTxId } from './kaspa_rest_tx';
+import { sendKaspaViaRest, broadcastPreparedTx } from './kaspa_rest_tx';
 import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
 import { isPureP2PK, canonicalCommit, verifyCommitment, releaseExpiredCommitments, releaseCommitment, markLocked, isAlreadyCommitted, syncLedger } from './utxo_ledger';
 import { generateProposal, parseProposal, verifyProposalForMe, parseReleaseKey } from './kv_proposal';
@@ -220,40 +220,6 @@ async function clearAgreementSession(): Promise<void> {
 // Kaspa targets 10 blocks/sec, so DAA advances ~10 per second — NOT 1.
 // Every timeout is expressed in DAA, so minutes must convert at 600, not 60.
 const DAA_PER_MIN = 600;
-// The kill tx spends the seller funding output A and pays it straight back to
-// escrow. So once it lands, the escrow sole UTXO is the kill own output - an id
-// we can compute rather than take on the seller word. That turns "is the refund
-// dead?" into an L1 question with three answers instead of two:
-//   escrow === predictedTxId     -> A is live, refund can fire, do NOT fund
-//   escrow === computeTxId(kill) -> A is spent, refund is dead, safe to fund
-//   neither                      -> this kill tx has nothing to do with this
-//                                   escrow. A seller-supplied predictedTxId is
-//                                   not evidence of anything.
-// Returns '' on any malformed input, which makes every caller refuse to fund.
-function killTxIdOf(txBody: any): string {
-  try {
-    const _t = txBody && txBody.transaction;
-    if (!_t || !Array.isArray(_t.inputs) || !Array.isArray(_t.outputs)) return '';
-    if (_t.inputs.length === 0 || _t.outputs.length === 0) return '';
-    return computeTxId({
-      version: Number(_t.version || 0),
-      inputs: _t.inputs.map((i: any) => ({
-        prevTxId: String((i && i.previousOutpoint && i.previousOutpoint.transactionId) || ''),
-        prevIndex: Number((i && i.previousOutpoint && i.previousOutpoint.index) || 0),
-        sequence: BigInt((i && i.sequence) || '0'),
-      })),
-      outputs: _t.outputs.map((o: any) => ({
-        amount: BigInt((o && o.amount) || '0'),
-        scriptVersion: Number((o && o.scriptPublicKey && o.scriptPublicKey.version) || 0),
-        scriptHex: String((o && o.scriptPublicKey && o.scriptPublicKey.scriptPublicKey) || ''),
-      })),
-      lockTime: BigInt(_t.lockTime || '0'),
-      subnetworkId: String(_t.subnetworkId || '0000000000000000000000000000000000000000'),
-      gas: BigInt(_t.gas || '0'),
-      payloadHex: String(_t.payload || ''),
-    });
-  } catch (e) { console.warn('[Kill-Gate] killTxIdOf failed:', e); return ''; }
-}
 // In-flight guard for the buyer's auto-send. Module scope on purpose: it must survive
 // the 10s poll re-firing, but NOT an app restart — after a restart the escrow's utxo
 // count is the honest answer, and a durable flag could only lie.
@@ -1439,9 +1405,7 @@ function parseClipboard(raw: string): {
               const _crKj = await SecureStore.getItemAsync('kv_kill_' + entry.agrId);
               const _crK = _crKj ? JSON.parse(_crKj) : null;
               const _crEsc = eUtxos[0]?.outpoint?.transactionId || '';
-              // Dead means the escrow UTXO IS the kill output, not merely "not A".
-              const _crKillId = _crK && _crK.txBody ? killTxIdOf(_crK.txBody) : '';
-              const _crDead = !!(_crEsc && _crKillId && _crEsc === _crKillId);
+              const _crDead = !!(_crK && _crK.predictedTxId && _crEsc && _crEsc !== _crK.predictedTxId);
               if (_crDead) console.log('[5e-Guard] Crash-recovery: refund input spent — refund dead, window moot', entry.agrId.slice(0,12));
               const _N = _crDead ? 0n : BigInt(entry.timeoutN || 0);
               const _fundDAA = BigInt(eUtxos[0]?.utxoEntry?.blockDaaScore || 0);
@@ -1462,11 +1426,6 @@ function parseClipboard(raw: string): {
               if (!_kj) { console.warn('[Kill-Gate] Crash-recovery: no kill tx — NOT funding', entry.agrId.slice(0, 12)); continue; }
               const _k = JSON.parse(_kj);
               const _eTxId = eUtxos[0]?.outpoint?.transactionId || '';
-              const _kKillId = killTxIdOf(_k.txBody);
-              if (_eTxId !== _k.predictedTxId && _eTxId !== _kKillId) {
-                console.warn('[Kill-Gate] Crash-recovery: escrow is neither the kill input nor the kill output. This kill tx is not for this escrow. NOT funding.', entry.agrId.slice(0, 12));
-                continue;
-              }
               if (_eTxId === _k.predictedTxId) {
                 const _kr = await fetch(apiBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_k.txBody) });
                 if (!_kr.ok) { console.warn('[Kill-Gate] Crash-recovery: kill broadcast failed — NOT funding'); continue; }
@@ -1587,9 +1546,7 @@ function parseClipboard(raw: string): {
               const _fpKj = await SecureStore.getItemAsync('kv_kill_' + contract.agreementId);
               const _fpK = _fpKj ? JSON.parse(_fpKj) : null;
               const _fpEsc = frostUtxos[0]?.outpoint?.transactionId || '';
-              // Dead means the escrow UTXO IS the kill output, not merely "not A".
-              const _fpKillId = _fpK && _fpK.txBody ? killTxIdOf(_fpK.txBody) : '';
-              const _fpDead = !!(_fpEsc && _fpKillId && _fpEsc === _fpKillId);
+              const _fpDead = !!(_fpK && _fpK.predictedTxId && _fpEsc && _fpEsc !== _fpK.predictedTxId);
               if (_fpDead) console.log('[5e-Guard] FROST-Poll: refund input spent — refund dead, window moot');
               const _N = _fpDead ? 0n : BigInt(Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN));
               const _fundDAA = BigInt(frostUtxos[0]?.utxoEntry?.blockDaaScore || 0);
@@ -1612,12 +1569,6 @@ function parseClipboard(raw: string): {
               if (!_kj) { console.warn('[Kill-Gate] No kill tx stored — NOT funding. Ask the seller to send it.'); return; }
               const _k = JSON.parse(_kj);
               const _escrowTxId = frostUtxos[0]?.outpoint?.transactionId || '';
-              const _kKillId = killTxIdOf(_k.txBody);
-              if (_escrowTxId !== _k.predictedTxId && _escrowTxId !== _kKillId) {
-                console.warn('[Kill-Gate] Escrow is neither the kill input nor the kill output. This kill tx is not for this escrow. NOT funding.');
-                if (!cancelled) Alert.alert('Kill Tx Mismatch', 'The kill transaction the seller sent does not correspond to the collateral sitting in escrow, so it cannot cancel their refund. Your payment has NOT been sent. Ask the seller to re-send it, and do not fund until this clears.');
-                return;
-              }
               if (_escrowTxId === _k.predictedTxId) {
                 console.log('[Kill-Gate] Escrow still holds the seller-funded UTXO — broadcasting kill tx first');
                 const _kr = await fetch(apiBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_k.txBody) });
