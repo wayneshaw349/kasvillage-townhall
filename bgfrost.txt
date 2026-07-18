@@ -1,0 +1,72 @@
+﻿
+  NeighborAgreement.tsx:1380:        if (session.contract?.buyerPubkey === session.contract?.sellerPubkey) return;
+  NeighborAgreement.tsx:1381:        const frostAddr = session.contract.multisigAddress;
+  NeighborAgreement.tsx:1382:        const networkStr = await SecureStore.getItemAsync('kaspa_network');
+  NeighborAgreement.tsx:1383:        const apiBase = networkStr?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 
+'https://api.kaspa.org';
+  NeighborAgreement.tsx:1384:        const resp = await fetch(apiBase + '/addresses/' + frostAddr + '/balance');
+  NeighborAgreement.tsx:1385:        if (!resp.ok) return;
+  NeighborAgreement.tsx:1386:        const data = await resp.json();
+  NeighborAgreement.tsx:1387:        const bal = BigInt(data.balance || '0');
+> NeighborAgreement.tsx:1388:        console.log('[Background-FROST] Session:', session.contract.agreementId?.slice(0,12), 'FROST:', 
+frostAddr.slice(0,20), 'Balance:', Number(bal)/1e8, 'Step:', session.step);
+  NeighborAgreement.tsx:1389:        // Also poll all active FROST entries
+  NeighborAgreement.tsx:1390:        let allActive = await getFrostList();
+  NeighborAgreement.tsx:1391:        // If empty, try recovering from Arweave
+  NeighborAgreement.tsx:1392:        if (allActive.length === 0) {
+  NeighborAgreement.tsx:1393:          try {
+  NeighborAgreement.tsx:1394:            const wallet = await loadMainWallet();
+  NeighborAgreement.tsx:1395:            if (wallet) {
+  NeighborAgreement.tsx:1396:              const myPk = (await SecureStore.getItemAsync('kv_public_key')) || 
+b2h(secpPub(wallet.privKeyHex)); // [PUBKEY-PREFIX-FIX] real compressed prefix
+  NeighborAgreement.tsx:1397:              // Query Arweave for my agreements
+  NeighborAgreement.tsx:1398:              const arAll = await queryAgreementsFromArweave({ network: 'testnet-10' });
+  NeighborAgreement.tsx:1399:              const mine = arAll.filter((a: any) => (a.pubkey || '').startsWith(myPk.slice(0,16)) || 
+(a.counterpartyPubkey || '').startsWith(myPk.slice(0,16)));
+  NeighborAgreement.tsx:1400:              for (const a of mine.slice(0, 5)) {
+  NeighborAgreement.tsx:1408:        }
+  NeighborAgreement.tsx:1409:        const updatedList: FrostActiveEntry[] = [];
+  NeighborAgreement.tsx:1410:        for (const entry of allActive) {
+  NeighborAgreement.tsx:1411:          try {
+  NeighborAgreement.tsx:1412:            const eResp = await fetch(apiBase + '/addresses/' + entry.frostAddr + '/balance');
+  NeighborAgreement.tsx:1413:            if (eResp.ok) {
+  NeighborAgreement.tsx:1414:              const eData = await eResp.json();
+  NeighborAgreement.tsx:1415:              const eBal = Number(eData.balance || '0') / 1e8;
+> NeighborAgreement.tsx:1416:              console.log('[Background-FROST] Polling', entry.agrId.slice(0,12), ':', eBal, 'KAS', 
+'step:', entry.step);
+  NeighborAgreement.tsx:1417:              updatedList.push({ ...entry, step: eBal >= (entry.buyerAmount + entry.sellerAmount) ? 4 : 
+entry.step });
+  NeighborAgreement.tsx:1418:            } else { updatedList.push(entry); }
+  NeighborAgreement.tsx:1419:          } catch { updatedList.push(entry); }
+  NeighborAgreement.tsx:1420:        }
+  NeighborAgreement.tsx:1421:        
+  NeighborAgreement.tsx:1422:        // === CRASH RECOVERY: auto-send if seller funded but buyer hasn't ===
+  NeighborAgreement.tsx:1423:        for (const entry of updatedList) {
+  NeighborAgreement.tsx:1424:          if (entry.step >= 4) continue; // already fully funded
+  NeighborAgreement.tsx:1425:          if (entry.role !== 'buyer') continue; // only buyer auto-sends from recovery
+  NeighborAgreement.tsx:1426:          const expectedBuyer = Math.floor(entry.buyerAmount * 1e8);
+  NeighborAgreement.tsx:1427:          const expectedSeller = Math.floor(entry.sellerAmount * 1e8);
+  NeighborAgreement.tsx:1428:          if (expectedBuyer <= 0 || expectedSeller <= 0) continue;
+  NeighborAgreement.tsx:1498:              console.warn('[Crash-Recovery] Send failed:', rResult.error);
+  NeighborAgreement.tsx:1499:            }
+  NeighborAgreement.tsx:1500:          } catch (e) { console.warn('[Crash-Recovery] Error for', entry.agrId.slice(0,12), ':', e); }
+  NeighborAgreement.tsx:1501:        }
+  NeighborAgreement.tsx:1502:
+  NeighborAgreement.tsx:1503:        setFrostActiveList(updatedList);
+  NeighborAgreement.tsx:1504:        // DISABLED: inbox handles session restore from Arweave
+  NeighborAgreement.tsx:1505:        // if (bal > 0n || session.step >= 3) { ... }
+> NeighborAgreement.tsx:1506:      } catch (e) { console.warn('[Background-FROST] Check failed:', e); }
+  NeighborAgreement.tsx:1507:    };
+  NeighborAgreement.tsx:1508:    checkPendingFrost();
+  NeighborAgreement.tsx:1509:  }, []);
+  NeighborAgreement.tsx:1510:
+  NeighborAgreement.tsx:1511:  useEffect(() => {
+  NeighborAgreement.tsx:1512:    isTailscaleFunnelAvailable().then(setTailscaleAvailable);
+  NeighborAgreement.tsx:1513:    return () => cleanupFrost();
+  NeighborAgreement.tsx:1514:  }, []);
+  NeighborAgreement.tsx:1515:
+  NeighborAgreement.tsx:1516:  // Poll for counterparty's Agreed-Send on Arweave
+  NeighborAgreement.tsx:1517:  // DEBUG: log guard values — triggers auto-send
+  NeighborAgreement.tsx:1518:  useEffect(() => {
+
+

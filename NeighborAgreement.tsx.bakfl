@@ -1389,7 +1389,7 @@ function parseClipboard(raw: string): {
         // Also poll all active FROST entries
         let allActive = await getFrostList();
         // If empty, try recovering from Arweave
-        if (true) { // [RECOVERY-MERGE] always scan - a non-empty list must not mask a missing agrId
+        if (allActive.length === 0) {
           try {
             const wallet = await loadMainWallet();
             if (wallet) {
@@ -1398,11 +1398,11 @@ function parseClipboard(raw: string): {
               const arAll = await queryAgreementsFromArweave({ network: 'testnet-10' });
               const mine = arAll.filter((a: any) => (a.pubkey || '').startsWith(myPk.slice(0,16)) || (a.counterpartyPubkey || '').startsWith(myPk.slice(0,16)));
               for (const a of mine.slice(0, 5)) {
-                const agrId = a.agreementId || a.agreement_id || ''; if (agrId && allActive.some(e => e.agrId === agrId)) continue; // [RECOVERY-MERGE] local entry wins
+                const agrId = a.agreementId || a.agreement_id || '';
                 if (!agrId) continue;
                 allActive.push({ agrId, frostAddr: a.frostAddress || '', role: a.pubkey?.startsWith(myPk.slice(0,16)) ? 'buyer' : 'seller', step: 3, buyerAmount: (a.buyerAmountSompi || 0) / 1e8, sellerAmount: (a.sellerAmountSompi || 0) / 1e8, buyerPubkey: a.pubkey || '', sellerPubkey: a.counterpartyPubkey || '', description: a.description || agrId.slice(0,12), createdAt: Date.now() });
               }
-              console.log('[Recovery] Arweave scan complete - list now', allActive.length, 'entries');
+              if (allActive.length > 0) console.log('[Recovery] Found', allActive.length, 'agreements from Arweave');
             }
           } catch (e) { console.warn('[Recovery] Arweave scan failed:', e); }
         }
@@ -1413,22 +1413,19 @@ function parseClipboard(raw: string): {
             if (eResp.ok) {
               const eData = await eResp.json();
               const eBal = Number(eData.balance || '0') / 1e8;
-              console.log('[Background-FROST] Polling', entry.agrId.slice(0,12), ':', eBal, 'KAS', 'role:', entry.role, 'want:', entry.buyerAmount, '+', entry.sellerAmount);
-              const _eTotal = entry.buyerAmount + entry.sellerAmount;
-              const _eStep = (_eTotal > 0 && eBal >= _eTotal * 0.95) ? 4 : entry.step;
-              if (_eTotal <= 0) console.warn('[Background-FROST] ' + entry.agrId.slice(0,12) + ' has no amounts (buyer=' + entry.buyerAmount + ' seller=' + entry.sellerAmount + ') - cannot fund, step left at ' + entry.step);
-              updatedList.push({ ...entry, step: _eStep });
+              console.log('[Background-FROST] Polling', entry.agrId.slice(0,12), ':', eBal, 'KAS', 'step:', entry.step);
+              updatedList.push({ ...entry, step: eBal >= (entry.buyerAmount + entry.sellerAmount) ? 4 : entry.step });
             } else { updatedList.push(entry); }
           } catch { updatedList.push(entry); }
         }
         
         // === CRASH RECOVERY: auto-send if seller funded but buyer hasn't ===
         for (const entry of updatedList) {
-          if (entry.step >= 4) { console.log('[Crash-Recovery] skip', entry.agrId.slice(0,12), '- step', entry.step, '(already funded)'); continue; }
-          if (entry.role !== 'buyer') { console.log('[Crash-Recovery] skip', entry.agrId.slice(0,12), '- role is', entry.role, '(only buyer auto-sends)'); continue; }
+          if (entry.step >= 4) continue; // already fully funded
+          if (entry.role !== 'buyer') continue; // only buyer auto-sends from recovery
           const expectedBuyer = Math.floor(entry.buyerAmount * 1e8);
           const expectedSeller = Math.floor(entry.sellerAmount * 1e8);
-          if (expectedBuyer <= 0 || expectedSeller <= 0) { console.warn('[Crash-Recovery] skip', entry.agrId.slice(0,12), '- amounts unknown: buyer=', expectedBuyer, 'seller=', expectedSeller); continue; }
+          if (expectedBuyer <= 0 || expectedSeller <= 0) continue;
           try {
             const eUtxoResp = await fetch(apiBase + '/addresses/' + entry.frostAddr + '/utxos');
             if (!eUtxoResp.ok) continue;
@@ -1543,7 +1540,7 @@ function parseClipboard(raw: string): {
         const balance = frostUtxos.reduce((sum, u) => sum + Number(u.utxoEntry?.amount || '0'), 0);
         const utxoCount = frostUtxos.length;
 
-        if (balance >= expectedTotal * 0.95 && expectedTotal > 0) {
+        if (balance >= expectedTotal && expectedTotal > 0) {
           // GUARD: exactly 2 UTXOs (buyer + seller collateral)
           if (utxoCount !== 2) {
             console.log('[FROST-Poll] Balance:', balance / 1e8, 'but', utxoCount, 'UTXOs (need 2) — stale funds, skipping');
@@ -1991,15 +1988,6 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
                 return;
               }
             } catch(thErr) { console.log('[TH-Guard] TownHall check failed (proceeding):', thErr); }
-            // [FROSTLIST-HOIST] persist BEFORE any network call - a TownHall throw or success:false
-            // must not leave the agreement invisible to the background poller (loop B).
-            await addToFrostList({
-              agrId: agreementId, frostAddr: frostData.address, role: role === 'seller' ? 'seller' : 'buyer', step: 3,
-              buyerAmount: contract.itemPriceKas, sellerAmount: contract.sellerCommitmentKas,
-              buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '',
-              description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''), createdAt: Date.now(),
-              timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN),
-            });
             console.log('[Neighbor] Proposing to TownHall:', agreementId, 'frost:', frostData.address, 'DAA:', currentDaa);
             const proposeResult = await proposeAgreement({
               agreementId: agreementId,
@@ -2037,7 +2025,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
               // R nonce is now generated at signing time (step 5), not proposal time
               // This keeps k alive for seconds instead of days
               addToFrostList({
-                agrId: agreementId, frostAddr: frostData.address, role: role === 'seller' ? 'seller' : 'buyer', step: 3,
+                agrId: agreementId, frostAddr: frostData.address, role: 'buyer', step: 3,
                 buyerAmount: contract.itemPriceKas, sellerAmount: contract.sellerCommitmentKas,
                 buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '',
                 description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''), createdAt: Date.now(),
@@ -2936,16 +2924,6 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
             frostData,
           }));
           
-          // [FROSTLIST-HOIST-ACCEPT] persist before Arweave, not after.
-          await addToFrostList({
-            agrId: agrId, frostAddr: frostData.address,
-            role: canon?.role as any || 'seller', step: 3,
-            buyerAmount: buyerKas, sellerAmount: sellerKas,
-            buyerPubkey: iAmProposer ? myPubkey : proposerPubkey,
-            sellerPubkey: iAmProposer ? proposerPubkey : myPubkey,
-            description: agreement.description || '', createdAt: Date.now(),
-            timeoutN: Number(canon?.timeoutN || 0),
-          });
           // Inscribe acceptance to Arweave
           try {
             // inscribeAgreementToArweave imported statically
@@ -2970,7 +2948,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
             addToFrostList({
               agrId: agrId,
               frostAddr: frostData.address,
-              role: canon?.role as any || 'seller', timeoutN: Number(canon?.timeoutN || 0),
+              role: canon?.role as any || 'seller',
               step: 3,
               buyerAmount: buyerKas,
               sellerAmount: sellerKas,

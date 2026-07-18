@@ -1,0 +1,55 @@
+﻿  // Check Tailscale on mount
+  // Background: check saved session for pending FROST funding on mount
+  useEffect(() => {
+    const checkPendingFrost = async () => {
+      if ((global as any).__frostRestored) return;
+      (global as any).__frostRestored = true;
+      try {
+        const session = await loadAgreementSession();
+        if (!session || session.step < 3 || !session.contract?.multisigAddress) return;
+        if (session.contract?.buyerPubkey === session.contract?.sellerPubkey) return;
+        const frostAddr = session.contract.multisigAddress;
+        const networkStr = await SecureStore.getItemAsync('kaspa_network');
+        const apiBase = networkStr?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+        const resp = await fetch(apiBase + '/addresses/' + frostAddr + '/balance');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const bal = BigInt(data.balance || '0');
+        console.log('[Background-FROST] Session:', session.contract.agreementId?.slice(0,12), 'FROST:', frostAddr.slice(0,20), 'Balance:', Number(bal)/1e8, 'Step:', session.step);
+        // Also poll all active FROST entries
+        let allActive = await getFrostList();
+        // If empty, try recovering from Arweave
+        if (allActive.length === 0) {
+          try {
+            const wallet = await loadMainWallet();
+            if (wallet) {
+              const myPk = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(wallet.privKeyHex)); // [PUBKEY-PREFIX-FIX] real compressed prefix
+              // Query Arweave for my agreements
+              const arAll = await queryAgreementsFromArweave({ network: 'testnet-10' });
+              const mine = arAll.filter((a: any) => (a.pubkey || '').startsWith(myPk.slice(0,16)) || (a.counterpartyPubkey || '').startsWith(myPk.slice(0,16)));
+              for (const a of mine.slice(0, 5)) {
+                const agrId = a.agreementId || a.agreement_id || '';
+                if (!agrId) continue;
+                allActive.push({ agrId, frostAddr: a.frostAddress || '', role: a.pubkey?.startsWith(myPk.slice(0,16)) ? 'buyer' : 'seller', step: 3, buyerAmount: (a.buyerAmountSompi || 0) / 1e8, sellerAmount: (a.sellerAmountSompi || 0) / 1e8, buyerPubkey: a.pubkey || '', sellerPubkey: a.counterpartyPubkey || '', description: a.description || agrId.slice(0,12), createdAt: Date.now() });
+              }
+              if (allActive.length > 0) console.log('[Recovery] Found', allActive.length, 'agreements from Arweave');
+            }
+          } catch (e) { console.warn('[Recovery] Arweave scan failed:', e); }
+        }
+        const updatedList: FrostActiveEntry[] = [];
+        for (const entry of allActive) {
+          try {
+            const eResp = await fetch(apiBase + '/addresses/' + entry.frostAddr + '/balance');
+            if (eResp.ok) {
+              const eData = await eResp.json();
+              const eBal = Number(eData.balance || '0') / 1e8;
+              console.log('[Background-FROST] Polling', entry.agrId.slice(0,12), ':', eBal, 'KAS', 'step:', entry.step);
+              updatedList.push({ ...entry, step: eBal >= (entry.buyerAmount + entry.sellerAmount) ? 4 : entry.step });
+            } else { updatedList.push(entry); }
+          } catch { updatedList.push(entry); }
+        }
+        
+        // === CRASH RECOVERY: auto-send if seller funded but buyer hasn't ===
+        for (const entry of updatedList) {
+          if (entry.step >= 4) continue; // already fully funded
+          if (entry.role !== 'buyer') continue; // only buyer auto-sends from recovery
