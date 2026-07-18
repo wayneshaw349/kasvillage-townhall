@@ -83,10 +83,7 @@ import {// Types
   generateVerificationCode,
   verifyFrostAddress,
   // Signatures
-  createPartialSigLocal,
   aggregatePartialSigs,
-  createFrostPartialSig,
-  completeFrostAndBroadcast,
   // L1 Inscriptions
   inscribeFrostEvent,
   // Exchange methods
@@ -106,9 +103,7 @@ import {// Types
   // High-level
   exchangePubkeys,
   createFrostAgreement,
-  computeFrostPartialS,
-  aggregateFrostSig,
-  cleanup as cleanupFrost, aggregateToAddress, completeFrost2Round} from './frost_complete';
+  cleanup as cleanupFrost, aggregateToAddress} from './frost_complete';
 import { validateEscrowDestination } from './frost_complete';
 import { sendPushToCounterparty } from './push_notifications';
 
