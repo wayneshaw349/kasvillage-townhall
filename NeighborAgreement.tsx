@@ -1755,28 +1755,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
                   const w2 = await loadMainWallet();
                   if (w2 && contract.frostData && !cancelled) {
                     const total2 = BigInt(Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8)) - 10000n;
-                    const res2 = await completeFrostAndBroadcast({
-                      frostAddress: contract.frostData,
-                      myPrivateKeyHex: w2.privKeyHex,
-                      recipientAddress: w2.address,
-                      amountSompi: total2,
-                      counterpartyPartialSig: (() => {
-                try {
-                  const dCtx2 = {
-                    agreementId: contract.agreementId || '',
-                    buyerPubkey: contract.buyerPubkey || '',
-                    sellerPubkey: contract.sellerPubkey || '',
-                    multisigAddress: contract.multisigAddress || '',
-                    aggregatedPubkey: contract.frostData?.aggregatedPubkey || '',
-                    network: contract.frostData?.network || 'testnet-10',
-                    itemPriceKas: contract.itemPriceKas,
-                    sellerCommitmentKas: contract.sellerCommitmentKas,
-                    R_hex: '',
-                  };
-                  return decryptPartialSig({ encrypted: partialSig, myPrivKeyHex: w2.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: dCtx2, nonce: '' });
-                } catch { return partialSig; }
-              })(),
-                    });
+                    const res2 = { success: false } as any; // DISABLED: completeFrostAndBroadcast (dead single-round path)
                     if (false /* disabled: old single-round */ && res2.success && res2.txId) {
                       console.log('[PartialSig-Poll] Release TX:', res2.txId);
                       setContract(prev => ({ ...prev, releaseTxId: res2.txId, releaseExplorerUrl: res2.explorerUrl }));
