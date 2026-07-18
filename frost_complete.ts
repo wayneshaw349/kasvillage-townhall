@@ -342,7 +342,7 @@ export function aggregateToAddress(aggregatePubkey: string, network: KaspaNetwor
 export function generateVerificationCode(pubkeyA: string, pubkeyB: string): string {
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
   const hash = sha256(new TextEncoder().encode('FROST_VERIFY:' + pk1 + pk2));
-  return bytesToHex(hash).slice(0, 4).toUpperCase();
+  return bytesToHex(hash).slice(0, 12).toUpperCase(); // 48-bit MITM grind cost
 }
 
 export function deriveFrostAddressLocal(params: {

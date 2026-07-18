@@ -6,6 +6,7 @@
 // ============================================================================
 
 import { sha256 } from '@noble/hashes/sha256';
+import { generateVerificationCode } from './frost_complete';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 import { secp256k1 } from '@noble/curves/secp256k1';
 
@@ -130,11 +131,14 @@ export function parseProposal(text: string): KVProposal | null {
   }
 
   // Verify code
-  const sorted = [proposal.buyerPubkey, proposal.sellerPubkey].sort();
-  const codeHash = sha256(new TextEncoder().encode(sorted[0] + sorted[1]));
-  const expectedCode = bytesToHex(codeHash.slice(0, 2)).toUpperCase();
-  if (proposal.verificationCode !== expectedCode) {
-    console.log('[KV] code recompute differs (signature is the gate, non-blocking):', expectedCode, 'vs', proposal.verificationCode);
+  // [MITM-GATE] one function, shared with the displayed code.
+
+  const expectedCode = generateVerificationCode(proposal.buyerPubkey as string, proposal.sellerPubkey as string);
+  if (proposal.verificationCode && proposal.verificationCode !== expectedCode) {
+    proposal.valid = false;
+    proposal.error = 'Verification code mismatch — pubkeys may have been swapped in transit. Do not proceed.';
+    console.warn('[KV] CODE MISMATCH (blocking):', expectedCode, 'vs', proposal.verificationCode);
+    return proposal;
   }
 
   // === SIGNATURE GATE ===
