@@ -459,8 +459,8 @@ export function deriveAddress(
  */
 export function verificationCode(pubkeyA: string, pubkeyB: string): string {
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
-  const hash = sha256(new Uint8Array([...hexToBytes(pk1), ...hexToBytes(pk2)]));
-  return bytesToHex(hash).slice(0, 4).toUpperCase();
+  const hash = sha256(new TextEncoder().encode('FROST_VERIFY:' + pk1 + pk2)); // [UNIFIED] match frost_complete
+  return bytesToHex(hash).slice(0, 12).toUpperCase();
 }
 
 // ============================================================================

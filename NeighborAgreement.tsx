@@ -146,7 +146,7 @@ import {
   verifyTemplate,
   deriveAggregateKey,
   deriveAddress,
-  verificationCode as computeVerificationCode,
+  // [REMOVED] verificationCode alias - use generateVerificationCode from frost_complete
   computeAgrId,
   buildTxBody,
   buildSellerRefund,
@@ -607,7 +607,7 @@ const VerificationCodeDisplay: React.FC<VerificationCodeProps> = ({ code, onConf
     </Text>
     
     <View style={verifyStyles.codeBox}>
-      <Text style={verifyStyles.code}>{code}</Text>
+      <Text style={verifyStyles.code}>{(code || '').replace(/(.{4})(?=.)/g, '$1-')}</Text>
     </View>
     
     <View style={verifyStyles.checkList}>
@@ -3908,7 +3908,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                         {contract.verificationCode && (
                           <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 12 }}>
                             <Text style={{ fontSize: rs.font(10), color: '#78716c', marginBottom: 2 }}>Verification Code:</Text>
-                            <Text selectable style={{ fontSize: rs.font(24), fontFamily: 'monospace', fontWeight: '900', color: '#312e81', letterSpacing: 6, textAlign: 'center' }}>{contract.verificationCode}</Text>
+                            <Text selectable style={{ fontSize: rs.font(24), fontFamily: 'monospace', fontWeight: '900', color: '#312e81', letterSpacing: 4, textAlign: 'center' }}>{(contract.verificationCode || '').replace(/(.{4})(?=.)/g, '$1-')}</Text>
                           </View>
                         )}
                         <TouchableOpacity onPress={async () => { 
