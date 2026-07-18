@@ -84,6 +84,8 @@ export function computeFrostPartialS(params: {
   frostAddress: FrostAddress;
   sighash_hex?: string; // real Kaspa sighash ? overrides myNonce.message_hex for challenge e
 }): { s_hex: string; R_agg_x_hex: string } {
+  throw new Error('[RETIRED] computeFrostPartialS (deterministic-nonce signer) - use canonical_agreement_steps ceremony');
+  // eslint-disable-next-line no-unreachable
   const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
   const { myNonce, counterpartyR_hex, frostAddress } = params;
 
@@ -401,6 +403,8 @@ export function createPartialSigLocal(params: {
   recipients?: Array<{ address: string; amount: bigint }>;
 }): FrostPartialSig {
   const { frostAddress, recipientAddress, amountSompi, privateKeyHex, recipients } = params;
+  throw new Error('[RETIRED] createPartialSigLocal (deterministic-nonce signer) - use canonical_agreement_steps ceremony');
+  // eslint-disable-next-line no-unreachable
   const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
 
   // 1. Build deterministic message (both parties compute the same message)
