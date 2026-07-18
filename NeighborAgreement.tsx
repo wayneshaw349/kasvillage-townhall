@@ -3292,7 +3292,21 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           const _u = _ur.ok ? await _ur.json() : [];
                           const _amts: number[] = Array.isArray(_u) ? _u.map((x: any) => Number(x.utxoEntry?.amount || '0')) : [];
                           const _near = (a: number, b: number) => b > 0 && Math.abs(a - b) <= b * 0.05;
-                          if (_amts.length === 0) { _step = 3; console.log('[Resume] Escrow empty — step 3'); }
+                          if (_amts.length === 0) {
+                            // Empty escrow is AMBIGUOUS: never-funded (step 3) OR already released/reclaimed (step 7).
+                            // Defaulting to step 3 here is the resume-detects-completed bug - it invites re-funding a
+                            // finished agreement. Ask Arweave for a terminal inscription before deciding.
+                            let _term = false, _termStatus = '', _termTx = '';
+                            try {
+                              const _tq = '{ transactions(first: 1, tags: [{ name: "KV-AgreementId", values: ["' + _p.agrId + '"] }, { name: "KV-Status", values: ["Released","Refund","Reclaimed"] }], sort: HEIGHT_DESC) { edges { node { id tags { name value } } } } }';
+                              const _tr = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: _tq }) });
+                              const _tj = _tr.ok ? await _tr.json() : null;
+                              const _tn = _tj && _tj.data && _tj.data.transactions && _tj.data.transactions.edges && _tj.data.transactions.edges[0] ? _tj.data.transactions.edges[0].node : null;
+                              if (_tn) { _term = true; _termTx = _tn.id || ''; const _tm = {}; (_tn.tags || []).forEach((t) => { _tm[t.name] = t.value; }); _termStatus = _tm['KV-Status'] || ''; }
+                            } catch (e) { console.warn('[Resume] Terminal-status check failed, treating empty escrow as step 3:', e); }
+                            if (_term) { _step = 7; console.log('[Resume] Escrow empty but Arweave shows', _termStatus, '- agreement COMPLETE, step 7. tx:', _termTx.slice(0, 16)); }
+                            else { _step = 3; console.log('[Resume] Escrow empty, no terminal inscription - step 3 (never funded)'); }
+                          }
                           else if (_amts.length === 1 && _near(_amts[0], _sAmt)) { _step = 3; console.log('[Resume] Seller funded, buyer has not — step 3'); }
                           else if (_amts.length === 2) {
                             const _sorted = [..._amts].sort((a, b) => a - b);
