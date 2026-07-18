@@ -72,9 +72,7 @@ function w64(v: bigint): Uint8Array {
 // ============================================================================
 // SCHEMA VERSION
 // ============================================================================
-// v2: R is per-input. v1 templates (one R, N inputs) leak the wallet key and
-// are rejected by parseTemplate/parseResponse.
-export const AGREEMENT_SCHEMA_VERSION = 2;
+export const AGREEMENT_SCHEMA_VERSION = 1;
 
 // ============================================================================
 // STEP DEFINITIONS
@@ -155,7 +153,7 @@ export interface TxTemplate {
   u: TxTemplateInput[];   // UTXOs (sorted by txId)
   o: TxTemplateOutput[];  // Outputs [buyer, seller]
   f: string;              // Fee sompi
-R: string[];            // Buyer R nonces - ONE PER INPUT, aligned with u[]
+  R: string;              // Buyer R nonce (compressed point hex)
   agr: string;            // Agreement ID
   lt?: string;            // lockTime (DAA) — '0' for release/cancel, set for refund
 }
@@ -165,7 +163,7 @@ R: string[];            // Buyer R nonces - ONE PER INPUT, aligned with u[]
 // ============================================================================
 
 export interface SellerResponse {
-R: string[];     // Seller R nonces - ONE PER INPUT, aligned with the template u[]
+  R: string;       // Seller R nonce (compressed point hex)
   s: string[];     // Partial s values (one per input, hex)
 }
 
@@ -248,21 +246,13 @@ export function buildReleaseTemplate(params: {
   partyB_depositSompi: bigint;
   mode: ReleaseMode;
   fee?: bigint;
-  privateKeyHex: string;
-  buyerPubkey: string;
-  sellerPubkey: string;
-  counter: number;
+  R_hex: string;
   agrId: string;
-}): { template: TxTemplate; description: string; nonces: FrostNonce[] } {
+}): { template: TxTemplate; description: string } {
   const sorted = [...params.utxos].sort((a, b) => a.txId.localeCompare(b.txId));
   const totalIn = sorted.reduce((s, u) => s + BigInt(u.amount), 0n);
   const numOutputs = params.mode === 'release' ? 1 : 2;
   const fee = params.fee || BigInt(sorted.length * 115000 + numOutputs * 48000 + 5000);
-
-  // ONE k PER INPUT. Generated AFTER the sort so R[i] lines up with u[i].
-  const nonces: FrostNonce[] = sorted.map(() =>
-    generateNonce(params.privateKeyHex, params.buyerPubkey, params.sellerPubkey, params.counter)
-  );
 
   const { outputs, description } = computeReleaseOutputs(
     params.mode, totalIn, fee,
@@ -275,11 +265,10 @@ export function buildReleaseTemplate(params: {
       u: sorted.map((u) => ({ t: u.txId, i: u.index, a: u.amount, s: u.scriptPubKey })),
       o: outputs,
       f: fee.toString(),
-      R: nonces.map((n) => n.R_hex),
+      R: params.R_hex,
       agr: params.agrId,
     },
     description,
-    nonces,
   };
 }
 
@@ -691,7 +680,7 @@ export function buildTemplate(params: {
   sellerXOnly: string;
   buyerAmountSompi: bigint;
   fee: bigint;
-buyerR_hex: string[];   // one per input, sorted order
+  buyerR_hex: string;
   agrId: string;
 }): TxTemplate {
   const { utxos, buyerXOnly, sellerXOnly, buyerAmountSompi, fee, buyerR_hex, agrId } = params;
@@ -709,7 +698,7 @@ buyerR_hex: string[];   // one per input, sorted order
       { v: sellerAmt.toString(), s: p2pkScript(sellerXOnly) },
     ],
     f: fee.toString(),
-R: buyerR_hex,
+    R: buyerR_hex,
     agr: agrId,
   };
 }
@@ -723,16 +712,6 @@ export function parseTemplate(b64: string): TxTemplate | null {
     const json = atob(b64);
     const obj = JSON.parse(json);
     if (!obj.u || !obj.o || !obj.R || !Array.isArray(obj.u) || !Array.isArray(obj.o)) {
-      return null;
-    }
-    // v1 templates carried ONE R for N inputs. Signing one leaks the wallet key
-    // by division. Refuse to parse rather than refuse to sign.
-    if (!Array.isArray(obj.R)) {
-      console.warn('[Template] REJECTED: v1 format (single R for all inputs). Ask for a fresh template.');
-      return null;
-    }
-    if (obj.R.length !== obj.u.length) {
-      console.warn('[Template] REJECTED:', obj.R.length, 'R nonces for', obj.u.length, 'inputs.');
       return null;
     }
     return obj as TxTemplate;
@@ -808,15 +787,6 @@ export function parseResponse(b64: string): SellerResponse | null {
   try {
     const obj = JSON.parse(atob(b64));
     if (!obj.R || !obj.s || !Array.isArray(obj.s)) return null;
-    // Same gate as parseTemplate: a scalar R means one k signed every input.
-    if (!Array.isArray(obj.R)) {
-      console.warn('[Response] REJECTED: v1 format (single R for all inputs).');
-      return null;
-    }
-    if (obj.R.length !== obj.s.length) {
-      console.warn('[Response] REJECTED:', obj.R.length, 'R nonces for', obj.s.length, 'partials.');
-      return null;
-    }
     return obj as SellerResponse;
   } catch {
     return null;
@@ -959,21 +929,21 @@ export function canTransition(
 // ============================================================================
 export function buildSellerRefund(params: {
   sellerPrivKeyHex: string;
-  sellerPubkey: string;   // reclaiming party (partyA) - receives the refund output
+  sellerPubkey: string;   // reclaiming party (partyA) — receives the refund output
   buyerPubkey: string;    // counterparty (partyB)
   counter: number;
   predictedEscrowUtxo: { txId: string; index: number; amount: string; scriptPubKey: string };
   fundDAA: bigint;
   N: bigint;              // timeout window in DAA (from proposal)
   agrId: string;
-}): { template: TxTemplate; templateB64: string; nonces: FrostNonce[]; sighashes: string[] } {
+}): { template: TxTemplate; templateB64: string; nonce: FrostNonce; sighashes: string[] } {
   return buyerBuildTemplate({
     privateKeyHex: params.sellerPrivKeyHex,
     buyerPubkey: params.sellerPubkey,   // partyA = seller = gets the refund output
     sellerPubkey: params.buyerPubkey,   // partyB = buyer = counterparty
     counter: params.counter,
     utxos: [params.predictedEscrowUtxo],
-    buyerAmountSompi: BigInt(params.predictedEscrowUtxo.amount),
+    buyerAmountSompi: BigInt(params.predictedEscrowUtxo.amount), // full escrow amount (fee deducted in outputs)
     releaseMode: 'refund',
     lockTime: params.fundDAA + params.N,
     agrId: params.agrId,
@@ -995,12 +965,21 @@ export function buyerBuildTemplate(params: {
 }): {
   template: TxTemplate;
   templateB64: string;
-  nonces: FrostNonce[];
+  nonce: FrostNonce;
   sighashes: string[];
 } {
-  const numOutputs = ((params.releaseMode || 'release') === 'cancel') ? 2 : 1;
+  const numOutputs = ((params.releaseMode || 'release') === 'cancel') ? 2 : 1; // release & refund = 1 output, cancel = 2
   const fee = params.fee || BigInt(params.utxos.length * 115000 + numOutputs * 48000 + 5000);
 
+  // Generate nonce (k born)
+  const nonce = generateNonce(
+    params.privateKeyHex,
+    params.buyerPubkey,
+    params.sellerPubkey,
+    params.counter
+  );
+
+  // Build template
   const buyerXOnly =
     params.buyerPubkey.length === 66 ? params.buyerPubkey.slice(2) : params.buyerPubkey;
   const sellerXOnly =
@@ -1010,13 +989,6 @@ export function buyerBuildTemplate(params: {
   const sorted = [...params.utxos].sort((a, b) => a.txId.localeCompare(b.txId));
   const totalIn = sorted.reduce((s, u) => s + BigInt(u.amount), 0n);
   const sellerDeposit = params.sellerAmountSompi ?? (totalIn - params.buyerAmountSompi - fee);
-
-  // ONE k PER INPUT (k born here, one per input). Sharing a k across inputs gives
-  // d = (s0-s1)/(e0-e1) - the wallet key by division. Generated after the sort so
-  // R[i] lines up with u[i].
-  const nonces: FrostNonce[] = sorted.map(() =>
-    generateNonce(params.privateKeyHex, params.buyerPubkey, params.sellerPubkey, params.counter)
-  );
 
   const { outputs } = computeReleaseOutputs(
     mode, totalIn, fee,
@@ -1028,11 +1000,12 @@ export function buyerBuildTemplate(params: {
     u: sorted.map((u) => ({ t: u.txId, i: u.index, a: u.amount, s: u.scriptPubKey })),
     o: outputs,
     f: fee.toString(),
-    R: nonces.map((n) => n.R_hex),
+    R: nonce.R_hex,
     agr: params.agrId,
     lt: (params.lockTime ?? 0n).toString(),
   };
 
+  // Compute sighashes
   const inputs: CanonicalInput[] = template.u.map((u) => ({
     txId: u.t,
     index: u.i,
@@ -1052,7 +1025,7 @@ export function buyerBuildTemplate(params: {
   return {
     template,
     templateB64: encodeTemplate(template),
-    nonces,
+    nonce,
     sighashes,
   };
 }
@@ -1076,12 +1049,7 @@ export function sellerSignTemplate(params: {
 } | { error: string } {
   const { privateKeyHex, sellerPubkey, buyerPubkey, counter, template } = params;
 
-  // A template with fewer R nonces than inputs is a v1 template. Signing it would
-  // publish two s values under one k and hand over the wallet key. Refuse.
-  if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
-    return { error: 'Template carries ' + (Array.isArray(template.R) ? template.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). One k per input is required - refusing to sign. Ask for a fresh template.' };
-  }
-
+  // Verify template
   const sellerXOnly =
     sellerPubkey.length === 66 ? sellerPubkey.slice(2) : sellerPubkey;
   const verification = verifyTemplate(template, sellerXOnly);
@@ -1089,8 +1057,13 @@ export function sellerSignTemplate(params: {
     return { error: verification.error || 'Template verification failed' };
   }
 
+  // Derive aggregate key
   const agg = deriveAggregateKey(buyerPubkey, sellerPubkey, counter);
 
+  // Generate seller nonce (k born — dies at end of this function)
+  const nonce = generateNonce(privateKeyHex, buyerPubkey, sellerPubkey, counter);
+
+  // Compute partial sigs
   const inputs: CanonicalInput[] = template.u.map((u) => ({
     txId: u.t,
     index: u.i,
@@ -1103,17 +1076,14 @@ export function sellerSignTemplate(params: {
   }));
 
   const partials: string[] = [];
-  const myR: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    // Fresh k for THIS input only. Born and dies inside this loop iteration.
-    const nonce = generateNonce(privateKeyHex, buyerPubkey, sellerPubkey, counter);
-    myR.push(nonce.R_hex);
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
-    const ps = partialSign(nonce, template.R[i], agg.aggXOnly, shHex);
+    const ps = partialSign(nonce, template.R, agg.aggXOnly, shHex);
     partials.push(ps.s_hex);
   }
 
-  const response: SellerResponse = { R: myR, s: partials };
+  // k dies here — nonce goes out of scope, garbage collected
+  const response: SellerResponse = { R: nonce.R_hex, s: partials };
 
   return {
     response,
@@ -1129,28 +1099,14 @@ export function sellerSignTemplate(params: {
  * Caller MUST destroy buyer nonce after this returns.
  */
 export function buyerAggregate(params: {
-  nonces: FrostNonce[];
+  nonce: FrostNonce;
   buyerPubkey: string;
   sellerPubkey: string;
   counter: number;
   template: TxTemplate;
   sellerResponse: SellerResponse;
 }): { txBody: object; signatures: string[] } | { error: string } {
-  const { nonces, buyerPubkey, sellerPubkey, counter, template, sellerResponse } = params;
-
-  // Every array must line up with u[], or somebody reused a k.
-  if (!Array.isArray(nonces) || nonces.length !== template.u.length) {
-    return { error: 'Have ' + (Array.isArray(nonces) ? nonces.length : 0) + ' nonce(s) for ' + template.u.length + ' input(s) - one k per input is required.' };
-  }
-  if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
-    return { error: 'Template carries the wrong number of R nonces - refusing.' };
-  }
-  if (!Array.isArray(sellerResponse.R) || sellerResponse.R.length !== template.u.length) {
-    return { error: 'Counterparty sent ' + (Array.isArray(sellerResponse.R) ? sellerResponse.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). They reused a k - do NOT broadcast, and tell them to update.' };
-  }
-  if (sellerResponse.s.length !== template.u.length) {
-    return { error: 'Counterparty sent ' + sellerResponse.s.length + ' partial(s) for ' + template.u.length + ' input(s).' };
-  }
+  const { nonce, buyerPubkey, sellerPubkey, counter, template, sellerResponse } = params;
 
   const agg = deriveAggregateKey(buyerPubkey, sellerPubkey, counter);
 
@@ -1170,15 +1126,17 @@ export function buyerAggregate(params: {
   for (let i = 0; i < inputs.length; i++) {
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
 
-    // nonces[i] signed input i and nothing else.
-    const buyerPartial = partialSign(nonces[i], sellerResponse.R[i], agg.aggXOnly, shHex);
+    // Buyer partial
+    const buyerPartial = partialSign(nonce, sellerResponse.R, agg.aggXOnly, shHex);
 
+    // Aggregate
     const sigHex = aggregateSigs(
       buyerPartial.R_agg_x_hex,
       buyerPartial.s_hex,
       sellerResponse.s[i]
     );
 
+    // Verify before broadcast
     if (!verifySig(sigHex, shHex, agg.aggXOnly)) {
       return { error: `Input ${i} failed BIP340 verification. Aborting.` };
     }
@@ -1215,8 +1173,7 @@ export function verifyRefundTemplate(
 ): { valid: boolean; error?: string } {
   const slack = expected.slackDAA ?? 600n;
 
-if (!Array.isArray(template.R) || template.R.length !== template.u.length) return { valid: false, error: 'Refund template must carry one R nonce per input (v2)' };
-if (template.u.length !== 1) return { valid: false, error: 'Refund must spend exactly 1 input, saw ' + template.u.length };
+  if (template.u.length !== 1) return { valid: false, error: 'Refund must spend exactly 1 input, saw ' + template.u.length };
   const u = template.u[0];
   if (u.t !== expected.predictedTxId) return { valid: false, error: 'Refund input is not the predicted escrow txid' };
   if (u.i !== 0) return { valid: false, error: 'Refund input index must be 0, saw ' + u.i };
@@ -1255,37 +1212,34 @@ if (template.u.length !== 1) return { valid: false, error: 'Refund must spend ex
 /** Counterparty co-signs the funder's timelocked refund. k born and dies here. */
 export function cosignRefundTemplate(params: {
   privateKeyHex: string;
-  myPubkey: string;        // co-signer (buyer) - receives nothing
-  funderPubkey: string;    // seller - receives the refund output
+  myPubkey: string;        // co-signer (buyer) — receives nothing
+  funderPubkey: string;    // seller — receives the refund output
   counter: number;
   template: TxTemplate;
   expected: { predictedTxId: string; escrowScript: string; N: bigint; currentDAA: bigint; slackDAA?: bigint; minRemainingDAA?: bigint };
 }): { response: SellerResponse; responseB64: string } | { error: string } {
   const { privateKeyHex, myPubkey, funderPubkey, counter, template } = params;
 
-  if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
-    return { error: 'Refund template carries ' + (Array.isArray(template.R) ? template.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). One k per input is required - refusing to sign.' };
-  }
-
   const funderXOnly = funderPubkey.length === 66 ? funderPubkey.slice(2) : funderPubkey;
   const v = verifyRefundTemplate(template, funderXOnly, params.expected);
   if (!v.valid) return { error: v.error || 'Refund verification failed' };
 
+  // Party mapping mirrors buildSellerRefund: the funder occupies the buyerPubkey slot.
+  // deriveAggregateKey/generateNonce sort internally, so the aggregate key is the
+  // same either way — the slot only selects which script receives the output.
   const agg = deriveAggregateKey(funderPubkey, myPubkey, counter);
+  const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);
 
   const inputs: CanonicalInput[] = template.u.map((u) => ({ txId: u.t, index: u.i, value: BigInt(u.a), scriptPubKey: u.s }));
   const outputs: CanonicalOutput[] = template.o.map((o) => ({ value: BigInt(o.v), script: o.s }));
 
   const partials: string[] = [];
-  const myR: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);  // fresh k per input
-    myR.push(nonce.R_hex);
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
-    partials.push(partialSign(nonce, template.R[i], agg.aggXOnly, shHex).s_hex);
+    partials.push(partialSign(nonce, template.R, agg.aggXOnly, shHex).s_hex);
   }
 
-  const response: SellerResponse = { R: myR, s: partials };
+  const response: SellerResponse = { R: nonce.R_hex, s: partials };
   return { response, responseB64: encodeResponse(response) };
 }
 
@@ -1310,26 +1264,22 @@ export function buildKillTx(params: {
   predictedEscrowUtxo: { txId: string; index: number; amount: string; scriptPubKey: string };
   agrId: string;
   fee?: bigint;
-}): { template: TxTemplate; templateB64: string; nonces: FrostNonce[]; sighashes: string[] } {
+}): { template: TxTemplate; templateB64: string; nonce: FrostNonce; sighashes: string[] } {
   const u = params.predictedEscrowUtxo;
   const fee = params.fee || BigInt(1 * 115000 + 1 * 48000 + 5000);
   const totalIn = BigInt(u.amount);
   if (totalIn <= fee) throw new Error('Kill: escrow amount too low for fee');
 
-  // Fresh random k per input. NEVER derive k from the tx, and never share one
-  // across inputs: the refund and the kill spend the SAME utxo with DIFFERENT
-  // outputs, so a shared k would give d = (s1-s2)/(e1-e2) - the wallet key by
-  // division. Same reason two inputs of one tx may not share a k.
-  const inputsRaw = [{ t: u.txId, i: u.index, a: u.amount, s: u.scriptPubKey }];
-  const nonces: FrostNonce[] = inputsRaw.map(() =>
-    generateNonce(params.sellerPrivKeyHex, params.sellerPubkey, params.buyerPubkey, params.counter)
-  );
+  // Fresh random k, same as every other ceremony call. NEVER derive k from the tx:
+  // the refund and the kill spend the SAME utxo with DIFFERENT outputs, so a shared
+  // k across the two would give d = (s1-s2)/(e1-e2) — the wallet key by division.
+  const nonce = generateNonce(params.sellerPrivKeyHex, params.sellerPubkey, params.buyerPubkey, params.counter);
 
   const template: TxTemplate = {
-    u: inputsRaw,
+    u: [{ t: u.txId, i: u.index, a: u.amount, s: u.scriptPubKey }],
     o: [{ v: (totalIn - fee).toString(), s: u.scriptPubKey }],  // back to the escrow
     f: fee.toString(),
-    R: nonces.map((n) => n.R_hex),
+    R: nonce.R_hex,
     agr: params.agrId,
     lt: '0',                                                    // spendable immediately
   };
@@ -1339,7 +1289,7 @@ export function buildKillTx(params: {
   const sighashes: string[] = [];
   for (let i = 0; i < inputs.length; i++) sighashes.push(bytesToHex(computeSighash(inputs, outputs, i, 0n)));
 
-  return { template, templateB64: encodeTemplate(template), nonces, sighashes };
+  return { template, templateB64: encodeTemplate(template), nonce, sighashes };
 }
 
 /** Buyer's check before co-signing the kill tx. It must only ever move A escrow->escrow. */
@@ -1347,8 +1297,7 @@ export function verifyKillTemplate(
   template: TxTemplate,
   expected: { predictedTxId: string; escrowScript: string },
 ): { valid: boolean; error?: string } {
-if (!Array.isArray(template.R) || template.R.length !== template.u.length) return { valid: false, error: 'Kill template must carry one R nonce per input (v2)' };
-if (template.u.length !== 1) return { valid: false, error: 'Kill must spend exactly 1 input, saw ' + template.u.length };
+  if (template.u.length !== 1) return { valid: false, error: 'Kill must spend exactly 1 input, saw ' + template.u.length };
   const u = template.u[0];
   if (u.t !== expected.predictedTxId) return { valid: false, error: 'Kill input is not the predicted escrow txid' };
   if (u.i !== 0) return { valid: false, error: 'Kill input index must be 0, saw ' + u.i };
@@ -1375,35 +1324,32 @@ if (template.u.length !== 1) return { valid: false, error: 'Kill must spend exac
 export function cosignKillTemplate(params: {
   privateKeyHex: string;
   myPubkey: string;        // co-signer (buyer)
-  funderPubkey: string;    // seller - whose UTXO is being consumed
+  funderPubkey: string;    // seller — whose UTXO is being consumed
   counter: number;
   template: TxTemplate;
   expected: { predictedTxId: string; escrowScript: string };
 }): { response: SellerResponse; responseB64: string } | { error: string } {
   const { privateKeyHex, myPubkey, funderPubkey, counter, template } = params;
 
-  if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
-    return { error: 'Kill template carries ' + (Array.isArray(template.R) ? template.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). One k per input is required - refusing to sign.' };
-  }
-
   const v = verifyKillTemplate(template, params.expected);
   if (!v.valid) return { error: v.error || 'Kill verification failed' };
 
+  // Same party mapping as buildSellerRefund/buildKillTx: funder in the buyerPubkey
+  // slot. deriveAggregateKey and generateNonce both sort internally, so the slot
+  // choice does not move the aggregate key.
   const agg = deriveAggregateKey(funderPubkey, myPubkey, counter);
+  const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);
 
   const inputs: CanonicalInput[] = template.u.map((u) => ({ txId: u.t, index: u.i, value: BigInt(u.a), scriptPubKey: u.s }));
   const outputs: CanonicalOutput[] = template.o.map((o) => ({ value: BigInt(o.v), script: o.s }));
 
   const partials: string[] = [];
-  const myR: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);  // fresh k per input
-    myR.push(nonce.R_hex);
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, 0n));
-    partials.push(partialSign(nonce, template.R[i], agg.aggXOnly, shHex).s_hex);
+    partials.push(partialSign(nonce, template.R, agg.aggXOnly, shHex).s_hex);
   }
 
-  const response: SellerResponse = { R: myR, s: partials };
+  const response: SellerResponse = { R: nonce.R_hex, s: partials };
   return { response, responseB64: encodeResponse(response) };
 }
 
