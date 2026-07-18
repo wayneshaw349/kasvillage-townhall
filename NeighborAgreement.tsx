@@ -4291,6 +4291,58 @@ nonces: _killNonces,
                         <Text style={{ fontSize: rs.font(9), color: '#b45309', marginTop: 2 }}>Only if the buyer never funds, after {contract.timeoutMinutes ?? 5} min</Text>
                       </TouchableOpacity>
                     )}
+                    {/* 5f: ABORT PENDING AGREEMENT - buyer never returned the co-signature. */}
+                    {role === 'seller' && contract.agreementId && (
+                      <TouchableOpacity
+                        onPress={async () => {
+                          const _agrId = contract.agreementId || '';
+                          try {
+                            const _pj = await SecureStore.getItemAsync('kv_refund_pending_' + _agrId);
+                            if (!_pj) { Alert.alert('Nothing Pending', 'No frozen collateral is waiting on a buyer co-signature for this agreement.'); return; }
+                            const _pp = JSON.parse(_pj);
+                            // SAFETY GATE: abort is only legal while NOTHING is on-chain. If the escrow
+                            // has any UTXO, the funding tx was broadcast - this is a live agreement and
+                            // the ledger tag must NOT be released; use Reclaim (after timeout) or Release.
+                            const _net = String(_pp.network || 'testnet-10');
+                            const _api = _net.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+                            const _fr = _pp.frostAddr || contract.multisigAddress || '';
+                            if (!_fr || _fr.length < 20) { Alert.alert('Error', 'Pending record has no escrow address - cannot verify safety. Not touching anything.'); return; }
+                            const _ur = await fetch(_api + '/addresses/' + _fr + '/utxos');
+                            if (!_ur.ok) { Alert.alert('Error', 'Could not check the escrow on L1. Not touching anything - try again.'); return; }
+                            const _uu = await _ur.json();
+                            if (Array.isArray(_uu) && _uu.length > 0) {
+                              Alert.alert('Cannot Abort', 'The escrow already holds funds on-chain, so this is a live agreement. Aborting now would strand real collateral. Use Reclaim (after the timeout) or a mutual release instead.');
+                              return;
+                            }
+                            Alert.alert('Abort Pending Agreement?', 'The buyer never returned their co-signature and nothing was sent on-chain. This frees your reserved ' + (Number(_pp.amountSompi || 0) / 1e8) + ' KAS and deletes the frozen (unsigned) refund. The agreement cannot be resumed after this.', [
+                              { text: 'Keep Waiting', style: 'cancel' },
+                              { text: 'Abort & Free Funds', style: 'destructive', onPress: async () => {
+                                try {
+                                  setIsLoading(true);
+                                  try { await releaseCommitment(_agrId); console.log('[Abort] Released UTXO tags for', _agrId); } catch (e) { console.warn('[Abort] releaseCommitment failed:', e); }
+                                  await SecureStore.deleteItemAsync('kv_refund_pending_' + _agrId).catch(() => {});
+                                  await removeFrostEntry(_agrId).catch(() => {});
+                                  await archiveAgreementSession('aborted-pending').catch(() => {});
+                                  await clearAgreementSession().catch(() => {});
+                                  Alert.alert('Aborted', 'Reservation released. Your funds are spendable again. Nothing was ever sent on-chain.');
+                                  setStep(1); setRole(null); setAgreementType(null);
+                                } catch (e) {
+                                  console.error('[Abort] Error:', e);
+                                  Alert.alert('Error', e instanceof Error ? e.message : 'Abort failed');
+                                } finally { setIsLoading(false); }
+                              }},
+                            ]);
+                          } catch (e) {
+                            console.error('[Abort] Check failed:', e);
+                            Alert.alert('Error', e instanceof Error ? e.message : 'Abort check failed');
+                          }
+                        }}
+                        style={{ backgroundColor: '#fef2f2', borderWidth: 2, borderColor: '#dc2626', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 16 }}
+                      >
+                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#991b1b' }}>Abort Pending Agreement</Text>
+                        <Text style={{ fontSize: rs.font(9), color: '#b91c1c', marginTop: 2 }}>Only if the buyer never co-signed and nothing was sent</Text>
+                      </TouchableOpacity>
+                    )}
 
                     <CollateralBreakdown
                       buyerAmount={contract.itemPriceKas}
