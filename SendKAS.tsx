@@ -18,6 +18,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import * as SecureStore from 'expo-secure-store';
 import { useKaspaPrice } from './useKaspaPrice';
 import {
   X,
@@ -187,6 +188,9 @@ export const SendKAS: React.FC<SendKASProps> = ({
   myAddress,
 }) => {
   const [recipientInput, setRecipientInput] = useState(initialAddress || '');
+  const [vaultAddr, setVaultAddr] = useState<string | null>(null);
+  const [hotAddr, setHotAddr] = useState<string | null>(null);
+  const [frostAddr, setFrostAddr] = useState<string | null>(null);
   const [amountKas, setAmountKas] = useState(initialAmount ? String(initialAmount / 100000000) : '');
   const [memo, setMemo] = useState('');
   const [useStealthAddress, setUseStealthAddress] = useState(false);
@@ -309,6 +313,21 @@ export const SendKAS: React.FC<SendKASProps> = ({
     }
   }, [visible, initialAddress, initialAmount]);
   
+  useEffect(() => {
+    (async () => {
+      try {
+        const [v, h, fr] = await Promise.all([
+          SecureStore.getItemAsync('kv_vault_address'),
+          SecureStore.getItemAsync('kv_kaspa_address'),
+          SecureStore.getItemAsync('kv_frost_vault_address'),
+        ]);
+        setVaultAddr(v);
+        setHotAddr(h);
+        setFrostAddr(fr);
+      } catch {}
+    })();
+  }, [visible]);
+
   const handlePaste = async () => {
     const text = await Clipboard.getStringAsync();
     if (text) setRecipientInput(text.trim());
@@ -420,6 +439,28 @@ export const SendKAS: React.FC<SendKASProps> = ({
             <View style={styles.content}>
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Send To</Text>
+                <View style={styles.sendToChips}>
+                  {[
+                    { label: 'Vault', addr: vaultAddr },
+                    { label: 'Hot/Shopping', addr: hotAddr },
+                    { label: 'FROST Vault', addr: frostAddr },
+                  ].map(({ label, addr }) => {
+                    if (!addr) return null;
+                    const isSelf = addr === myAddress;
+                    return (
+                      <TouchableOpacity
+                        key={label}
+                        style={[styles.sendToChip, isSelf && styles.sendToChipDisabled]}
+                        disabled={isSelf}
+                        onPress={() => setRecipientInput(addr)}
+                      >
+                        <Text style={[styles.sendToChipText, isSelf && styles.sendToChipTextDisabled]}>
+                          {label}{isSelf ? ' (this wallet)' : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
                 <View style={styles.addressInputRow}>
                   <TextInput
                     style={[
@@ -524,26 +565,6 @@ export const SendKAS: React.FC<SendKASProps> = ({
                   maxLength={100}
                 />
               </View>
-              
-              {/* PO Box Option */}
-              {!inputIsStealth && (
-                <TouchableOpacity
-                  style={styles.stealthOption}
-                  onPress={() => setUseStealthAddress(!useStealthAddress)}
-                >
-                  <View style={[styles.checkbox, useStealthAddress && styles.checkboxChecked]}>
-                    {useStealthAddress && <CheckCircle size={rs.s(16)} color={COLORS.white} />}
-                  </View>
-                  <View style={styles.stealthInfo}>
-                    <Text style={styles.stealthTitle}>
-                      <Shield size={rs.s(14)} color={COLORS.indigo500} />{' Use PO Box Address'}
-                    </Text>
-                    <Text style={styles.stealthDesc}>
-                      Enhanced privacy - recipient address private payment
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )}
               
               {inputIsStealth && (
                 <View style={styles.stealthAutoEnabled}>
@@ -761,6 +782,11 @@ const styles = StyleSheet.create({
   quickAmounts: { flexDirection: 'row', gap: rs.s(8), marginTop: rs.s(12) },
   quickAmountBtn: { flex: 1, backgroundColor: COLORS.stone100, borderRadius: rs.s(8), paddingVertical: rs.s(8), alignItems: 'center' },
   quickAmountText: { fontSize: rs.font(11), fontWeight: 'bold', color: COLORS.stone600 },
+  sendToChips: { flexDirection: 'row', gap: rs.s(8), marginBottom: rs.s(8) },
+  sendToChip: { backgroundColor: COLORS.amber100, borderRadius: rs.s(8), paddingHorizontal: rs.s(12), paddingVertical: rs.s(6), borderWidth: 1, borderColor: COLORS.amber500 },
+  sendToChipDisabled: { backgroundColor: COLORS.stone100, borderColor: COLORS.stone300 },
+  sendToChipText: { fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.amber700 },
+  sendToChipTextDisabled: { color: COLORS.stone400 },
   memoInput: { backgroundColor: COLORS.white, borderWidth: 1, borderColor: COLORS.stone200, borderRadius: rs.s(12), paddingHorizontal: rs.s(14), paddingVertical: rs.s(12), fontSize: rs.font(14), color: COLORS.stone800 },
   stealthOption: { flexDirection: 'row', alignItems: 'center', gap: rs.s(12), backgroundColor: COLORS.stone50, borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(20) },
   stealthAutoEnabled: { flexDirection: 'row', alignItems: 'center', gap: rs.s(8), backgroundColor: COLORS.indigo100, borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(20) },

@@ -1,0 +1,264 @@
+
+======================================================================
+== A: onRecovered handler  [AppNaviagator.tsx]
+======================================================================
+ 1178 |           onCancel={() => { setVaultWires([]); setScreen('dashboard'); }}
+ 1179 |         />
+ 1180 |       );
+ 1181 | 
+ 1182 |     case 'vault_recovery':
+ 1183 |       return (
+ 1184 |         <VaultRecoveryScreen
+ 1185 |           onRecovered={(mnemonic) => {
+ 1186 |             (async () => {
+ 1187 |               const net = kaspaAddress.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet';
+ 1188 |               const res = await restoreWalletFromMnemonic(mnemonic, net);
+ 1189 |               if (res.success) {
+ 1190 |                 setKaspaAddress(res.kaspaAddress || '');
+ 1191 |                 setUser((prev) => ({ ...prev, pubkey: res.publicKey, publicKey: res.publicKey }));
+ 1192 |                 Alert.alert('Wallet restored', 'Same address recovered from your cards.');
+ 1193 |                 setScreen('dashboard');
+ 1194 |               } else {
+ 1195 |                 Alert.alert('Restore failed', res.error || 'Try re-scanning your cards.');
+ 1196 |               }
+ 1197 |             })();
+ 1198 |           }}
+ 1199 |           onCancel={() => setScreen('onboarding')}
+ 1200 |         />
+ 1201 |       );
+ 1202 | 
+ 1203 |     case 'vault_setup':
+ 1204 |       return (
+ 1205 |         <VaultSetupScreen
+ 1206 |           visible={true}
+ 1207 |           onClose={() => setScreen('dashboard')}
+ 1208 |           getMyPubkey={getMyPubkeyHex}
+ 1209 |           network={kaspaAddress.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet'}
+ 1210 |           onCreated={(v) => setFrostVault(v)}
+ 1211 |         />
+ 1212 |       );
+ 1213 | 
+ 1214 |     case 'vault_sign':
+ 1215 |       return frostVault ? (
+ 1216 |         <VaultQRSignScreen
+ 1217 |           visible={true}
+
+======================================================================
+== B: card generation  [AppNaviagator.tsx]
+======================================================================
+  799 |     } else {
+  800 |       setScreen('dashboard');
+  801 |     }
+  802 |   }, [snailMode, snailDelayMs]);
+  803 | 
+  804 |   const handleQuizFail = useCallback(() => setScreen('vault_recovery'), []);
+  805 | 
+  806 |   const handleSnailModeComplete = useCallback(() => {
+  807 |     setSnailMode(false);
+  808 |     setScreen('dashboard');
+  809 |   }, []);
+  810 | 
+  811 |   const openVaultBackup = useCallback(async () => {
+  812 |     try {
+  813 |       const mnemonic = await SecureStore.getItemAsync('kv_mnemonic');
+  814 |       if (!mnemonic) {
+  815 |         setScreen('generate_vault'); // no seed on this wallet -> offer to mint a backable one
+  816 |         return;
+  817 |       }
+  818 |       const pubHex = (await SecureStore.getItemAsync('kv_public_key')) || '';
+  819 |       const backup = createIdentityBoundBackup(mnemonic, pubHex, 4); // 2-of-4, identity-bound
+  820 |       setVaultWires(backup.wires);
+  821 |       setScreen('vault_backup');
+  822 |     } catch (e: any) {
+  823 |       Alert.alert('Backup error', e?.message || 'Could not create backup cards.');
+  824 |     }
+  825 |   }, []);
+  826 | 
+  827 |   // ---- FROST vault (2-device signer) ----
+  828 |   const [frostVault, setFrostVault] = useState<VaultInfo | null>(null);
+  829 |   useEffect(() => { loadFrostVault().then(setFrostVault).catch(() => {}); }, [screen]);
+  830 | 
+  831 |   const getMyPubkeyHex = useCallback(async () => {
+  832 |     return (await SecureStore.getItemAsync('kv_public_key'))
+  833 |       || (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY))
+  834 |       || (await SecureStore.getItemAsync('kaspa_pubkey'))
+  835 |       || '';
+  836 |   }, []);
+  837 | 
+  838 |   const getPrivKeyHex = useCallback(async () => {
+  839 |     return (await SecureStore.getItemAsync('kv_private_key'))
+  840 |       || (await SecureStore.getItemAsync(STORE_KEYS.PRIVATE_KEY))
+  841 |       || '';
+  842 |   }, []);
+  843 | 
+
+======================================================================
+== C: ritual Arweave tags  [expo_identity_ritual.tsx]
+======================================================================
+ 9263 |       console.log("[PhaseAnchor] INSCRIPTION SUCCESS! txId:", result.kaspacTxId);
+ 9264 |       setTxId(result.kaspacTxId);
+ 9265 | 
+ 9266 |       // Save avatar SVG paths to device for profile display
+ 9267 |       try {
+ 9268 |         const recipeData = typeof recipe === 'string' ? JSON.parse(recipe) : recipe;
+ 9269 |         const paths = recipeData.silhouettePaths || [];
+ 9270 |         if (paths.length > 0) {
+ 9271 |           const hash = computeAvatarHash(paths);
+ 9272 |           await storeAvatarLocally({ race: recipeData.race || 'human', gender: recipeData.gender || 'male', paths, hash, createdAt: Date.now() } as any);
+ 9273 |           console.log('[PhaseAnchor] Avatar SVG saved to device:', paths.length, 'paths, hash:', hash.slice(0, 16));
+ 9274 |         } else {
+ 9275 |           console.warn('[PhaseAnchor] No silhouette paths in recipe to save');
+ 9276 |         }
+ 9277 |       } catch (svgErr: any) {
+ 9278 |         console.warn('[PhaseAnchor] Avatar SVG save failed (non-fatal):', svgErr.message);
+ 9279 |       }
+ 9280 | 
+ 9281 |       // Arweave upload � permanent avatar backup (non-blocking)
+ 9282 |       try {
+ 9283 |         console.log("[PhaseAnchor] Starting Arweave upload...");
+ 9284 |         const arTags: ArweaveTag[] = [
+ 9285 |           { name: "App-Name", value: "KasVillage" },
+ 9286 |           { name: "Content-Type", value: "application/json" },
+ 9287 |           { name: "KV-Type", value: "identity" },
+ 9288 |           { name: "KV-IdentityHash", value: recipe.recipeHash || "" },
+ 9289 |           { name: "KV-KaspaTxId", value: result.kaspacTxId || "" },
+ 9290 |           { name: "KV-Network", value: selectedNetwork },
+ 9291 |           { name: "KV-Address", value: address },
+ 9292 |           { name: "KV-Version", value: "2" },
+ 9293 |           { name: "Unix-Time", value: String(Math.floor(Date.now() / 1000)) },
+ 9294 |         ];
+ 9295 |         // Add device attestation tags (non-blocking)
+ 9296 |         try {
+ 9297 |           const deviceHash = await getDeviceHash();
+ 9298 |           if (deviceHash) arTags.push({ name: "KV-DeviceHash", value: deviceHash });
+ 9299 |           const serialHash = await getSerialHash();
+ 9300 |           if (serialHash) arTags.push({ name: "KV-SerialHash", value: serialHash });
+ 9301 |         } catch (attErr) {
+ 9302 |           console.warn("[PhaseAnchor] Attestation tags failed (non-fatal):", attErr);
+ 9303 |         }
+ 9304 |         const arResult = await uploadToTurbo(JSON.stringify(recipe), arTags);
+ 9305 |         if (arResult.success) {
+ 9306 |           console.log("[PhaseAnchor] Arweave SUCCESS! txId:", arResult.txId);
+ 9307 |           console.log("[PhaseAnchor] Arweave URL:", arResult.arweaveUrl);
+
+======================================================================
+== D: setScreen calls  [AppNaviagator.tsx]
+======================================================================
+  719 | setScreen('onboarding');
+  735 | setScreen('biometric_gate');
+  748 | setScreen('onboarding');
+  790 | setScreen('quiz_gate');
+  793 | const handleBiometricFail = useCallback(() => setScreen('onboarding'), []);
+  798 | setScreen('snail_mode');
+  800 | setScreen('dashboard');
+  804 | const handleQuizFail = useCallback(() => setScreen('vault_recovery'), []);
+  808 | setScreen('dashboard');
+  815 | setScreen('generate_vault'); // no seed on this wallet -> offer to mint a backable one
+  821 | setScreen('vault_backup');
+  845 | if (!frostVault) { setScreen('vault_setup'); return; }
+  850 | { text: 'Send (this device builds)', onPress: () => setScreen('vault_sign') },
+  851 | { text: 'Co-Sign (this device approves)', onPress: () => setScreen('vault_cosign') },
+  852 | { text: 'New vault (replace)', onPress: () => setScreen('vault_setup') },
+  861 | setScreen('snail_mode');
+  864 | if (screenName === 'SendKAS') setScreen('send_kas');
+  865 | if (screenName === 'ReceiveKAS') setScreen('receive_kas');
+  866 | if (screenName === 'KaspaTest') setScreen('kaspa_test');
+  867 | if (screenName === 'TownHall') setScreen('town_hall');
+  868 | if (screenName === 'PayNearby') setScreen('pay_nearby');
+  996 | setScreen('dashboard');
+  998 | setScreen('dashboard');
+ 1018 | onNavigateSendKas={() => setScreen('send_kas')}
+ 1019 | onNavigateTownHall={() => setScreen('town_hall')}
+ 1020 | onNavigatePayNearby={() => setScreen('pay_nearby')}
+ 1021 | onNavigateBathroom={() => setScreen('bathroom')}
+ 1022 | onNavigateReceive={() => setScreen('receive_kas')}
+ 1023 | onNavigateTxHistory={() => setScreen('tx_history')}
+ 1026 | onNavigateMailbox={() => setScreen('mailbox')}
+ 1027 | onNavigateWorkspace={() => setScreen('workspace')}
+ 1028 | onNavigateEntertainment={() => setScreen('entertainment')}
+ 1029 | onNavigateProfile={() => setScreen('profile')}
+ 1030 | onNavigateNeighbor={() => setScreen('neighbor_agreement')}
+ 1031 | onNavigatePhoneProof={() => setScreen('phone_proof')}
+ 1032 | onNavigateBalanceSheet={() => setScreen('balance_sheet')}
+ 1047 | onClose={() => setScreen('dashboard')}
+ 1059 | return <IOUBalanceSheetModal visible={true} onClose={() => setScreen('dashboard')} />;
+ 1062 | return <PhoneProofScreen visible={true} onClose={() => setScreen('dashboard')} />;
+ 1068 | onClose={() => setScreen('dashboard')}
+ 1093 | return <TownHallScreen onClose={() => setScreen('dashboard')} />;
+ 1099 | <TouchableOpacity onPress={() => setScreen('dashboard')} style={{ padding: 8 }}>
+ 1112 | <TouchableOpacity onPress={() => setScreen('dashboard')} style={{ padding: 8 }}>
+ 1126 | onClose={() => setScreen('dashboard')}
+ 1131 | navigation={{ goBack: () => setScreen('dashboard') }}
+ 1132 | onNavigatePhoneProof={() => setScreen('phone_proof')}
+ 1133 | onNavigateEntertainment={() => setScreen('entertainment')}
+ 1134 | onNavigateTownHall={() => setScreen('town_hall')}
+ 1135 | onNavigateBookshelf={() => setScreen('entertainment')}
+ 1143 | onClose={() => setScreen('dashboard')}
+ 1147 | return <TransactionHistory onClose={() => setScreen('dashboard')} />;
+ 1152 | <TouchableOpacity onPress={() => setScreen('dashboard')} style={{ padding: 8 }}>
+ 1161 | return <QRPayNearby onClose={() => setScreen('dashboard')} onNavigateSend={(addr?: string, sompi?: number) => { (globalThis as any).__kvSendPrefill = { addr, sompi }; setScreen('send_kas'); }} />;
+ 1167 | onDone={() => setScreen('dashboard')}
+ 1168 | onCancel={() => setScreen('dashboard')}
+ 1177 | onDone={() => { setVaultWires([]); setScreen('dashboard'); }}
+ 1178 | onCancel={() => { setVaultWires([]); setScreen('dashboard'); }}
+ 1193 | setScreen('dashboard');
+ 1199 | onCancel={() => setScreen('onboarding')}
+ 1207 | onClose={() => setScreen('dashboard')}
+ 1218 | onClose={() => setScreen('dashboard')}
+ 1229 | onClose={() => setScreen('dashboard')}
+
+======================================================================
+== D2: screen cases  [AppNaviagator.tsx]
+======================================================================
+  978 | case 'booting':
+  981 | case 'onboarding':
+ 1003 | case 'biometric_gate':
+ 1006 | case 'quiz_gate':
+ 1009 | case 'dashboard':
+ 1043 | case 'send_kas':
+ 1058 | case 'balance_sheet':
+ 1061 | case 'phone_proof':
+ 1064 | case 'receive_kas':
+ 1073 | case 'snail_mode':
+ 1089 | case 'kaspa_test':
+ 1092 | case 'town_hall':
+ 1095 | case 'mailbox':
+ 1108 | case 'workspace':
+ 1124 | case 'entertainment':
+ 1129 | case 'profile':
+ 1139 | case 'neighbor_agreement':
+ 1146 | case 'tx_history':
+ 1148 | case 'bathroom':
+ 1160 | case 'pay_nearby':
+ 1163 | case 'generate_vault':
+ 1172 | case 'vault_backup':
+ 1182 | case 'vault_recovery':
+ 1203 | case 'vault_setup':
+ 1214 | case 'vault_sign':
+ 1225 | case 'vault_cosign':
+
+======================================================================
+== E: boot gate  [AppNaviagator.tsx]
+======================================================================
+  708 |   useEffect(() => {
+  709 |     const stopPriceFeed = startPriceFeed();
+  710 | 
+  711 |     (async () => {
+  712 |       try {
+  713 |         const privateKey: string = (await SecureStore.getItemAsync(STORE_KEYS.PRIVATE_KEY)) || '';
+  714 |         const aptAlias: string = (await SecureStore.getItemAsync(STORE_KEYS.APT_ALIAS)) || '';
+  715 |         const kvVerified: string = (await SecureStore.getItemAsync('kv_verified')) || '';
+  716 |         const isReturning = !!(privateKey && aptAlias) || kvVerified === 'true';
+  717 | 
+  718 |         if (!isReturning) {
+  719 |           setScreen('onboarding');
+  720 |           return;
+  721 |         }
+  722 |         const publicKey: string = (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY)) || (await SecureStore.getItemAsync('kaspa_pubkey')) || ''; console.log('[AppNav] Your PubKey:', publicKey);
+  723 |         // pubkey logged above
+  724 |         const identityRaw: string = (await SecureStore.getItemAsync(STORE_KEYS.IDENTITY)) || '';
+  725 |         const identity = identityRaw ? JSON.parse(identityRaw) : null;
+  726 | 
+  727 |         const resolvedAlias: string = aptAlias 
+  728 |           || (identity?.identityHash
+  729 |               ? `KV-${identity.identityHash.slice(0, 8).toUpperCase()}`

@@ -1,0 +1,131 @@
+
+======================================================================
+== A: restoreWalletFromMnemonic  [wallet_registration_v2.ts]
+======================================================================
+  534 | export async function restoreWalletFromMnemonic(
+  535 |   mnemonic: string,
+  536 |   network: 'mainnet' | 'testnet-10' | 'testnet-11' = 'testnet-10',
+  537 | ): Promise<{
+  538 |   success: boolean;
+  539 |   publicKey?: string;
+  540 |   kaspaAddress?: string;
+  541 |   error?: string;
+  542 | }> {
+  543 |   try {
+  544 |     if (!mnemonic || mnemonic.trim().split(/\s+/).length !== 12) {
+  545 |       return { success: false, error: 'Invalid recovery phrase (need 12 words)' };
+  546 |     }
+  547 | 
+  548 |     const { mnemonicToSeed, deriveKaspaHDKey } = await import('./bip39_wallet');
+  549 | 
+  550 |     // EMPTY passphrase — must match createWallet's random branch exactly.
+  551 |     const seed = await mnemonicToSeed(mnemonic, '');
+  552 |     const hdKey = deriveKaspaHDKey(seed);
+  553 |     const pubBytes = getPublicKey(hdKey.privateKey, true);
+  554 |     const xOnly = pubBytes.slice(1);
+  555 |     const hrp = network.startsWith('testnet') ? 'kaspatest' : 'kaspa';
+  556 | 
+  557 |     const wallet = {
+  558 |       mnemonic,
+  559 |       privateKeyHex: bytesToHex(hdKey.privateKey),
+  560 |       publicKeyHex: bytesToHex(pubBytes),
+  561 |       kaspaAddress: kaspaAddressFromXOnly(xOnly, hrp),
+  562 |       seed: seed.slice(0, 32),
+  563 |     };
+  564 | 
+  565 |     // Stealth keys from the same 32-byte seed slice (as createWallet).
+  566 |     await generateStealthKeys(wallet.seed);
+  567 | 
+  568 |     // ---- identical SecureStore writes ----
+  569 |     await SecureStore.setItemAsync(STORE_KEYS.PRIVATE_KEY, wallet.privateKeyHex, {
+  570 |       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+  571 |     });
+  572 |     await SecureStore.setItemAsync(STORE_KEYS.PUBLIC_KEY, wallet.publicKeyHex);
+  573 |     await SecureStore.setItemAsync(STORE_KEYS.KASPA_ADDRESS, wallet.kaspaAddress);
+  574 |     await SecureStore.setItemAsync(STORE_KEYS.MASTER_SEED, bytesToHex(wallet.seed), {
+  575 |       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+  576 |     });
+  577 |     await SecureStore.setItemAsync(STORE_KEYS.REGISTRATION_STATUS, 'wallet_created');
+  578 | 
+  579 |     // preserve stats cache if present, else seed defaults (TownHall refills by pubkey)
+  580 |     const existingStats = await AsyncStorage.getItem(STORE_KEYS.USER_STATS);
+  581 |     if (!existingStats) {
+  582 |       await AsyncStorage.setItem(STORE_KEYS.USER_STATS, JSON.stringify(createDefaultUserStats()));
+  583 |     }
+  584 | 
+  585 |     // ---- encrypted privkey block (identity_inscription_v6 compatibility) ----
+  586 |     let deviceEncKey = await SecureStore.getItemAsync('device_encryption_key');
+  587 |     if (!deviceEncKey) {
+  588 |       const randomBytes = await Crypto.getRandomBytesAsync(32);
+  589 |       deviceEncKey = Array.from(new Uint8Array(randomBytes), b => b.toString(16).padStart(2, '0')).join('');
+  590 |       await SecureStore.setItemAsync('device_encryption_key', deviceEncKey, {
+  591 |         keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+  592 |       });
+  593 |     }
+  594 |     const combined = deviceEncKey + wallet.privateKeyHex;
+  595 |     const keyStream = await Crypto.digestStringAsync(
+  596 |       Crypto.CryptoDigestAlgorithm.SHA256,
+  597 |       combined,
+  598 |     );
+  599 |     const encryptedChars: string[] = [];
+  600 |     for (let i = 0; i < 64; i += 2) {
+  601 |       const privByte = parseInt(wallet.privateKeyHex.slice(i, i + 2), 16);
+  602 |       const ksByte = parseInt(keyStream.slice(i % keyStream.length, (i % keyStream.length) + 2), 16);
+  603 |       encryptedChars.push((privByte ^ ksByte).toString(16).padStart(2, '0'));
+  604 |     }
+  605 |     await SecureStore.setItemAsync('kv_l1_privkey_enc', JSON.stringify({ privateKeyEnc: encryptedChars.join('') }), {
+  606 |       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+  607 |     });
+  608 | 
+
+======================================================================
+== B: KV-Address usage
+======================================================================
+avatar_arweave_upload.ts:320: { name: 'KV-Address', value: kaspaAddress },
+avatar_arweave_upload.ts:495: *   By address: tags: KV-Type=avatar-svg, KV-Address={kaspa_address}
+avatar_arweave_upload.ts:510: { name: 'KV-Address', value: kaspaAddress },
+counterparty_lookup.ts:839: const pubkey = await resolvePubkeyFromArweave('KV-Address', address);
+expo_identity_ritual.tsx:9291: { name: "KV-Address", value: address },
+PhoneProofScreen.tsx:53: if (input.startsWith('kaspa') || input.startsWith('kaspatest')) { try { const r = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: `{ transactions(tags: [{ name: \"KV-Type\", values: [\"identity-anchor\"] }, { name: \"KV-Address\", values: [\"${input}\"] }], first: 1, sort: HEIGHT_DESC) { edges { node { tags { name value } } } } }` }) }); const j = await r.json(); const t = j?.data?.transactions?.edges?.[0]?.node?.tags || []; pk = t.find((x: any) => x.name === 'KV-Pubkey')?.value || ''; } catch {} }
+TownHallScreen.tsx:246: // Address lookup → Arweave KV-Address tag → pubkey → stats
+TownHallScreen.tsx:1053: { name: 'KV-Address', value: kaspaAddress || '' },
+
+======================================================================
+== C: identity fetch fns
+======================================================================
+arweave_queries.ts:530: export async function queryIdentityByPubkey(
+arweave_queries.ts:580: export async function queryIdentityByApt(
+arweave_queries.ts:624: const identity = await queryIdentityByApt(aptAlias);
+arweave_queries.ts:628: export async function queryIdentityByAddress(
+arweave_queries.ts:847: queryIdentityByPubkey,
+arweave_queries.ts:848: queryIdentityByApt,
+arweave_queries.ts:849: queryIdentityByAddress,
+
+======================================================================
+== D: onboarding case  [AppNaviagator.tsx]
+======================================================================
+  981 |     case 'onboarding':
+  982 |       return <IdentityRitual onComplete={() => {
+  983 |         // Ritual finished — reload user data and go to dashboard
+  984 |         (async () => {
+  985 |           try {
+  986 |             const publicKey = (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY)) || (await SecureStore.getItemAsync('kaspa_pubkey')) || '';
+  987 |             const identityRaw = (await SecureStore.getItemAsync(STORE_KEYS.IDENTITY)) || '';
+  988 |             const avatarRaw = (await SecureStore.getItemAsync('kv_avatar_recipe')) || '';
+  989 |             const identity = identityRaw ? JSON.parse(identityRaw) : null;
+  990 |             const avatar = avatarRaw ? JSON.parse(avatarRaw) : null;
+  991 |             const aptAlias = (await SecureStore.getItemAsync(STORE_KEYS.APT_ALIAS)) || 
+  992 |               (identity?.identityHash ? `KV-${identity.identityHash.slice(0, 8).toUpperCase()}` : 'Villager');
+  993 |             const avatarName = avatar ? `${avatar.race || ''} ${avatar.class || ''}`.trim() : '';
+  994 |             
+  995 |             setUser({ apartment: aptAlias, xp: 0, pubkey: publicKey, publicKey, name: avatarName });
+  996 |             setScreen('dashboard');
+  997 |           } catch {
+  998 |             setScreen('dashboard');
+  999 |           }
+ 1000 |         })();
+ 1001 |       }} />;
+ 1002 | 
+ 1003 |     case 'biometric_gate':
+ 1004 |       return <BiometricGate onSuccess={handleBiometricSuccess} onFail={handleBiometricFail} />;
+ 1005 | 

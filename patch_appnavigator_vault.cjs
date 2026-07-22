@@ -1,0 +1,46 @@
+#!/usr/bin/env node
+// Wires vault_backup + vault_recovery into AppNaviagator.tsx.
+// 7 edits: union, imports, restore-import, state, opener, quiz->recovery, cases.
+// Count-guarded, CRLF-tolerant, idempotent (each edit skips if already applied).
+// Usage:  node patch_appnavigator_vault.cjs [path\to\AppNaviagator.tsx]
+const fs = require('fs');
+const FILE = process.argv[2] || 'AppNaviagator.tsx';
+const EDITS = JSON.parse(Buffer.from('W3sibiI6MSwiZiI6IklDQjhJQ2RpWVhSb2NtOXZiU2NLSUNCOElDZHdZWGxmYm1WaGNtSjVKenNLIiwiciI6IklDQjhJQ2RpWVhSb2NtOXZiU2NLSUNCOElDZHdZWGxmYm1WaGNtSjVKd29nSUh3Z0ozWmhkV3gwWDJKaFkydDFjQ2NLSUNCOElDZDJZWFZzZEY5eVpXTnZkbVZ5ZVNjN0NnPT0iLCJkIjoiZkNBbmRtRjFiSFJmWW1GamEzVndKdz09In0seyJuIjoyLCJmIjoiYVcxd2IzSjBJSHNnVG1WcFoyaGliM0pCWjNKbFpXMWxiblFnZlNCbWNtOXRJQ2N1TDA1bGFXZG9ZbTl5UVdkeVpXVnRaVzUwSnpzSyIsInIiOiJhVzF3YjNKMElIc2dUbVZwWjJoaWIzSkJaM0psWlcxbGJuUWdmU0JtY205dElDY3VMMDVsYVdkb1ltOXlRV2R5WldWdFpXNTBKenNLYVcxd2IzSjBJSHNnVm1GMWJIUkNZV05yZFhCVFkzSmxaVzRnZlNCbWNtOXRJQ2N1TDFaaGRXeDBRbUZqYTNWd1UyTnlaV1Z1SnpzS2FXMXdiM0owSUhzZ1ZtRjFiSFJTWldOdmRtVnllVk5qY21WbGJpQjlJR1p5YjIwZ0p5NHZWbUYxYkhSU1pXTnZkbVZ5ZVZOamNtVmxiaWM3Q21sdGNHOXlkQ0I3SUdOeVpXRjBaVTF1WlcxdmJtbGpRbUZqYTNWd0lIMGdabkp2YlNBbkxpOTNZV3hzWlhSZmMyaGhiV2x5WDJKaFkydDFjQ2M3Q2c9PSIsImQiOiJabkp2YlNBbkxpOVdZWFZzZEVKaFkydDFjRk5qY21WbGJpYz0ifSx7Im4iOjMsImYiOiJhVzF3YjNKMElIc0tJQ0JuWlhSVmMyVnlVM1JoZEhNc0NpQWdhWE5KYmxOdVlXbHNUVzlrWlN3S0lDQm5aWFJEY21WaGRHbHZia1JsYkdGNVRYTXNDbjBnWm5KdmJTQW5MaTkzWVd4c1pYUmZjbVZuYVhOMGNtRjBhVzl1WDNZeUp6c0siLCJyIjoiYVcxd2IzSjBJSHNLSUNCblpYUlZjMlZ5VTNSaGRITXNDaUFnYVhOSmJsTnVZV2xzVFc5a1pTd0tJQ0JuWlhSRGNtVmhkR2x2YmtSbGJHRjVUWE1zQ2lBZ2NtVnpkRzl5WlZkaGJHeGxkRVp5YjIxTmJtVnRiMjVwWXl3S2ZTQm1jbTl0SUNjdUwzZGhiR3hsZEY5eVpXZHBjM1J5WVhScGIyNWZkakluT3dvPSIsImQiOiJaMlYwUTNKbFlYUnBiMjVFWld4aGVVMXpMQW9nSUhKbGMzUnZjbVZYWVd4c1pYUkdjbTl0VFc1bGJXOXVhV01zIn0seyJuIjo0LCJmIjoiSUNCamIyNXpkQ0JiYzI1aGFXeEVaV0ZrYkc5amEzTXNJSE5sZEZOdVlXbHNSR1ZoWkd4dlkydHpYU0E5SUhWelpWTjBZWFJsS0RBcE93bz0iLCJyIjoiSUNCamIyNXpkQ0JiYzI1aGFXeEVaV0ZrYkc5amEzTXNJSE5sZEZOdVlXbHNSR1ZoWkd4dlkydHpYU0E5SUhWelpWTjBZWFJsS0RBcE93b2dJR052Ym5OMElGdDJZWFZzZEZkcGNtVnpMQ0J6WlhSV1lYVnNkRmRwY21WelhTQTlJSFZ6WlZOMFlYUmxQSE4wY21sdVoxdGRQaWhiWFNrN0NnPT0iLCJkIjoiWTI5dWMzUWdXM1poZFd4MFYybHlaWE1zSUhObGRGWmhkV3gwVjJseVpYTmQifSx7Im4iOjUsImYiOiJJQ0JqYjI1emRDQm9ZVzVrYkdWVGJtRnBiRTF2WkdWRGIyMXdiR1YwWlNBOUlIVnpaVU5oYkd4aVlXTnJLQ2dwSUQwK0lIc0tJQ0FnSUhObGRGTnVZV2xzVFc5a1pTaG1ZV3h6WlNrN0NpQWdJQ0J6WlhSVFkzSmxaVzRvSjJSaGMyaGliMkZ5WkNjcE93b2dJSDBzSUZ0ZEtUc0siLCJyIjoiSUNCamIyNXpkQ0JvWVc1a2JHVlRibUZwYkUxdlpHVkRiMjF3YkdWMFpTQTlJSFZ6WlVOaGJHeGlZV05yS0NncElEMCtJSHNLSUNBZ0lITmxkRk51WVdsc1RXOWtaU2htWVd4elpTazdDaUFnSUNCelpYUlRZM0psWlc0b0oyUmhjMmhpYjJGeVpDY3BPd29nSUgwc0lGdGRLVHNLQ2lBZ1kyOXVjM1FnYjNCbGJsWmhkV3gwUW1GamEzVndJRDBnZFhObFEyRnNiR0poWTJzb1lYTjVibU1nS0NrZ1BUNGdld29nSUNBZ2RISjVJSHNLSUNBZ0lDQWdZMjl1YzNRZ2JXNWxiVzl1YVdNZ1BTQmhkMkZwZENCVFpXTjFjbVZUZEc5eVpTNW5aWFJKZEdWdFFYTjVibU1vSjJ0MlgyMXVaVzF2Ym1sakp5azdDaUFnSUNBZ0lHbG1JQ2doYlc1bGJXOXVhV01wSUhzS0lDQWdJQ0FnSUNCQmJHVnlkQzVoYkdWeWRDZ25UbThnYzJWbFpDQm1iM1Z1WkNjc0lDZE9ieUJ5WldOdmRtVnllU0J3YUhKaGMyVWdjM1J2Y21Wa0lHOXVJSFJvYVhNZ1pHVjJhV05sSUhSdklHSmhZMnNnZFhBdUp5azdDaUFnSUNBZ0lDQWdjbVYwZFhKdU93b2dJQ0FnSUNCOUNpQWdJQ0FnSUdOdmJuTjBJR0poWTJ0MWNDQTlJR0YzWVdsMElHTnlaV0YwWlUxdVpXMXZibWxqUW1GamEzVndLRzF1WlcxdmJtbGpMQ0EwS1RzZ0x5OGdNaTF2WmkwMENpQWdJQ0FnSUhObGRGWmhkV3gwVjJseVpYTW9ZbUZqYTNWd0xuZHBjbVZ6S1RzS0lDQWdJQ0FnYzJWMFUyTnlaV1Z1S0NkMllYVnNkRjlpWVdOcmRYQW5LVHNLSUNBZ0lIMGdZMkYwWTJnZ0tHVTZJR0Z1ZVNrZ2V3b2dJQ0FnSUNCQmJHVnlkQzVoYkdWeWRDZ25RbUZqYTNWd0lHVnljbTl5Snl3Z1pUOHViV1Z6YzJGblpTQjhmQ0FuUTI5MWJHUWdibTkwSUdOeVpXRjBaU0JpWVdOcmRYQWdZMkZ5WkhNdUp5azdDaUFnSUNCOUNpQWdmU3dnVzEwcE93bz0iLCJkIjoiWTI5dWMzUWdiM0JsYmxaaGRXeDBRbUZqYTNWd0lEMD0ifSx7Im4iOjYsImYiOiJJQ0JqYjI1emRDQm9ZVzVrYkdWUmRXbDZSbUZwYkNBOUlIVnpaVU5oYkd4aVlXTnJLQ2dwSUQwK0lITmxkRk5qY21WbGJpZ25iMjVpYjJGeVpHbHVaeWNwTENCYlhTazdDZz09IiwiciI6IklDQmpiMjV6ZENCb1lXNWtiR1ZSZFdsNlJtRnBiQ0E5SUhWelpVTmhiR3hpWVdOcktDZ3BJRDArSUhObGRGTmpjbVZsYmlnbmRtRjFiSFJmY21WamIzWmxjbmtuS1N3Z1cxMHBPd289IiwiZCI6ImFHRnVaR3hsVVhWcGVrWmhhV3dnUFNCMWMyVkRZV3hzWW1GamF5Z29LU0E5UGlCelpYUlRZM0psWlc0b0ozWmhkV3gwWDNKbFkyOTJaWEo1SnlrPSJ9LHsibiI6NywiZiI6IklDQWdJR1JsWm1GMWJIUTZDaUFnSUNBZ0lISmxkSFZ5YmlBOFRHOWhaR2x1WjFOamNtVmxiaUF2UGpzSyIsInIiOiJJQ0FnSUdOaGMyVWdKM1poZFd4MFgySmhZMnQxY0NjNkNpQWdJQ0FnSUhKbGRIVnliaUFvQ2lBZ0lDQWdJQ0FnUEZaaGRXeDBRbUZqYTNWd1UyTnlaV1Z1Q2lBZ0lDQWdJQ0FnSUNCM2FYSmxjejE3ZG1GMWJIUlhhWEpsYzMwS0lDQWdJQ0FnSUNBZ0lIUm9jbVZ6YUc5c1pEMTdNbjBLSUNBZ0lDQWdJQ0FnSUc5dVJHOXVaVDE3S0NrZ1BUNGdleUJ6WlhSV1lYVnNkRmRwY21WektGdGRLVHNnYzJWMFUyTnlaV1Z1S0Nka1lYTm9ZbTloY21RbktUc2dmWDBLSUNBZ0lDQWdJQ0FnSUc5dVEyRnVZMlZzUFhzb0tTQTlQaUI3SUhObGRGWmhkV3gwVjJseVpYTW9XMTBwT3lCelpYUlRZM0psWlc0b0oyUmhjMmhpYjJGeVpDY3BPeUI5ZlFvZ0lDQWdJQ0FnSUM4K0NpQWdJQ0FnSUNrN0Nnb2dJQ0FnWTJGelpTQW5kbUYxYkhSZmNtVmpiM1psY25rbk9nb2dJQ0FnSUNCeVpYUjFjbTRnS0FvZ0lDQWdJQ0FnSUR4V1lYVnNkRkpsWTI5MlpYSjVVMk55WldWdUNpQWdJQ0FnSUNBZ0lDQnZibEpsWTI5MlpYSmxaRDE3S0cxdVpXMXZibWxqS1NBOVBpQjdDaUFnSUNBZ0lDQWdJQ0FnSUNoaGMzbHVZeUFvS1NBOVBpQjdDaUFnSUNBZ0lDQWdJQ0FnSUNBZ1kyOXVjM1FnYm1WMElEMGdhMkZ6Y0dGQlpHUnlaWE56TG5OMFlYSjBjMWRwZEdnb0oydGhjM0JoZEdWemREb25LU0EvSUNkMFpYTjBibVYwTFRFd0p5QTZJQ2R0WVdsdWJtVjBKenNLSUNBZ0lDQWdJQ0FnSUNBZ0lDQmpiMjV6ZENCeVpYTWdQU0JoZDJGcGRDQnlaWE4wYjNKbFYyRnNiR1YwUm5KdmJVMXVaVzF2Ym1saktHMXVaVzF2Ym1sakxDQnVaWFFwT3dvZ0lDQWdJQ0FnSUNBZ0lDQWdJR2xtSUNoeVpYTXVjM1ZqWTJWemN5a2dld29nSUNBZ0lDQWdJQ0FnSUNBZ0lDQWdjMlYwUzJGemNHRkJaR1J5WlhOektISmxjeTVyWVhOd1lVRmtaSEpsYzNNZ2ZId2dKeWNwT3dvZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnYzJWMFZYTmxjaWdvY0hKbGRpa2dQVDRnS0hzZ0xpNHVjSEpsZGl3Z2NIVmlhMlY1T2lCeVpYTXVjSFZpYkdsalMyVjVMQ0J3ZFdKc2FXTkxaWGs2SUhKbGN5NXdkV0pzYVdOTFpYa2dmU2twT3dvZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnUVd4bGNuUXVZV3hsY25Rb0oxZGhiR3hsZENCeVpYTjBiM0psWkNjc0lDZFRZVzFsSUdGa1pISmxjM01nY21WamIzWmxjbVZrSUdaeWIyMGdlVzkxY2lCallYSmtjeTRuS1RzS0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSUhObGRGTmpjbVZsYmlnblpHRnphR0p2WVhKa0p5azdDaUFnSUNBZ0lDQWdJQ0FnSUNBZ2ZTQmxiSE5sSUhzS0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSUVGc1pYSjBMbUZzWlhKMEtDZFNaWE4wYjNKbElHWmhhV3hsWkNjc0lISmxjeTVsY25KdmNpQjhmQ0FuVkhKNUlISmxMWE5qWVc1dWFXNW5JSGx2ZFhJZ1kyRnlaSE11SnlrN0NpQWdJQ0FnSUNBZ0lDQWdJQ0FnZlFvZ0lDQWdJQ0FnSUNBZ0lDQjlLU2dwT3dvZ0lDQWdJQ0FnSUNBZ2ZYMEtJQ0FnSUNBZ0lDQWdJRzl1UTJGdVkyVnNQWHNvS1NBOVBpQnpaWFJUWTNKbFpXNG9KMjl1WW05aGNtUnBibWNuS1gwS0lDQWdJQ0FnSUNBdlBnb2dJQ0FnSUNBcE93b0tJQ0FnSUdSbFptRjFiSFE2Q2lBZ0lDQWdJSEpsZEhWeWJpQThURzloWkdsdVoxTmpjbVZsYmlBdlBqc0siLCJkIjoiWTJGelpTQW5kbUYxYkhSZlltRmphM1Z3SnpvPSJ9XQ==', 'base64').toString('utf8'));
+
+let s = fs.readFileSync(FILE, 'utf8');
+const eol = s.includes('\r\n') ? '\r\n' : '\n';
+const b64 = (x) => Buffer.from(x, 'base64').toString('utf8');
+const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\r?\n/g, '\r?\n');
+
+let applied = 0, skipped = 0;
+for (const e of EDITS) {
+  const find = b64(e.f), repl = b64(e.r), done = b64(e.d);
+
+  // idempotency: if the done-marker is already present, skip this edit
+  if (s.includes(done.replace(/\r?\n/g, '\n')) || s.includes(done)) {
+    console.log('[skip] edit ' + e.n + ' already applied.');
+    skipped++;
+    continue;
+  }
+
+  const re = new RegExp(esc(find), 'g');
+  const count = (s.match(re) || []).length;
+  if (count !== 1) {
+    console.error('[ABORT] edit ' + e.n + ': anchor found ' + count + ' times (expected 1). No changes written.');
+    process.exit(1);
+  }
+  const replEol = repl.replace(/\r?\n/g, eol);
+  s = s.replace(new RegExp(esc(find)), replEol);
+  console.log('[ok]   edit ' + e.n + ' applied.');
+  applied++;
+}
+
+// post-conditions: all 7 markers must now be present
+const markers = ["| 'vault_backup'","from './VaultBackupScreen'","restoreWalletFromMnemonic,",
+                 "const [vaultWires","const openVaultBackup =","setScreen('vault_recovery')","case 'vault_backup':"];
+const missing = markers.filter(m => !s.includes(m));
+if (missing.length) { console.error('[ABORT] post-condition missing: ' + JSON.stringify(missing)); process.exit(1); }
+
+fs.writeFileSync(FILE, s);
+console.log('[done] ' + applied + ' applied, ' + skipped + ' skipped. eol=' + JSON.stringify(eol));
+console.log('       Next: npx tsc --noEmit  (confirm no NEW errors from the vault imports)');

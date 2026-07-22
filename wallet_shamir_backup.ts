@@ -1,23 +1,31 @@
 // ============================================================================
-// KASVILLAGE — WALLET ↔ SHAMIR INTEGRATION
+// KASVILLAGE — WALLET ↔ SHAMIR INTEGRATION  (MNEMONIC-STRING EDITION)
 // ============================================================================
 // The single seam between the wallet and the Shamir backup system.
-// createWallet produces `wallet.seed` (32 bytes). This module turns that into
-// N QR-ready share strings (2-of-N), and rebuilds the seed from scanned shares.
+//
+// WHY THE MNEMONIC STRING (not entropy, not the seed slice):
+//   createWallet derives keys as:
+//       mnemonic -> mnemonicToSeed(_, '') [64 bytes] -> deriveKaspaHDKey
+//   The seed (and therefore the address) is a pure function of the mnemonic
+//   STRING via PBKDF2 — it does NOT depend on the BIP39 wordlist at all.
+//
+//   So we Shamir-split the UTF-8 bytes of the mnemonic string itself.
+//   Recovery reconstructs the exact string -> mnemonicToSeed(_, '') ->
+//   deriveKaspaHDKey -> IDENTICAL address. This is robust even if the
+//   wordlist is wrong/version-skewed (a real bug this codebase had), and it
+//   works for any-length phrase.
 //
 // Uses expo-crypto for the secure RNG — no new dependency.
-// Every split is self-verified before shares are returned (see shamir_wire).
+// Every split is self-verified before shares are returned (see shamir_wire):
+// if the bytes don't round-trip through split->combine and wire encode/decode,
+// createMnemonicBackup THROWS and no cards are shown.
 // ============================================================================
 
 import * as Crypto from 'expo-crypto';
 import { splitWithVerify, recoverFromWires } from './shamir_wire';
-import type { ShamirShare } from './shamir';
 
-// Secure RNG adapter: expo-crypto -> (n) => Uint8Array
-// getRandomBytes is synchronous on expo-crypto (SDK 54); if unavailable at
-// runtime, the async variant should be pre-warmed by the caller.
+// Secure RNG adapter: expo-crypto -> (n) => Uint8Array (sync, CSPRNG-backed).
 function secureRandom(n: number): Uint8Array {
-  // getRandomBytes is sync and CSPRNG-backed on native.
   return Crypto.getRandomBytes(n);
 }
 
@@ -29,65 +37,73 @@ export interface BackupResult {
 }
 
 /**
- * Create a Shamir backup of the wallet seed.
- * @param seed        the 32-byte wallet seed from createWallet (wallet.seed)
+ * Create a Shamir backup of the wallet MNEMONIC (its UTF-8 bytes).
+ * @param mnemonic    the mnemonic from createWallet (wallet.mnemonic / kv_mnemonic)
  * @param total       number of shares to issue (e.g. 4 for the house-key model)
  * @param generation  bump on every re-split; defaults to 1 for first backup
  * @param threshold   shares required to recover (default 2 — "any two cards")
  *
- * Throws if the split fails self-verification. On success, the returned wires
- * are proven to reconstruct the exact seed. Show one QR per wire; never store
- * them together in a cloud-synced location.
+ * Self-verifies the split end-to-end before returning. A silently-bad backup
+ * can never reach the user.
  */
-export function createSeedBackup(
-  seed: Uint8Array,
+export function createMnemonicBackup(
+  mnemonic: string,
   total: number,
   generation = 1,
   threshold = 2,
 ): BackupResult {
-  if (seed.length !== 32) {
-    throw new Error(`expected 32-byte seed, got ${seed.length}`);
+  const norm = mnemonic.normalize('NFKD').trim();
+  if (norm.split(/\s+/).length < 12) {
+    throw new Error('refusing to back up: mnemonic has fewer than 12 words');
   }
-  const { wires } = splitWithVerify(seed, threshold, total, generation, secureRandom);
+  const bytes = new TextEncoder().encode(norm);
+  const { wires } = splitWithVerify(bytes, threshold, total, generation, secureRandom);
   return { wires, generation, threshold, total };
 }
 
 /**
- * Rebuild the wallet seed from scanned QR share strings.
+ * Rebuild the wallet MNEMONIC from scanned QR share strings.
  * Validates format, checksum, and generation-consistency before combining.
- * @returns the 32-byte seed, ready to feed back into the wallet derivation
- *          (deriveKaspaHDKey path) exactly as createWallet does.
+ *
+ * Returns the mnemonic STRING. The CALLER then re-derives the wallet with the
+ * EXACT same path createWallet's random branch uses:
+ *     mnemonicToSeed(mnemonic, '')   // EMPTY passphrase — matches createWallet
+ *     deriveKaspaHDKey(seed)
+ * and writes the identical SecureStore keys. createWallet passes '' (NOT the
+ * bip39 default 'kasvillage'); using any other passphrase here derives a
+ * DIFFERENT address. Always pass '' in the recovery path.
  */
-export function recoverSeedFromShares(scannedWires: string[]): Uint8Array {
-  const seed = recoverFromWires(scannedWires);
-  if (seed.length !== 32) {
-    throw new Error(`recovered seed has wrong length: ${seed.length}`);
+export function recoverMnemonicFromShares(scannedWires: string[]): string {
+  const bytes = recoverFromWires(scannedWires);
+  const mnemonic = new TextDecoder().decode(bytes);
+  if (mnemonic.trim().split(/\s+/).length < 12) {
+    throw new Error('recovered data is not a valid mnemonic (fewer than 12 words)');
   }
-  return seed;
+  return mnemonic;
 }
 
 /**
- * Re-split: issue a fresh generation of shares from the seed, voiding all
- * previous shares. Call after any suspected share compromise or after a
- * recovery event. The new generation will not combine with old shares.
+ * Re-split: issue a fresh generation of shares, voiding all previous shares.
  * @param currentGeneration the generation currently in use; new = +1
  */
-export function resplitSeed(
-  seed: Uint8Array,
+export function resplitMnemonic(
+  mnemonic: string,
   total: number,
   currentGeneration: number,
   threshold = 2,
 ): BackupResult {
-  return createSeedBackup(seed, total, currentGeneration + 1, threshold);
+  return createMnemonicBackup(mnemonic, total, currentGeneration + 1, threshold);
 }
 
 // ---- integration note (not code) -------------------------------------------
-// In createWallet (wallet_registration_v2.ts), AFTER the wallet object is built
-// and BEFORE returning, the Vault-mode path would call:
+// BACKUP  (Vault-mode; wallet.mnemonic / kv_mnemonic in hand):
+//   const backup = createMnemonicBackup(mnemonic, 4); // 2-of-4
+//   // hand backup.wires to VaultBackupScreen, one QR per card/device
 //
-//   const backup = createSeedBackup(wallet.seed, 4);   // 2-of-4
-//   // hand backup.wires to the QR display screen, one per card/device
+// RECOVERY (VaultRecoveryScreen.onRecovered(mnemonic)):
+//   -> restoreWalletFromMnemonic(mnemonic)  // in wallet_registration_v2
+//      which does mnemonicToSeed(mnemonic,'') -> deriveKaspaHDKey  (EMPTY passphrase)
+//      -> writes the SAME SecureStore keys createWallet writes.
 //
-// Standard (non-vault) wallets skip this and rely on the mnemonic.
-// The seed used MUST be the same 32 bytes that deriveKaspaHDKey consumes, so
-// recovery reproduces the identical address.
+// Wordlist-independent: works even if bip39_wallet.ts's WORDLIST is wrong,
+// because the seed derives from the mnemonic STRING, not from word indices.

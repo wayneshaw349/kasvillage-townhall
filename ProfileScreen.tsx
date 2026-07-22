@@ -389,7 +389,7 @@ const AvatarLikenessCard: React.FC<{
   );
 };
 
-export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: () => void; onNavigateEntertainment?: () => void; onNavigateTownHall?: () => void; onNavigateBookshelf?: () => void }> = ({ navigation, onNavigateEntertainment, onNavigateTownHall, onNavigateBookshelf }) => {
+export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: () => void; onNavigateEntertainment?: () => void; onNavigateTownHall?: () => void; onNavigateBookshelf?: () => void; onNavigateVaultBackup?: () => void }> = ({ navigation, onNavigateEntertainment, onNavigateTownHall, onNavigateBookshelf, onNavigateVaultBackup }) => {
   const [stats, setStats] = useState<UserStats>(mockStats);
   const [serialInput, setSerialInput] = React.useState('');
   const [serialHashed, setSerialHashed] = React.useState(false);
@@ -703,6 +703,15 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
         <View style={styles.securityCard}>
           <Text style={styles.cardTitle}>🔐 Security & Backup</Text>
 
+          <TouchableOpacity
+            style={styles.seedExportButton}
+            onPress={() => onNavigateVaultBackup?.()}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.seedExportText}>🔐 Vault Backup (QR cards)</Text>
+              <Text style={styles.seedExportSub}>Split your seed into 2-of-4 recovery cards</Text>
+            </View>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.seedExportButton}
             onPress={handleExportSeed}

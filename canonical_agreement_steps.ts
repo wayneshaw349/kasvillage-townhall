@@ -35,6 +35,13 @@ const N = secp256k1.CURVE.n;
 const G = secp256k1.ProjectivePoint.BASE;
 const SIGHASH_KEY = new TextEncoder().encode('TransactionSigningHash');
 
+// Kaspa TransactionSigningHash is KEYED blake2b-256. The runtime honors `key`
+// (L1-proven; verified against installed @noble/hashes) but the resolved .d.ts
+// omits it. The cast below is TYPE-ONLY - runtime bytes are unchanged.
+function keyedBlake2b(data: Uint8Array): Uint8Array {
+  return blake2b(data, { dkLen: 32, key: SIGHASH_KEY } as unknown as { dkLen: number });
+}
+
 function mod(a: bigint, m: bigint): bigint {
   return ((a % m) + m) % m;
 }
@@ -398,6 +405,34 @@ export function p2pkScript(xOnlyHex: string): string {
 }
 
 /**
+ * [L-GUARD] Assert the signing-side aggregate key matches the escrow script being spent.
+ * If the counter (or pubkey set) used at signing diverges from the one used at address
+ * derivation, L differs, the aggregate key differs, and the signature can never satisfy
+ * the escrow script - the failure would surface only at broadcast, or worse, in a stored
+ * refund that silently cannot fire. This makes the divergence throw loudly BEFORE any k
+ * is used or anything is signed.
+ */
+export function assertLMatch(
+  agg: { aggXOnly: string },
+  templateInputs: Array<{ s: string; t?: string }>,
+  fnName: string,
+  counter?: number
+): void {
+  const expected = p2pkScript(agg.aggXOnly);
+  for (let gi = 0; gi < templateInputs.length; gi++) {
+    const got = (templateInputs[gi] && templateInputs[gi].s) || '';
+    if (got !== expected) {
+      throw new Error(
+        '[L-MISMATCH] ' + fnName + ': input ' + gi + ' escrow script does not match the aggregate key derived at signing time. ' +
+        'counter=' + String(counter) + ' derived=' + expected.slice(0, 20) + '... input=' + got.slice(0, 20) + '... ' +
+        'The signing counter/pubkeys differ from the ones used to derive the escrow address. NOTHING was signed. ' +
+        'Do not retry with a guessed counter - resume from the original proposal paste.'
+      );
+    }
+  }
+}
+
+/**
  * Derive FROST address string from aggregate key.
  * Uses Kaspa bech32 encoding.
  */
@@ -480,28 +515,21 @@ export interface CanonicalOutput {
 }
 
 function hashPrevOutputs(inputs: CanonicalInput[]): Uint8Array {
-  return blake2b(
-    concat(...inputs.map((i) => concat(hexToBytes(i.txId), w32(i.index)))),
-    { dkLen: 32, key: SIGHASH_KEY }
+  return keyedBlake2b(
+    concat(...inputs.map((i) => concat(hexToBytes(i.txId), w32(i.index))))
   );
 }
 
 function hashSequences(inputs: CanonicalInput[]): Uint8Array {
-  return blake2b(concat(...inputs.map(() => w64(0n))), {
-    dkLen: 32,
-    key: SIGHASH_KEY,
-  });
+  return keyedBlake2b(concat(...inputs.map(() => w64(0n))));
 }
 
 function hashSigOpCounts(inputs: CanonicalInput[]): Uint8Array {
-  return blake2b(new Uint8Array(inputs.map(() => 1)), {
-    dkLen: 32,
-    key: SIGHASH_KEY,
-  });
+  return keyedBlake2b(new Uint8Array(inputs.map(() => 1)));
 }
 
 function hashOutputs(outputs: CanonicalOutput[]): Uint8Array {
-  return blake2b(
+  return keyedBlake2b(
     concat(
       ...outputs.map((o) =>
         concat(
@@ -511,8 +539,7 @@ function hashOutputs(outputs: CanonicalOutput[]): Uint8Array {
           hexToBytes(o.script)
         )
       )
-    ),
-    { dkLen: 32, key: SIGHASH_KEY }
+    )
   );
 }
 
@@ -530,7 +557,7 @@ export function computeSighash(
   const spk = hexToBytes(inp.scriptPubKey);
   const subnetId = new Uint8Array(20); // all zeros = native
 
-  return blake2b(
+  return keyedBlake2b(
     concat(
       w16(0),                         // version
       hashPrevOutputs(inputs),
@@ -550,8 +577,7 @@ export function computeSighash(
       w64(0n),                        // gas
       new Uint8Array(32),             // payload hash (empty)
       w8(1)                           // sighash type: ALL
-    ),
-    { dkLen: 32, key: SIGHASH_KEY }
+    )
   );
 }
 
@@ -591,7 +617,7 @@ export function generateNonce(
   if (aggBytes[0] === 0x03) d = mod(N - d, N);
 
   // Random k
-  const kBytes = secp256k1.utils.randomPrivateKey();
+  const kBytes = (secp256k1 as any).utils.randomPrivateKey(); // type-only cast; runtime proven
   let k = mod(BigInt('0x' + bytesToHex(kBytes)), N);
   if (k === 0n) k = 1n;
 
@@ -618,7 +644,7 @@ export function partialSign(
 ): { s_hex: string; R_agg_x_hex: string } {
   // R_agg = R_mine + R_counterparty
   const Rc = secp256k1.ProjectivePoint.fromHex(counterpartyR_hex);
-  let Ragg = G.multiply(nonce.k).add(Rc);
+  let Ragg: any = (G.multiply(nonce.k) as any).add(Rc); // type-only cast; runtime proven
   let k = nonce.k;
 
   // BIP340: negate k if R_agg has odd y
@@ -1090,6 +1116,7 @@ export function sellerSignTemplate(params: {
   }
 
   const agg = deriveAggregateKey(buyerPubkey, sellerPubkey, counter);
+  assertLMatch(agg, template.u, 'sellerSignTemplate/buyerAggregate', counter); // [L-GUARD]
 
   const inputs: CanonicalInput[] = template.u.map((u) => ({
     txId: u.t,
@@ -1153,6 +1180,7 @@ export function buyerAggregate(params: {
   }
 
   const agg = deriveAggregateKey(buyerPubkey, sellerPubkey, counter);
+  assertLMatch(agg, template.u, 'sellerSignTemplate/buyerAggregate', counter); // [L-GUARD]
 
   const inputs: CanonicalInput[] = template.u.map((u) => ({
     txId: u.t,
@@ -1272,6 +1300,7 @@ export function cosignRefundTemplate(params: {
   if (!v.valid) return { error: v.error || 'Refund verification failed' };
 
   const agg = deriveAggregateKey(funderPubkey, myPubkey, counter);
+  assertLMatch(agg, template.u, 'cosignRefund/cosignKill', counter); // [L-GUARD]
 
   const inputs: CanonicalInput[] = template.u.map((u) => ({ txId: u.t, index: u.i, value: BigInt(u.a), scriptPubKey: u.s }));
   const outputs: CanonicalOutput[] = template.o.map((o) => ({ value: BigInt(o.v), script: o.s }));
@@ -1390,6 +1419,7 @@ export function cosignKillTemplate(params: {
   if (!v.valid) return { error: v.error || 'Kill verification failed' };
 
   const agg = deriveAggregateKey(funderPubkey, myPubkey, counter);
+  assertLMatch(agg, template.u, 'cosignRefund/cosignKill', counter); // [L-GUARD]
 
   const inputs: CanonicalInput[] = template.u.map((u) => ({ txId: u.t, index: u.i, value: BigInt(u.a), scriptPubKey: u.s }));
   const outputs: CanonicalOutput[] = template.o.map((o) => ({ value: BigInt(o.v), script: o.s }));

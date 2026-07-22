@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "672978797000",
+    "project_id": "the-village-93f9c",
+    "storage_bucket": "the-village-93f9c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:672978797000:android:964fa13e760f25468d80fd",
+        "android_client_info": {
+          "package_name": "com.kasvillage.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCzhqyd8LwDSPIWwvk2za8vDPGrFrR2PFI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

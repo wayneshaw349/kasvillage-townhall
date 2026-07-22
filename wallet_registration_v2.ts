@@ -438,10 +438,10 @@ export async function createWallet(options?: {
       seed: Uint8Array;
     };
 
-    if (options?.identityHashHex) {
+    if (false && options?.identityHashHex) { // SECURITY: brainwallet path disabled - all wallets use random entropy (Option A)
       // DETERMINISTIC PATH (avatar-derived)
-      const derived = await deriveWalletFromIdentityHash(options.identityHashHex);
-      const seedBytes = sha256(hexToBytes(options.identityHashHex));
+      const derived = await deriveWalletFromIdentityHash(options!.identityHashHex!);
+      const seedBytes = sha256(hexToBytes(options!.identityHashHex!));
       // Re-derive address with correct network prefix
       const pubBytes = hexToBytes(derived.publicKeyHex);
       const xOnly = pubBytes.slice(1);
@@ -452,7 +452,7 @@ export async function createWallet(options?: {
       const { entropyToMnemonic, mnemonicToSeed, deriveKaspaHDKey } = await import('./bip39_wallet');
       const randomEntropy = await Crypto.getRandomBytesAsync(16);
       const mnemonic = await entropyToMnemonic(randomEntropy);
-      const seed = await mnemonicToSeed(mnemonic, 'kasvillage');
+      const seed = await mnemonicToSeed(mnemonic, '');
       const hdKey = deriveKaspaHDKey(seed);
       const pubBytes = getPublicKey(hdKey.privateKey, true);
       const xOnly = pubBytes.slice(1);
@@ -476,6 +476,9 @@ export async function createWallet(options?: {
     await SecureStore.setItemAsync(STORE_KEYS.PUBLIC_KEY, wallet.publicKeyHex);
     await SecureStore.setItemAsync(STORE_KEYS.KASPA_ADDRESS, wallet.kaspaAddress);
     await SecureStore.setItemAsync(STORE_KEYS.MASTER_SEED, bytesToHex(wallet.seed), {
+      keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+    });
+    await SecureStore.setItemAsync('kv_mnemonic', wallet.mnemonic, {
       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
     await SecureStore.setItemAsync(STORE_KEYS.REGISTRATION_STATUS, 'wallet_created');
@@ -525,6 +528,98 @@ export async function createWallet(options?: {
   } catch (error) {
     console.error('[createWallet] failed:', error);
     return { success: false, error: 'Wallet creation failed. Please try again.' };
+  }
+}
+
+export async function restoreWalletFromMnemonic(
+  mnemonic: string,
+  network: 'mainnet' | 'testnet-10' | 'testnet-11' = 'testnet-10',
+): Promise<{
+  success: boolean;
+  publicKey?: string;
+  kaspaAddress?: string;
+  error?: string;
+}> {
+  try {
+    if (!mnemonic || mnemonic.trim().split(/\s+/).length !== 12) {
+      return { success: false, error: 'Invalid recovery phrase (need 12 words)' };
+    }
+
+    const { mnemonicToSeed, deriveKaspaHDKey } = await import('./bip39_wallet');
+
+    // EMPTY passphrase — must match createWallet's random branch exactly.
+    const seed = await mnemonicToSeed(mnemonic, '');
+    const hdKey = deriveKaspaHDKey(seed);
+    const pubBytes = getPublicKey(hdKey.privateKey, true);
+    const xOnly = pubBytes.slice(1);
+    const hrp = network.startsWith('testnet') ? 'kaspatest' : 'kaspa';
+
+    const wallet = {
+      mnemonic,
+      privateKeyHex: bytesToHex(hdKey.privateKey),
+      publicKeyHex: bytesToHex(pubBytes),
+      kaspaAddress: kaspaAddressFromXOnly(xOnly, hrp),
+      seed: seed.slice(0, 32),
+    };
+
+    // Stealth keys from the same 32-byte seed slice (as createWallet).
+    await generateStealthKeys(wallet.seed);
+
+    // ---- identical SecureStore writes ----
+    await SecureStore.setItemAsync(STORE_KEYS.PRIVATE_KEY, wallet.privateKeyHex, {
+      keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+    });
+    await SecureStore.setItemAsync(STORE_KEYS.PUBLIC_KEY, wallet.publicKeyHex);
+    await SecureStore.setItemAsync(STORE_KEYS.KASPA_ADDRESS, wallet.kaspaAddress);
+    await SecureStore.setItemAsync(STORE_KEYS.MASTER_SEED, bytesToHex(wallet.seed), {
+      keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+    });
+    await SecureStore.setItemAsync(STORE_KEYS.REGISTRATION_STATUS, 'wallet_created');
+
+    // preserve stats cache if present, else seed defaults (TownHall refills by pubkey)
+    const existingStats = await AsyncStorage.getItem(STORE_KEYS.USER_STATS);
+    if (!existingStats) {
+      await AsyncStorage.setItem(STORE_KEYS.USER_STATS, JSON.stringify(createDefaultUserStats()));
+    }
+
+    // ---- encrypted privkey block (identity_inscription_v6 compatibility) ----
+    let deviceEncKey = await SecureStore.getItemAsync('device_encryption_key');
+    if (!deviceEncKey) {
+      const randomBytes = await Crypto.getRandomBytesAsync(32);
+      deviceEncKey = Array.from(new Uint8Array(randomBytes), b => b.toString(16).padStart(2, '0')).join('');
+      await SecureStore.setItemAsync('device_encryption_key', deviceEncKey, {
+        keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+      });
+    }
+    const combined = deviceEncKey + wallet.privateKeyHex;
+    const keyStream = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      combined,
+    );
+    const encryptedChars: string[] = [];
+    for (let i = 0; i < 64; i += 2) {
+      const privByte = parseInt(wallet.privateKeyHex.slice(i, i + 2), 16);
+      const ksByte = parseInt(keyStream.slice(i % keyStream.length, (i % keyStream.length) + 2), 16);
+      encryptedChars.push((privByte ^ ksByte).toString(16).padStart(2, '0'));
+    }
+    await SecureStore.setItemAsync('kv_l1_privkey_enc', JSON.stringify({ privateKeyEnc: encryptedChars.join('') }), {
+      keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+    });
+
+    await SecureStore.setItemAsync('kaspa_address', wallet.kaspaAddress);
+    await SecureStore.setItemAsync('kaspa_network', network);
+
+    // export continuity + boot-as-returning:
+    await SecureStore.setItemAsync('kv_mnemonic', mnemonic, {
+      keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+    });
+    await SecureStore.setItemAsync('kv_verified', 'true'); // AppNavigator boot treats as returning
+
+    console.log('[restoreWallet] Restored address:', wallet.kaspaAddress);
+    return { success: true, publicKey: wallet.publicKeyHex, kaspaAddress: wallet.kaspaAddress };
+  } catch (error) {
+    console.error('[restoreWalletFromMnemonic] failed:', error);
+    return { success: false, error: 'Wallet restore failed.' };
   }
 }
 

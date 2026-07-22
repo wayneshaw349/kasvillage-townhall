@@ -42,10 +42,19 @@ import { ProfileScreen } from './ProfileScreen';
 import { QRPayNearby } from './QRPayNearby';
 import TradeFiScreen from './TradeFiScreen';
 import { NeighborAgreement } from './NeighborAgreement';
+import { VaultBackupScreen } from './VaultBackupScreen';
+import { VaultRecoveryScreen } from './VaultRecoveryScreen';
+import { GenerateVaultScreen } from './GenerateVaultScreen';
+import { VaultSetupScreen, loadFrostVault } from './VaultSetupScreen';
+import { VaultQRSignScreen } from './VaultQRSignScreen';
+import { VaultCosignScreen } from './VaultCosignScreen';
+import type { VaultInfo } from './frost_qr_signer';
+import { createIdentityBoundBackup } from './vault_generator';
 import {
   getUserStats,
   isInSnailMode,
   getCreationDelayMs,
+  restoreWalletFromMnemonic,
 } from './wallet_registration_v2';
 import { startPriceFeed, subscribeToPriceUpdates, getKasPrice } from './kas_price_feed';
 import { getBalance as getKaspaBalance, setNetwork } from './kaspa_unified';
@@ -75,7 +84,13 @@ type AppScreen =
   | 'neighbor_agreement'
   | 'tx_history'
   | 'bathroom'
-  | 'pay_nearby';
+  | 'pay_nearby'
+  | 'vault_backup'
+  | 'vault_recovery'
+  | 'generate_vault'
+  | 'vault_setup'
+  | 'vault_sign'
+  | 'vault_cosign';
 
 interface SessionUser {
   apartment: string;
@@ -588,6 +603,7 @@ export const AppNavigator: React.FC = () => {
   const [snailReason, setSnailReason] = useState('');
   const [snailPComplete, setSnailPComplete] = useState(0);
   const [snailDeadlocks, setSnailDeadlocks] = useState(0);
+  const [vaultWires, setVaultWires] = useState<string[]>([]);
 
   // ------------------------------------------------------------------
   // Load stats helper
@@ -785,12 +801,59 @@ export const AppNavigator: React.FC = () => {
     }
   }, [snailMode, snailDelayMs]);
 
-  const handleQuizFail = useCallback(() => setScreen('onboarding'), []);
+  const handleQuizFail = useCallback(() => setScreen('vault_recovery'), []);
 
   const handleSnailModeComplete = useCallback(() => {
     setSnailMode(false);
     setScreen('dashboard');
   }, []);
+
+  const openVaultBackup = useCallback(async () => {
+    try {
+      const mnemonic = await SecureStore.getItemAsync('kv_mnemonic');
+      if (!mnemonic) {
+        setScreen('generate_vault'); // no seed on this wallet -> offer to mint a backable one
+        return;
+      }
+      const pubHex = (await SecureStore.getItemAsync('kv_public_key')) || '';
+      const backup = createIdentityBoundBackup(mnemonic, pubHex, 4); // 2-of-4, identity-bound
+      setVaultWires(backup.wires);
+      setScreen('vault_backup');
+    } catch (e: any) {
+      Alert.alert('Backup error', e?.message || 'Could not create backup cards.');
+    }
+  }, []);
+
+  // ---- FROST vault (2-device signer) ----
+  const [frostVault, setFrostVault] = useState<VaultInfo | null>(null);
+  useEffect(() => { loadFrostVault().then(setFrostVault).catch(() => {}); }, [screen]);
+
+  const getMyPubkeyHex = useCallback(async () => {
+    return (await SecureStore.getItemAsync('kv_public_key'))
+      || (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY))
+      || (await SecureStore.getItemAsync('kaspa_pubkey'))
+      || '';
+  }, []);
+
+  const getPrivKeyHex = useCallback(async () => {
+    return (await SecureStore.getItemAsync('kv_private_key'))
+      || (await SecureStore.getItemAsync(STORE_KEYS.PRIVATE_KEY))
+      || '';
+  }, []);
+
+  const openFrostMenu = useCallback(() => {
+    if (!frostVault) { setScreen('vault_setup'); return; }
+    Alert.alert(
+      'FROST Vault',
+      frostVault.address.slice(0, 28) + '...\nverify: ' + frostVault.verificationCode,
+      [
+        { text: 'Send (this device builds)', onPress: () => setScreen('vault_sign') },
+        { text: 'Co-Sign (this device approves)', onPress: () => setScreen('vault_cosign') },
+        { text: 'New vault (replace)', onPress: () => setScreen('vault_setup') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  }, [frostVault]);
 
   const navigation = {
     navigate: (screenName: string) => {
@@ -945,6 +1008,7 @@ export const AppNavigator: React.FC = () => {
 
     case 'dashboard':
       return (
+        <View style={{ flex: 1 }}>{/* frost-wrap */}
         <Dashboard
           user={user}
           balance={balance}
@@ -967,6 +1031,13 @@ export const AppNavigator: React.FC = () => {
           onNavigatePhoneProof={() => setScreen('phone_proof')}
           onNavigateBalanceSheet={() => setScreen('balance_sheet')}
         />
+        <TouchableOpacity
+          onPress={openFrostMenu}
+          style={{ position: 'absolute', bottom: 96, right: 14, backgroundColor: '#14532D', borderRadius: 24, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: '#4ADE80', zIndex: 99 }}
+        >
+          <Text style={{ color: '#BBF7D0', fontWeight: 'bold', fontSize: 12 }}>{'\uD83D\uDD17 FROST'}</Text>
+        </TouchableOpacity>
+        </View>
       );
 
     case 'send_kas':
@@ -1062,6 +1133,7 @@ export const AppNavigator: React.FC = () => {
         onNavigateEntertainment={() => setScreen('entertainment')}
         onNavigateTownHall={() => setScreen('town_hall')}
         onNavigateBookshelf={() => setScreen('entertainment')}
+        onNavigateVaultBackup={openVaultBackup}
       />;
 
     case 'neighbor_agreement':
@@ -1087,6 +1159,78 @@ export const AppNavigator: React.FC = () => {
       );
     case 'pay_nearby':
       return <QRPayNearby onClose={() => setScreen('dashboard')} onNavigateSend={(addr?: string, sompi?: number) => { (globalThis as any).__kvSendPrefill = { addr, sompi }; setScreen('send_kas'); }} />;
+
+    case 'generate_vault':
+      return (
+        <GenerateVaultScreen
+          network={kaspaAddress.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet'}
+          onDone={() => setScreen('dashboard')}
+          onCancel={() => setScreen('dashboard')}
+        />
+      );
+
+    case 'vault_backup':
+      return (
+        <VaultBackupScreen
+          wires={vaultWires}
+          threshold={2}
+          onDone={() => { setVaultWires([]); setScreen('dashboard'); }}
+          onCancel={() => { setVaultWires([]); setScreen('dashboard'); }}
+        />
+      );
+
+    case 'vault_recovery':
+      return (
+        <VaultRecoveryScreen
+          onRecovered={(mnemonic) => {
+            (async () => {
+              const net = kaspaAddress.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet';
+              const res = await restoreWalletFromMnemonic(mnemonic, net);
+              if (res.success) {
+                setKaspaAddress(res.kaspaAddress || '');
+                setUser((prev) => ({ ...prev, pubkey: res.publicKey, publicKey: res.publicKey }));
+                Alert.alert('Wallet restored', 'Same address recovered from your cards.');
+                setScreen('dashboard');
+              } else {
+                Alert.alert('Restore failed', res.error || 'Try re-scanning your cards.');
+              }
+            })();
+          }}
+          onCancel={() => setScreen('onboarding')}
+        />
+      );
+
+    case 'vault_setup':
+      return (
+        <VaultSetupScreen
+          visible={true}
+          onClose={() => setScreen('dashboard')}
+          getMyPubkey={getMyPubkeyHex}
+          network={kaspaAddress.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet'}
+          onCreated={(v) => setFrostVault(v)}
+        />
+      );
+
+    case 'vault_sign':
+      return frostVault ? (
+        <VaultQRSignScreen
+          visible={true}
+          onClose={() => setScreen('dashboard')}
+          vault={frostVault}
+          getPrivateKeyHex={getPrivKeyHex}
+          onSuccess={() => setTimeout(() => refreshBalance(), 2000)}
+        />
+      ) : <LoadingScreen />;
+
+    case 'vault_cosign':
+      return frostVault ? (
+        <VaultCosignScreen
+          visible={true}
+          onClose={() => setScreen('dashboard')}
+          vault={frostVault}
+          getPrivateKeyHex={getPrivKeyHex}
+        />
+      ) : <LoadingScreen />;
 
     default:
       return <LoadingScreen />;
