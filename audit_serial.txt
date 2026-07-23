@@ -1,0 +1,1604 @@
+scanned 193 source files
+
+======================================================================
+== ALL SERIAL REFERENCES
+======================================================================
+AppNaviagator.tsx:61: import { getDeviceHash, getSerialHash } from './device_attestation';
+AppNaviagator.tsx:793: const serialHash = await getSerialHash();
+AppNaviagator.tsx:795: console.log('[DeviceAttestation] serialHash:', serialHash?.slice(0, 16) || 'none');   [optional]
+arweave_state_persistence_client (2).ts:106: function serializeTags(tags: ArweaveTag[]): Uint8Array {
+arweave_state_persistence_client (2).ts:134: const serialTags   = serializeTags(tags);
+arweave_state_persistence_client (2).ts:143: serialTags,
+arweave_state_persistence_client (2).ts:156: serialTags,
+attestation_updated.rs:8: use serde::{Deserialize, Serialize};
+attestation_updated.rs:15: #[derive(Clone, Debug, Serialize, Deserialize)]
+attestation_updated.rs:43: #[derive(Clone, Debug, Serialize, Deserialize)]
+avatar_arweave_upload.ts:112: // TAG SERIALIZATION
+avatar_arweave_upload.ts:128: function serializeTags(tags: ArweaveTag[]): Uint8Array {
+avatar_arweave_upload.ts:163: const serializedTags = serializeTags(tags);
+avatar_arweave_upload.ts:174: serializedTags,
+avatar_arweave_upload.ts:192: // Build serialized data item
+avatar_arweave_upload.ts:197: const tagBytesLen = w64LE(serializedTags.length);
+avatar_arweave_upload.ts:207: serializedTags,
+canonical_schema_rs.rs:11: use serde::{Deserialize, Serialize};
+canonical_schema_rs.rs:65: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+canonical_schema_rs.rs:93: /// Serialize to canonical JSON (alphabetical field order, lowercase values)
+canonical_schema_rs.rs:94: pub fn serialize_canonical(&self) -> String {
+canonical_schema_rs.rs:127: let serialized = self.serialize_canonical();
+canonical_schema_rs.rs:128: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+canonical_schema_rs.rs:197: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+canonical_schema_rs.rs:225: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+canonical_schema_rs.rs:317: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+canonical_schema_rs.rs:339: #[derive(Clone, Debug, Serialize, Deserialize)]
+canonical_schema_rs.rs:392: #[derive(Clone, Debug, Serialize, Deserialize)]
+canonical_schema_rs.rs:425: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+canonical_schema_rs.rs:478: fn test_canonical_serialization() {
+canonical_schema_rs.rs:486: let serialized = avatar.serialize_canonical();
+canonical_schema_rs.rs:489: assert!(serialized.starts_with("{\"animal\":"));
+canonical_schema_rs.rs:490: assert!(serialized.contains("\"class\":\"ninja\""));
+canonical_schema_rs.rs:491: assert!(serialized.contains("\"name\":\"shadow\""));
+canonical_schema_ts.ts:19: // This order MUST match Rust. Both sides serialize in this exact order.
+canonical_schema_ts.ts:112: // CANONICAL SERIALIZATION (Deterministic)
+canonical_schema_ts.ts:114: export const serializeAvatarCanonical = (avatar: Partial<CanonicalAvatar>): string => {
+canonical_schema_ts.ts:115: // Always serialize in alphabetical field order
+canonical_schema_ts.ts:131: const serialized = serializeAvatarCanonical(avatar);
+canonical_schema_ts.ts:132: const versionedData = `KV_AVATAR_V${schemaVersion}:${serialized}`;
+device_attestation.ts:426: // SERIAL NUMBER HASH — Hardware-bound attestation (user pastes serial manually)
+device_attestation.ts:428: // Flow: User copies serial from Settings → About → pastes into app
+device_attestation.ts:429: // App hashes locally: SHA256(serial + anchor + applicationId)
+device_attestation.ts:430: // Only hash is stored/inscribed — raw serial NEVER leaves device
+device_attestation.ts:433: const STORE_KEY_SERIAL_HASH = 'kv_serial_hash';
+device_attestation.ts:436: * Hash a device serial number with the device anchor for hardware binding.
+device_attestation.ts:437: * Result is deterministic: same serial + same device = same hash.
+device_attestation.ts:439: export async function hashSerialNumber(serial: string): Promise<string> {
+device_attestation.ts:442: const input = `KV_SERIAL:${serial.trim().toUpperCase()}:${anchor}:${appId}`;
+device_attestation.ts:450: * Store the serial hash after user pastes their serial number.
+device_attestation.ts:451: * Raw serial is NOT stored — only the one-way hash.
+device_attestation.ts:453: export async function storeSerialHash(serial: string): Promise<string> {
+device_attestation.ts:454: const hash = await hashSerialNumber(serial);
+device_attestation.ts:455: await SecureStore.setItemAsync(STORE_KEY_SERIAL_HASH, hash);
+device_attestation.ts:460: * Get the stored serial hash (for Arweave inscription).
+device_attestation.ts:461: * Returns null if user hasn't entered serial yet.
+device_attestation.ts:463: export async function getSerialHash(): Promise<string | null> {
+device_attestation.ts:464: return await SecureStore.getItemAsync(STORE_KEY_SERIAL_HASH);
+device_attestation.ts:468: * Verify a serial number matches the stored hash.
+device_attestation.ts:471: export async function verifySerialNumber(serial: string): Promise<boolean> {
+device_attestation.ts:472: const stored = await SecureStore.getItemAsync(STORE_KEY_SERIAL_HASH);
+device_attestation.ts:474: const computed = await hashSerialNumber(serial);
+expo_identity_ritual.tsx:124: import { getDeviceHash, storeSerialHash, getSerialHash } from './device_attestation';
+expo_identity_ritual.tsx:9030: const [serialInput, setSerialInput] = useState(String.fromCharCode(39)+String.fromCharCode(39));
+expo_identity_ritual.tsx:9031: const [serialHashed, setSerialHashed] = useState(false);
+expo_identity_ritual.tsx:9323: const serialHash = await getSerialHash();
+expo_identity_ritual.tsx:9324: if (serialHash) arTags.push({ name: "KV-SerialHash", value: serialHash });   [optional]
+expo_identity_ritual.tsx:9550: {/* Serial Number Attestation — hardware binding */}
+expo_identity_ritual.tsx:9554: Paste your device serial number to bind this wallet to your physical device.{'\n'}
+expo_identity_ritual.tsx:9555: Go to Settings → About → Serial Number → Copy
+expo_identity_ritual.tsx:9559: placeholder="Paste serial number..."
+expo_identity_ritual.tsx:9561: value={serialInput}
+expo_identity_ritual.tsx:9562: onChangeText={setSerialInput}
+expo_identity_ritual.tsx:9567: {serialInput.length >= 5 && (
+expo_identity_ritual.tsx:9572: const hash = await storeSerialHash(serialInput);
+expo_identity_ritual.tsx:9573: setSerialHashed(true);
+expo_identity_ritual.tsx:9574: Alert.alert('✅ Hardware Bound', 'Serial hash stored securely. Raw serial was NOT saved — only the one-way hash.');
+expo_identity_ritual.tsx:9576: Alert.alert('Error', 'Failed to hash serial');
+expo_identity_ritual.tsx:9581: {serialHashed ? '✓ Serial Hashed' : '🔐 Hash & Store'}
+expo_identity_ritual.tsx:9585: {serialHashed && (
+expo_phone_l1_merged.tsx:1247: // Build transaction (simplified - real implementation would serialize properly)
+expo_phone_l1_merged.tsx:1271: // Submit (placeholder - real implementation would serialize tx properly)
+expo_phone_l1_merged.tsx:1272: // const txId = await l1Client.submitTransaction(serializedTx);
+identity_inscription_v6.ts:421: function serializeTags(tags: { name: string; value: string }[]): Uint8Array {
+identity_inscription_v6.ts:454: const serializedTags = serializeTags(tags);
+identity_inscription_v6.ts:465: serializedTags,
+identity_inscription_v6.ts:480: serializedTags,
+KaspaClient.ts:1006: // This is a simplified version - full impl needs SIGHASH_ALL serialization
+kaspa_rest_tx.ts:91: // Serialize: version u16 | inputs_len u64 | per-input[outpoint 32 + index u32 +
+kaspa_rest_tx.ts:223: // (value * 1000) / (3 * output_serialized_size) < MINIMUM_RELAY_TX_FEE
+kasvillage_api.ts:60: serializeCanonicalAvatar,
+NeighborAgreement.tsx:178: const serializable = { ...session, contract: { ...session.contract, frostData: session.contract.frostData ? { address: session.contract.frostData.address, aggregatedPubkey: session.contract.frostData.aggregatedPubkey, network: session.contract.frostData.network, pubkeyA: session.contract.frostData.pubkeyA, pubkeyB: session.contract.frostData.pubkeyB, sessionId: session.contract.frostData.sessionId || session.contract.agreementId, verificationCode: session.contract.frostData.verificationCode || '', createdAt: session.contract.frostData.createdAt || 0 } : undefined } };   [optional]
+NeighborAgreement.tsx:179: await AsyncStorage.setItem(AGR_SESSION_KEY, JSON.stringify(serializable));
+ProfileScreen.tsx:18: import { storeSerialHash, getSerialHash, getDeviceHash } from './device_attestation';
+ProfileScreen.tsx:394: const [serialInput, setSerialInput] = React.useState('');
+ProfileScreen.tsx:395: const [serialHashed, setSerialHashed] = React.useState(false);
+ProfileScreen.tsx:396: const [existingSerialHash, setExistingSerialHash] = React.useState<string | null>(null);
+ProfileScreen.tsx:399: // Check if serial already bound
+ProfileScreen.tsx:401: getSerialHash().then(h => { if (h) { setExistingSerialHash(h); setSerialHashed(true); } });
+ProfileScreen.tsx:405: // Auto-inscribe if serial bound but not yet attested
+ProfileScreen.tsx:406: const sh = await getSerialHash();
+ProfileScreen.tsx:413: await uploadToTurbo(JSON.stringify({ serialHash: sh, deviceHash, apt: 'APT-' + apt, timestamp: Date.now() }), [
+ProfileScreen.tsx:420: { name: 'KV-SerialHash', value: sh },
+ProfileScreen.tsx:425: console.log('[Serial] Auto-attested to Arweave');
+ProfileScreen.tsx:426: } catch (e) { console.warn('[Serial] Auto-attest failed (non-fatal):', e); }
+ProfileScreen.tsx:727: {/* Hardware Attestation — Serial Bind */}
+ProfileScreen.tsx:731: Bind this wallet to your physical device. Your serial is NEVER stored or transmitted — only a one-way hash is kept locally on your device.
+ProfileScreen.tsx:733: {serialHashed ? (
+ProfileScreen.tsx:737: <Text style={{ color: '#666', fontSize: rs(10) }}>{existingSerialHash?.slice(0, 12)}...</Text>
+ProfileScreen.tsx:744: <Text style={{ color: '#888', fontSize: rs(10), marginBottom: rs(6) }}>Settings → About → Serial Number → Copy → Paste below</Text>
+ProfileScreen.tsx:748: placeholder="Paste serial..."
+ProfileScreen.tsx:750: value={serialInput}
+ProfileScreen.tsx:751: onChangeText={setSerialInput}
+ProfileScreen.tsx:754: {serialInput.length >= 5 && (
+ProfileScreen.tsx:759: const hash = await storeSerialHash(serialInput);
+ProfileScreen.tsx:760: setSerialHashed(true);
+ProfileScreen.tsx:761: setExistingSerialHash(hash);
+ProfileScreen.tsx:762: // Inscribe serial hash to Arweave (permanent)
+ProfileScreen.tsx:767: await uploadToTurbo(JSON.stringify({ serialHash: hash, deviceHash, apt, timestamp: Date.now() }), [
+ProfileScreen.tsx:772: { name: 'KV-SerialHash', value: hash },
+ProfileScreen.tsx:775: console.log('[Serial] Inscribed to Arweave');
+ProfileScreen.tsx:776: } catch (e) { console.warn('[Serial] Arweave inscription failed (non-fatal):', e); }
+ProfileScreen.tsx:777: Alert.alert('\u2705 Hardware Bound', 'Serial hash stored and inscribed to Arweave. Raw serial was NOT saved.');
+relay_endpoints.rs:14: use serde::{Deserialize, Serialize};
+relay_endpoints.rs:56: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:65: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:78: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:86: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:95: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:102: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:108: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:115: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:120: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:125: #[derive(Debug, Clone, Serialize, Deserialize)]
+shared_types.ts:531: export function serializeCanonicalAvatar(avatar: CanonicalAvatar): string {
+shared_types.ts:540: const canonical = serializeCanonicalAvatar(avatar);
+main.rs:48: use serde::{Serialize, Deserialize};
+main.rs:120: #[derive(Clone, Debug, Serialize)]
+main.rs:185: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+main.rs:213: /// Serialize to canonical JSON (alphabetical field order, lowercase values)
+main.rs:214: pub fn serialize_canonical(&self) -> String {
+main.rs:246: let serialized = self.serialize_canonical();
+main.rs:247: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+main.rs:332: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:356: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:362: // Arweave-serializable fields (v5 stateless persistence)
+main.rs:479: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:499: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:589: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:625: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:637: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:905: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:994: // Serialize inputs
+main.rs:1712: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:1723: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:1738: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2032: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+main.rs:2047: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+main.rs:2051: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+main.rs:2055: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:2063: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:2170: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2208: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:2234: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2245: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2263: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+main.rs:2266: #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+main.rs:2269: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2348: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+main.rs:2351: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2387: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+main.rs:2390: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2397: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2547: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:2579: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2582: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2622: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3083: fn test_fq_serialization_roundtrip() {
+main.rs:3095: assert_eq!(*original, recovered, "Serialization roundtrip failed");
+main.rs:3332: // RIGOROUS PROOF SERIALIZATION TESTS
+main.rs:3336: fn test_proof_serialization_roundtrip() {
+main.rs:3884: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3897: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3922: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3935: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3943: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3955: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3963: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3978: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3990: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3997: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4008: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4015: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4063: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4131: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4204: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4313: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4402: #[derive(Debug, Deserialize)]
+main.rs:4435: #[derive(Debug, Deserialize)]
+main.rs:4484: #[derive(Debug, Deserialize)]
+main.rs:4500: #[derive(Debug, Deserialize)]
+main.rs:4516: #[derive(Debug, Deserialize)]
+main.rs:4535: #[derive(Debug, Deserialize)]
+main.rs:4555: #[derive(Debug, Deserialize)]
+main.rs:4560: #[derive(Debug, Serialize)]
+main.rs:4568: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:4638: #[derive(Debug, Deserialize)]
+main.rs:5075: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5308: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5370: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:5382: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5391: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5417: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:5494: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5534: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5541: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5670: #[derive(Debug, Deserialize)]
+main.rs:5740: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5831: #[derive(Debug, Deserialize)]
+main.rs:5838: #[derive(Debug, Serialize)]
+main.rs:5998: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6027: #[derive(Debug, Deserialize)]
+main.rs:6034: #[derive(Debug, Serialize)]
+main.rs:6136: #[derive(Debug, Clone, Serialize)]
+main.rs:6284: #[derive(serde::Serialize, serde::Deserialize, Debug)]
+main.rs:6578: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6611: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6639: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6652: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6659: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:6671: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:6684: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6947: #[derive(Debug, Deserialize)]
+main.rs:7121: #[derive(Debug, Deserialize)]
+main.rs:7158: #[derive(Debug, Deserialize)]
+main.rs:7212: #[derive(Debug, Deserialize)]
+main.rs:7248: #[derive(Debug, Deserialize)]
+main.rs:7356: #[derive(Deserialize)]
+main.rs:7363: #[derive(Debug, Clone, Serialize)]
+main.rs:7518: #[derive(Deserialize)]
+main.rs:7536: #[derive(Deserialize)]
+main.rs:7809: #[derive(Debug, Deserialize)]
+main.rs:8654: fn test_canonical_serialization() {
+main.rs:8662: let serialized = avatar.serialize_canonical();
+main.rs:8665: assert!(serialized.starts_with("{\"animal\":"));
+main.rs:8667: assert!(serialized.contains("\"class\":\"ninja\""));
+main.rs:8668: assert!(serialized.contains("\"name\":\"shadow\""));
+main.rs:8669: assert!(serialized.contains("\"race\":\"dark elf\""));
+stealth_endgame_verify.rs:9: use serde::{Deserialize, Serialize};
+stealth_endgame_verify.rs:15: #[derive(Debug, Deserialize)]
+stealth_endgame_verify.rs:25: #[derive(Debug, Serialize)]
+stealth_endgame_verify.rs:28: #[serde(skip_serializing_if = "Option::is_none")]
+stealth_endgame_verify.rs:30: #[serde(skip_serializing_if = "Option::is_none")]
+stealth_endgame_verify.rs:172: #[derive(Debug, Deserialize)]
+stealth_endgame_verify.rs:175: #[derive(Debug, Serialize)]
+stealth_endgame_verify.rs:179: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:14: use serde::{Deserialize, Serialize};
+townhall_verification_complete.rs:154: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:166: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:174: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:182: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:285: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:299: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:980: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:991: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:1265: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:1275: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:1284: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:1642: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:1958: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:1967: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:1971: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:1973: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:1975: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:2045: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2054: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2064: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2125: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2139: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:2261: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2267: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:2305: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2312: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:2394: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2604: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:2615: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:2624: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2664: #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+townhall_verification_complete.rs:2692: #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+townhall_verification_complete.rs:2834: #[derive(Debug, Deserialize, Default)]
+townhall_verification_complete.rs:2843: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:2847: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:2849: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:2854: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2863: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:2873: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2879: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:3161: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3184: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3195: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3210: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3225: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3238: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3245: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3276: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3292: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:3301: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:3308: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:3315: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:3322: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:3333: #[derive(Debug, Clone, Serialize)]
+townhall_verification_complete.rs:3600: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3612: #[derive(Debug, Clone, Serialize)]
+townhall_verification_complete.rs:3629: #[derive(Debug, Clone, Serialize)]
+stealth_watcher.ts:629: // Persist with bigint serialization
+stealth_watcher.ts:723: * Persist payments to SecureStore with bigint serialization
+stealth_watcher.ts:726: const serialized = Array.from(_pendingPayments.values()).map(p => ({
+stealth_watcher.ts:730: await AsyncStorage.setItem(SECURESTORE_KEYS.STEALTH_PAYMENTS, JSON.stringify(serialized));
+stealth_watcher.ts:791: const serialized = updated.map(p => ({
+stealth_watcher.ts:796: await AsyncStorage.setItem(SECURESTORE_KEYS.STEALTH_PAYMENTS, JSON.stringify(serialized));
+townhall_complete_4.rs:41: use serde::{Serialize, Deserialize};
+townhall_complete_4.rs:150: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+townhall_complete_4.rs:178: /// Serialize to canonical JSON (alphabetical field order, lowercase values)
+townhall_complete_4.rs:179: pub fn serialize_canonical(&self) -> String {
+townhall_complete_4.rs:211: let serialized = self.serialize_canonical();
+townhall_complete_4.rs:212: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+townhall_complete_4.rs:297: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:321: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:410: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:430: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:526: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:562: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:651: // Serialize inputs
+townhall_complete_4.rs:1369: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1380: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1395: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1679: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_complete_4.rs:1683: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_complete_4.rs:1687: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_complete_4.rs:1691: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:1699: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:1806: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1844: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:1870: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1881: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1899: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+townhall_complete_4.rs:1902: #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+townhall_complete_4.rs:1905: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1984: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+townhall_complete_4.rs:1987: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:2021: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:2053: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:2056: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:2096: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:2451: fn test_fq_serialization_roundtrip() {
+townhall_complete_4.rs:2463: assert_eq!(*original, recovered, "Serialization roundtrip failed");
+townhall_complete_4.rs:2700: // RIGOROUS PROOF SERIALIZATION TESTS
+townhall_complete_4.rs:2704: fn test_proof_serialization_roundtrip() {
+townhall_complete_4.rs:3256: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3269: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3294: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3307: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3315: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3327: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3335: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3350: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3362: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3369: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3380: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3387: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3435: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3503: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3576: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3685: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3772: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3805: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3851: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3867: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3883: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3902: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:4190: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4423: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4485: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:4497: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4506: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4532: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:4609: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4649: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4656: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4785: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:4817: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4908: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:4915: #[derive(Debug, Serialize)]
+townhall_complete_4.rs:5079: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5108: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:5115: #[derive(Debug, Serialize)]
+townhall_complete_4.rs:5217: #[derive(Debug, Clone, Serialize)]
+townhall_complete_4.rs:5558: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5591: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5619: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5632: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5639: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:5651: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:5664: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5927: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6101: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6135: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6189: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6222: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6375: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6949: fn test_canonical_serialization() {
+townhall_complete_4.rs:6957: let serialized = avatar.serialize_canonical();
+townhall_complete_4.rs:6960: assert!(serialized.starts_with("{\"animal\":"));
+townhall_complete_4.rs:6962: assert!(serialized.contains("\"class\":\"ninja\""));
+townhall_complete_4.rs:6963: assert!(serialized.contains("\"name\":\"shadow\""));
+townhall_complete_4.rs:6964: assert!(serialized.contains("\"race\":\"dark elf\""));
+townhall_crypto.rs:600: use serde::{Deserialize, Serialize};
+townhall_crypto.rs:602: #[derive(Debug, Deserialize)]
+townhall_crypto.rs:611: #[derive(Debug, Serialize)]
+townhall_crypto.rs:614: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_crypto.rs:640: #[derive(Debug, Serialize, Deserialize, Clone)]
+townhall_crypto.rs:652: #[derive(Debug, Deserialize)]
+townhall_crypto.rs:661: #[derive(Debug, Serialize)]
+townhall_crypto.rs:668: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_crypto.rs:670: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_crypto.rs:776: #[derive(Debug, Deserialize)]
+townhall_crypto.rs:781: #[derive(Debug, Serialize)]
+townhall_library.rs:27: use serde::{Deserialize, Serialize};
+townhall_library.rs:295: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:304: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:314: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:326: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:357: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:406: #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+townhall_library.rs:461: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:474: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:482: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:490: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:498: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:511: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:525: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:534: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:550: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:569: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:579: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:605: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:619: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:633: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:651: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:663: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:678: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:686: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:696: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:707: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:728: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:755: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:767: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:1309: .map_err(|e| format!("Serialization failed: {}", e))?;
+townhall_library.rs:1427: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:1451: #[derive(Debug, Deserialize)]
+townhall_library.rs:1461: #[derive(Debug, Serialize)]
+townhall_library.rs:1518: #[derive(Debug, Deserialize)]
+townhall_library.rs:1533: #[derive(Debug, Serialize)]
+townhall_library.rs:1640: #[derive(Debug, Deserialize)]
+townhall_library.rs:1655: #[derive(Debug, Serialize)]
+townhall_library.rs:1830: #[derive(Debug, Deserialize)]
+townhall_library.rs:1843: #[derive(Debug, Serialize)]
+townhall_library.rs:1912: #[derive(Debug, Deserialize)]
+townhall_library.rs:1927: #[derive(Debug, Serialize)]
+townhall_library.rs:2041: #[derive(Debug, Deserialize)]
+townhall_library.rs:2055: #[derive(Debug, Serialize)]
+townhall_library.rs:2138: #[derive(Debug, Deserialize)]
+townhall_library.rs:2149: #[derive(Debug, Serialize)]
+townhall_library.rs:2198: #[derive(Debug, Deserialize)]
+townhall_library.rs:2205: #[derive(Debug, Serialize)]
+townhall_library.rs:2262: #[derive(Debug, Deserialize)]
+townhall_library.rs:2269: #[derive(Debug, Serialize)]
+townhall_library.rs:2316: #[derive(Debug, Deserialize)]
+townhall_merged.rs:42: use serde::{Serialize, Deserialize};
+townhall_merged.rs:158: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+townhall_merged.rs:186: /// Serialize to canonical JSON (alphabetical field order, lowercase values)
+townhall_merged.rs:187: pub fn serialize_canonical(&self) -> String {
+townhall_merged.rs:219: let serialized = self.serialize_canonical();
+townhall_merged.rs:220: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+townhall_merged.rs:305: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:329: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:335: // Arweave-serializable fields (v5 stateless persistence)
+townhall_merged.rs:452: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:472: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:562: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:598: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:610: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:741: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:830: // Serialize inputs
+townhall_merged.rs:1548: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:1559: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:1574: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:1865: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_merged.rs:1880: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_merged.rs:1884: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_merged.rs:1888: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:1896: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:2003: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2041: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:2067: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2078: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2096: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+townhall_merged.rs:2099: #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+townhall_merged.rs:2102: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2181: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+townhall_merged.rs:2184: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2218: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:2250: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2253: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2293: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2648: fn test_fq_serialization_roundtrip() {
+townhall_merged.rs:2660: assert_eq!(*original, recovered, "Serialization roundtrip failed");
+townhall_merged.rs:2897: // RIGOROUS PROOF SERIALIZATION TESTS
+townhall_merged.rs:2901: fn test_proof_serialization_roundtrip() {
+townhall_merged.rs:3453: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3466: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3491: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3504: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3512: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3524: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3532: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3547: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3559: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3566: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3577: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3584: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3632: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3700: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3773: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3882: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3971: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4004: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4053: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4069: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4150: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4169: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4189: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4194: #[derive(Debug, Serialize)]
+townhall_merged.rs:4202: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:4272: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4612: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:4845: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:4907: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:4919: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:4928: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:4954: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:5031: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:5071: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:5078: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:5207: #[derive(Debug, Deserialize)]
+townhall_merged.rs:5277: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:5368: #[derive(Debug, Deserialize)]
+townhall_merged.rs:5375: #[derive(Debug, Serialize)]
+townhall_merged.rs:5535: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:5564: #[derive(Debug, Deserialize)]
+townhall_merged.rs:5571: #[derive(Debug, Serialize)]
+townhall_merged.rs:5673: #[derive(Debug, Clone, Serialize)]
+townhall_merged.rs:5821: #[derive(serde::Serialize, serde::Deserialize, Debug)]
+townhall_merged.rs:6115: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6148: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6176: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6189: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6196: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:6208: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:6221: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6484: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6658: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6692: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6746: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6779: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6885: #[derive(Deserialize)]
+townhall_merged.rs:6892: #[derive(Serialize)]
+townhall_merged.rs:6945: #[derive(Deserialize)]
+townhall_merged.rs:6963: #[derive(Deserialize)]
+townhall_merged.rs:7044: #[derive(Debug, Deserialize)]
+townhall_merged.rs:7618: fn test_canonical_serialization() {
+townhall_merged.rs:7626: let serialized = avatar.serialize_canonical();
+townhall_merged.rs:7629: assert!(serialized.starts_with("{\"animal\":"));
+townhall_merged.rs:7631: assert!(serialized.contains("\"class\":\"ninja\""));
+townhall_merged.rs:7632: assert!(serialized.contains("\"name\":\"shadow\""));
+townhall_merged.rs:7633: assert!(serialized.contains("\"race\":\"dark elf\""));
+townhall_production.rs:16: use serde::{Deserialize, Serialize};
+townhall_production.rs:180: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:192: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+townhall_production.rs:200: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:208: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:221: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:254: #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+townhall_production.rs:300: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:315: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:772: .map_err(|e| format!("Serialization failed: {}", e))?;
+townhall_production.rs:886: #[derive(Debug, Deserialize)]
+townhall_production.rs:901: #[derive(Debug, Serialize)]
+townhall_production.rs:1014: #[derive(Debug, Deserialize)]
+townhall_production.rs:1024: #[derive(Debug, Serialize)]
+townhall_production.rs:1092: #[derive(Debug, Deserialize)]
+townhall_production.rs:1098: #[derive(Debug, Serialize)]
+townhall_production.rs:1165: #[derive(Debug, Deserialize)]
+townhall_production.rs:1172: #[derive(Debug, Serialize)]
+townhall_production.rs:1217: #[derive(Debug, Deserialize)]
+townhall_production.rs:1258: #[derive(Debug, Deserialize)]
+townhall_production.rs:1264: #[derive(Debug, Serialize)]
+townhall_production.rs:1268: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1270: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1272: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1274: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1276: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1278: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_stateless_v5.rs:28: use serde::{Serialize, Deserialize};
+townhall_stateless_v5.rs:334: // STATE STRUCTURES (Arweave-serializable)
+townhall_stateless_v5.rs:337: #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+townhall_stateless_v5.rs:381: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_stateless_v5.rs:393: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_stateless_v5.rs:411: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+townhall_stateless_v5.rs:435: pub fn serialize_canonical(&self) -> String {
+townhall_stateless_v5.rs:466: let serialized = self.serialize_canonical();
+townhall_stateless_v5.rs:467: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+townhall_stateless_v5.rs:499: #[derive(Deserialize)]
+townhall_stateless_v5.rs:506: #[derive(Serialize)]
+townhall_stateless_v5.rs:568: #[derive(Deserialize)]
+townhall_stateless_v5.rs:590: #[derive(Deserialize)]
+townhall_stateless_v5.rs:688: fn test_avatar_serialization() {
+townhall_stateless_v5.rs:696: let serialized = avatar.serialize_canonical();
+townhall_stateless_v5.rs:697: assert!(serialized.contains("\"animal\":\"\""));
+townhall_stateless_v5.rs:698: assert!(serialized.contains("\"class\":\"warrior\""));
+townhall_stateless_v5.rs:699: assert!(serialized.contains("\"name\":\"test\""));
+townhall_stateless_v5.rs:700: assert!(serialized.contains("\"race\":\"human\""));
+townhall_verification_stubs.rs:12: use serde::{Deserialize, Serialize};
+townhall_verification_stubs.rs:25: #[derive(Debug, Serialize, Deserialize)]
+townhall_verification_stubs.rs:35: #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+townhall_verification_stubs.rs:44: #[derive(Debug, Serialize, Deserialize)]
+townhall_verification_stubs.rs:47: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_stubs.rs:49: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_stubs.rs:53: impl<T: Serialize> ApiResponse<T> {
+townhall_verification_stubs.rs:78: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:87: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:159: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:167: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:207: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:213: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:262: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:270: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:298: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:308: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:350: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:359: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:388: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:398: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:457: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:486: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:492: #[derive(Debug, Serialize)]
+wallet_registration_v2.ts:63: serializeCanonicalAvatar,
+
+======================================================================
+== FINGERPRINT COMPONENTS
+======================================================================
+--- device_attestation.ts ---
+  152 |   const components = [
+  153 |     anchor,
+  154 |     Application.applicationId ?? 'com.kasvillage.mobile',
+  155 |     Device.brand             ?? 'unknown',
+  156 |     Device.modelName         ?? 'unknown',
+  157 |     Device.osName            ?? 'unknown',
+  158 |     Platform.OS,
+  159 |   ];
+
+======================================================================
+== ANCHOR SOURCE (random UUID = not hardware-bound)
+======================================================================
+AkashRelay.ts:99: const randomBytes = await Crypto.getRandomBytesAsync(bytes);
+attestation_bridge.ts:131: const saltBytes = await Crypto.getRandomBytesAsync(32);
+dapp_integrity.ts:41: function getRandomBytes(length: number): Uint8Array {
+dapp_integrity.ts:333: const randomBytes = getRandomBytes(32);
+device_attestation.ts:64: const STORE_KEY_ANCHOR      = 'kv_device_anchor';       // stable UUID
+device_attestation.ts:76: async function getOrCreateAnchor(): Promise<string> {
+device_attestation.ts:89: const bytes = await Crypto.getRandomBytesAsync(16);
+device_attestation.ts:128: const anchor = await getOrCreateAnchor();
+device_attestation.ts:136: const anchor = await getOrCreateAnchor();
+device_attestation.ts:173: const anchor = await getOrCreateAnchor();
+device_attestation.ts:219: const anchor      = await getOrCreateAnchor();
+device_attestation.ts:440: const anchor = await getOrCreateAnchor();
+device_verify.ts:30: // KV1 format: "KV1"(3) + pubkey(32) + aptHash(8) + avatarHash(8) + deviceAnchorHash(8) = 59 bytes
+device_verify.ts:59: async function getCurrentDeviceAnchorHash(): Promise<string> {
+device_verify.ts:106: const currentHash = await getCurrentDeviceAnchorHash();
+device_verify.ts:172: const deviceAnchorTag = tags.find((t: any) => t.name === 'KV-DeviceAnchor');
+device_verify.ts:174: if (!deviceAnchorTag) {
+device_verify.ts:178: const currentHash = await getCurrentDeviceAnchorHash();
+device_verify.ts:180: if (deviceAnchorTag.value.toLowerCase() === currentHash.toLowerCase()) {
+device_verify.ts:237: const storedHash = await SecureStore.getItemAsync('kv_device_anchor_hash');
+expo_identity_ritual.tsx:9113: const randomBytes = await Crypto.getRandomBytesAsync(32);
+expo_phone_l1_merged.tsx:777: const privKeyBytes = await Crypto.getRandomBytesAsync(32);
+expo_phone_l1_merged.tsx:847: const privKeyBytes = await Crypto.getRandomBytesAsync(32);
+expo_phone_l1_merged.tsx:906: const bytes = await Crypto.getRandomBytesAsync(32);
+expo_phone_l1_merged.tsx:970: const privateKeyBytes = await Crypto.getRandomBytesAsync(32);
+expo_phone_l1_merged.tsx:985: const privateKeyBytes = await Crypto.getRandomBytesAsync(32);
+expo_phone_l1_merged.tsx:1023: const secretBytes = await Crypto.getRandomBytesAsync(32);
+identity_inscription_v6.ts:520: //   Bytes 38-45: deviceAnchorHash (8 bytes raw)
+identity_inscription_v6.ts:526: deviceAnchorHash: string
+identity_inscription_v6.ts:546: // Bytes 38-45: deviceAnchorHash (8 bytes from 16-char hex)
+identity_inscription_v6.ts:547: const deviceBytes = hexToBytes(deviceAnchorHash.slice(0, 16));
+identity_inscription_v6.ts:559: deviceAnchorHash?: string;
+identity_inscription_v6.ts:581: deviceAnchorHash: bytesToHex(payload.slice(38, 46)),
+identity_inscription_v6.ts:622: const deviceAnchorHash = deviceHash.slice(0, 16);
+identity_inscription_v6.ts:625: const kaspaPayload = formatKV2UPayload(identityHash, traitCount, deviceAnchorHash);
+identity_inscription_v6.ts:634: { name: 'KV-DeviceAnchor', value: deviceAnchorHash },
+kaspa_rest_tx.ts:20: const bytes = ExpoCrypto.getRandomBytes(buffer.length);
+kaspa_unified.ts:108: pubkey: string, aptHash: string, avatarHash: string, deviceAnchorHash: string, privateKeyHex: string
+kasvillage_cold_wallet.tsx:294: const keyBytes = await ExpoCrypto.getRandomBytesAsync(32);
+kasvillage_cold_wallet.tsx:314: const salt = new Uint8Array(await ExpoCrypto.getRandomBytesAsync(16));
+kasvillage_cold_wallet.tsx:367: const privateKeyBytes = new Uint8Array(await ExpoCrypto.getRandomBytesAsync(32));
+kasvillage_cold_wallet.tsx:409: const auxRand = new Uint8Array(await ExpoCrypto.getRandomBytesAsync(32));
+kasvillage_cold_wallet.tsx:419: const privateKeyBytes = new Uint8Array(await ExpoCrypto.getRandomBytesAsync(32));
+kasvillage_cold_wallet.tsx:454: const priv0 = new Uint8Array(await ExpoCrypto.getRandomBytesAsync(32));
+kasvillage_cold_wallet.tsx:455: const priv1 = new Uint8Array(await ExpoCrypto.getRandomBytesAsync(32));
+ONBOARDING.tsx:23: const DEVICE_ANCHOR_KEY = 'kv_device_anchor';
+ONBOARDING.tsx:104: let deviceAnchor = await SecureStore.getItemAsync(DEVICE_ANCHOR_KEY);
+ONBOARDING.tsx:105: if (!deviceAnchor) {
+ONBOARDING.tsx:106: const bytes = await Crypto.getRandomBytesAsync(16);
+ONBOARDING.tsx:108: deviceAnchor = [hex.slice(0, 8), hex.slice(8, 12), '4' + hex.slice(13, 16),
+ONBOARDING.tsx:110: await SecureStore.setItemAsync(DEVICE_ANCHOR_KEY, deviceAnchor, { keychainAccessible: SecureStore.ALWAYS });
+ONBOARDING.tsx:113: const prefixed = 'KV_AVATAR_V3:' + jsonStr + '|' + deviceAnchor;
+index.tsx:9: const bytes = ExpoCrypto.getRandomBytes(buffer.length);
+stealth_watcher.ts:137: async function getRandomBytes(length: number): Promise<Uint8Array> {
+stealth_watcher.ts:138: return Crypto.getRandomBytesAsync(length);
+stealth_watcher.ts:412: const ephemeralPriv = await getRandomBytes(32);
+vault_generator.ts:40: return Crypto.getRandomBytes(n);
+wallet_registration_v2.ts:453: const randomEntropy = await Crypto.getRandomBytesAsync(16);
+wallet_registration_v2.ts:491: const randomBytes = await Crypto.getRandomBytesAsync(32);
+wallet_registration_v2.ts:588: const randomBytes = await Crypto.getRandomBytesAsync(32);
+wallet_shamir_backup.ts:29: return Crypto.getRandomBytes(n);
+Workspace.tsx:1577: const nonceBytes = new Uint8Array(await Crypto.getRandomBytesAsync(16));
+
+======================================================================
+== RUST / TOWNHALL SIDE
+======================================================================
+attestation_updated.rs:2: // DEVICE ATTESTATION - No Apple/Google Store dependency
+attestation_updated.rs:8: use serde::{Deserialize, Serialize};
+attestation_updated.rs:14: /// Replaces old DeviceAttestation that relied on attestation_blob from Apple/Google
+attestation_updated.rs:15: #[derive(Clone, Debug, Serialize, Deserialize)]
+attestation_updated.rs:16: pub struct DeviceAttestation {
+attestation_updated.rs:20: pub device_hash: String,
+attestation_updated.rs:43: #[derive(Clone, Debug, Serialize, Deserialize)]
+attestation_updated.rs:44: pub struct AttestationResult {
+attestation_updated.rs:58: const MAX_ATTESTATION_AGE_MS: u64 = 5 * 60 * 1000;
+attestation_updated.rs:62: pub fn verify_attestation(att: &DeviceAttestation) -> AttestationResult {
+attestation_updated.rs:110: if att.timestamp == 0 || now.saturating_sub(att.timestamp) > MAX_ATTESTATION_AGE_MS {
+attestation_updated.rs:111: flags.push("attestation_stale".into());
+attestation_updated.rs:117: if att.device_hash.is_empty() {
+attestation_updated.rs:118: flags.push("missing_device_hash".into());
+attestation_updated.rs:127: format!("{}:{}:{}", att.jitter_commitment, att.timing_hash, att.device_hash).as_bytes()
+attestation_updated.rs:130: AttestationResult {
+attestation_updated.rs:147: attestation: &DeviceAttestation,
+attestation_updated.rs:149: let att_result = verify_attestation(attestation);
+attestation_updated.rs:172: attestation: att_result,
+attestation_updated.rs:189: fn make_valid_attestation() -> DeviceAttestation {
+attestation_updated.rs:190: DeviceAttestation {
+attestation_updated.rs:192: device_hash: "abc123def456".into(),
+attestation_updated.rs:207: fn test_valid_attestation() {
+attestation_updated.rs:208: let att = make_valid_attestation();
+attestation_updated.rs:209: let result = verify_attestation(&att);
+attestation_updated.rs:217: let mut att = make_valid_attestation();
+attestation_updated.rs:219: let result = verify_attestation(&att);
+attestation_updated.rs:225: let mut att = make_valid_attestation();
+attestation_updated.rs:227: let result = verify_attestation(&att);
+attestation_updated.rs:233: let mut att = make_valid_attestation();
+attestation_updated.rs:235: let result = verify_attestation(&att);
+attestation_updated.rs:244: let mut att = make_valid_attestation();
+attestation_updated.rs:246: let result = verify_attestation(&att);
+attestation_updated.rs:252: let mut att = make_valid_attestation();
+attestation_updated.rs:254: let result = verify_attestation(&att);
+attestation_updated.rs:257: assert!(result.flags.contains(&"attestation_stale".to_string()));
+canonical_schema_rs.rs:11: use serde::{Deserialize, Serialize};
+canonical_schema_rs.rs:65: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+canonical_schema_rs.rs:93: /// Serialize to canonical JSON (alphabetical field order, lowercase values)
+canonical_schema_rs.rs:94: pub fn serialize_canonical(&self) -> String {
+canonical_schema_rs.rs:127: let serialized = self.serialize_canonical();
+canonical_schema_rs.rs:128: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+canonical_schema_rs.rs:197: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+canonical_schema_rs.rs:225: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+canonical_schema_rs.rs:317: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+canonical_schema_rs.rs:339: #[derive(Clone, Debug, Serialize, Deserialize)]
+canonical_schema_rs.rs:392: #[derive(Clone, Debug, Serialize, Deserialize)]
+canonical_schema_rs.rs:425: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+canonical_schema_rs.rs:478: fn test_canonical_serialization() {
+canonical_schema_rs.rs:486: let serialized = avatar.serialize_canonical();
+canonical_schema_rs.rs:489: assert!(serialized.starts_with("{\"animal\":"));
+canonical_schema_rs.rs:490: assert!(serialized.contains("\"class\":\"ninja\""));
+canonical_schema_rs.rs:491: assert!(serialized.contains("\"name\":\"shadow\""));
+relay_endpoints.rs:14: use serde::{Deserialize, Serialize};
+relay_endpoints.rs:56: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:65: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:78: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:86: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:95: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:102: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:108: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:115: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:120: #[derive(Debug, Clone, Serialize, Deserialize)]
+relay_endpoints.rs:125: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:48: use serde::{Serialize, Deserialize};
+main.rs:120: #[derive(Clone, Debug, Serialize)]
+main.rs:185: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+main.rs:213: /// Serialize to canonical JSON (alphabetical field order, lowercase values)
+main.rs:214: pub fn serialize_canonical(&self) -> String {
+main.rs:246: let serialized = self.serialize_canonical();
+main.rs:247: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+main.rs:332: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:356: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:362: // Arweave-serializable fields (v5 stateless persistence)
+main.rs:479: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:499: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:589: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:625: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:637: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:762: // Count lamport attestations + UTXO proofs by KV-PubKeyHash
+main.rs:768: {{ name: "KV-Type", values: ["lamport-attestation"] }},
+main.rs:905: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:994: // Serialize inputs
+main.rs:1712: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:1718: /// Device attestation hash (binds to specific device)
+main.rs:1719: pub device_hash: String,
+main.rs:1723: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:1733: /// Device attestation
+main.rs:1734: pub device_hash: String,
+main.rs:1738: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:1863: device_hash: String::new(), // Filled by caller
+main.rs:2032: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+main.rs:2047: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+main.rs:2051: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+main.rs:2055: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:2063: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:2170: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2179: pub attestation_hash: String,
+main.rs:2208: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:2231: // DEVICE ATTESTATION
+main.rs:2234: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2235: pub struct DeviceAttestation {
+main.rs:2237: pub attestation_blob: String,
+main.rs:2245: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2246: pub struct AttestationResult {
+main.rs:2253: pub fn verify_attestation(att: &DeviceAttestation) -> AttestationResult {
+main.rs:2254: let valid = !att.attestation_blob.is_empty() && att.device_integrity && att.app_integrity;
+main.rs:2255: let hash = hex::encode(&sha256_hash(att.attestation_blob.as_bytes())[..16]);
+main.rs:2256: AttestationResult { valid, platform: att.platform.clone(), hash, error: if valid { None } else { Some("Validation failed".into()) } }
+main.rs:2263: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+main.rs:2266: #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+main.rs:2269: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2348: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+main.rs:2351: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2387: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+main.rs:2390: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2397: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2547: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:2579: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2582: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:2622: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3083: fn test_fq_serialization_roundtrip() {
+main.rs:3095: assert_eq!(*original, recovered, "Serialization roundtrip failed");
+main.rs:3332: // RIGOROUS PROOF SERIALIZATION TESTS
+main.rs:3336: fn test_proof_serialization_roundtrip() {
+main.rs:3576: device_hash: "device123".into(),
+main.rs:3594: device_hash: "device123".into(),
+main.rs:3616: device_hash: "device123".into(),
+main.rs:3672: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+main.rs:3684: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+main.rs:3695: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+main.rs:3706: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+main.rs:3717: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+main.rs:3725: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+main.rs:3845: // ATTESTATION TESTS
+main.rs:3849: fn test_attestation_valid() {
+main.rs:3850: let att = DeviceAttestation {
+main.rs:3852: attestation_blob: "abc123".into(),
+main.rs:3859: let result = verify_attestation(&att);
+main.rs:3865: fn test_attestation_invalid() {
+main.rs:3866: let att = DeviceAttestation {
+main.rs:3868: attestation_blob: "".into(), // Empty
+main.rs:3875: let result = verify_attestation(&att);
+main.rs:3884: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3897: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3922: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3935: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3943: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3955: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3963: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3978: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3990: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:3997: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4008: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4015: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4063: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4066: pub device_hash: String,
+main.rs:4087: pub fn register(&self, device_hash: &str, pubkey_hash: &str) -> Result<String, String> {
+main.rs:4089: if let Some(apt) = self.device_to_apt.read().unwrap().get(device_hash) {
+main.rs:4099: device_hash: device_hash.into(),
+main.rs:4106: self.device_to_apt.write().unwrap().insert(device_hash.into(), apt.clone());
+main.rs:4115: pub fn lookup_by_device(&self, device_hash: &str) -> Option<String> {
+main.rs:4116: self.device_to_apt.read().unwrap().get(device_hash).cloned()
+main.rs:4119: pub fn check_conflict(&self, device_hash: &str, claimed_apt: &str) -> bool {
+main.rs:4120: if let Some(actual) = self.lookup_by_device(device_hash) {
+main.rs:4131: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4204: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4313: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:4319: pub attestation: AttestationResult,
+main.rs:4330: attestation: &DeviceAttestation,
+main.rs:4332: let att_result = verify_attestation(attestation);
+main.rs:4355: attestation: att_result,
+main.rs:4402: #[derive(Debug, Deserialize)]
+main.rs:4435: #[derive(Debug, Deserialize)]
+main.rs:4484: #[derive(Debug, Deserialize)]
+main.rs:4489: pub attestation: DeviceAttestation,
+main.rs:4496: let result = verify_user_full(&body.stats, &body.traits, &body.attestation);
+main.rs:4500: #[derive(Debug, Deserialize)]
+main.rs:4502: pub device_hash: String,
+main.rs:4510: match state.apt_registry.register(&body.device_hash, &body.pubkey_hash) {
+main.rs:4516: #[derive(Debug, Deserialize)]
+main.rs:4518: pub device_hash: String,
+main.rs:4526: let conflict = state.apt_registry.check_conflict(&body.device_hash, &body.claimed_apt);
+main.rs:4527: let actual = state.apt_registry.lookup_by_device(&body.device_hash);
+main.rs:4535: #[derive(Debug, Deserialize)]
+main.rs:4555: #[derive(Debug, Deserialize)]
+main.rs:4560: #[derive(Debug, Serialize)]
+main.rs:4568: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:4638: #[derive(Debug, Deserialize)]
+main.rs:4940: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+main.rs:4943: let att = DeviceAttestation {
+main.rs:4944: platform: "ios".into(), attestation_blob: "valid".into(),
+main.rs:4962: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+main.rs:4969: let att = DeviceAttestation {
+main.rs:4970: platform: "ios".into(), attestation_blob: "valid".into(),
+main.rs:4987: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+main.rs:4998: let att = DeviceAttestation {
+main.rs:4999: platform: "ios".into(), attestation_blob: "valid".into(),
+main.rs:5075: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5308: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5370: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:5382: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5391: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5417: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+main.rs:5494: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5534: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5541: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5670: #[derive(Debug, Deserialize)]
+main.rs:5740: #[derive(Clone, Debug, Serialize, Deserialize)]
+main.rs:5831: #[derive(Debug, Deserialize)]
+main.rs:5838: #[derive(Debug, Serialize)]
+main.rs:5998: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6027: #[derive(Debug, Deserialize)]
+main.rs:6034: #[derive(Debug, Serialize)]
+main.rs:6136: #[derive(Debug, Clone, Serialize)]
+main.rs:6284: #[derive(serde::Serialize, serde::Deserialize, Debug)]
+main.rs:6578: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6611: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6639: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6652: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6659: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:6671: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+main.rs:6684: #[derive(Debug, Clone, Serialize, Deserialize)]
+main.rs:6947: #[derive(Debug, Deserialize)]
+main.rs:7121: #[derive(Debug, Deserialize)]
+main.rs:7158: #[derive(Debug, Deserialize)]
+main.rs:7212: #[derive(Debug, Deserialize)]
+main.rs:7248: #[derive(Debug, Deserialize)]
+main.rs:7356: #[derive(Deserialize)]
+main.rs:7363: #[derive(Debug, Clone, Serialize)]
+main.rs:7462: attestation_hash: String::new(),
+main.rs:7518: #[derive(Deserialize)]
+main.rs:7536: #[derive(Deserialize)]
+main.rs:7622: // ── Device attestation check — stateless Arweave query ──────────────────────
+main.rs:7624: // APT lookup with attestations
+main.rs:7633: let gql = format!(r#"{{"query":"{{ transactions(tags: [{{ name: \"App-Name\", values: [\"KasVillage\"] }}, {{ name: \"KV-Type\", values: [\"device-attestation\"] }}, {{ name: \"KV-Apt\", values: [\"{}\"] }}], sort: HEIGHT_DESC, first: 1) {{ edges {{ node {{ id tags {{ name value }} }} }} }} }}"}}"#, apt_raw);
+main.rs:7642: let attestation_tx = edge["node"]["id"].as_str().unwrap_or("").to_string();
+main.rs:7656: HttpResponse::Ok().json(json!({"found":true,"apt":apt_raw,"pubkey":pubkey,"platform":platform,"attestation_tx":attestation_tx,"stats":stats,"completed_agreements":agreements,"source":"arweave"}))
+main.rs:7659: async fn check_device_attestation(
+main.rs:7662: let device_hash = match body.get("device_hash").and_then(|v| v.as_str()) {
+main.rs:7664: None => return HttpResponse::BadRequest().json(json!({ "error": "device_hash required" })),
+main.rs:7667: // Query Arweave for device attestation
+main.rs:7669: r#"{{"query":"{{ transactions(tags: [{{ name: \"App-Name\", values: [\"KasVillage\"] }}, {{ name: \"KV-Type\", values: [\"device-attestation\"] }}, {{ name: \"KV-DeviceHash\", values: [\"{}\"] }}], sort: HEIGHT_DESC, first: 1) {{ edges {{ node {{ tags {{ name value }} }} }} }} }}"}}"#,
+main.rs:7670: device_hash
+main.rs:7809: #[derive(Debug, Deserialize)]
+main.rs:7816: pub device_hash: String,
+main.rs:7861: code.device_hash
+main.rs:7908: &code.device_hash[..8.min(code.device_hash.len())],
+main.rs:8243: // Phase 2: Cross-reference Lamport attestations for active agreements
+main.rs:8244: // Each Agreed-Send must have a matching lamport-attestation
+main.rs:8249: {{ name: "KV-Type", values: ["lamport-attestation"] }}
+main.rs:8269: println!("   Lamport attestations found: {}", lamport_count);
+main.rs:8575: let device_hash = "1a2b3c4d5e6f7g8h";
+main.rs:8577: let message = format!("{}:{}:{}:{}", timestamp, nonce, cf_attempt_hash, device_hash);
+main.rs:8586: "deviceHash": device_hash,
+main.rs:8602: let device_hash = "1a2b3c4d5e6f7g8h";
+main.rs:8604: let message = format!("{}:{}:{}:{}", timestamp, nonce, cf_attempt_hash, device_hash);
+main.rs:8613: "deviceHash": device_hash,
+main.rs:8654: fn test_canonical_serialization() {
+main.rs:8662: let serialized = avatar.serialize_canonical();
+main.rs:8665: assert!(serialized.starts_with("{\"animal\":"));
+main.rs:8667: assert!(serialized.contains("\"class\":\"ninja\""));
+main.rs:8668: assert!(serialized.contains("\"name\":\"shadow\""));
+main.rs:8669: assert!(serialized.contains("\"race\":\"dark elf\""));
+stealth_endgame_verify.rs:9: use serde::{Deserialize, Serialize};
+stealth_endgame_verify.rs:15: #[derive(Debug, Deserialize)]
+stealth_endgame_verify.rs:25: #[derive(Debug, Serialize)]
+stealth_endgame_verify.rs:28: #[serde(skip_serializing_if = "Option::is_none")]
+stealth_endgame_verify.rs:30: #[serde(skip_serializing_if = "Option::is_none")]
+stealth_endgame_verify.rs:172: #[derive(Debug, Deserialize)]
+stealth_endgame_verify.rs:175: #[derive(Debug, Serialize)]
+stealth_endgame_verify.rs:179: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:8: // 4. Device attestation validation
+townhall_verification_complete.rs:14: use serde::{Deserialize, Serialize};
+townhall_verification_complete.rs:154: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:166: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:174: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:182: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:285: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:294: pub device_attestation_hash: String,
+townhall_verification_complete.rs:299: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:314: /// 5. device_attestation is valid
+townhall_verification_complete.rs:980: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:991: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:1265: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:1275: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:1284: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:1642: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:1958: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:1967: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:1971: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:1973: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:1975: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:2045: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2051: pub device_attestation: String,
+townhall_verification_complete.rs:2054: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2064: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2095: // TODO: Verify device attestation
+townhall_verification_complete.rs:2125: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2136: pub device_attestation: String,
+townhall_verification_complete.rs:2139: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:2208: let device_attestation_hash = compute_hash(&body.device_attestation);
+townhall_verification_complete.rs:2218: device_attestation_hash: device_attestation_hash,
+townhall_verification_complete.rs:2261: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2267: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:2305: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2309: pub device_attestation: String,
+townhall_verification_complete.rs:2312: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:2394: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2500: pub attestation_count: u64,
+townhall_verification_complete.rs:2521: meta.create_gate("min_attestations", |meta| { let s = meta.query_selector(selector); let c = meta.query_advice(advice[2], halo2_proofs::poly::Rotation::cur()); let surplus = meta.query_advice(advice[3], halo2_proofs::poly::Rotation::cur()); vec![s * (surplus - (c - Expression::Constant(Fp::from(3u64))))] });
+townhall_verification_complete.rs:2531: region.assign_advice(|| "ac", config.advice[2], 0, || Value::known(Fp::from(self.witness.attestation_count)))?;
+townhall_verification_complete.rs:2532: region.assign_advice(|| "as", config.advice[3], 0, || Value::known(Fp::from(self.witness.attestation_count.saturating_sub(3))))?;
+townhall_verification_complete.rs:2554: if witness.attestation_count < 3 { return Err(format!("Need 3 attestations, have {}", witness.attestation_count)); }
+townhall_verification_complete.rs:2572: attestation_count: body.get("attestation_count").and_then(|v| v.as_u64()).unwrap_or(0),
+townhall_verification_complete.rs:2604: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:2615: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:2624: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2664: #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+townhall_verification_complete.rs:2692: #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+townhall_verification_complete.rs:2834: #[derive(Debug, Deserialize, Default)]
+townhall_verification_complete.rs:2843: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:2847: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:2849: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_complete.rs:2854: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:2863: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+townhall_verification_complete.rs:2873: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:2879: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:3161: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3184: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3195: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3210: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3225: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3238: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3245: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3276: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3292: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:3301: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:3308: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:3315: #[derive(Debug, Serialize)]
+townhall_verification_complete.rs:3322: #[derive(Debug, Deserialize)]
+townhall_verification_complete.rs:3333: #[derive(Debug, Clone, Serialize)]
+townhall_verification_complete.rs:3600: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_verification_complete.rs:3612: #[derive(Debug, Clone, Serialize)]
+townhall_verification_complete.rs:3629: #[derive(Debug, Clone, Serialize)]
+townhall_complete_4.rs:41: use serde::{Serialize, Deserialize};
+townhall_complete_4.rs:150: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+townhall_complete_4.rs:178: /// Serialize to canonical JSON (alphabetical field order, lowercase values)
+townhall_complete_4.rs:179: pub fn serialize_canonical(&self) -> String {
+townhall_complete_4.rs:211: let serialized = self.serialize_canonical();
+townhall_complete_4.rs:212: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+townhall_complete_4.rs:297: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:321: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:410: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:430: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:526: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:562: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:651: // Serialize inputs
+townhall_complete_4.rs:1369: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1375: /// Device attestation hash (binds to specific device)
+townhall_complete_4.rs:1376: pub device_hash: String,
+townhall_complete_4.rs:1380: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1390: /// Device attestation
+townhall_complete_4.rs:1391: pub device_hash: String,
+townhall_complete_4.rs:1395: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1517: device_hash: String::new(), // Filled by caller
+townhall_complete_4.rs:1679: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_complete_4.rs:1683: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_complete_4.rs:1687: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_complete_4.rs:1691: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:1699: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:1806: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1815: pub attestation_hash: String,
+townhall_complete_4.rs:1844: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:1867: // DEVICE ATTESTATION
+townhall_complete_4.rs:1870: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1871: pub struct DeviceAttestation {
+townhall_complete_4.rs:1873: pub attestation_blob: String,
+townhall_complete_4.rs:1881: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1882: pub struct AttestationResult {
+townhall_complete_4.rs:1889: pub fn verify_attestation(att: &DeviceAttestation) -> AttestationResult {
+townhall_complete_4.rs:1890: let valid = !att.attestation_blob.is_empty() && att.device_integrity && att.app_integrity;
+townhall_complete_4.rs:1891: let hash = hex::encode(&sha256_hash(att.attestation_blob.as_bytes())[..16]);
+townhall_complete_4.rs:1892: AttestationResult { valid, platform: att.platform.clone(), hash, error: if valid { None } else { Some("Validation failed".into()) } }
+townhall_complete_4.rs:1899: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+townhall_complete_4.rs:1902: #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+townhall_complete_4.rs:1905: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:1984: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+townhall_complete_4.rs:1987: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:2021: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:2053: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:2056: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:2096: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:2451: fn test_fq_serialization_roundtrip() {
+townhall_complete_4.rs:2463: assert_eq!(*original, recovered, "Serialization roundtrip failed");
+townhall_complete_4.rs:2700: // RIGOROUS PROOF SERIALIZATION TESTS
+townhall_complete_4.rs:2704: fn test_proof_serialization_roundtrip() {
+townhall_complete_4.rs:2944: device_hash: "device123".into(),
+townhall_complete_4.rs:2962: device_hash: "device123".into(),
+townhall_complete_4.rs:2984: device_hash: "device123".into(),
+townhall_complete_4.rs:3040: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_complete_4.rs:3052: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_complete_4.rs:3063: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_complete_4.rs:3074: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_complete_4.rs:3085: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_complete_4.rs:3093: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_complete_4.rs:3217: // ATTESTATION TESTS
+townhall_complete_4.rs:3221: fn test_attestation_valid() {
+townhall_complete_4.rs:3222: let att = DeviceAttestation {
+townhall_complete_4.rs:3224: attestation_blob: "abc123".into(),
+townhall_complete_4.rs:3231: let result = verify_attestation(&att);
+townhall_complete_4.rs:3237: fn test_attestation_invalid() {
+townhall_complete_4.rs:3238: let att = DeviceAttestation {
+townhall_complete_4.rs:3240: attestation_blob: "".into(), // Empty
+townhall_complete_4.rs:3247: let result = verify_attestation(&att);
+townhall_complete_4.rs:3256: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3269: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3294: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3307: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3315: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3327: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3335: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3350: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3362: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3369: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3380: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3387: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3435: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3438: pub device_hash: String,
+townhall_complete_4.rs:3459: pub fn register(&self, device_hash: &str, pubkey_hash: &str) -> Result<String, String> {
+townhall_complete_4.rs:3461: if let Some(apt) = self.device_to_apt.read().unwrap().get(device_hash) {
+townhall_complete_4.rs:3471: device_hash: device_hash.into(),
+townhall_complete_4.rs:3478: self.device_to_apt.write().unwrap().insert(device_hash.into(), apt.clone());
+townhall_complete_4.rs:3487: pub fn lookup_by_device(&self, device_hash: &str) -> Option<String> {
+townhall_complete_4.rs:3488: self.device_to_apt.read().unwrap().get(device_hash).cloned()
+townhall_complete_4.rs:3491: pub fn check_conflict(&self, device_hash: &str, claimed_apt: &str) -> bool {
+townhall_complete_4.rs:3492: if let Some(actual) = self.lookup_by_device(device_hash) {
+townhall_complete_4.rs:3503: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3576: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3685: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:3691: pub attestation: AttestationResult,
+townhall_complete_4.rs:3702: attestation: &DeviceAttestation,
+townhall_complete_4.rs:3704: let att_result = verify_attestation(attestation);
+townhall_complete_4.rs:3727: attestation: att_result,
+townhall_complete_4.rs:3772: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3805: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3851: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3856: pub attestation: DeviceAttestation,
+townhall_complete_4.rs:3863: let result = verify_user_full(&body.stats, &body.traits, &body.attestation);
+townhall_complete_4.rs:3867: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3869: pub device_hash: String,
+townhall_complete_4.rs:3877: match state.apt_registry.register(&body.device_hash, &body.pubkey_hash) {
+townhall_complete_4.rs:3883: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:3885: pub device_hash: String,
+townhall_complete_4.rs:3893: let conflict = state.apt_registry.check_conflict(&body.device_hash, &body.claimed_apt);
+townhall_complete_4.rs:3894: let actual = state.apt_registry.lookup_by_device(&body.device_hash);
+townhall_complete_4.rs:3902: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:4053: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_complete_4.rs:4056: let att = DeviceAttestation {
+townhall_complete_4.rs:4057: platform: "ios".into(), attestation_blob: "valid".into(),
+townhall_complete_4.rs:4075: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_complete_4.rs:4084: let att = DeviceAttestation {
+townhall_complete_4.rs:4085: platform: "ios".into(), attestation_blob: "valid".into(),
+townhall_complete_4.rs:4102: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_complete_4.rs:4113: let att = DeviceAttestation {
+townhall_complete_4.rs:4114: platform: "ios".into(), attestation_blob: "valid".into(),
+townhall_complete_4.rs:4190: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4423: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4485: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:4497: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4506: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4532: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_complete_4.rs:4609: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4649: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4656: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4785: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:4817: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_complete_4.rs:4908: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:4915: #[derive(Debug, Serialize)]
+townhall_complete_4.rs:5079: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5108: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:5115: #[derive(Debug, Serialize)]
+townhall_complete_4.rs:5217: #[derive(Debug, Clone, Serialize)]
+townhall_complete_4.rs:5558: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5591: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5619: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5632: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5639: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:5651: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+townhall_complete_4.rs:5664: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_complete_4.rs:5927: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6101: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6135: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6189: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6222: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6375: #[derive(Debug, Deserialize)]
+townhall_complete_4.rs:6382: pub device_hash: String,
+townhall_complete_4.rs:6427: code.device_hash
+townhall_complete_4.rs:6474: &code.device_hash[..8.min(code.device_hash.len())],
+townhall_complete_4.rs:6870: let device_hash = "1a2b3c4d5e6f7g8h";
+townhall_complete_4.rs:6872: let message = format!("{}:{}:{}:{}", timestamp, nonce, cf_attempt_hash, device_hash);
+townhall_complete_4.rs:6881: "deviceHash": device_hash,
+townhall_complete_4.rs:6897: let device_hash = "1a2b3c4d5e6f7g8h";
+townhall_complete_4.rs:6899: let message = format!("{}:{}:{}:{}", timestamp, nonce, cf_attempt_hash, device_hash);
+townhall_complete_4.rs:6908: "deviceHash": device_hash,
+townhall_complete_4.rs:6949: fn test_canonical_serialization() {
+townhall_complete_4.rs:6957: let serialized = avatar.serialize_canonical();
+townhall_complete_4.rs:6960: assert!(serialized.starts_with("{\"animal\":"));
+townhall_complete_4.rs:6962: assert!(serialized.contains("\"class\":\"ninja\""));
+townhall_complete_4.rs:6963: assert!(serialized.contains("\"name\":\"shadow\""));
+townhall_complete_4.rs:6964: assert!(serialized.contains("\"race\":\"dark elf\""));
+townhall_crypto.rs:600: use serde::{Deserialize, Serialize};
+townhall_crypto.rs:602: #[derive(Debug, Deserialize)]
+townhall_crypto.rs:611: #[derive(Debug, Serialize)]
+townhall_crypto.rs:614: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_crypto.rs:640: #[derive(Debug, Serialize, Deserialize, Clone)]
+townhall_crypto.rs:652: #[derive(Debug, Deserialize)]
+townhall_crypto.rs:661: #[derive(Debug, Serialize)]
+townhall_crypto.rs:668: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_crypto.rs:670: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_crypto.rs:776: #[derive(Debug, Deserialize)]
+townhall_crypto.rs:781: #[derive(Debug, Serialize)]
+townhall_library.rs:7: //   1. Users (stats, traits, device attestation)
+townhall_library.rs:27: use serde::{Deserialize, Serialize};
+townhall_library.rs:295: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:304: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:314: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:326: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:357: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:406: #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+townhall_library.rs:461: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:474: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:482: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:490: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:498: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:511: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:525: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:534: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:550: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:569: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_library.rs:579: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:605: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:619: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:633: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:651: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:663: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:678: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:686: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:696: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:707: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:728: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:755: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:767: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:1309: .map_err(|e| format!("Serialization failed: {}", e))?;
+townhall_library.rs:1427: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_library.rs:1431: pub device_hash: String,
+townhall_library.rs:1451: #[derive(Debug, Deserialize)]
+townhall_library.rs:1457: pub device_hash: String,
+townhall_library.rs:1461: #[derive(Debug, Serialize)]
+townhall_library.rs:1518: #[derive(Debug, Deserialize)]
+townhall_library.rs:1533: #[derive(Debug, Serialize)]
+townhall_library.rs:1640: #[derive(Debug, Deserialize)]
+townhall_library.rs:1655: #[derive(Debug, Serialize)]
+townhall_library.rs:1830: #[derive(Debug, Deserialize)]
+townhall_library.rs:1843: #[derive(Debug, Serialize)]
+townhall_library.rs:1912: #[derive(Debug, Deserialize)]
+townhall_library.rs:1927: #[derive(Debug, Serialize)]
+townhall_library.rs:2041: #[derive(Debug, Deserialize)]
+townhall_library.rs:2055: #[derive(Debug, Serialize)]
+townhall_library.rs:2138: #[derive(Debug, Deserialize)]
+townhall_library.rs:2149: #[derive(Debug, Serialize)]
+townhall_library.rs:2198: #[derive(Debug, Deserialize)]
+townhall_library.rs:2205: #[derive(Debug, Serialize)]
+townhall_library.rs:2262: #[derive(Debug, Deserialize)]
+townhall_library.rs:2266: pub device_hash: String,
+townhall_library.rs:2269: #[derive(Debug, Serialize)]
+townhall_library.rs:2284: if existing.pubkey == body.pubkey && existing.device_hash == body.device_hash {
+townhall_library.rs:2316: #[derive(Debug, Deserialize)]
+townhall_library.rs:2320: pub device_hash: String,
+townhall_library.rs:2331: if existing.pubkey != body.pubkey || existing.device_hash != body.device_hash {
+townhall_library.rs:2342: device_hash: body.device_hash.clone(),
+townhall_merged.rs:42: use serde::{Serialize, Deserialize};
+townhall_merged.rs:158: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+townhall_merged.rs:186: /// Serialize to canonical JSON (alphabetical field order, lowercase values)
+townhall_merged.rs:187: pub fn serialize_canonical(&self) -> String {
+townhall_merged.rs:219: let serialized = self.serialize_canonical();
+townhall_merged.rs:220: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+townhall_merged.rs:305: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:329: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:335: // Arweave-serializable fields (v5 stateless persistence)
+townhall_merged.rs:452: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:472: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:562: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:598: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:610: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:741: #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:830: // Serialize inputs
+townhall_merged.rs:1548: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:1554: /// Device attestation hash (binds to specific device)
+townhall_merged.rs:1555: pub device_hash: String,
+townhall_merged.rs:1559: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:1569: /// Device attestation
+townhall_merged.rs:1570: pub device_hash: String,
+townhall_merged.rs:1574: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:1696: device_hash: String::new(), // Filled by caller
+townhall_merged.rs:1865: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_merged.rs:1880: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_merged.rs:1884: #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+townhall_merged.rs:1888: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:1896: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:2003: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2012: pub attestation_hash: String,
+townhall_merged.rs:2041: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:2064: // DEVICE ATTESTATION
+townhall_merged.rs:2067: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2068: pub struct DeviceAttestation {
+townhall_merged.rs:2070: pub attestation_blob: String,
+townhall_merged.rs:2078: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2079: pub struct AttestationResult {
+townhall_merged.rs:2086: pub fn verify_attestation(att: &DeviceAttestation) -> AttestationResult {
+townhall_merged.rs:2087: let valid = !att.attestation_blob.is_empty() && att.device_integrity && att.app_integrity;
+townhall_merged.rs:2088: let hash = hex::encode(&sha256_hash(att.attestation_blob.as_bytes())[..16]);
+townhall_merged.rs:2089: AttestationResult { valid, platform: att.platform.clone(), hash, error: if valid { None } else { Some("Validation failed".into()) } }
+townhall_merged.rs:2096: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+townhall_merged.rs:2099: #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+townhall_merged.rs:2102: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2181: #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+townhall_merged.rs:2184: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2218: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:2250: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2253: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2293: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:2648: fn test_fq_serialization_roundtrip() {
+townhall_merged.rs:2660: assert_eq!(*original, recovered, "Serialization roundtrip failed");
+townhall_merged.rs:2897: // RIGOROUS PROOF SERIALIZATION TESTS
+townhall_merged.rs:2901: fn test_proof_serialization_roundtrip() {
+townhall_merged.rs:3141: device_hash: "device123".into(),
+townhall_merged.rs:3159: device_hash: "device123".into(),
+townhall_merged.rs:3181: device_hash: "device123".into(),
+townhall_merged.rs:3237: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_merged.rs:3249: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_merged.rs:3260: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_merged.rs:3271: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_merged.rs:3282: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_merged.rs:3290: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_merged.rs:3414: // ATTESTATION TESTS
+townhall_merged.rs:3418: fn test_attestation_valid() {
+townhall_merged.rs:3419: let att = DeviceAttestation {
+townhall_merged.rs:3421: attestation_blob: "abc123".into(),
+townhall_merged.rs:3428: let result = verify_attestation(&att);
+townhall_merged.rs:3434: fn test_attestation_invalid() {
+townhall_merged.rs:3435: let att = DeviceAttestation {
+townhall_merged.rs:3437: attestation_blob: "".into(), // Empty
+townhall_merged.rs:3444: let result = verify_attestation(&att);
+townhall_merged.rs:3453: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3466: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3491: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3504: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3512: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3524: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3532: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3547: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3559: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3566: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3577: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3584: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3632: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3635: pub device_hash: String,
+townhall_merged.rs:3656: pub fn register(&self, device_hash: &str, pubkey_hash: &str) -> Result<String, String> {
+townhall_merged.rs:3658: if let Some(apt) = self.device_to_apt.read().unwrap().get(device_hash) {
+townhall_merged.rs:3668: device_hash: device_hash.into(),
+townhall_merged.rs:3675: self.device_to_apt.write().unwrap().insert(device_hash.into(), apt.clone());
+townhall_merged.rs:3684: pub fn lookup_by_device(&self, device_hash: &str) -> Option<String> {
+townhall_merged.rs:3685: self.device_to_apt.read().unwrap().get(device_hash).cloned()
+townhall_merged.rs:3688: pub fn check_conflict(&self, device_hash: &str, claimed_apt: &str) -> bool {
+townhall_merged.rs:3689: if let Some(actual) = self.lookup_by_device(device_hash) {
+townhall_merged.rs:3700: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3773: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3882: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:3888: pub attestation: AttestationResult,
+townhall_merged.rs:3899: attestation: &DeviceAttestation,
+townhall_merged.rs:3901: let att_result = verify_attestation(attestation);
+townhall_merged.rs:3924: attestation: att_result,
+townhall_merged.rs:3971: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4004: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4053: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4058: pub attestation: DeviceAttestation,
+townhall_merged.rs:4065: let result = verify_user_full(&body.stats, &body.traits, &body.attestation);
+townhall_merged.rs:4069: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4071: pub device_hash: String,
+townhall_merged.rs:4081: let device_hash = match body.get("device_hash").and_then(|v| v.as_str()) {
+townhall_merged.rs:4083: None => return HttpResponse::BadRequest().json(json!({ "error": "device_hash required" })),
+townhall_merged.rs:4091: {{ name: "KV-Type", values: ["device-attestation"] }},
+townhall_merged.rs:4099: }}"#, device_hash);
+townhall_merged.rs:4144: match state.apt_registry.register(&body.device_hash, &body.pubkey_hash) {
+townhall_merged.rs:4150: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4152: pub device_hash: String,
+townhall_merged.rs:4160: let conflict = state.apt_registry.check_conflict(&body.device_hash, &body.claimed_apt);
+townhall_merged.rs:4161: let actual = state.apt_registry.lookup_by_device(&body.device_hash);
+townhall_merged.rs:4169: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4189: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4194: #[derive(Debug, Serialize)]
+townhall_merged.rs:4202: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:4272: #[derive(Debug, Deserialize)]
+townhall_merged.rs:4475: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_merged.rs:4478: let att = DeviceAttestation {
+townhall_merged.rs:4479: platform: "ios".into(), attestation_blob: "valid".into(),
+townhall_merged.rs:4497: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_merged.rs:4506: let att = DeviceAttestation {
+townhall_merged.rs:4507: platform: "ios".into(), attestation_blob: "valid".into(),
+townhall_merged.rs:4524: snail_mode: false, attestation_hash: "".into(), timestamp: 0,
+townhall_merged.rs:4535: let att = DeviceAttestation {
+townhall_merged.rs:4536: platform: "ios".into(), attestation_blob: "valid".into(),
+townhall_merged.rs:4612: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:4845: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:4907: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:4919: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:4928: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:4954: #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+townhall_merged.rs:5031: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:5071: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:5078: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:5207: #[derive(Debug, Deserialize)]
+townhall_merged.rs:5277: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_merged.rs:5368: #[derive(Debug, Deserialize)]
+townhall_merged.rs:5375: #[derive(Debug, Serialize)]
+townhall_merged.rs:5535: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:5564: #[derive(Debug, Deserialize)]
+townhall_merged.rs:5571: #[derive(Debug, Serialize)]
+townhall_merged.rs:5673: #[derive(Debug, Clone, Serialize)]
+townhall_merged.rs:5821: #[derive(serde::Serialize, serde::Deserialize, Debug)]
+townhall_merged.rs:6115: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6148: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6176: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6189: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6196: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:6208: #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+townhall_merged.rs:6221: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_merged.rs:6484: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6658: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6692: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6746: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6779: #[derive(Debug, Deserialize)]
+townhall_merged.rs:6885: #[derive(Deserialize)]
+townhall_merged.rs:6892: #[derive(Serialize)]
+townhall_merged.rs:6945: #[derive(Deserialize)]
+townhall_merged.rs:6963: #[derive(Deserialize)]
+townhall_merged.rs:7044: #[derive(Debug, Deserialize)]
+townhall_merged.rs:7051: pub device_hash: String,
+townhall_merged.rs:7096: code.device_hash
+townhall_merged.rs:7143: &code.device_hash[..8.min(code.device_hash.len())],
+townhall_merged.rs:7539: let device_hash = "1a2b3c4d5e6f7g8h";
+townhall_merged.rs:7541: let message = format!("{}:{}:{}:{}", timestamp, nonce, cf_attempt_hash, device_hash);
+townhall_merged.rs:7550: "deviceHash": device_hash,
+townhall_merged.rs:7566: let device_hash = "1a2b3c4d5e6f7g8h";
+townhall_merged.rs:7568: let message = format!("{}:{}:{}:{}", timestamp, nonce, cf_attempt_hash, device_hash);
+townhall_merged.rs:7577: "deviceHash": device_hash,
+townhall_merged.rs:7618: fn test_canonical_serialization() {
+townhall_merged.rs:7626: let serialized = avatar.serialize_canonical();
+townhall_merged.rs:7629: assert!(serialized.starts_with("{\"animal\":"));
+townhall_merged.rs:7631: assert!(serialized.contains("\"class\":\"ninja\""));
+townhall_merged.rs:7632: assert!(serialized.contains("\"name\":\"shadow\""));
+townhall_merged.rs:7633: assert!(serialized.contains("\"race\":\"dark elf\""));
+townhall_production.rs:16: use serde::{Deserialize, Serialize};
+townhall_production.rs:180: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:192: #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+townhall_production.rs:200: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:208: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:221: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:254: #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+townhall_production.rs:300: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:315: #[derive(Debug, Clone, Serialize, Deserialize)]
+townhall_production.rs:319: pub device_hash: String,
+townhall_production.rs:436: pub device_hash: Value<Fq>,
+townhall_production.rs:462: device_hash: Value::unknown(),
+townhall_production.rs:575: device_hash: &[u8; 32],
+townhall_production.rs:607: device_hash: Value::known(bytes_to_fq(device_hash)),
+townhall_production.rs:666: device_hash: Value::unknown(),
+townhall_production.rs:772: .map_err(|e| format!("Serialization failed: {}", e))?;
+townhall_production.rs:886: #[derive(Debug, Deserialize)]
+townhall_production.rs:897: pub device_hash: String,
+townhall_production.rs:901: #[derive(Debug, Serialize)]
+townhall_production.rs:961: let device_hash = hex_to_bytes32(&body.device_hash);
+townhall_production.rs:969: &device_hash,
+townhall_production.rs:1014: #[derive(Debug, Deserialize)]
+townhall_production.rs:1020: pub device_hash: String,
+townhall_production.rs:1024: #[derive(Debug, Serialize)]
+townhall_production.rs:1054: let device_hash = hex_to_bytes32(&body.device_hash);
+townhall_production.rs:1062: &device_hash,
+townhall_production.rs:1092: #[derive(Debug, Deserialize)]
+townhall_production.rs:1098: #[derive(Debug, Serialize)]
+townhall_production.rs:1165: #[derive(Debug, Deserialize)]
+townhall_production.rs:1169: pub device_hash: String,
+townhall_production.rs:1172: #[derive(Debug, Serialize)]
+townhall_production.rs:1188: if existing.pubkey == body.pubkey && existing.device_hash == body.device_hash {
+townhall_production.rs:1217: #[derive(Debug, Deserialize)]
+townhall_production.rs:1221: pub device_hash: String,
+townhall_production.rs:1233: if existing.pubkey != body.pubkey || existing.device_hash != body.device_hash {
+townhall_production.rs:1245: device_hash: body.device_hash.clone(),
+townhall_production.rs:1258: #[derive(Debug, Deserialize)]
+townhall_production.rs:1264: #[derive(Debug, Serialize)]
+townhall_production.rs:1268: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1270: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1272: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1274: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1276: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_production.rs:1278: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_stateless_v5.rs:28: use serde::{Serialize, Deserialize};
+townhall_stateless_v5.rs:334: // STATE STRUCTURES (Arweave-serializable)
+townhall_stateless_v5.rs:337: #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+townhall_stateless_v5.rs:381: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_stateless_v5.rs:393: #[derive(Clone, Debug, Serialize, Deserialize)]
+townhall_stateless_v5.rs:411: #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+townhall_stateless_v5.rs:435: pub fn serialize_canonical(&self) -> String {
+townhall_stateless_v5.rs:466: let serialized = self.serialize_canonical();
+townhall_stateless_v5.rs:467: let versioned = format!("KV_AVATAR_V{}:{}", AVATAR_SCHEMA_VERSION, serialized);
+townhall_stateless_v5.rs:499: #[derive(Deserialize)]
+townhall_stateless_v5.rs:506: #[derive(Serialize)]
+townhall_stateless_v5.rs:568: #[derive(Deserialize)]
+townhall_stateless_v5.rs:590: #[derive(Deserialize)]
+townhall_stateless_v5.rs:688: fn test_avatar_serialization() {
+townhall_stateless_v5.rs:696: let serialized = avatar.serialize_canonical();
+townhall_stateless_v5.rs:697: assert!(serialized.contains("\"animal\":\"\""));
+townhall_stateless_v5.rs:698: assert!(serialized.contains("\"class\":\"warrior\""));
+townhall_stateless_v5.rs:699: assert!(serialized.contains("\"name\":\"test\""));
+townhall_stateless_v5.rs:700: assert!(serialized.contains("\"race\":\"human\""));
+townhall_verification_stubs.rs:12: use serde::{Deserialize, Serialize};
+townhall_verification_stubs.rs:25: #[derive(Debug, Serialize, Deserialize)]
+townhall_verification_stubs.rs:35: #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+townhall_verification_stubs.rs:44: #[derive(Debug, Serialize, Deserialize)]
+townhall_verification_stubs.rs:47: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_stubs.rs:49: #[serde(skip_serializing_if = "Option::is_none")]
+townhall_verification_stubs.rs:53: impl<T: Serialize> ApiResponse<T> {
+townhall_verification_stubs.rs:78: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:87: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:159: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:167: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:207: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:213: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:262: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:270: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:298: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:304: pub attestations: Vec<String>,  // 3 required attestations
+townhall_verification_stubs.rs:308: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:319: // Require 3 attestations
+townhall_verification_stubs.rs:320: if body.attestations.len() < 3 {
+townhall_verification_stubs.rs:321: return ApiResponse::<()>::error("Minimum 3 attestations required");
+townhall_verification_stubs.rs:339: message: "Abstract submitted. Awaiting peer attestations.".to_string(),
+townhall_verification_stubs.rs:350: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:359: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:388: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:398: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:457: #[derive(Debug, Serialize)]
+townhall_verification_stubs.rs:486: #[derive(Debug, Deserialize)]
+townhall_verification_stubs.rs:492: #[derive(Debug, Serialize)]
+
+======================================================================
+VERDICT: 657 serial references, 0 flagged as possibly blocking
+======================================================================
