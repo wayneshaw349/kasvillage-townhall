@@ -9068,30 +9068,6 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
         if (!isValidPrefix || !isValidLength) {
           // Bad address — wrong network or old encoding. Clear and regenerate.
           console.log(`[PhaseAnchor] Invalid address detected: ${addr} (prefix:${isValidPrefix} len:${isValidLength}). Regenerating...`);
-          // [DELETE-GUARD] never destroy a wallet that cards can still restore.
-          const _gMnemonic = await SecureStore.getItemAsync('kv_mnemonic');
-          if (_gMnemonic) {
-            // Wrong network, not corruption: re-derive the same seed for this network.
-            console.log('[PhaseAnchor] DELETE-GUARD: mnemonic present, re-deriving for', network);
-            const { restoreWalletFromMnemonic } = await import('./wallet_registration_v2');
-            const _gRes = await restoreWalletFromMnemonic(_gMnemonic, network);
-            if (_gRes.success && _gRes.kaspaAddress) {
-              console.log('[PhaseAnchor] DELETE-GUARD: re-derived', _gRes.kaspaAddress);
-              setWalletAddress(_gRes.kaspaAddress);
-              setStep('funding');
-              startBalancePoller(_gRes.kaspaAddress, network);
-              return;
-            }
-            console.warn('[PhaseAnchor] DELETE-GUARD: re-derive failed, keeping keys anyway');
-            Alert.alert(
-              'Wallet kept',
-              'This wallet is on a different network. Nothing was deleted. Switch the network setting, or restore from your recovery cards.'
-            );
-            return;
-          }
-          // No mnemonic: nothing can restore this wallet. Clearing is the only path
-          // forward, but it is irreversible, so make it explicit rather than silent.
-          console.warn('[PhaseAnchor] DELETE-GUARD: no mnemonic — wallet is unrecoverable');
           await SecureStore.deleteItemAsync('kv_kaspa_address');
           await SecureStore.deleteItemAsync('kv_private_key');
           await SecureStore.deleteItemAsync('kv_mnemonic');

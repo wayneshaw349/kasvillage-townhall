@@ -65,7 +65,6 @@ import { getDeviceHash, getSerialHash } from './device_attestation';
 // ============================================================================
 
 type AppScreen =
-  | 'welcome'
   | 'booting'
   | 'onboarding'
   | 'biometric_gate'

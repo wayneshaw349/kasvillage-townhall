@@ -65,7 +65,6 @@ import { getDeviceHash, getSerialHash } from './device_attestation';
 // ============================================================================
 
 type AppScreen =
-  | 'welcome'
   | 'booting'
   | 'onboarding'
   | 'biometric_gate'
@@ -711,26 +710,16 @@ export const AppNavigator: React.FC = () => {
 
     (async () => {
       try {
-        const privateKey: string = (await SecureStore.getItemAsync('kv_private_key'))
-          || (await SecureStore.getItemAsync(STORE_KEYS.PRIVATE_KEY)) || '';
-        const privKeyEnc: string = (await SecureStore.getItemAsync('kv_l1_privkey_enc')) || '';
-        const kaspaAddrBoot: string = (await SecureStore.getItemAsync('kv_kaspa_address'))
-          || (await SecureStore.getItemAsync('kaspa_address')) || '';
-        const aptAlias: string = (await SecureStore.getItemAsync('kv_apt_alias'))
-          || (await SecureStore.getItemAsync(STORE_KEYS.APT_ALIAS)) || '';
+        const privateKey: string = (await SecureStore.getItemAsync(STORE_KEYS.PRIVATE_KEY)) || '';
+        const aptAlias: string = (await SecureStore.getItemAsync(STORE_KEYS.APT_ALIAS)) || '';
         const kvVerified: string = (await SecureStore.getItemAsync('kv_verified')) || '';
-        const hasWallet = !!((privateKey || privKeyEnc) && kaspaAddrBoot);
-        console.log('[AppNav] boot keys — priv:', !!privateKey, 'privEnc:', !!privKeyEnc,
-          'addr:', !!kaspaAddrBoot, 'alias:', !!aptAlias, 'verified:', kvVerified || 'none');
-        const isReturning = hasWallet || kvVerified === 'true';
+        const isReturning = !!(privateKey && aptAlias) || kvVerified === 'true';
 
         if (!isReturning) {
-          setScreen('welcome');
+          setScreen('onboarding');
           return;
         }
-        const publicKey: string = (await SecureStore.getItemAsync('kv_public_key'))
-          || (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY))
-          || (await SecureStore.getItemAsync('kaspa_pubkey')) || ''; console.log('[AppNav] Your PubKey:', publicKey);
+        const publicKey: string = (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY)) || (await SecureStore.getItemAsync('kaspa_pubkey')) || ''; console.log('[AppNav] Your PubKey:', publicKey);
         // pubkey logged above
         const identityRaw: string = (await SecureStore.getItemAsync(STORE_KEYS.IDENTITY)) || '';
         const identity = identityRaw ? JSON.parse(identityRaw) : null;
@@ -989,32 +978,6 @@ export const AppNavigator: React.FC = () => {
     case 'booting':
       return <LoadingScreen />;
 
-    case 'welcome':
-      return (
-        <View style={{ flex: 1, backgroundColor: '#0d0d0f', justifyContent: 'center', padding: 28 }}>
-          <Text style={{ color: '#e8ddd0', fontSize: 26, fontWeight: '700', marginBottom: 10 }}>KasVillage</Text>
-          <Text style={{ color: '#8a8a8a', fontSize: 14, marginBottom: 36 }}>
-            Start a new identity, or restore the one you already hold on cards.
-          </Text>
-          <TouchableOpacity
-            onPress={() => setScreen('onboarding')}
-            style={{ backgroundColor: '#49b675', padding: 16, borderRadius: 10, marginBottom: 14 }}
-          >
-            <Text style={{ color: '#0d0d0f', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>
-              New identity
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setScreen('vault_recovery')}
-            style={{ borderColor: '#49b675', borderWidth: 1, padding: 16, borderRadius: 10 }}
-          >
-            <Text style={{ color: '#49b675', fontSize: 16, fontWeight: '600', textAlign: 'center' }}>
-              Restore from recovery cards
-            </Text>
-          </TouchableOpacity>
-        </View>
-      );
-
     case 'onboarding':
       return <IdentityRitual onComplete={() => {
         // Ritual finished — reload user data and go to dashboard
@@ -1221,14 +1184,7 @@ export const AppNavigator: React.FC = () => {
         <VaultRecoveryScreen
           onRecovered={(mnemonic) => {
             (async () => {
-              const knownAddr = kaspaAddress
-                || (await SecureStore.getItemAsync('kv_kaspa_address'))
-                || (await SecureStore.getItemAsync('kaspa_address')) || '';
-              const knownNet = (await SecureStore.getItemAsync('kaspa_network')) || '';
-              // fresh install: nothing known -> testnet-10, never a silent mainnet restore
-              const net: 'mainnet' | 'testnet-10' =
-                (knownAddr.startsWith('kaspa:') || knownNet === 'mainnet') ? 'mainnet' : 'testnet-10';
-              console.log('[Restore] network:', net, 'from addr:', knownAddr.slice(0, 12) || 'none');
+              const net = kaspaAddress.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet';
               const res = await restoreWalletFromMnemonic(mnemonic, net);
               if (res.success) {
                 setKaspaAddress(res.kaspaAddress || '');
@@ -1240,7 +1196,7 @@ export const AppNavigator: React.FC = () => {
               }
             })();
           }}
-          onCancel={() => setScreen('welcome')}
+          onCancel={() => setScreen('onboarding')}
         />
       );
 
