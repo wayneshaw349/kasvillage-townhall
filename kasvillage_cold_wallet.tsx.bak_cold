@@ -852,26 +852,6 @@ async function sendKASWithHybridSig(
 
 // ============================================================================
 // ============================================================================
-// VAULT COLD MODE - remove the vault key from this device. The vault becomes
-// watch-only; spending requires restoring from cards (Profile > Restore from
-// Cards), then optionally going cold again.
-// ============================================================================
-
-export async function vaultGoCold(): Promise<{ success: boolean; error?: string }> {
-  const mn = await SecureStore.getItemAsync('kv_vault_mnemonic');
-  if (!mn) return { success: false, error: 'Vault is already cold (no key on device).' };
-  const authOk = await biometricAuth.authenticate('Remove vault key from this device');
-  if (!authOk) return { success: false, error: 'Authentication failed' };
-  await SecureStore.deleteItemAsync('kv_vault_mnemonic');
-  console.log('[VaultCold] vault key removed from device - cards are now the only key');
-  return { success: true };
-}
-
-export async function vaultIsWarm(): Promise<boolean> {
-  return !!(await SecureStore.getItemAsync('kv_vault_mnemonic'));
-}
-
-// ============================================================================
 // SEND FROM VAULT (cards vault - key derived from kv_vault_mnemonic at sign time,
 // never persisted to main slots; buffer zeroed after use)
 // ============================================================================
@@ -884,7 +864,7 @@ async function sendKASFromVault(
 
   const mnemonic = await SecureStore.getItemAsync('kv_vault_mnemonic');
   if (!mnemonic) {
-    return { success: false, error: 'Vault is COLD: key is not on this device. Use Profile > Restore from Cards to load it, send, then Go Cold again.' };
+    return { success: false, error: 'No vault key on this device. Scan your vault cards first.' };
   }
 
   let hdPriv: Uint8Array | null = null;

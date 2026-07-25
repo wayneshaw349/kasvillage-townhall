@@ -118,7 +118,7 @@ export async function inscribePushToken(params: {
 
     const arweaveUpload = await import('./arweave_upload');
     const buildFn = (arweaveUpload as any).buildAns104Item || (arweaveUpload as any).default?.buildAns104Item;
-    const uploadFn = (arweaveUpload as any).uploadToIrys || (arweaveUpload as any).default?.uploadToIrys;
+    const uploadFn = (arweaveUpload as any).uploadDataItemRaw || (arweaveUpload as any).default?.uploadDataItemRaw;
     if (!buildFn || !uploadFn) { console.error('[Push] Arweave upload functions not found'); return null; }
 
     const data = new TextEncoder().encode(payload);

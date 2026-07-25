@@ -33,7 +33,6 @@ import {
 
 import {
   sendKASWithHybridSig,
-  sendKASFromVault,
 
   formatKAS,
   isValidKaspaAddress as validateKaspaAddress,
@@ -190,7 +189,6 @@ export const SendKAS: React.FC<SendKASProps> = ({
 }) => {
   const [recipientInput, setRecipientInput] = useState(initialAddress || '');
   const [vaultAddr, setVaultAddr] = useState<string | null>(null);
-  const [sendSource, setSendSource] = useState<'hot' | 'vault'>('hot');
   const [hotAddr, setHotAddr] = useState<string | null>(null);
   const [frostAddr, setFrostAddr] = useState<string | null>(null);
   const [amountKas, setAmountKas] = useState(initialAmount ? String(initialAmount / 100000000) : '');
@@ -220,19 +218,18 @@ export const SendKAS: React.FC<SendKASProps> = ({
   
   useEffect(() => {
     const loadBalance = async () => {
-      const srcAddr = sendSource === 'vault' ? (vaultAddr || '') : myAddress;
-      if (srcAddr) {
+      if (myAddress) {
         try {
           // Load raw L1 balance
-          const prefix = srcAddr.startsWith('kaspatest:') ? 'api-tn10' : 'api';
-          const resp = await fetch('https://' + prefix + '.kaspa.org/addresses/' + srcAddr + '/balance');
+          const prefix = myAddress.startsWith('kaspatest:') ? 'api-tn10' : 'api';
+          const resp = await fetch('https://' + prefix + '.kaspa.org/addresses/' + myAddress + '/balance');
           if (resp.ok) {
             const data = await resp.json();
             const total = BigInt(data.balance || '0');
             // Get spendable from ledger (excludes committed + IOU)
             try {
               const { syncLedger } = await import('./utxo_ledger');
-              const ledger = await syncLedger(srcAddr);
+              const ledger = await syncLedger(myAddress);
               setBalance(ledger.spendableBalance > 0n ? ledger.spendableBalance : total);
             } catch {
               setBalance(total); // fallback to raw
@@ -244,7 +241,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
       }
     };
     loadBalance();
-  }, [myAddress, sendSource, vaultAddr]);
+  }, [myAddress]);
   
   useEffect(() => {
     const resolveInput = async () => {
@@ -373,9 +370,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
     setIsLoading(true);
     
     try {
-      const result: TransactionResult = sendSource === 'vault'
-        ? await sendKASFromVault(resolved.address, amountSompi, memo || undefined)
-        : await sendKASWithHybridSig(
+      const result: TransactionResult = await sendKASWithHybridSig(
         resolved.address,
         amountSompi,
         memo || undefined
@@ -443,22 +438,6 @@ export const SendKAS: React.FC<SendKASProps> = ({
           {step === 'input' && (
             <View style={styles.content}>
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Send From</Text>
-                <View style={styles.sendToChips}>
-                  {([['hot', 'Hot Wallet'], ['vault', 'Vault']] as const).map(([src, label]) => (
-                    (src === 'hot' || vaultAddr) ? (
-                    <TouchableOpacity
-                      key={src}
-                      style={[styles.sendToChip, sendSource === src && { borderColor: '#49d6aa', backgroundColor: '#12241d' }]}
-                      onPress={() => setSendSource(src)}
-                    >
-                      <Text style={[styles.sendToChipText, sendSource === src && { color: '#49d6aa', fontWeight: '700' }]}>
-                        {label}{sendSource === src ? ' \u2713' : ''}
-                      </Text>
-                    </TouchableOpacity>
-                    ) : null
-                  ))}
-                </View>
                 <Text style={styles.inputLabel}>Send To</Text>
                 <View style={styles.sendToChips}>
                   {[
@@ -467,8 +446,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
                     { label: 'FROST Vault', addr: frostAddr },
                   ].map(({ label, addr }) => {
                     if (!addr) return null;
-                    const effectiveSender = sendSource === 'vault' ? vaultAddr : myAddress;
-                    const isSelf = addr === effectiveSender;
+                    const isSelf = addr === myAddress;
                     return (
                       <TouchableOpacity
                         key={label}

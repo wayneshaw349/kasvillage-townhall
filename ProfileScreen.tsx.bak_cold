@@ -9,7 +9,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Rect, Circle, Path, Text as SvgText } from 'react-native-svg';
 import * as SecureStore from 'expo-secure-store';
-import { vaultGoCold } from './kasvillage_cold_wallet';
 import { getUserStats } from './wallet_registration_v2';
 import * as LocalAuthentication from 'expo-local-authentication';
 import MnemonicExportModal from './MnemonicExportModal';
@@ -729,20 +728,6 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
             <View style={{ flex: 1 }}>
               <Text style={styles.seedExportText}>Restore from Cards</Text>
               <Text style={styles.seedExportSub}>Scan 2 backup cards to load a wallet or vault key</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.seedExportButton}
-            onPress={async () => {
-              const r = await vaultGoCold();
-              Alert.alert(r.success ? 'Vault is now cold' : 'Go Cold', r.success
-                ? 'The vault key was removed from this device. Your cards are now the only way to spend from the vault. It can still receive and show its balance.'
-                : (r.error || 'Failed'));
-            }}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.seedExportText}>Go Cold (Vault)</Text>
-              <Text style={styles.seedExportSub}>Remove the vault key from this phone - cards become the only key</Text>
             </View>
           </TouchableOpacity>
           <TouchableOpacity

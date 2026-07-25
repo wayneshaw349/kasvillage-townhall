@@ -220,19 +220,18 @@ export const SendKAS: React.FC<SendKASProps> = ({
   
   useEffect(() => {
     const loadBalance = async () => {
-      const srcAddr = sendSource === 'vault' ? (vaultAddr || '') : myAddress;
-      if (srcAddr) {
+      if (myAddress) {
         try {
           // Load raw L1 balance
-          const prefix = srcAddr.startsWith('kaspatest:') ? 'api-tn10' : 'api';
-          const resp = await fetch('https://' + prefix + '.kaspa.org/addresses/' + srcAddr + '/balance');
+          const prefix = myAddress.startsWith('kaspatest:') ? 'api-tn10' : 'api';
+          const resp = await fetch('https://' + prefix + '.kaspa.org/addresses/' + myAddress + '/balance');
           if (resp.ok) {
             const data = await resp.json();
             const total = BigInt(data.balance || '0');
             // Get spendable from ledger (excludes committed + IOU)
             try {
               const { syncLedger } = await import('./utxo_ledger');
-              const ledger = await syncLedger(srcAddr);
+              const ledger = await syncLedger(myAddress);
               setBalance(ledger.spendableBalance > 0n ? ledger.spendableBalance : total);
             } catch {
               setBalance(total); // fallback to raw
@@ -244,7 +243,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
       }
     };
     loadBalance();
-  }, [myAddress, sendSource, vaultAddr]);
+  }, [myAddress]);
   
   useEffect(() => {
     const resolveInput = async () => {
@@ -467,8 +466,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
                     { label: 'FROST Vault', addr: frostAddr },
                   ].map(({ label, addr }) => {
                     if (!addr) return null;
-                    const effectiveSender = sendSource === 'vault' ? vaultAddr : myAddress;
-                    const isSelf = addr === effectiveSender;
+                    const isSelf = addr === myAddress;
                     return (
                       <TouchableOpacity
                         key={label}

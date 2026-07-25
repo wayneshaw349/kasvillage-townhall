@@ -1193,8 +1193,6 @@ export const AppNavigator: React.FC = () => {
         onNavigateTownHall={() => setScreen('town_hall')}
         onNavigateBookshelf={() => setScreen('entertainment')}
         onNavigateVaultBackup={openVaultBackup}
-        onNavigateVaultRestore={() => setScreen('vault_recovery')}
-        onNavigateCreateVault={() => setScreen('generate_vault')}
       />;
 
     case 'neighbor_agreement':

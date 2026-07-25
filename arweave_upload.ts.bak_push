@@ -121,8 +121,6 @@ function checkCooldown(tags: ArweaveTag[]): { allowed: boolean; reason?: string 
  * Upload data to Turbo (ArDrive)
  * Legacy API - wraps ANS-104 upload
  */
-export { buildAns104DataItem, buildAns104DataItem as buildAns104Item, uploadDataItemRaw } from './avatar_arweave_upload';
-
 export async function uploadToTurbo(
   data: string | Uint8Array,
   tags: ArweaveTag[],

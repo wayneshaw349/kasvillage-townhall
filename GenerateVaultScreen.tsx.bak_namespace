@@ -48,15 +48,12 @@ export const GenerateVaultScreen: React.FC<Props> = ({
       //    so a split failure aborts without changing the active wallet
       const backup = createIdentityBoundBackup(w.mnemonic, w.publicKeyHex, total, 1, threshold);
 
-      // 3) VAULT-NAMESPACED: store in vault slots ONLY - never touches the
-      //    active (hot) wallet. Spending uses sendKASFromVault, which derives
-      //    the key from kv_vault_mnemonic at sign time.
-      const vaultAddr = w.kaspaAddress;
-      await SecureStore.setItemAsync('kv_vault_mnemonic', w.mnemonic, {
-        keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
-      });
-      await SecureStore.setItemAsync('kv_vault_pubkey', w.publicKeyHex);
-      await SecureStore.setItemAsync('kv_vault_address', vaultAddr);
+      // 3) activate: persist keys + kv_mnemonic (same path createWallet uses)
+      const res = await restoreWalletFromMnemonic(w.mnemonic, network);
+      if (!res.success) throw new Error(res.error || 'activation failed');
+
+      const vaultAddr = res.kaspaAddress || w.kaspaAddress;
+      try { await SecureStore.setItemAsync('kv_vault_address', vaultAddr); } catch {}
       setAddress(vaultAddr);
       setBindingHex(backup.bindingHex);
       setWires(backup.wires);           // -> renders VaultBackupScreen below
@@ -72,7 +69,7 @@ export const GenerateVaultScreen: React.FC<Props> = ({
     return (
       <View style={{ flex: 1 }}>
         <View style={styles.banner}>
-          <Text style={styles.bannerText}>Vault created</Text>
+          <Text style={styles.bannerText}>New wallet active</Text>
           <Text style={styles.bannerSub} numberOfLines={1}>{address}</Text>
           <Text style={styles.bindTag}>card set · {bindingHex}</Text>
         </View>
@@ -97,7 +94,7 @@ export const GenerateVaultScreen: React.FC<Props> = ({
       <View style={styles.card}>
         <Text style={styles.cardHead}>What happens</Text>
         <Text style={styles.li}>• A fresh 12-word seed is generated on-device.</Text>
-        <Text style={styles.li}>• It becomes your VAULT (separate from your hot wallet).</Text>
+        <Text style={styles.li}>• It becomes your active wallet (new address).</Text>
         <Text style={styles.li}>• The seed is split into {total} identity-bound QR cards.</Text>
         <Text style={styles.li}>• Any {threshold} of {total} cards rebuild it — on any phone.</Text>
       </View>
@@ -105,7 +102,7 @@ export const GenerateVaultScreen: React.FC<Props> = ({
       <View style={styles.warn}>
         <Text style={styles.warnText}>
           ⚠ The QR cards are the only portable backup. Save/print all {total} before
-          sending funds. Your hot wallet is untouched; the vault is a separate cold wallet.
+          sending funds. Your previous wallet stays intact but this new one becomes active.
         </Text>
       </View>
 

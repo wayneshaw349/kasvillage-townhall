@@ -585,8 +585,6 @@ export interface AvatarRecoveryResult {
  *   4. Store to SecureStore (storeAvatarLocally)
  *   5. Return recovered AvatarIdentity
  */
-export const uploadDataItemRaw = uploadToIrys;
-
 export async function recoverAvatarFromArweave(pubkey: string): Promise<AvatarRecoveryResult> {
   if (!pubkey) return { success: false, error: 'No pubkey provided' };
 

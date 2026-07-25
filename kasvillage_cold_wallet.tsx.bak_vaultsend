@@ -851,95 +851,6 @@ async function sendKASWithHybridSig(
 }
 
 // ============================================================================
-// ============================================================================
-// VAULT COLD MODE - remove the vault key from this device. The vault becomes
-// watch-only; spending requires restoring from cards (Profile > Restore from
-// Cards), then optionally going cold again.
-// ============================================================================
-
-export async function vaultGoCold(): Promise<{ success: boolean; error?: string }> {
-  const mn = await SecureStore.getItemAsync('kv_vault_mnemonic');
-  if (!mn) return { success: false, error: 'Vault is already cold (no key on device).' };
-  const authOk = await biometricAuth.authenticate('Remove vault key from this device');
-  if (!authOk) return { success: false, error: 'Authentication failed' };
-  await SecureStore.deleteItemAsync('kv_vault_mnemonic');
-  console.log('[VaultCold] vault key removed from device - cards are now the only key');
-  return { success: true };
-}
-
-export async function vaultIsWarm(): Promise<boolean> {
-  return !!(await SecureStore.getItemAsync('kv_vault_mnemonic'));
-}
-
-// ============================================================================
-// SEND FROM VAULT (cards vault - key derived from kv_vault_mnemonic at sign time,
-// never persisted to main slots; buffer zeroed after use)
-// ============================================================================
-
-async function sendKASFromVault(
-  recipientAddress: string, amountSompi: bigint, memo?: string
-): Promise<TransactionResult> {
-  const authOk = await biometricAuth.authenticate('Vault: send ' + formatKAS(amountSompi) + ' KASPA');
-  if (!authOk) return { success: false, error: 'Authentication failed' };
-
-  const mnemonic = await SecureStore.getItemAsync('kv_vault_mnemonic');
-  if (!mnemonic) {
-    return { success: false, error: 'Vault is COLD: key is not on this device. Use Profile > Restore from Cards to load it, send, then Go Cold again.' };
-  }
-
-  let hdPriv: Uint8Array | null = null;
-  try {
-    const { mnemonicToSeed, deriveKaspaHDKey } = await import('./bip39_wallet');
-    const { previewAddressFromMnemonic } = await import('./wallet_registration_v2');
-
-    const storedVaultAddr = (await SecureStore.getItemAsync('kv_vault_address')) || '';
-    const network: KaspaNetwork = storedVaultAddr.startsWith('kaspa:') ? 'mainnet' : 'testnet-10';
-
-    const preview = await previewAddressFromMnemonic(mnemonic, network);
-    if (!preview) return { success: false, error: 'Vault key derivation failed' };
-    if (storedVaultAddr && preview.address !== storedVaultAddr) {
-      return { success: false, error: 'Vault key does not match stored vault address. Re-scan cards.' };
-    }
-
-    const seed = await mnemonicToSeed(mnemonic, '');
-    const hdKey = deriveKaspaHDKey(seed);
-    hdPriv = hdKey.privateKey;
-    const privKeyHex = bytesToHex(hdPriv);
-
-    console.log('[VaultSend] Sending from vault', preview.address.slice(0, 22), 'via REST...');
-    const restResult = await sendKaspaViaRest({
-      senderAddress: preview.address,
-      recipientAddress,
-      amountSompi,
-      privateKeyHex: privKeyHex,
-      network,
-    });
-
-    if (!restResult.success) {
-      return { success: false, error: restResult.error || 'Vault transaction failed' };
-    }
-
-    const txId = restResult.txId || '';
-    console.log('[VaultSend] TX broadcast:', txId);
-
-    await storeTransaction({
-      txId, type: 'send', toAddress: recipientAddress, amountSompi,
-      timestamp: Date.now(), status: 'pending', lamportIndex: -1,
-    });
-
-    return {
-      success: true, kaspaTxId: txId,
-      explorerUrl: EXPLORER_URLS[network] + txId,
-    };
-  } catch (e: any) {
-    console.error('[VaultSend] Error:', e?.message);
-    return { success: false, error: e?.message || 'Vault send failed' };
-  } finally {
-    if (hdPriv) hdPriv.fill(0);
-  }
-}
-
-// ============================================================================
 // SEND INSCRIPTION TX (REST API � main wallet)
 // ============================================================================
 
@@ -1168,7 +1079,6 @@ export {
   lamportKeyManager,
   biometricAuth,
   sendKASWithHybridSig,
-  sendKASFromVault,
   sendInscriptionTx,
   pubkeyToKaspaAddress,
   isValidKaspaAddress,
