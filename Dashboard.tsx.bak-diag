@@ -1017,7 +1017,6 @@ const WalletOverview: React.FC<{
 }> = ({ balance, xp, onDeposit, onWithdraw, onSend, onPayNearby, onNavigateProfile, onNavigateNeighbor, onNavigateTxHistory, onNavigatePOBox,
   onNavigatePhoneProof, onNavigateBalanceSheet, activeMode, onSwitchMode, balanceSompi = 0n, ds }) => {
   const { formattedPrice, usdPerKas, loading: priceLoading, isStale } = useKaspaPrice({ autoStart: true });
-  console.log('[WalletUI] render balanceSompi:', balanceSompi.toString());
   const kasBalance = Number(balanceSompi) / 100_000_000;
   const usdValue = kasBalance * usdPerKas;
 

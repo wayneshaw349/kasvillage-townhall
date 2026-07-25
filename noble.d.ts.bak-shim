@@ -100,23 +100,11 @@ declare module '@noble/curves/secp256k1.js' {
 }
 
 declare module '@noble/hashes/sha256' {
-  // CHash shape — pbkdf2/hmac require these members, not just the call signature.
-  export const sha256: {
-    (data: Uint8Array | string): Uint8Array;
-    outputLen: number;
-    blockLen: number;
-    create(): any;
-  };
+  export function sha256(data: Uint8Array): Uint8Array;
 }
 
 declare module '@noble/hashes/sha256.js' {
-  // CHash shape — pbkdf2/hmac require these members, not just the call signature.
-  export const sha256: {
-    (data: Uint8Array | string): Uint8Array;
-    outputLen: number;
-    blockLen: number;
-    create(): any;
-  };
+  export function sha256(data: Uint8Array): Uint8Array;
 }
 
 declare module '@noble/hashes/blake2b' {
@@ -164,22 +152,4 @@ declare module 'expo-network' {
   export function getNetworkStateAsync(): Promise<NetworkState>;
   export function getIpAddressAsync(): Promise<string>;
   export function isAirplaneModeEnabledAsync(): Promise<boolean>;
-}
-
-declare module '@noble/hashes/pbkdf2' {
-  export function pbkdf2(
-    hash: any,
-    password: Uint8Array | string,
-    salt: Uint8Array | string,
-    opts: { c: number; dkLen: number },
-  ): Uint8Array;
-}
-
-declare module '@noble/hashes/pbkdf2.js' {
-  export function pbkdf2(
-    hash: any,
-    password: Uint8Array | string,
-    salt: Uint8Array | string,
-    opts: { c: number; dkLen: number },
-  ): Uint8Array;
 }

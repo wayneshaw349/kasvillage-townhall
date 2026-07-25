@@ -1,0 +1,142 @@
+﻿_avatar_cache_snippet.ts(25,42): error TS2304: Cannot find name 'KasVillageAvatar'.
+_avatar_cache_snippet.ts(27,23): error TS2304: Cannot find name 'TOTAL_ANGLES'.
+_avatar_cache_snippet.ts(28,21): error TS2304: Cannot find name 'ANGLE_STEP'.
+_avatar_cache_snippet.ts(29,18): error TS2304: Cannot find name 'projectAngle'.
+_avatar_cache_snippet.ts(42,9): error TS2304: Cannot find name 'AsyncStorage'.
+_avatar_cache_snippet.ts(47,24): error TS2304: Cannot find name 'AsyncStorage'.
+_avatar_cache_snippet.ts(58,9): error TS2304: Cannot find name 'AsyncStorage'.
+_avatar_cache_snippet.ts(64,11): error TS2304: Cannot find name 'KasVillageAvatar'.
+_avatar_cache_snippet.ts(69,28): error TS2304: Cannot find name 'ANGLE_STEP'.
+_avatar_cache_snippet.ts(70,16): error TS2304: Cannot find name 'projectAngle'.
+_avatar_cache_snippet.ts(82,11): error TS2304: Cannot find name 'KasVillageAvatar'.
+_avatar_cache_snippet.ts(84,9): error TS2304: Cannot find name 'AnimationPose'.
+_avatar_cache_snippet.ts(87,16): error TS2304: Cannot find name 'projectAngle'.
+_avatar_cache_snippet.ts(89,11): error TS7006: Parameter 'dp' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(89,15): error TS7006: Parameter 'i' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(90,13): error TS7006: Parameter 'dp' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(91,12): error TS7006: Parameter 'a' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(91,15): error TS7006: Parameter 'b' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(93,33): error TS7006: Parameter 'dp' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(113,11): error TS2304: Cannot find name 'KasVillageAvatar'.
+_avatar_cache_snippet.ts(115,9): error TS2304: Cannot find name 'AnimationPose'.
+_avatar_cache_snippet.ts(118,16): error TS2304: Cannot find name 'projectAngle'.
+_avatar_cache_snippet.ts(121,11): error TS7006: Parameter 'dp' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(121,15): error TS7006: Parameter 'i' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(128,13): error TS7006: Parameter 'p' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(129,12): error TS7006: Parameter 'a' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(129,15): error TS7006: Parameter 'b' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(130,13): error TS7031: Binding element 'd' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(130,16): error TS7031: Binding element 'fill' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(130,22): error TS7031: Binding element 'stroke' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(130,30): error TS7031: Binding element 'z' implicitly has an 'any' type.
+_avatar_cache_snippet.ts(136,49): error TS2304: Cannot find name 'KasVillageAvatar'.
+_avatar_cache_snippet.ts(137,24): error TS2304: Cannot find name 'loadAvatarFromWallet'.
+avatar_arweave_upload.ts(187,23): error TS2339: Property 'recovery' does not exist on type '{ toCompactRawBytes(): Uint8Array<ArrayBufferLike>; }'.
+avatar_arweave_upload.ts(401,23): error TS2323: Cannot redeclare exported variable 'lamportAttest'.
+avatar_arweave_upload.ts(454,3): error TS2323: Cannot redeclare exported variable 'lamportAttest'.
+avatar_arweave_upload.ts(454,3): error TS2484: Export declaration conflicts with exported declaration of 'lamportAttest'.
+expo_identity_ritual.tsx(5322,5): error TS2353: Object literal may only specify known properties, and 'quizFailedAt' does not exist in type 'RitualState | (() => RitualState)'.
+expo_identity_ritual.tsx(6254,19): error TS2339: Property 'quizFailedAt' does not exist on type 'RitualState'.
+expo_identity_ritual.tsx(6256,46): error TS2339: Property 'quizFailedAt' does not exist on type 'RitualState'.
+expo_identity_ritual.tsx(9086,13): error TS2304: Cannot find name 'Alert'.
+expo_identity_ritual.tsx(9348,37): error TS2345: Argument of type 'string' is not assignable to parameter of type '{ pubkey: string; privKeyHex: string; }'.
+expo_identity_ritual.tsx(9574,19): error TS2304: Cannot find name 'Alert'.
+expo_identity_ritual.tsx(9576,19): error TS2304: Cannot find name 'Alert'.
+GameScreen.tsx(18,20): error TS2307: Cannot find module 'react-native-canvas' or its corresponding type declarations.
+KaspaClient.ts(391,7): error TS2345: Argument of type 'bigint' is not assignable to parameter of type 'string'.
+kasvillage_camera_system.ts(29,43): error TS2322: Type '0 | 12 | 24 | 300 | 60 | 36 | 48 | 120 | 204 | 72 | 96 | 240 | 228 | 180 | 84 | 108 | 132 | 144 | 156 | 168 | 192 | 216 | 252 | 264 | 276 | 288 | 312 | 324 | 336 | 348' is not assignable to type '0'.
+  Type '12' is not assignable to type '0'.
+kasvillage_canvas_renderer.ts(394,33): error TS2339: Property 'documentDirectory' does not exist on type 'typeof import("C:/Users/wayne/Downloads/kasvillage layer1/node_modules/expo-file-system/build/index")'.
+kasvillage_canvas_renderer.ts(445,26): error TS2339: Property 'EncodingType' does not exist on type 'typeof import("C:/Users/wayne/Downloads/kasvillage layer1/node_modules/expo-file-system/build/index")'.
+kasvillage_canvas_renderer.ts(525,28): error TS2339: Property 'EncodingType' does not exist on type 'typeof import("C:/Users/wayne/Downloads/kasvillage layer1/node_modules/expo-file-system/build/index")'.
+kasvillage_detail_engine.ts(486,92): error TS2367: This comparison appears to be unintentional because the types '"path" | "rect" | "polygon"' and '"circle"' have no overlap.
+kasvillage_enemy_avatars.ts(408,54): error TS2345: Argument of type 'string' is not assignable to parameter of type 'AnimationPose'.
+kasvillage_enemy_combos.ts(151,25): error TS2339: Property 'race' does not exist on type 'EnemyAI'.
+kasvillage_environments.ts(8,10): error TS2459: Module '"./kasvillage_avatar_engine"' declares 'Race' locally, but it is not exported.
+kasvillage_game_loop.ts(238,44): error TS2339: Property 'colors' does not exist on type 'KasVillageAvatar'.
+kasvillage_item_library.ts(149,58): error TS2872: This kind of expression is always truthy.
+kasvillage_item_library.ts(172,126): error TS2872: This kind of expression is always truthy.
+kasvillage_item_library.ts(197,64): error TS2872: This kind of expression is always truthy.
+kasvillage_item_library.ts(383,212): error TS2872: This kind of expression is always truthy.
+kasvillage_item_library.ts(409,285): error TS2872: This kind of expression is always truthy.
+kasvillage_multiplayer.ts(282,31): error TS2339: Property 'zoneIndex' does not exist on type 'BoardLayout'.
+kasvillage_paint_v2.ts(14,3): error TS2459: Module '"./kasvillage_game_input_paint"' declares 'ComboResult' locally, but it is not exported.
+kasvillage_ps1_engine.ts(195,30): error TS2322: Type '"fence"' is not assignable to type 'WallDetail'.
+kasvillage_skia_adapter.ts(17,8): error TS2307: Cannot find module '@shopify/react-native-skia' or its corresponding type declarations.
+kasvillage_skia_adapter.ts(331,33): error TS2339: Property 'documentDirectory' does not exist on type 'typeof import("C:/Users/wayne/Downloads/kasvillage layer1/node_modules/expo-file-system/build/index")'.
+kasvillage_skia_adapter.ts(356,26): error TS2339: Property 'EncodingType' does not exist on type 'typeof import("C:/Users/wayne/Downloads/kasvillage layer1/node_modules/expo-file-system/build/index")'.
+kasvillage_skia_adapter.ts(390,28): error TS2339: Property 'EncodingType' does not exist on type 'typeof import("C:/Users/wayne/Downloads/kasvillage layer1/node_modules/expo-file-system/build/index")'.
+kasvillage_spotify_auth.ts(7,30): error TS2307: Cannot find module 'expo-auth-session' or its corresponding type declarations.
+kasvillage_spotify_auth.ts(9,29): error TS2307: Cannot find module 'expo-web-browser' or its corresponding type declarations.
+kasvillage_vscode_sdk.ts(38,23): error TS2323: Cannot redeclare exported variable 'fetchCreatorFromArweave'.
+kasvillage_vscode_sdk.ts(144,17): error TS2323: Cannot redeclare exported variable 'generateAttribution'.
+kasvillage_vscode_sdk.ts(170,17): error TS2323: Cannot redeclare exported variable 'generateCreatorMetadata'.
+kasvillage_vscode_sdk.ts(198,17): error TS2323: Cannot redeclare exported variable 'createMockAvatar'.
+kasvillage_vscode_sdk.ts(550,3): error TS2459: Module '"./kasvillage_avatar_engine"' declares 'Race' locally, but it is not exported.
+kasvillage_vscode_sdk.ts(551,3): error TS2459: Module '"./kasvillage_avatar_engine"' declares 'Gender' locally, but it is not exported.
+kasvillage_vscode_sdk.ts(625,3): error TS2323: Cannot redeclare exported variable 'fetchCreatorFromArweave'.
+kasvillage_vscode_sdk.ts(625,3): error TS2484: Export declaration conflicts with exported declaration of 'fetchCreatorFromArweave'.
+kasvillage_vscode_sdk.ts(626,3): error TS2323: Cannot redeclare exported variable 'generateAttribution'.
+kasvillage_vscode_sdk.ts(626,3): error TS2484: Export declaration conflicts with exported declaration of 'generateAttribution'.
+kasvillage_vscode_sdk.ts(627,3): error TS2323: Cannot redeclare exported variable 'generateCreatorMetadata'.
+kasvillage_vscode_sdk.ts(627,3): error TS2484: Export declaration conflicts with exported declaration of 'generateCreatorMetadata'.
+kasvillage_vscode_sdk.ts(628,3): error TS2323: Cannot redeclare exported variable 'createMockAvatar'.
+kasvillage_vscode_sdk.ts(628,3): error TS2484: Export declaration conflicts with exported declaration of 'createMockAvatar'.
+kasvillage_vscode_sdk.ts(632,3): error TS2484: Export declaration conflicts with exported declaration of 'CreatorIdentity'.
+kasvillage_wallet_bridge.ts(13,3): error TS2459: Module '"./kasvillage_avatar_engine"' declares 'Race' locally, but it is not exported.
+kasvillage_wallet_bridge.ts(14,3): error TS2459: Module '"./kasvillage_avatar_engine"' declares 'Gender' locally, but it is not exported.
+kasvillage_wallet_bridge.ts(22,3): error TS2459: Module '"./kasvillage_canvas_renderer"' declares 'ShadingPreset' locally, but it is not exported.
+neighbor_relay.ts(99,5): error TS17005: A constructor cannot contain a 'super' call when its class extends 'null'.
+neighbor_relay.ts(170,5): error TS2531: Object is possibly 'null'.
+NeighborAgreement.tsx(1714,519): error TS7006: Parameter 't' implicitly has an 'any' type.
+NeighborAgreement.tsx(1714,526): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+NeighborAgreement.tsx(1714,563): error TS7053: Element implicitly has an 'any' type because expression of type '"KV-Pubkey"' can't be used to index type '{}'.
+  Property 'KV-Pubkey' does not exist on type '{}'.
+NeighborAgreement.tsx(1714,683): error TS7053: Element implicitly has an 'any' type because expression of type '"KV-FrostR"' can't be used to index type '{}'.
+  Property 'KV-FrostR' does not exist on type '{}'.
+NeighborAgreement.tsx(1714,711): error TS7053: Element implicitly has an 'any' type because expression of type '"KV-FrostR"' can't be used to index type '{}'.
+  Property 'KV-FrostR' does not exist on type '{}'.
+NeighborAgreement.tsx(1726,27): error TS2345: Argument of type '(prev: Contract) => { releaseTxId: null; releaseExplorerUrl: any; itemPriceKas: number; sellerCommitmentKas: number; timeoutMinutes?: number | undefined; timeoutN?: number | undefined; ... 17 more ...; inscriptionTxId?: string | undefined; }' is not assignable to parameter of type 'SetStateAction<Contract>'.
+  Type '(prev: Contract) => { releaseTxId: null; releaseExplorerUrl: any; itemPriceKas: number; sellerCommitmentKas: number; timeoutMinutes?: number | undefined; timeoutN?: number | undefined; ... 17 more ...; inscriptionTxId?: string | undefined; }' is not assignable to type '(prevState: Contract) => Contract'.
+    Call signature return types '{ releaseTxId: null; releaseExplorerUrl: any; itemPriceKas: number; sellerCommitmentKas: number; timeoutMinutes?: number | undefined; timeoutN?: number | undefined; stipulations: string; ... 16 more ...; inscriptionTxId?: string | undefined; }' and 'Contract' are incompatible.
+      The types of 'releaseTxId' are incompatible between these types.
+        Type 'null' is not assignable to type 'string | undefined'.
+NeighborAgreement.tsx(1726,100): error TS2339: Property 'explorerUrl' does not exist on type '{ success: boolean; txId: null; }'.
+NeighborAgreement.tsx(1734,61): error TS2339: Property 'slice' does not exist on type 'never'.
+NeighborAgreement.tsx(1736,74): error TS2339: Property 'error' does not exist on type '{ success: boolean; txId: null; }'.
+NeighborAgreement.tsx(1745,64): error TS2339: Property 'partial_sig_a' does not exist on type 'AgreementStatus'.
+NeighborAgreement.tsx(1745,90): error TS2339: Property 'partial_sig_b' does not exist on type 'AgreementStatus'.
+NeighborAgreement.tsx(1899,81): error TS18046: 'b' is of type 'unknown'.
+NeighborAgreement.tsx(1962,39): error TS2339: Property 'error' does not exist on type 'AgreementStatus'.
+NeighborAgreement.tsx(2251,29): error TS7006: Parameter 'u' implicitly has an 'any' type.
+NeighborAgreement.tsx(2255,11): error TS2322: Type '"cancel" | "split"' is not assignable to type 'ReleaseMode'.
+  Type '"split"' is not assignable to type 'ReleaseMode'.
+NeighborAgreement.tsx(2336,66): error TS2339: Property 'transaction' does not exist on type 'object'.
+NeighborAgreement.tsx(2337,67): error TS2339: Property 'transaction' does not exist on type 'object'.
+NeighborAgreement.tsx(2343,42): error TS2339: Property 'transaction' does not exist on type 'object'.
+NeighborAgreement.tsx(2350,43): error TS2339: Property 'transaction' does not exist on type 'object'.
+NeighborAgreement.tsx(2681,34): error TS2551: Property 'buyerAmountSompi' does not exist on type 'AgreementPartyInfo'. Did you mean 'amount_sompi'?
+NeighborAgreement.tsx(2682,44): error TS2551: Property 'buyerAmountSompi' does not exist on type 'AgreementPartyInfo'. Did you mean 'amount_sompi'?
+NeighborAgreement.tsx(2683,49): error TS2339: Property 'sellerAmountSompi' does not exist on type 'AgreementPartyInfo'.
+NeighborAgreement.tsx(2902,13): error TS2783: 'agreementId' is specified more than once, so this usage will be overwritten.
+NeighborAgreement.tsx(2904,13): error TS2783: 'buyerPubkey' is specified more than once, so this usage will be overwritten.
+NeighborAgreement.tsx(2905,13): error TS2783: 'sellerPubkey' is specified more than once, so this usage will be overwritten.
+NeighborAgreement.tsx(2906,13): error TS2783: 'counterpartyPubkey' is specified more than once, so this usage will be overwritten.
+NeighborAgreement.tsx(2963,98): error TS2345: Argument of type '"buyer" | "unknown" | "seller"' is not assignable to parameter of type '"buyer" | "seller"'.
+  Type '"unknown"' is not assignable to type '"buyer" | "seller"'.
+NeighborAgreement.tsx(3204,425): error TS2353: Object literal may only specify known properties, and 'description' does not exist in type 'SetStateAction<Contract>'.
+NeighborAgreement.tsx(3305,122): error TS7006: Parameter 't' implicitly has an 'any' type.
+NeighborAgreement.tsx(3305,130): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+NeighborAgreement.tsx(3305,171): error TS7053: Element implicitly has an 'any' type because expression of type '"KV-Status"' can't be used to index type '{}'.
+  Property 'KV-Status' does not exist on type '{}'.
+NeighborAgreement.tsx(3835,102): error TS18047: '_w' is possibly 'null'.
+proposal_share.ts(236,33): error TS2339: Property 'Signature' does not exist on type '{ sign(msgHash: Uint8Array<ArrayBufferLike>, privKey: Uint8Array<ArrayBufferLike>, opts?: { prehash?: boolean | undefined; } | undefined): { ...; }; ... 4 more ...; CURVE: { ...; }; }'.
+proposal_share.ts(239,31): error TS2339: Property 'Signature' does not exist on type '{ sign(msgHash: Uint8Array<ArrayBufferLike>, privKey: Uint8Array<ArrayBufferLike>, opts?: { prehash?: boolean | undefined; } | undefined): { ...; }; ... 4 more ...; CURVE: { ...; }; }'.
+push_notifications.ts(236,37): error TS2322: Type 'Promise<{ shouldShowAlert: true; shouldPlaySound: true; shouldSetBadge: true; }>' is not assignable to type 'Promise<NotificationBehavior>'.
+  Type '{ shouldShowAlert: true; shouldPlaySound: true; shouldSetBadge: true; }' is missing the following properties from type 'NotificationBehavior': shouldShowBanner, shouldShowList
+TownHallScreen.tsx(1053,44): error TS2304: Cannot find name 'kaspaAddress'.
+wallet_merkle_archive.ts(574,47): error TS2345: Argument of type '"mainnet" | "testnet-10"' is not assignable to parameter of type '"mainnet" | "testnet" | undefined'.
+  Type '"testnet-10"' is not assignable to type '"mainnet" | "testnet" | undefined'. Did you mean '"testnet"'?
+wallet_merkle_archive.ts(583,30): error TS2551: Property 'daaScore' does not exist on type 'CapturedBlockHeader'. Did you mean 'daa_score'?
+Workspace.tsx(4044,44): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ procedural_sdk: string; game_input: string; }'.
+  No index signature with a parameter of type 'string' was found on type '{ procedural_sdk: string; game_input: string; }'.

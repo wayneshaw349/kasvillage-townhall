@@ -17,7 +17,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Dimensions, Alert, AppState, ScrollView } from 'react-native';
+  View, Text, TouchableOpacity, StyleSheet, Dimensions, Alert, AppState,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 
@@ -126,8 +127,7 @@ export const VaultBackupScreen: React.FC<VaultBackupScreenProps> = ({
         <View style={{ width: rs(60) }} />
       </View>
 
-      {/* scroll-fix */}
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={true}>
+      <View style={styles.body}>
         <Text style={styles.stepper}>Card {idx + 1} of {total}</Text>
         <Text style={styles.subtitle}>
           Any {threshold} of these {total} cards can restore your wallet.
@@ -200,7 +200,7 @@ export const VaultBackupScreen: React.FC<VaultBackupScreenProps> = ({
             />
           ))}
         </View>
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 };
@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
   backBtn: { padding: rs(8) },
   backText: { color: '#F59E0B', fontSize: rs(16) },
   title: { color: '#FFF', fontSize: rs(18), fontWeight: '900' },
-  body: { paddingHorizontal: rs(16), alignItems: 'center', paddingBottom: rs(40) },
+  body: { flex: 1, paddingHorizontal: rs(16), alignItems: 'center' },
   stepper: { color: '#49d6aa', fontSize: rs(16), fontWeight: '700', marginTop: rs(4) },
   subtitle: {
     color: '#AAA', fontSize: rs(12), textAlign: 'center',

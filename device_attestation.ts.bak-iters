@@ -488,7 +488,7 @@ export async function verifySerialNumber(serial: string): Promise<boolean> {
 
 const STORE_KEY_SERIAL_HASH_V2 = 'kv_serial_hash_v2';
 const SERIAL_SALT_V2 = 'KV_SERIAL_V1';   // fixed and global — do not vary per user
-const SERIAL_ITERATIONS_V2 = 50_000;     // ~190ms desktop, ~1-4s on a low-end phone
+const SERIAL_ITERATIONS_V2 = 100_000;    // ~1-3s on a low-end phone; one-time cost
 
 /**
  * Normalise before hashing. Without this the SAME serial typed with spaces or

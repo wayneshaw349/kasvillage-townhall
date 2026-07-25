@@ -18,9 +18,6 @@ import * as Application from 'expo-application';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { pbkdf2 as noblePbkdf2 } from '@noble/hashes/pbkdf2';
-import { sha256 as nobleSha256 } from '@noble/hashes/sha256';
-import { bytesToHex as nobleBytesToHex } from '@noble/hashes/utils';
 
 // ============================================================================
 // TYPES
@@ -475,70 +472,5 @@ export async function verifySerialNumber(serial: string): Promise<boolean> {
   const stored = await SecureStore.getItemAsync(STORE_KEY_SERIAL_HASH);
   if (!stored) return false;
   const computed = await hashSerialNumber(serial);
-  return computed === stored;
-}
-
-// ============================================================================
-// SERIAL HASH V2 — globally comparable
-// ============================================================================
-// v1 salts with the device anchor, so the same serial yields a different hash
-// on every install: dedup and recovery both impossible. v2 uses a fixed salt so
-// the hash is identical everywhere, and a slow KDF so the (small, structured)
-// serial space is not cheaply enumerable from a public KV-SerialHash tag.
-
-const STORE_KEY_SERIAL_HASH_V2 = 'kv_serial_hash_v2';
-const SERIAL_SALT_V2 = 'KV_SERIAL_V1';   // fixed and global — do not vary per user
-const SERIAL_ITERATIONS_V2 = 50_000;     // ~190ms desktop, ~1-4s on a low-end phone
-
-/**
- * Normalise before hashing. Without this the SAME serial typed with spaces or
- * dashes hashes differently and dedup silently fails.
- */
-export function normalizeSerial(serial: string): string {
-  return serial.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
-
-/**
- * Deterministic across devices and installs. Safe to inscribe publicly.
- * Deliberately slow — do not call this in a loop or on every render.
- */
-export async function hashSerialNumberV2(serial: string): Promise<string> {
-  const norm = normalizeSerial(serial);
-  if (norm.length < 6) throw new Error('serial too short to be valid');
-  const dk = noblePbkdf2(
-    nobleSha256,
-    new TextEncoder().encode(norm),
-    new TextEncoder().encode(SERIAL_SALT_V2),
-    { c: SERIAL_ITERATIONS_V2, dkLen: 32 },
-  );
-  return nobleBytesToHex(dk);
-}
-
-/** Store the v2 hash. Raw serial is never persisted. */
-export async function storeSerialHashV2(serial: string): Promise<string> {
-  const hash = await hashSerialNumberV2(serial);
-  await SecureStore.setItemAsync(STORE_KEY_SERIAL_HASH_V2, hash);
-  return hash;
-}
-
-/** Read the stored v2 hash (for inscription). Null if never entered. */
-export async function getSerialHashV2(): Promise<string | null> {
-  return await SecureStore.getItemAsync(STORE_KEY_SERIAL_HASH_V2);
-}
-
-/**
- * Recompute from a freshly typed serial. Unlike verifySerialNumber this does
- * NOT need anything stored locally, so it works on a wiped device: hand the
- * result to an Arweave KV-SerialHash query to locate the identity.
- */
-export async function serialLookupHash(serial: string): Promise<string> {
-  return await hashSerialNumberV2(serial);
-}
-
-/** Local check against the stored v2 hash, when one exists. */
-export async function verifySerialNumberV2(serial: string): Promise<boolean> {
-  const stored = await SecureStore.getItemAsync(STORE_KEY_SERIAL_HASH_V2);
-  if (!stored) return false;
-  const computed = await hashSerialNumberV2(serial);
   return computed === stored;
 }

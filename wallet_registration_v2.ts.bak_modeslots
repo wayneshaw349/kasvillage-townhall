@@ -379,8 +379,7 @@ async function derivePublicKey(privateKeyHex: string): Promise<string> {
 async function deriveKaspaAddress(publicKeyHex: string): Promise<string> {
   const pubBytes = hexToBytes(publicKeyHex);
   const xOnly = pubBytes.slice(1); // drop 02/03 prefix → 32 bytes
-  const net = (await SecureStore.getItemAsync('kaspa_network')) || 'mainnet';
-  return kaspaAddressFromXOnly(xOnly, net.startsWith('testnet') ? 'kaspatest' : 'kaspa');
+  return kaspaAddressFromXOnly(xOnly, 'kaspa');
 }
 
 async function signMessage(message: string): Promise<string> {
@@ -513,9 +512,6 @@ export async function createWallet(options?: {
     });
     // Also save address under inscription's key name
     await SecureStore.setItemAsync('kaspa_address', wallet.kaspaAddress);
-    // MODE-SLOT-SYNC: invalidate cached mode addresses so boot re-copies the fresh one
-    try { await SecureStore.deleteItemAsync('kaspa_address_tutorial'); } catch {}
-    try { await SecureStore.deleteItemAsync('kaspa_address_real'); } catch {}
     // Save network
     await SecureStore.setItemAsync('kaspa_network', options?.network || 'testnet-10');
 
@@ -650,9 +646,6 @@ export async function restoreWalletFromMnemonic(
     });
 
     await SecureStore.setItemAsync('kaspa_address', wallet.kaspaAddress);
-    // MODE-SLOT-SYNC: invalidate cached mode addresses so boot re-copies the fresh one
-    try { await SecureStore.deleteItemAsync('kaspa_address_tutorial'); } catch {}
-    try { await SecureStore.deleteItemAsync('kaspa_address_real'); } catch {}
     await SecureStore.setItemAsync('kaspa_network', network);
 
     // export continuity + boot-as-returning:

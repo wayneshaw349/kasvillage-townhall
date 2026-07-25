@@ -891,7 +891,6 @@ export const AppNavigator: React.FC = () => {
       const resp = await fetch('https://' + prefix + '.kaspa.org/addresses/' + kaspaAddress + '/balance');
       if (resp.ok) {
         const data = await resp.json();
-        console.log('[Refresh]', kaspaAddress.slice(0, 20), '->', data.balance);
         setBalanceSompi(BigInt(data.balance || '0'));
       }
     } catch {}
@@ -978,15 +977,9 @@ export const AppNavigator: React.FC = () => {
     }
   }, []);
   useEffect(() => {
-    (async () => {
-      const mode = (await SecureStore.getItemAsync('kaspa_active_mode')) === 'real' ? 'real' : 'tutorial';
-      const addr = mode === 'real'
-        ? (await SecureStore.getItemAsync('kaspa_address_real')) || ''
-        : (await SecureStore.getItemAsync('kaspa_address_tutorial'))
-          || (await SecureStore.getItemAsync('kaspa_address')) || '';
-      console.log('[AppNav] kaspaAddress state init:', mode, addr.slice(0, 20) || 'none');
+    SecureStore.getItemAsync('kaspa_address').then(addr => {
       if (addr) setKaspaAddress(addr);
-    })();
+    });
   }, []);
 
   // ------------------------------------------------------------------
