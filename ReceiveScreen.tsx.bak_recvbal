@@ -70,26 +70,11 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
       try { setVaultAddr(await SecureStore.getItemAsync('kv_vault_address')); } catch {}
       if (addr) {
         setAddress(addr);
-      // balance now loaded by toggle-aware effect below
+        const bal = await getBalance(addr);
+        setBalance(bal);
       }
     })();
   }, [visible, myAddress]);
-
-  // recvBalEffect: balance follows the Hot/Vault toggle, REST-based
-  useEffect(() => {
-    const a = recvSource === 'vault' ? vaultAddr : address;
-    if (!visible || !a) { return; }
-    (async () => {
-      try {
-        const prefix = a.startsWith('kaspatest:') ? 'api-tn10' : 'api';
-        const resp = await fetch('https://' + prefix + '.kaspa.org/addresses/' + a + '/balance');
-        if (resp.ok) {
-          const data = await resp.json();
-          setBalance(BigInt(data.balance || '0'));
-        }
-      } catch {}
-    })();
-  }, [visible, recvSource, address, vaultAddr]);
 
   const handleCopy = async () => {
     if (!shownAddress) return;

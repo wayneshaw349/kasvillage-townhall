@@ -57,8 +57,6 @@ export interface ReceiveScreenProps {
 
 export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProps) {
   const [address, setAddress] = useState<string | null>(myAddress || null);
-  const [vaultAddr, setVaultAddr] = useState<string | null>(null);
-  const [recvSource, setRecvSource] = useState<'hot' | 'vault'>('hot');
   const [balance, setBalance] = useState<bigint>(0n);
   const [copied, setCopied] = useState(false);
   const { usdPerKas } = useKaspaPrice();
@@ -67,45 +65,28 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
     if (!visible) return;
     (async () => {
       const addr = myAddress || await SecureStore.getItemAsync(SECURESTORE_KEYS.KASPA_ADDRESS);
-      try { setVaultAddr(await SecureStore.getItemAsync('kv_vault_address')); } catch {}
       if (addr) {
         setAddress(addr);
-      // balance now loaded by toggle-aware effect below
+        const bal = await getBalance(addr);
+        setBalance(bal);
       }
     })();
   }, [visible, myAddress]);
 
-  // recvBalEffect: balance follows the Hot/Vault toggle, REST-based
-  useEffect(() => {
-    const a = recvSource === 'vault' ? vaultAddr : address;
-    if (!visible || !a) { return; }
-    (async () => {
-      try {
-        const prefix = a.startsWith('kaspatest:') ? 'api-tn10' : 'api';
-        const resp = await fetch('https://' + prefix + '.kaspa.org/addresses/' + a + '/balance');
-        if (resp.ok) {
-          const data = await resp.json();
-          setBalance(BigInt(data.balance || '0'));
-        }
-      } catch {}
-    })();
-  }, [visible, recvSource, address, vaultAddr]);
-
   const handleCopy = async () => {
-    if (!shownAddress) return;
-    await Clipboard.setStringAsync(shownAddress);
+    if (!address) return;
+    await Clipboard.setStringAsync(address);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleShare = async () => {
-    if (!shownAddress) return;
-    await Share.share({ message: `My Kaspa address: ${shownAddress}` });
+    if (!address) return;
+    await Share.share({ message: `My Kaspa address: ${address}` });
   };
 
-  const shownAddress = recvSource === 'vault' ? (vaultAddr || address) : address;
-  const shortAddress = shownAddress
-    ? shownAddress.slice(0, 20) + '...' + shownAddress.slice(-12)
+  const shortAddress = address
+    ? address.slice(0, 20) + '...' + address.slice(-12)
     : '';
 
   if (!visible) return null;
@@ -121,28 +102,11 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
         </View>
 
         <ScrollView style={styles.content}>
-          {vaultAddr ? (
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12, justifyContent: 'center' }}>
-          {([['hot', 'Hot Wallet'], ['vault', 'Vault']] as const).map(([src, label]) => (
-            <TouchableOpacity
-              key={src}
-              onPress={() => setRecvSource(src)}
-              style={{ paddingVertical: 8, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1,
-                borderColor: recvSource === src ? '#49d6aa' : '#333',
-                backgroundColor: recvSource === src ? '#12241d' : 'transparent' }}
-            >
-              <Text style={{ color: recvSource === src ? '#49d6aa' : '#AAA', fontWeight: recvSource === src ? '700' : '400' }}>
-                {label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      ) : null}
-      {address && (
+          {address && (
             <View style={styles.qrContainer}>
               <View style={styles.qrWrapper}>
                 <QRCode
-                  value={shownAddress || address}
+                  value={address}
                   size={rs.s(200)}
                   backgroundColor={COLORS.cardBg}
                   color={COLORS.primary}
