@@ -231,9 +231,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
             const data = await resp.json();
             const total = BigInt(data.balance || '0');
             // Get spendable from ledger (excludes committed + IOU)
-            if (sendSource === 'vault') {
-              setBalance(total); // vault: raw balance only - never sync shared ledger to vault addr
-            } else try {
+            try {
               const { syncLedger } = await import('./utxo_ledger');
               const ledger = await syncLedger(srcAddr);
               setBalance(ledger.spendableBalance > 0n ? ledger.spendableBalance : total);

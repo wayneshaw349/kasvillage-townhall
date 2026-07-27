@@ -34,7 +34,6 @@ import {
 import {
   sendKASWithHybridSig,
   sendKASFromVault,
-  vaultGoCold,
 
   formatKAS,
   isValidKaspaAddress as validateKaspaAddress,
@@ -231,9 +230,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
             const data = await resp.json();
             const total = BigInt(data.balance || '0');
             // Get spendable from ledger (excludes committed + IOU)
-            if (sendSource === 'vault') {
-              setBalance(total); // vault: raw balance only - never sync shared ledger to vault addr
-            } else try {
+            try {
               const { syncLedger } = await import('./utxo_ledger');
               const ledger = await syncLedger(srcAddr);
               setBalance(ledger.spendableBalance > 0n ? ledger.spendableBalance : total);
@@ -390,18 +387,6 @@ export const SendKAS: React.FC<SendKASProps> = ({
         if (onSuccess) onSuccess(result.kaspaTxId);
         // Refresh balance after successful send
         setTimeout(() => { onBalanceRefresh?.(); }, 2000);
-        if (sendSource === 'vault') {
-          setTimeout(() => {
-            Alert.alert(
-              'Return vault to cold?',
-              'Remove the vault key from this phone again. Your cards stay the only key.',
-              [
-                { text: 'Stay warm', style: 'cancel' },
-                { text: 'Go Cold', onPress: async () => { await vaultGoCold(); } },
-              ],
-            );
-          }, 800);
-        }
       } else {
         setError(result.error || 'Transaction failed');
         setStep('error');

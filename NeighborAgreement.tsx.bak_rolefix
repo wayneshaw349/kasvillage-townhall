@@ -2579,7 +2579,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
           console.log('[Accept-Resume] held agreement', _agrId, 'step:', _exRec.step, 'phase:', _exPh.phase, 'route:', _exRoute);
           if (_exRoute === 'release') { setContract({ agreementId: _agrId, multisigAddress: _exPh.frostAddress, frostData: { address: _exPh.frostAddress, network: _exRec.network || 'testnet-10', frostCounter: _exRec.frostCounter }, itemPriceKas: _exPh.buyerKas, sellerCommitmentKas: _exPh.sellerKas } as any); setStep(5); Alert.alert('Resumed at Release', 'Escrow holds ' + _exPh.balanceKas.toFixed(2) + ' KAS.'); return; }
           if (_exRoute === 'done') { Alert.alert('Already Complete', 'This agreement is finished.'); return; }
-          setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
+          setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, _exRec.role || 'seller')); return;
         }
       } catch (_rgE) { console.warn('[Accept-Resume] guard failed, continuing to accept:', _rgE); }
     }
@@ -3613,7 +3613,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                                 console.log("[Paste-Resume] existing agreement", parsed.agrId, "step:", _exRec.step, "phase:", _exPh.phase, "route:", _exRoute);
                                 if (_exRoute === "release") { setContract({ agreementId: parsed.agrId, multisigAddress: _exPh.frostAddress, frostData: { address: _exPh.frostAddress, network: parsed.network || "testnet-10", frostCounter: parsed.frostCounter }, itemPriceKas: _exPh.buyerKas, sellerCommitmentKas: _exPh.sellerKas } as any); setStep(5); Alert.alert("Resumed at Release", "You already hold this agreement. Escrow: " + _exPh.balanceKas.toFixed(2) + " KAS."); return; }
                                 if (_exRoute === "done") { Alert.alert("Already Complete", "This agreement is finished."); return; }
-                                setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
+                                setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, _exRec.role || 'seller')); return;
                               }
                             }
       laUpsert({ agrId: parsed.agrId, role: 'seller', origin: 'given', buyerPubkey: parsed.buyerPubkey, sellerPubkey: parsed.sellerPubkey, buyerAmountSompi: String(parsed.buyerAmountSompi ?? ''), sellerAmountSompi: String(parsed.sellerAmountSompi ?? ''), frostCounter: parsed.frostCounter, timeoutN: parsed.timeoutN, network: parsed.network, description: parsed.description, verificationCode: parsed.verificationCode, buyerR: parsed.buyerR }).catch(() => {});

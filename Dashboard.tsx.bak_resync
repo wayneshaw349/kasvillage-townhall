@@ -140,16 +140,6 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
       const n = await releaseOrphanCollateral(_live); if (n > 0) console.log('[DashStats] freed', n, 'orphan UTXOs'); } catch {}
       let committedSompi = 0n;
       let iouAllocatedSompi = 0n;
-      // DASH-RESYNC: heal stale/foreign ledger cache on every dashboard load
-      try {
-        const SecureStoreMod = require('expo-secure-store');
-        const primary = (await SecureStoreMod.getItemAsync('kv_kaspa_address'))
-          || (await SecureStoreMod.getItemAsync('kaspa_address')) || '';
-        if (primary) {
-          const { syncLedger } = require('./utxo_ledger');
-          await syncLedger(primary);
-        }
-      } catch (e) { console.warn('[DashStats] resync skipped:', e); }
       try {
         const ledgerJson = await AsyncStorage.getItem('kv_utxo_ledger');
         console.log('[DashStats] UTXO ledger:', ledgerJson ? ledgerJson.length + ' chars' : 'NONE');

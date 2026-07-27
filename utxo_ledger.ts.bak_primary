@@ -148,17 +148,7 @@ export async function syncLedger(address: string): Promise<SpendableResult> {
   if (!resp.ok) throw new Error('UTXO fetch failed: ' + resp.status);
   const rawUtxos: any[] = await resp.json();
 
-  // PRIMARY-GUARD: only the primary (hot) wallet address may read/write the
-  // persisted ledger. Any other address (vault, counterparty) gets an
-  // ephemeral in-memory ledger so it can never clobber hot state.
-  let isPrimary = true;
-  try {
-    const primary = (await SecureStore.getItemAsync('kv_kaspa_address'))
-      || (await SecureStore.getItemAsync('kaspa_address')) || '';
-    if (primary && address !== primary) isPrimary = false;
-  } catch {}
-
-  const ledger = isPrimary ? await loadLedger() : new Map<string, LedgerEntry>();
+  const ledger = await loadLedger();
 
   // Build set of L1 UTXOs
   const l1Keys = new Set<string>();
@@ -193,7 +183,7 @@ export async function syncLedger(address: string): Promise<SpendableResult> {
     }
   }
 
-  if (isPrimary) await saveLedger(ledger);
+  await saveLedger(ledger);
   return computeBalances(ledger);
 }
 

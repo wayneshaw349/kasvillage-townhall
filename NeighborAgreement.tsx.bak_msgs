@@ -2552,20 +2552,7 @@ const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_twe
     }
   };
 
-const nextActionMsg = (ph: string, rl: string): string => {
-      const seller = rl === 'seller';
-      switch (ph) {
-        case 'proposed': return seller ? 'Review the proposal and tap Accept to begin.' : 'Waiting for the seller to accept your proposal.';
-        case 'agreed': return seller ? 'Next: your refund + kill templates. Tap the agreement to build and copy them, then DM to the buyer (they paste in their AMBER box).' : 'Next: the seller sends you two templates. Paste them into your AMBER box, co-sign, and send your signature back (it goes in their PURPLE box).';
-        case 'templates_ready': return seller ? 'Your templates are with the buyer. When their co-signature comes back, paste it into your PURPLE box - your collateral funds right after.' : 'Paste the seller templates into your AMBER box, co-sign, and send the signature back (their PURPLE box).';
-        case 'cosigned': return seller ? 'Co-signature received - your collateral is funding now.' : 'Waiting for the seller to fund. Their kill tx will arrive next - paste it in your GREEN box.';
-        case 'seller_funded': return seller ? 'Your collateral is in escrow. Send the kill tx to the buyer (their GREEN box) so they can fund.' : 'Seller funded. Paste their kill tx into your GREEN box - your payment sends automatically after.';
-        case 'kill_dead': return seller ? 'Refund is dead - waiting for the buyer to fund.' : 'Refund is dead - your payment sends on the next poll automatically.';
-        case 'fully_funded': return 'Escrow is fully funded. Proceed to Release.';
-        default: return 'Continuing where the agreement is.';
-      }
-    };
-    const handleAcceptFromInbox = async (agreement: any) => {
+const handleAcceptFromInbox = async (agreement: any) => {
     const _agrId = agreement.agreementId || agreement.agreement_id || '';
     if (acceptingId) { console.log('[Neighbor] Already accepting', acceptingId); return; }
     console.log('[Neighbor] Agree tapped:', _agrId);
@@ -2579,7 +2566,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
           console.log('[Accept-Resume] held agreement', _agrId, 'step:', _exRec.step, 'phase:', _exPh.phase, 'route:', _exRoute);
           if (_exRoute === 'release') { setContract({ agreementId: _agrId, multisigAddress: _exPh.frostAddress, frostData: { address: _exPh.frostAddress, network: _exRec.network || 'testnet-10', frostCounter: _exRec.frostCounter }, itemPriceKas: _exPh.buyerKas, sellerCommitmentKas: _exPh.sellerKas } as any); setStep(5); Alert.alert('Resumed at Release', 'Escrow holds ' + _exPh.balanceKas.toFixed(2) + ' KAS.'); return; }
           if (_exRoute === 'done') { Alert.alert('Already Complete', 'This agreement is finished.'); return; }
-          setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
+          setStep(4); Alert.alert('Resuming Agreement', 'You already hold this agreement (' + _exPh.phase + '). Continuing where it is - not re-accepting.'); return;
         }
       } catch (_rgE) { console.warn('[Accept-Resume] guard failed, continuing to accept:', _rgE); }
     }
@@ -2953,7 +2940,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                 network: wallet.network || 'testnet-10',
                 createdAt: Date.now(),
               }));
-              try { await Clipboard.setStringAsync('KasVillage refund+kill templates. Paste ALL of this into your AMBER box (refund template) in Neighbor Agreement, co-sign, and send your signature back.\n\n' + _refund.templateB64 + '|' + _kill.templateB64); } catch {}
+              try { await Clipboard.setStringAsync(_refund.templateB64 + '|' + _kill.templateB64); } catch {}
       await SecureStore.setItemAsync('kv_refund_b64_' + agrId, _refund.templateB64 + '|' + _kill.templateB64).catch(() => {}); // REUSE-GUARD store
               console.log('[Refund] Template built + persisted. lockTime =', String(_rNow + BigInt(canon.timeoutN || 0)), '— awaiting buyer co-signature.');
       laUpsert({ agrId, predictedFundingTxId: txResult.predictedTxId }).then(() => laStep(agrId, 'templates_built')).catch(() => {});
@@ -3613,7 +3600,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                                 console.log("[Paste-Resume] existing agreement", parsed.agrId, "step:", _exRec.step, "phase:", _exPh.phase, "route:", _exRoute);
                                 if (_exRoute === "release") { setContract({ agreementId: parsed.agrId, multisigAddress: _exPh.frostAddress, frostData: { address: _exPh.frostAddress, network: parsed.network || "testnet-10", frostCounter: parsed.frostCounter }, itemPriceKas: _exPh.buyerKas, sellerCommitmentKas: _exPh.sellerKas } as any); setStep(5); Alert.alert("Resumed at Release", "You already hold this agreement. Escrow: " + _exPh.balanceKas.toFixed(2) + " KAS."); return; }
                                 if (_exRoute === "done") { Alert.alert("Already Complete", "This agreement is finished."); return; }
-                                setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
+                                setStep(4); Alert.alert("Resuming Agreement", "You already hold this agreement (" + _exPh.phase + "). Not re-accepting - continuing where it is."); return;
                               }
                             }
       laUpsert({ agrId: parsed.agrId, role: 'seller', origin: 'given', buyerPubkey: parsed.buyerPubkey, sellerPubkey: parsed.sellerPubkey, buyerAmountSompi: String(parsed.buyerAmountSompi ?? ''), sellerAmountSompi: String(parsed.sellerAmountSompi ?? ''), frostCounter: parsed.frostCounter, timeoutN: parsed.timeoutN, network: parsed.network, description: parsed.description, verificationCode: parsed.verificationCode, buyerR: parsed.buyerR }).catch(() => {});
@@ -3985,7 +3972,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           /* BODY-IMMUTABLE: a proposal body is generated ONCE. Re-copying must reuse the stored body verbatim - regeneration with a fresh R/counter forks the ceremony under the same agrId. */
                           const _storedRec = await (await import('./local_agreements')).getAgreement(contract.agreementId || '');
                           if (_storedRec && _storedRec.proposalBody && _storedRec.proposalBody.startsWith('KV|')) {
-                            Clipboard.setStringAsync('KasVillage agreement proposal. Open Neighbor Agreement, tap Resume, and paste ALL of this into the BLUE box (Paste Buyer Proposal). /* PASTE-INSTRUCTIONS */\n\n' + _storedRec.proposalBody);
+                            Clipboard.setStringAsync(_storedRec.proposalBody);
                             Alert.alert('Copied (unchanged)', 'The ORIGINAL signed proposal was re-copied - identical to what your counterparty already has. Send it via DM; they paste it in the BLUE box.');
                             return;
                           }
@@ -4053,7 +4040,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               setIsLoading(true);
                               const _w = await loadMainWallet();
                               if (!_w?.privKeyHex) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
-                              const _ppLines = v.trim().split(/\r?\n/).filter(x => x.trim()); const _ppPayload = _ppLines.length ? _ppLines[_ppLines.length - 1] : v; /* PASTE-SANITIZE: instruction headers ride above the payload */ const _pp = _ppPayload.split('|');
+                              const _pp = v.split('|');
                               if (_pp.length !== 2) { Alert.alert('Error', 'Expected two templates (refund|kill). Ask the seller to re-copy.'); setIsLoading(false); return; }
                               const _tmpl = parseTemplate(_pp[0]);
                               const _killT = parseTemplate(_pp[1]);
@@ -4173,7 +4160,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               const _pj = await SecureStore.getItemAsync('kv_refund_pending_' + _agrId);
                               if (!_pj) { Alert.alert('No Pending Refund', 'Nothing is frozen for this agreement. Re-accept it to start over.'); setIsLoading(false); return; }
                               const _p = JSON.parse(_pj);
-                              const _rpLines = v.trim().split(/\r?\n/).filter(x => x.trim()); const _rpPayload = _rpLines.length ? _rpLines[_rpLines.length - 1] : v; const _rp = _rpPayload.split('|');
+                              const _rp = v.split('|');
                               if (_rp.length !== 2) { Alert.alert('Error', 'Expected two signatures (refund|kill). Ask the buyer to re-copy.'); setIsLoading(false); return; }
                               const _resp = parseResponse(_rp[0]);
                               const _killResp = parseResponse(_rp[1]);

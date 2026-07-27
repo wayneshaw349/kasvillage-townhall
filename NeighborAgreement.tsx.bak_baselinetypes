@@ -125,7 +125,7 @@ import { secp256k1 as secpCurve } from '@noble/curves/secp256k1';
 import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave, postFrostR, getFrostR, listProposedAgreements, submitPartialSig } from './townhall_client';
 import { getUserStats } from './wallet_registration_v2';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { upsertAgreement as laUpsert, advanceStep as laStep, abortAgreement as laAbort, recordArweaveTx as laArTx, listActiveAgreements, derivePhase, routeForPhase } from './local_agreements';
+import { upsertAgreement as laUpsert, advanceStep as laStep, abortAgreement as laAbort, recordArweaveTx as laArTx } from './local_agreements';
 import * as Clipboard from 'expo-clipboard';
 
 import {
@@ -1713,7 +1713,7 @@ function parseClipboard(raw: string): {
             let buyerR = '';
             // R comes from clipboard, not TownHall
             console.log('[FROST-R] R is clipboard-only, checking AsyncStorage');
-            if (!buyerR) { try { const gql = '{ transactions(first: 10, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }]) { edges { node { tags { name value } } } } }'; const resp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }); const json = await resp.json(); for (const edge2 of (json?.data?.transactions?.edges || [])) { const t2 = edge2?.node?.tags || []; const m2: Record<string, string> = {}; /* BASELINE-TYPES */ t2.forEach((t: any) => { m2[t.name] = t.value; }); const p2 = m2['KV-Pubkey'] || ''; if (p2 !== (role === 'seller' ? (contract.sellerPubkey || '') : (contract.buyerPubkey || '')) && m2['KV-FrostR']) { buyerR = m2['KV-FrostR']; console.log('[FROST-2R] Found counterparty R from Arweave:', buyerR.slice(0,20)); break; } } } catch {} }
+            if (!buyerR) { try { const gql = '{ transactions(first: 10, tags: [{ name: "KV-AgreementId", values: ["' + contract.agreementId + '"] }]) { edges { node { tags { name value } } } } }'; const resp = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: gql }) }); const json = await resp.json(); for (const edge2 of (json?.data?.transactions?.edges || [])) { const t2 = edge2?.node?.tags || []; const m2 = {}; t2.forEach(t => { m2[t.name] = t.value; }); const p2 = m2['KV-Pubkey'] || ''; if (p2 !== (role === 'seller' ? (contract.sellerPubkey || '') : (contract.buyerPubkey || '')) && m2['KV-FrostR']) { buyerR = m2['KV-FrostR']; console.log('[FROST-2R] Found counterparty R from Arweave:', buyerR.slice(0,20)); break; } } } catch {} }
             const sigStr = typeof decrypted === 'string' ? decrypted : '';
             // Parse all s values: R_agg_x (64) + s_0 (64) + s_1 (64) + ...
             const cpAllS: string[] = []; for (let si = 64; si < sigStr.length; si += 64) { cpAllS.push(sigStr.slice(si, si + 64)); }
@@ -1721,11 +1721,11 @@ function parseClipboard(raw: string): {
             const buyerSig = cpAllS.length > 0 ? { R_agg_x_hex: sigStr.slice(0, 64), s_hex: cpAllS.join('') + (txTemplateB64 ? '|' + txTemplateB64 : '') } : undefined;
             const myNonceJson = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || ''));
             if (!myNonceJson || !buyerR) { console.warn('[PartialSig-Poll] Missing nonce or buyer R, skipping'); return; }
-            const result: { success: boolean; txId: string | null; explorerUrl?: string; error?: string } = { success: false, txId: null }; // DISABLED: completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: wallet.address });
+            const result = { success: false, txId: null }; // DISABLED: completeFrost2Round({ frostAddress: contract.frostData, myPrivateKeyHex: wallet.privKeyHex, recipientAddress: wallet.address, amountSompi: totalAmount, myNonceJson, counterpartyR_hex: buyerR, counterpartySig: buyerSig, buyerAmountSompi: BigInt(Math.floor((contract.itemPriceKas || 0) * 1e8)), sellerAmountSompi: BigInt(Math.floor((contract.sellerCommitmentKas || 0) * 1e8)), buyerAddress: (() => { const bpk = contract.buyerPubkey || ''; const bx = bpk.length === 66 ? bpk.slice(2) : bpk; return aggregateToAddress('02' + bx, contract.frostData?.network || 'testnet-10'); })(), sellerAddress: wallet.address });
             if (result.success && result.txId) {
               console.log('[PartialSig-Poll] Release TX broadcast:', result.txId);
               try { const cpk = contract.buyerPubkey || ''; if (cpk) sendPushToCounterparty({ counterpartyPubkey: cpk, event: 'release_available', agreementId: contract.agreementId }); } catch {}
-              setContract(prev => ({ ...prev, releaseTxId: result.txId || '', releaseExplorerUrl: result.explorerUrl || '' }));
+              setContract(prev => ({ ...prev, releaseTxId: result.txId, releaseExplorerUrl: result.explorerUrl }));
               await SecureStore.deleteItemAsync('kv_frost_nonce_' + (contract.agreementId || '')).catch(() => {}); console.log('[FROST-R] Destroyed nonce for', contract.agreementId); setStep(7);
               
         // VERIFY k destruction
@@ -1927,7 +1927,6 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         const frostScriptCheck = aggPk.length === 64 ? '20' + aggPk + 'ac' : '';
         if (frostScriptCheck && !isPureP2PK(frostScriptCheck)) { console.error('[COVENANT] ⚠️ FROST address has non-standard script!'); await new Promise((resolve) => Alert.alert('⚠️ Covenant Detected', 'FROST address contains a non-standard script. This may be a programmed UTXO that could claw back funds.\n\nProceed at your own risk.', [{ text: 'Stop (Recommended)', style: 'cancel', onPress: () => resolve(false) }, { text: 'I understand, continue', style: 'destructive', onPress: () => resolve(true) }])).then(ok => { if (!ok) return; }); }
         console.log('[Neighbor] Derived FROST address:', frostData.address);
-            laUpsert({ agrId: agreementId, frostAddress: frostData.address, frostCounter: frostData.frostCounter }).catch(() => {}); /* FILL-FROSTADDR */
           console.log('[Neighbor] Verification code:', verificationCode);
           
           setContract(prev => ({
@@ -2223,23 +2222,6 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         const ids = new Set(enrichedPending.map(p => p.agreementId || p.agreement_id));
         const kept = prev.filter(p => !ids.has(p.agreementId || p.agreement_id));
         return [...enrichedPending, ...kept];
-      }); /* original merge - superseded below by LOCAL-FIRST-INBOX */
-      let _localItems: any[] = [];
-      try {
-        const _local = await listActiveAgreements();
-        _localItems = _local.filter((l) => l.step === 'proposed' && (l.buyerPubkey || l.sellerPubkey)).map((l) => {
-          const _b = Number(l.buyerAmountSompi || 0); const _se = Number(l.sellerAmountSompi || 0);
-          let _verified = true; try { if (l.proposalBody) { const _vp = parseProposal(l.proposalBody); _verified = !!_vp && _vp.valid !== false; } } catch { _verified = false; }
-          return { agreementId: l.agrId, agreement_id: l.agrId, pubkey: l.buyerPubkey || '', counterpartyPubkey: l.sellerPubkey || '', amount_sompi: _b + _se, buyerAmountSompi: _b, sellerAmountSompi: _se, description: l.description || '', network: l.network || 'testnet-10', status: 'Proposed', frostCounter: l.frostCounter, timeoutN: Number(l.timeoutN || 0), frostAddress: l.frostAddress || '', partyA: { pubkey: l.buyerPubkey || '', amount_sompi: _b + _se }, _score: l.updatedAt || l.createdAt || 0, _local: true, _verified };
-        });
-      } catch (e) { console.warn('[LocalAgr] inbox map failed:', e); }
-      const _localIds = new Set(_localItems.map(i => i.agreementId));
-      const _remoteOnly = enrichedPending.filter(p => !_localIds.has(p.agreementId || p.agreement_id));
-      console.log('[Neighbor] Inbox local-first:', _localItems.length, 'local +', _remoteOnly.length, 'remote-only');
-      setInboxAgreements(prev => {
-        const ids = new Set([..._localIds, ..._remoteOnly.map(p => p.agreementId || p.agreement_id)]);
-        const kept = prev.filter(p => !ids.has(p.agreementId || p.agreement_id));
-        return [..._localItems, ..._remoteOnly, ...kept];
       });
     } catch (e) {
       console.error('[Neighbor] Inbox load error:', e);
@@ -2552,37 +2534,10 @@ const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_twe
     }
   };
 
-const nextActionMsg = (ph: string, rl: string): string => {
-      const seller = rl === 'seller';
-      switch (ph) {
-        case 'proposed': return seller ? 'Review the proposal and tap Accept to begin.' : 'Waiting for the seller to accept your proposal.';
-        case 'agreed': return seller ? 'Next: your refund + kill templates. Tap the agreement to build and copy them, then DM to the buyer (they paste in their AMBER box).' : 'Next: the seller sends you two templates. Paste them into your AMBER box, co-sign, and send your signature back (it goes in their PURPLE box).';
-        case 'templates_ready': return seller ? 'Your templates are with the buyer. When their co-signature comes back, paste it into your PURPLE box - your collateral funds right after.' : 'Paste the seller templates into your AMBER box, co-sign, and send the signature back (their PURPLE box).';
-        case 'cosigned': return seller ? 'Co-signature received - your collateral is funding now.' : 'Waiting for the seller to fund. Their kill tx will arrive next - paste it in your GREEN box.';
-        case 'seller_funded': return seller ? 'Your collateral is in escrow. Send the kill tx to the buyer (their GREEN box) so they can fund.' : 'Seller funded. Paste their kill tx into your GREEN box - your payment sends automatically after.';
-        case 'kill_dead': return seller ? 'Refund is dead - waiting for the buyer to fund.' : 'Refund is dead - your payment sends on the next poll automatically.';
-        case 'fully_funded': return 'Escrow is fully funded. Proceed to Release.';
-        default: return 'Continuing where the agreement is.';
-      }
-    };
-    const handleAcceptFromInbox = async (agreement: any) => {
+const handleAcceptFromInbox = async (agreement: any) => {
     const _agrId = agreement.agreementId || agreement.agreement_id || '';
     if (acceptingId) { console.log('[Neighbor] Already accepting', acceptingId); return; }
     console.log('[Neighbor] Agree tapped:', _agrId);
-    { /* ACCEPT-RESUME-GUARD: a held agreement past proposed NEVER re-enters the ceremony - it resumes at its true phase. */
-      try {
-        const _laMod = await import('./local_agreements');
-        const _exRec = await _laMod.getAgreement(_agrId);
-        if (_exRec && _exRec.step && _exRec.step !== 'proposed' && _exRec.step !== 'aborted') {
-          const _exPh = await _laMod.derivePhase(_agrId);
-          const _exRoute = _laMod.routeForPhase(_exPh.phase);
-          console.log('[Accept-Resume] held agreement', _agrId, 'step:', _exRec.step, 'phase:', _exPh.phase, 'route:', _exRoute);
-          if (_exRoute === 'release') { setContract({ agreementId: _agrId, multisigAddress: _exPh.frostAddress, frostData: { address: _exPh.frostAddress, network: _exRec.network || 'testnet-10', frostCounter: _exRec.frostCounter }, itemPriceKas: _exPh.buyerKas, sellerCommitmentKas: _exPh.sellerKas } as any); setStep(5); Alert.alert('Resumed at Release', 'Escrow holds ' + _exPh.balanceKas.toFixed(2) + ' KAS.'); return; }
-          if (_exRoute === 'done') { Alert.alert('Already Complete', 'This agreement is finished.'); return; }
-          setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
-        }
-      } catch (_rgE) { console.warn('[Accept-Resume] guard failed, continuing to accept:', _rgE); }
-    }
       laStep(_agrId, 'agreed').catch(() => {});
     setAcceptingId(_agrId);
     setIsLoading(true);
@@ -2811,7 +2766,6 @@ const nextActionMsg = (ph: string, rl: string): string => {
           if (!frostData) frostData = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: proposerPubkey, network: frostNetwork, agreementId: agrId, frostCounter: 0 });
           }
           console.log('[Neighbor] Inbox FROST address:', frostData.address);
-          laUpsert({ agrId, frostAddress: frostData.address, frostCounter: frostData.frostCounter }).catch(() => {}); /* FILL-FROSTADDR */
           // === HARD GATE: seller-derived FROST must match buyer's declared address ===
           const _claimedFrost = (agreement as any)?.frostAddress || '';
           if (_claimedFrost && frostData?.address && _claimedFrost !== frostData.address) {
@@ -2843,8 +2797,6 @@ const nextActionMsg = (ph: string, rl: string): string => {
             } catch {}
           }
           // 2b GATE: refund is mandatory — never fund without a co-signed reclaim path
-          /* LOCAL-TIMEOUT-FILL: device record is authoritative - TownHall snake_case records drop timeoutN. */
-          if (!(Number(canon.timeoutN) > 0)) { try { const _laT = await (await import('./local_agreements')).getAgreement(agrId); if (_laT && Number(_laT.timeoutN) > 0) { (canon as any).timeoutN = Number(_laT.timeoutN); console.log('[Refund] timeoutN filled from device record:', _laT.timeoutN); } } catch {} }
           if (immediateSendAmount > 0 && !(Number(canon.timeoutN) > 0)) {
             console.warn('[Refund] BLOCKED — proposal carries no timeout N. Not funding.');
             Alert.alert('Cannot Accept', 'This proposal has no refund timeout, so your collateral would have no reclaim path. Ask the buyer for a fresh proposal.');
@@ -2879,7 +2831,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
         if (_rgP && _rgB) {
           try { await Clipboard.setStringAsync(_rgB); } catch {}
           console.log('[Refund] REUSE-GUARD - frozen template exists, re-copied same templates, not re-preparing');
-          setStep(4); Alert.alert('Templates Re-Copied — paste in the AMBER box', 'Your existing frozen templates were copied again (unchanged). Send both to the buyer — they paste this into the AMBER refund-template box on their screen. When they send back their co-signature, paste it in your PURPLE box below. Nothing was re-built.');
+          Alert.alert('Templates Re-Copied', 'Your existing frozen templates were copied again (unchanged). Send both to the buyer. Nothing was re-built.');
           setIsLoading(false); setAcceptingId(null); return;
         }
       }
@@ -2953,7 +2905,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                 network: wallet.network || 'testnet-10',
                 createdAt: Date.now(),
               }));
-              try { await Clipboard.setStringAsync('KasVillage refund+kill templates. Paste ALL of this into your AMBER box (refund template) in Neighbor Agreement, co-sign, and send your signature back.\n\n' + _refund.templateB64 + '|' + _kill.templateB64); } catch {}
+              try { await Clipboard.setStringAsync(_refund.templateB64 + '|' + _kill.templateB64); } catch {}
       await SecureStore.setItemAsync('kv_refund_b64_' + agrId, _refund.templateB64 + '|' + _kill.templateB64).catch(() => {}); // REUSE-GUARD store
               console.log('[Refund] Template built + persisted. lockTime =', String(_rNow + BigInt(canon.timeoutN || 0)), '— awaiting buyer co-signature.');
       laUpsert({ agrId, predictedFundingTxId: txResult.predictedTxId }).then(() => laStep(agrId, 'templates_built')).catch(() => {});
@@ -3485,13 +3437,13 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                         <Text style={{ fontSize: rs.font(11), color: '#92400e', fontWeight: 'bold' }}>Enter Verification Code</Text>
                         <Text style={{ fontSize: rs.font(9), color: '#b45309', marginBottom: 4 }}>Get this from your counterparty via call/DM</Text>
                         <TextInput
-                          style={{ backgroundColor: '#fff', borderWidth: 2, borderColor: manualVerCode.length === 12 ? '#16a34a' : '#fbbf24', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: rs.font(18), fontFamily: 'monospace', textAlign: 'center', letterSpacing: 8, color: '#1c1917' }}
-                          placeholder="665969B73196"
+                          style={{ backgroundColor: '#fff', borderWidth: 2, borderColor: manualVerCode.length === 4 ? '#16a34a' : '#fbbf24', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: rs.font(18), fontFamily: 'monospace', textAlign: 'center', letterSpacing: 8, color: '#1c1917' }}
+                          placeholder="A3E5"
                           placeholderTextColor="#d6d3d1"
                           value={manualVerCode}
-                          onChangeText={(t) => setManualVerCode(t.toUpperCase().slice(0, 12))}
+                          onChangeText={(t) => setManualVerCode(t.toUpperCase().slice(0, 4))}
                           autoCapitalize="characters"
-                          maxLength={12}
+                          maxLength={4}
                         />
                       </View>
                       <TouchableOpacity
@@ -3504,14 +3456,14 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                             const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
                             // Will be set after loadMainWallet in handleAcceptFromInbox
                           } catch {}
-                          if (manualVerCode.length !== 12) { Alert.alert('Verification', 'Enter the 12-character verification code'); return; }
-                          { (async () => { const _mr: any = manualLookupResult; const _aid = _mr.agreementId || _mr.agreement_id; try { await laUpsert({ agrId: _aid, origin: 'given', buyerPubkey: _mr.buyerPubkey || _mr.pubkey, sellerPubkey: _mr.sellerPubkey || _mr.counterpartyPubkey, buyerAmountSompi: String(_mr.buyerAmountSompi ?? ''), sellerAmountSompi: String(_mr.sellerAmountSompi ?? ''), frostAddress: _mr.frostAddress || _mr.frost_address, frostCounter: _mr.frostCounter, network: _mr.network || 'testnet-10', description: _mr.description }); const _ph = await derivePhase(_aid); const _route = routeForPhase(_ph.phase); console.log('[Lookup] phase:', _ph.phase, 'route:', _route, 'bal:', _ph.balanceKas, 'utxo:', _ph.utxoCount); if (_route === 'release') { setContract({ agreementId: _aid, multisigAddress: _ph.frostAddress, frostData: { address: _ph.frostAddress, network: _mr.network || 'testnet-10', frostCounter: _mr.frostCounter }, itemPriceKas: _ph.buyerKas, sellerCommitmentKas: _ph.sellerKas } as any); setStep(5); Alert.alert('Resumed at Release', 'Escrow holds ' + _ph.balanceKas.toFixed(2) + ' KAS. You are at the release step.'); return; } if (_route === 'done') { Alert.alert('Already Complete', 'This agreement is finished (escrow ' + _ph.balanceKas.toFixed(2) + ' KAS).'); return; } if (_route === 'poll') { Alert.alert('In Progress', 'Escrow at ' + _ph.balanceKas.toFixed(2) + ' KAS. Funding resumes automatically.'); return; } } catch (e) { console.warn('[Lookup] derivePhase failed, falling back:', e); } handleAcceptFromInbox({ ...manualLookupResult, _verificationCode: manualVerCode }); })(); }
+                          if (manualVerCode.length !== 4) { Alert.alert('Verification', 'Enter the 4-character verification code'); return; }
+                          handleAcceptFromInbox({ ...manualLookupResult, _verificationCode: manualVerCode });
                         }}
-                        disabled={!!acceptingId || manualVerCode.length !== 12}
-                        style={{ backgroundColor: (acceptingId || manualVerCode.length !== 12) ? '#888' : '#059669', borderRadius: 8, padding: 12, marginTop: 10, alignItems: 'center' }}
+                        disabled={!!acceptingId || manualVerCode.length !== 4}
+                        style={{ backgroundColor: (acceptingId || manualVerCode.length !== 4) ? '#888' : '#059669', borderRadius: 8, padding: 12, marginTop: 10, alignItems: 'center' }}
                       >
                         <Text style={{ color: '#FFF', fontSize: rs.font(13), fontWeight: 'bold' }}>
-                          {manualVerCode.length !== 12 ? 'Enter Code to Unlock' : 'Accept This Agreement'}
+                          {manualVerCode.length !== 4 ? 'Enter Code to Unlock' : 'Accept This Agreement'}
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -3604,18 +3556,6 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                             Alert.alert("Proposal Rejected", parsed.error || "Signature invalid \u2014 do not proceed.");
                           } else if (parsed) {
                             console.log("[Seller-Paste] Parsed KV proposal:", parsed.agrId, parsed.description);
-                            { /* PASTE-RESUME-GUARD: an agrId already held on this device NEVER re-enters the accept ceremony - it resumes at its true phase. */
-                              const _laMod = await import("./local_agreements");
-                              const _exRec = await _laMod.getAgreement(parsed.agrId);
-                              if (_exRec && _exRec.step && _exRec.step !== "proposed") {
-                                const _exPh = await _laMod.derivePhase(parsed.agrId);
-                                const _exRoute = _laMod.routeForPhase(_exPh.phase);
-                                console.log("[Paste-Resume] existing agreement", parsed.agrId, "step:", _exRec.step, "phase:", _exPh.phase, "route:", _exRoute);
-                                if (_exRoute === "release") { setContract({ agreementId: parsed.agrId, multisigAddress: _exPh.frostAddress, frostData: { address: _exPh.frostAddress, network: parsed.network || "testnet-10", frostCounter: parsed.frostCounter }, itemPriceKas: _exPh.buyerKas, sellerCommitmentKas: _exPh.sellerKas } as any); setStep(5); Alert.alert("Resumed at Release", "You already hold this agreement. Escrow: " + _exPh.balanceKas.toFixed(2) + " KAS."); return; }
-                                if (_exRoute === "done") { Alert.alert("Already Complete", "This agreement is finished."); return; }
-                                setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
-                              }
-                            }
       laUpsert({ agrId: parsed.agrId, role: 'seller', origin: 'given', buyerPubkey: parsed.buyerPubkey, sellerPubkey: parsed.sellerPubkey, buyerAmountSompi: String(parsed.buyerAmountSompi ?? ''), sellerAmountSompi: String(parsed.sellerAmountSompi ?? ''), frostCounter: parsed.frostCounter, timeoutN: parsed.timeoutN, network: parsed.network, description: parsed.description, verificationCode: parsed.verificationCode, buyerR: parsed.buyerR }).catch(() => {});
                             console.log("[Seller-Paste-DEBUG] parsed.frostCounter:", parsed.frostCounter, "parsed keys:", Object.keys(parsed).join(","));
                             Alert.alert("Proposal Found", "Item: " + (parsed.description || "N/A") + "\nAmount: " + (Number(parsed.buyerAmountSompi || 0)/1e8) + " KAS\nCode: " + (parsed.verificationCode || ""), [
@@ -3660,7 +3600,6 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                   return (b._score || b.created_at || 0) - (a._score || a.created_at || 0);
                 }).map((agr: any, idx: number) => (
                   <View key={idx} style={{ backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#F59E0B', borderRadius: 12, padding: 14, marginBottom: 10 }}>
-                    {agr._local && agr._verified === false && (<Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: '#DC2626', marginBottom: 4 }}>⚠ Unverified — stored proposal signature did not check out. Do not accept; ask for a fresh proposal.</Text>)}
                     <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#92400E' }}>
                       {agr.description || 'Agreement ' + (agr.agreementId || agr.agreement_id || '').slice(0, 8)}
                     </Text>
@@ -3982,13 +3921,6 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           // Generate KV proposal clipboard format
                           const _wallet = await loadMainWallet();
                           const buyerR_saved = await (async () => { try { const s = await SecureStore.getItemAsync('kv_frost_nonce_' + (contract.agreementId || '')); return s ? JSON.parse(s).R_hex || '' : ''; } catch { return ''; } })();
-                          /* BODY-IMMUTABLE: a proposal body is generated ONCE. Re-copying must reuse the stored body verbatim - regeneration with a fresh R/counter forks the ceremony under the same agrId. */
-                          const _storedRec = await (await import('./local_agreements')).getAgreement(contract.agreementId || '');
-                          if (_storedRec && _storedRec.proposalBody && _storedRec.proposalBody.startsWith('KV|')) {
-                            Clipboard.setStringAsync('KasVillage agreement proposal. Open Neighbor Agreement, tap Resume, and paste ALL of this into the BLUE box (Paste Buyer Proposal). /* PASTE-INSTRUCTIONS */\n\n' + _storedRec.proposalBody);
-                            Alert.alert('Copied (unchanged)', 'The ORIGINAL signed proposal was re-copied - identical to what your counterparty already has. Send it via DM; they paste it in the BLUE box.');
-                            return;
-                          }
                           const shareText = generateProposal({
                             agrId: contract.agreementId || '',
                             buyerAddress: myAddress || '',
@@ -4005,7 +3937,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                             description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });
                           Clipboard.setStringAsync(shareText);
-                          laUpsert({ agrId: contract.agreementId || '', role: 'buyer', origin: 'mine', proposalBody: shareText, buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN), network: contract.frostData?.network || 'testnet-10', description: (contract.itemDescription || ''), verificationCode: contract.verificationCode || '', buyerR: buyerR_saved }).catch(() => {}); { const _dp = decodeProposal({ agrId: contract.agreementId || '', description: contract.itemDescription || '', buyerAmountSompi: Math.floor(contract.itemPriceKas * 1e8), sellerAmountSompi: Math.floor(contract.sellerCommitmentKas * 1e8), timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN), verificationCode: contract.verificationCode || '', network: contract.frostData?.network || 'testnet-10' }, 'buyer'); Alert.alert('Copied — ' + _dp.title, _dp.rows.map(r => r.label + ': ' + r.value + (r.detail ? '\n  ' + r.detail : '')).join('\n\n')); }
+                          Alert.alert('Copied!', 'Agreement details copied to clipboard');
                         }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 10, marginTop: 8, alignItems: 'center' }}>
                           <Text style={{ color: '#fff', fontSize: rs.font(11), fontWeight: '600' }}>Copy All to Clipboard</Text>
                         </TouchableOpacity>
@@ -4053,7 +3985,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               setIsLoading(true);
                               const _w = await loadMainWallet();
                               if (!_w?.privKeyHex) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
-                              const _ppLines = v.trim().split(/\r?\n/).filter(x => x.trim()); const _ppPayload = _ppLines.length ? _ppLines[_ppLines.length - 1] : v; /* PASTE-SANITIZE: instruction headers ride above the payload */ const _pp = _ppPayload.split('|');
+                              const _pp = v.split('|');
                               if (_pp.length !== 2) { Alert.alert('Error', 'Expected two templates (refund|kill). Ask the seller to re-copy.'); setIsLoading(false); return; }
                               const _tmpl = parseTemplate(_pp[0]);
                               const _killT = parseTemplate(_pp[1]);
@@ -4173,7 +4105,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               const _pj = await SecureStore.getItemAsync('kv_refund_pending_' + _agrId);
                               if (!_pj) { Alert.alert('No Pending Refund', 'Nothing is frozen for this agreement. Re-accept it to start over.'); setIsLoading(false); return; }
                               const _p = JSON.parse(_pj);
-                              const _rpLines = v.trim().split(/\r?\n/).filter(x => x.trim()); const _rpPayload = _rpLines.length ? _rpLines[_rpLines.length - 1] : v; const _rp = _rpPayload.split('|');
+                              const _rp = v.split('|');
                               if (_rp.length !== 2) { Alert.alert('Error', 'Expected two signatures (refund|kill). Ask the buyer to re-copy.'); setIsLoading(false); return; }
                               const _resp = parseResponse(_rp[0]);
                               const _killResp = parseResponse(_rp[1]);
@@ -4256,17 +4188,9 @@ nonces: _killNonces,
                                   { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
                                 ]);
                                 if (!_arRes || !_arRes.success || !_arRes.txId) {
-                                  /* COOLDOWN-TOLERANT: refund is already signed + persisted in SecureStore (kv_refund_pending_).
-                                     A rate-limit is not a durability failure - the SlothQueue holds the item and lands it when
-                                     poison decays. Funding must not be hostage to Irys cooldowns. Hard-block only on real failures. */
-                                  const _arErr = String((_arRes && _arRes.error) || '');
-                                  if (/cooldown|queued|rate/i.test(_arErr)) {
-                                    console.warn('[Refund] Arweave rate-limited (' + _arErr.slice(0,60) + ') - proceeding to fund; SlothQueue will land the inscription.');
-                                  } else {
                                   console.warn('[Refund] Arweave inscription FAILED:', _arRes && _arRes.error);
                                   Alert.alert('Backup Failed', 'Could not publish the signed refund to Arweave, so it would only exist on this phone. Nothing was sent - try again.');
                                   setIsLoading(false); return;
-                                  }
                                 }
                                 console.log('[Refund] Inscribed to Arweave:', _arRes.txId, '- survives phone loss.');
                               } catch (_arE) {
