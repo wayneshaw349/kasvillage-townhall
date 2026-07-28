@@ -242,7 +242,13 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
     try {
       let lookupResult: { pubkey: string | null; stats: any } | null = null;
 
-      if (q.toLowerCase().startsWith('kaspa:')) {
+      const _qLow = q.toLowerCase();
+      if (/^0[23][0-9a-f]{64}$/.test(_qLow)) {
+        // Raw compressed pubkey -> straight to /user-stats
+        console.log('[StatsLookup] Raw pubkey lookup');
+        const res = await fetch('https://kasvillage.app.runonflux.io/user-stats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pubkey: _qLow }) });
+        if (res.ok) { lookupResult = { pubkey: _qLow, stats: await res.json() }; }
+      } else if (_qLow.startsWith('kaspa:') || _qLow.startsWith('kaspatest:')) {
         // Address lookup → Arweave KV-Address tag → pubkey → stats
         lookupResult = await lookupByAddress(q);
       } else {
