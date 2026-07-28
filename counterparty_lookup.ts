@@ -790,6 +790,8 @@ export function hasConcerningDeadlockPattern(stats: DeadlockStats): boolean {
 
 const ARWEAVE_GQL = 'https://arweave.net/graphql';
 
+import { resolveAptToPubkey as _resolveAptVerified } from './apt_derivation';
+
 async function resolvePubkeyFromArweave(
   tagName: string,
   tagValue: string
@@ -836,7 +838,30 @@ export async function lookupByAddress(
   address: string,
   options?: { includeProof?: boolean }
 ): Promise<{ pubkey: string | null; stats: CounterpartyStats | null }> {
-  const pubkey = await resolvePubkeyFromArweave('KV-Address', address);
+  // LOCAL-DECODE: the address encodes the x-only pubkey — no inscription needed to resolve it.
+  let pubkey: string | null = null;
+  try {
+    const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+    const _dp = (address.split(':')[1] || '');
+    const _d5 = Array.from(_dp).map((c: string) => CHARSET.indexOf(c));
+    const _rb: number[] = []; let _bf = 0, _bi = 0;
+    for (const d of _d5) { _bf = (_bf << 5) | d; _bi += 5; while (_bi >= 8) { _bi -= 8; _rb.push((_bf >> _bi) & 0xff); } }
+    if (_rb[0] === 0x00 && _rb.length >= 33) {
+      const _x = _rb.slice(1, 33).map(b => b.toString(16).padStart(2, '0')).join('');
+      for (const _pfx of ['02', '03']) {
+        const _cand = _pfx + _x;
+        try {
+          const _r = await fetch('https://kasvillage.app.runonflux.io/user-stats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pubkey: _cand }) });
+          if (_r.ok) {
+            const _st = await _r.json();
+            if ((_st.total_samples || 0) > 0 || (_st.successes || 0) > 0) { pubkey = _cand; console.log('[Resolve] Address decoded locally — prefix ' + _pfx + ' has history'); break; }
+          }
+        } catch {}
+      }
+      if (!pubkey) { pubkey = '02' + _x; console.log('[Resolve] Address decoded — no history under either prefix, defaulting 02 (new user)'); }
+    }
+  } catch (e) { console.warn('[Resolve] Local address decode failed, falling back to Arweave:', e); }
+  if (!pubkey) pubkey = await resolvePubkeyFromArweave('KV-Address', address);
   if (!pubkey) {
     console.warn('[Resolve] No pubkey found for address:', address.slice(0, 16));
     return { pubkey: null, stats: null };
@@ -852,7 +877,10 @@ export async function lookupByApt(
   apt: string,
   options?: { includeProof?: boolean }
 ): Promise<{ pubkey: string | null; stats: CounterpartyStats | null }> {
-  let pubkey = await resolvePubkeyFromArweave('KV-APT', apt);
+  // Derivation-verified resolver: tolerant of 'N'/'APT-N' tag forms, rejects squatters.
+  let pubkey: string | null = null;
+  try { pubkey = (await _resolveAptVerified(apt)) || null; } catch (e) { console.warn('[Resolve] Verified APT resolve failed:', e); }
+  if (!pubkey) pubkey = await resolvePubkeyFromArweave('KV-APT', apt);
   if (!pubkey) {
     console.warn('[Resolve] No pubkey found for apt:', apt);
     return { pubkey: null, stats: null };
