@@ -1050,7 +1050,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
               { name: 'KV-Type', value: 'stats-proof' },
               { name: 'KV-Pubkey', value: myPubkey },
               { name: 'KV-APT', value: myApt },
-              { name: 'KV-Address', value: kaspaAddress || '' },
+              { name: 'KV-Address', value: myAddress || '' },
               { name: 'KV-ProofType', value: data.proof.proof_type || 'Halo2-IPA-Stats-Mock-V2' },
               { name: 'KV-Successes', value: String(data.stats?.successes || 0) },
               { name: 'KV-Deadlocks', value: String(data.stats?.deadlocks || 0) },
