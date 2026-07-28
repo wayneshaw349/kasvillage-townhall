@@ -1071,6 +1071,9 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   const [activeTab, setActiveTab] = useState<'active'|'buyer'|'seller'>('active');
   const [localList, setLocalList] = useState<any[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
+  const [stagedCosign, setStagedCosign] = useState('');
+  const [stagedKill, setStagedKill] = useState('');
+  const [stagedSig, setStagedSig] = useState('');
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [manualAgrId, setManualAgrId] = useState('');
   const [resumeAsCollateral, setResumeAsCollateral] = useState(false);
@@ -1086,6 +1089,48 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
 // UNIVERSAL CLIPBOARD PARSER
 // Accepts any paste format and extracts all fields
 // ============================================================================
+function stripKvHeader(raw: string): string {
+  const t = (raw || '').trim();
+  if (t.startsWith('KV-STEP-')) {
+    const nl = t.indexOf('\n');
+    return nl >= 0 ? t.slice(nl + 1).trim() : '';
+  }
+  return t;
+}
+
+// CEREMONY-TRACKER: phase+role -> step number (1..7), whose turn, and the action label.
+// The 7-paste alternation: 1 seller-accept, 2 buyer-cosign, 3 seller-fund(sig paste),
+// 4 buyer-kill-paste, 5 (auto buyer fund), 6 seller-sign-template, 7 buyer-aggregate-release.
+function ceremonyStatus(phase: string, role: 'buyer' | 'seller' | null): { stepNum: number; total: number; mine: boolean; label: string } {
+  const seller = role === 'seller';
+  const T = 7;
+  switch (phase) {
+    case 'proposed': return seller ? { stepNum: 1, total: T, mine: true, label: 'Accept the proposal' } : { stepNum: 1, total: T, mine: false, label: 'Waiting for seller to accept' };
+    case 'agreed':
+    case 'templates_ready': return seller ? { stepNum: 2, total: T, mine: false, label: 'Waiting for buyer co-signature' } : { stepNum: 2, total: T, mine: true, label: 'Co-sign the refund + kill (AMBER box)' };
+    case 'cosigned': return seller ? { stepNum: 3, total: T, mine: true, label: 'Paste buyer signature to fund (GREEN box)' } : { stepNum: 3, total: T, mine: false, label: 'Waiting for seller to fund' };
+    case 'seller_funded': return seller ? { stepNum: 4, total: T, mine: true, label: 'Send the kill tx to the buyer' } : { stepNum: 4, total: T, mine: true, label: 'Paste the kill tx (STEP 2 box)' };
+    case 'kill_dead': return { stepNum: 5, total: T, mine: !seller, label: seller ? 'Waiting for buyer payment (automatic)' : 'Your payment sends automatically' };
+    case 'fully_funded': return seller ? { stepNum: 6, total: T, mine: false, label: 'Waiting for buyer template — then sign it' } : { stepNum: 6, total: T, mine: true, label: 'Build the TX template, send to seller' };
+    case 'complete': return { stepNum: 7, total: T, mine: false, label: 'Complete' };
+    default: return { stepNum: 1, total: T, mine: false, label: 'In progress' };
+  }
+}
+
+const TurnBanner: React.FC<{ phase: string; role: 'buyer' | 'seller' | null }> = ({ phase, role }) => {
+  const st = ceremonyStatus(phase, role);
+  if (phase === 'complete' || phase === 'aborted' || !role) return null;
+  return (
+    <View style={{ backgroundColor: st.mine ? '#dcfce7' : '#f1f5f9', borderRadius: 10, borderWidth: 2, borderColor: st.mine ? '#16a34a' : '#cbd5e1', padding: 10, marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text style={{ fontSize: rs.font(12), fontWeight: '900', color: st.mine ? '#166534' : '#64748b' }}>{st.mine ? 'YOUR TURN' : 'WAITING ON THEM'}</Text>
+        <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: st.mine ? '#15803d' : '#94a3b8' }}>Step {st.stepNum} of {st.total}</Text>
+      </View>
+      <Text style={{ fontSize: rs.font(11), color: st.mine ? '#15803d' : '#64748b', marginTop: 3 }}>{st.label}</Text>
+    </View>
+  );
+};
+
 function parseClipboard(raw: string): {
   agrId?: string;
   buyerR?: string;
@@ -2328,7 +2373,7 @@ agrId: contract.agreementId || '',
 await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: _cNonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })), createdAt: Date.now() }));
         await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(_cTmpl));
         const _b64 = encodeTemplate(_cTmpl);
-        try { await Clipboard.setStringAsync(_b64); } catch {}
+        try { await Clipboard.setStringAsync('KV-STEP-6-TEMPLATE|' + (contract.agreementId || '') + '\n' + _b64); } catch {}
         setTemplateBuilt(true);
         console.log('[Ceremony] ' + releaseMode + ' template built:', _b64.length, 'chars,', _cDesc);
         Alert.alert('Template Copied (' + releaseMode + ')', _cDesc + '\nOutputs: ' + _cTmpl.o.length + '\n\nSend to counterparty.');
@@ -2350,7 +2395,7 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
       // v2: one k per input, array order == template u[] order.
       await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: result.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })), createdAt: Date.now() }));
       await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(result.template));
-      try { await Clipboard.setStringAsync(result.templateB64); } catch {}
+      try { await Clipboard.setStringAsync('KV-STEP-6-TEMPLATE|' + (contract.agreementId || '') + '\n' + result.templateB64); } catch {}
 
       console.log('[Ceremony] Template built:', result.templateB64.length, 'chars');
       setTemplateBuilt(true);
@@ -2366,7 +2411,7 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
       if (!pastedText) { try { const CB = await import('expo-clipboard'); pastedText = await CB.getStringAsync() || ''; } catch {} }
       if (!pastedText) { Alert.alert('Error', 'Nothing in clipboard'); return; }
 
-      const resp = parseResponse(pastedText);
+      const resp = parseResponse(stripKvHeader(pastedText));
       if (!resp || !resp.R || !resp.s || !Array.isArray(resp.s)) {
         Alert.alert('Error', 'Invalid seller response — expected base64 with R + partial sigs');
         return;
@@ -2999,7 +3044,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                 network: wallet.network || 'testnet-10',
                 createdAt: Date.now(),
               }));
-              try { await Clipboard.setStringAsync('KasVillage refund+kill templates. In Neighbor Agreement, paste ALL of this into the box titled "Paste seller refund template" (amber), co-sign, and send your signature back.\n\n' + _refund.templateB64 + '|' + _kill.templateB64); } catch {}
+              try { await Clipboard.setStringAsync('KV-STEP-2-TEMPLATES|' + agrId + '\nKasVillage refund+kill templates. In Neighbor Agreement, paste ALL of this into the box titled "Paste seller refund template" (amber), co-sign, and send your signature back.\n\n' + _refund.templateB64 + '|' + _kill.templateB64); } catch {}
       await SecureStore.setItemAsync('kv_refund_b64_' + agrId, _refund.templateB64 + '|' + _kill.templateB64).catch(() => {}); // REUSE-GUARD store
               console.log('[Refund] Template built + persisted. lockTime =', String(_rNow + BigInt(canon.timeoutN || 0)), '— awaiting buyer co-signature.');
       laUpsert({ agrId, predictedFundingTxId: txResult.predictedTxId }).then(() => laStep(agrId, 'templates_built')).catch(() => {});
@@ -4001,6 +4046,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
             {/* Step 3: Lock Funds */}
             {step === 3 && (
               <View>
+                <TurnBanner phase={sellerLocked && buyerLocked ? 'fully_funded' : sellerLocked ? 'seller_funded' : (role === 'seller' ? 'cosigned' : 'templates_ready')} role={role} />
                 <Text style={styles.stepTitle}>Step 1: Lock Collateral (FROST 2-of-2)</Text>
                 
                 {/* Counterparty Address Input */}
@@ -4155,9 +4201,10 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           multiline
                           autoCapitalize="none"
                           autoCorrect={false}
-                          onChangeText={async (txt) => {
-                            const v = txt.trim();
-                            if (v.length < 20) return;
+                          onChangeText={(txt) => { const _sv = stripKvHeader(txt); if (_sv.length >= 20) setStagedCosign(_sv); }}
+                        />
+                        {stagedCosign.length >= 20 && (
+                          <TouchableOpacity onPress={async () => { const v = stagedCosign; setStagedCosign('');
                             try {
                               setIsLoading(true);
                               const _w = await loadMainWallet();
@@ -4209,7 +4256,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                                 Alert.alert('Kill Tx Rejected', _killRes.error + '\n\nDo not proceed with this trade.');
                                 setIsLoading(false); return;
                               }
-                              try { await Clipboard.setStringAsync(_res.responseB64 + '|' + _killRes.responseB64); } catch {}
+                              try { await Clipboard.setStringAsync('KV-STEP-3-COSIG|' + (contract.agreementId || '') + '\n' + _res.responseB64 + '|' + _killRes.responseB64); } catch {}
                               try { await SecureStore.setItemAsync('kv_paste_cosign_' + (contract.agreementId || ''), v); } catch {} // CAPTURE seller templates
                               console.log('[Refund-Cosign] Signed. lockTime =', _tmpl.lt, 'now =', String(_now), 'N =', String(_N));
                               console.log('[Kill-Cosign] Signed. kills utxo', (_killT.u[0]?.t || '').slice(0, 16) + ':0');
@@ -4218,8 +4265,10 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               console.error('[Refund-Cosign] Error:', e);
                               Alert.alert('Error', e instanceof Error ? e.message : 'Co-sign failed');
                             } finally { setIsLoading(false); }
-                          }}
-                        />
+                          }} style={{ backgroundColor: '#d97706', borderRadius: 8, padding: 12, marginTop: 8, alignItems: 'center' }}>
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(13) }}>Review OK — Co-sign Refund + Kill</Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
                     )}
 
@@ -4235,9 +4284,10 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           multiline
                           autoCapitalize="none"
                           autoCorrect={false}
-                          onChangeText={async (txt) => {
-                            const v = txt.trim();
-                            if (v.length < 20 || v.indexOf('transaction') < 0) return;
+                          onChangeText={(txt) => { const _sv = (txt || '').trim(); if (_sv.length >= 20 && _sv.indexOf('transaction') >= 0) setStagedKill(_sv); }}
+                        />
+                        {stagedKill.length >= 20 && (
+                          <TouchableOpacity onPress={async () => { const v = stagedKill; setStagedKill('');
                             try {
                               const _kt = JSON.parse(v);
                               const _in = _kt?.transaction?.inputs?.[0];
@@ -4257,8 +4307,10 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               console.warn('[Kill] Store failed:', e);
                               Alert.alert('Error', 'Could not read that kill tx.');
                             }
-                          }}
-                        />
+                          }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 12, marginTop: 8, alignItems: 'center' }}>
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(13) }}>Review OK — Store Kill Tx</Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
                     )}
 
@@ -4274,9 +4326,10 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           multiline
                           autoCapitalize="none"
                           autoCorrect={false}
-                          onChangeText={async (txt) => {
-                            const v = txt.trim();
-                            if (v.length < 20) return;
+                          onChangeText={(txt) => { const _sv = stripKvHeader(txt); if (_sv.length >= 20) setStagedSig(_sv); }}
+                        />
+                        {stagedSig.length >= 20 && (
+                          <TouchableOpacity onPress={async () => { const v = stagedSig; setStagedSig('');
                             const _agrId = contract.agreementId || '';
                             try {
                               setIsLoading(true);
@@ -4414,8 +4467,10 @@ nonces: _killNonces,
                               console.error('[Refund-Agg] Error:', e);
                               Alert.alert('Error', e instanceof Error ? e.message : 'Aggregate failed');
                             } finally { setIsLoading(false); }
-                          }}
-                        />
+                          }} style={{ backgroundColor: '#16a34a', borderRadius: 8, padding: 12, marginTop: 8, alignItems: 'center' }}>
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(13) }}>{'Review OK — Sign & Fund ' + contract.sellerCommitmentKas + ' KAS'}</Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
                     )}
 
@@ -4611,6 +4666,7 @@ nonces: _killNonces,
             {/* Step 4: Pay / Confirm & Release */}
             {step === 4 && (
               <View>
+                <TurnBanner phase={'fully_funded'} role={role} />
                 <Text style={styles.stepTitle}>Step 2: {releaseMode === 'cancel' ? 'Return Collateral' : 'Confirm & Release'}</Text>
                 
                 <View style={styles.flowBox}>
@@ -4729,6 +4785,7 @@ nonces: _killNonces,
             {step === 5 && (
             
 <>
+                <TurnBanner phase={'fully_funded'} role={role} />
                 <View style={{ marginBottom: 16, gap: 8 }}>
                   {role === 'buyer' ? (
                     <>
@@ -4766,7 +4823,7 @@ nonces: _killNonces,
 
                         multiline
 
-                        onChangeText={(txt) => { const v = txt.trim(); if (v.length > 20) setSellerResponseB64(v); }}
+                        onChangeText={(txt) => { const v = stripKvHeader(txt); if (v.length > 20) setSellerResponseB64(v); }}
 
                         autoCapitalize="none"
 
@@ -4810,7 +4867,7 @@ nonces: _killNonces,
                             setIsLoading(true);
                             const wallet = await loadMainWallet();
                             if (!wallet) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
-                            const tmpl = parseTemplate(v);
+                            const tmpl = parseTemplate(stripKvHeader(v));
                             if (!tmpl) { Alert.alert('Error', 'Invalid template format'); setIsLoading(false); return; }
                             try { await SecureStore.setItemAsync('kv_paste_tmpl_' + (contract.agreementId || ''), v); } catch {} // CAPTURE buyer template
                             const result = sellerSignTemplate({
@@ -4821,7 +4878,7 @@ nonces: _killNonces,
                               template: tmpl,
                             });
                             if ('error' in result) { Alert.alert('Verification Failed', result.error); setIsLoading(false); return; }
-                            try { await Clipboard.setStringAsync(result.responseB64); } catch {}
+                            try { await Clipboard.setStringAsync('KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + '\n' + result.responseB64); } catch {}
                             console.log('[Ceremony-Seller] Signed! Response:', result.responseB64.length, 'chars');
                             // Inscribe signed + tracking to Arweave (dispute evidence)
                             try {
