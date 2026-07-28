@@ -3733,7 +3733,26 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                       const v = txt.trim();
                       // Check if KV proposal format
                       // Universal: detect what was pasted
-                      const clipData = parseClipboard(v);
+                      // KV-STEP ROUTER: headered ceremony payloads route themselves. Stage-only.
+                          const _rt = (v || '').trim();
+                          if (_rt.startsWith('KV-STEP-')) {
+                            const _rnl = _rt.indexOf('\n');
+                            const _rhdr = _rnl >= 0 ? _rt.slice(0, _rnl) : _rt;
+                            const _rbody = _rnl >= 0 ? _rt.slice(_rnl + 1).trim() : '';
+                            const _rm = _rhdr.match(/^KV-STEP-(\d+)-([A-Z]+)\|(.+)$/);
+                            if (_rm && _rbody) {
+                              const _rkind = _rm[2]; const _rhAgr = _rm[3].trim();
+                              const _rcur = contract.agreementId || '';
+                              if (!_rcur) { Alert.alert('No Agreement Open', 'This payload belongs to ' + _rhAgr + '. Open that agreement first (Active tab or Resume), then paste again.'); return; }
+                              if (_rhAgr && _rhAgr !== _rcur) { Alert.alert('Different Agreement', 'This payload is for ' + _rhAgr + ' but ' + _rcur + ' is open. Switch via the Active tab, then paste again.'); return; }
+                              if (_rkind === 'TEMPLATES') { setStagedCosign(_rbody); if (!role) setRole('buyer'); setStep(3); Alert.alert('Routed', 'Seller templates staged. Review and tap Co-sign when ready.'); return; }
+                              if (_rkind === 'COSIG') { setStagedSig(_rbody); if (!role) setRole('seller'); setStep(3); Alert.alert('Routed', 'Buyer co-signature staged. Review and tap Sign & Fund when ready.'); return; }
+                              if (_rkind === 'TEMPLATE') { if (!role) setRole('seller'); setStep(5); try { await Clipboard.setStringAsync(_rbody); } catch {} Alert.alert('Routed', 'Buyer template is on your clipboard. Paste it into the template box to sign.'); return; }
+                              if (_rkind === 'RESPONSE') { setSellerResponseB64(_rbody); if (!role) setRole('buyer'); setStep(5); Alert.alert('Routed', 'Seller response staged. Tap Process Seller Response when ready.'); return; }
+                              console.warn('[Router] Unknown KV-STEP kind:', _rkind, '- falling through');
+                            }
+                          }
+                          const clipData = parseClipboard(v);
                       if (clipData.sig && clipData.sig.length >= 128) {
                         // This is a release key, not a proposal
                         if (clipData.buyerR && clipData.buyerR.length >= 60) { await AsyncStorage.setItem("kv_manual_counterparty_r_" + (contract.agreementId || ""), clipData.buyerR); }
