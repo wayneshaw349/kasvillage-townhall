@@ -2376,6 +2376,7 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
 
       const nonceJson = await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId);
       if (!nonceJson) { Alert.alert('Error', 'Buyer nonce not found — did you build the template first?'); return; }
+      try { await SecureStore.setItemAsync('kv_paste_resp_' + (contract.agreementId || ''), sellerResponseB64 || ''); } catch {} // CAPTURE seller response
       const savedNonce = JSON.parse(nonceJson);
 // A v1 blob holds ONE k. Reconstituting it would sign every input with the same
 // k and publish the wallet key by division. There is no migration - one k cannot
@@ -4209,6 +4210,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                                 setIsLoading(false); return;
                               }
                               try { await Clipboard.setStringAsync(_res.responseB64 + '|' + _killRes.responseB64); } catch {}
+                              try { await SecureStore.setItemAsync('kv_paste_cosign_' + (contract.agreementId || ''), v); } catch {} // CAPTURE seller templates
                               console.log('[Refund-Cosign] Signed. lockTime =', _tmpl.lt, 'now =', String(_now), 'N =', String(_N));
                               console.log('[Kill-Cosign] Signed. kills utxo', (_killT.u[0]?.t || '').slice(0, 16) + ':0');
                               Alert.alert('Both Co-signed', 'Signatures copied. Send them back to the seller — they will fund the escrow, then send you the kill tx.');
@@ -4285,6 +4287,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               if (_rp.length !== 2) { Alert.alert('Error', 'Expected two signatures (refund|kill). Ask the buyer to re-copy.'); setIsLoading(false); return; }
                               const _resp = parseResponse(_rp[0]);
                               const _killResp = parseResponse(_rp[1]);
+                              try { await SecureStore.setItemAsync('kv_paste_sig_' + _agrId, v); } catch {} // CAPTURE buyer cosig
                               if (!_resp || !_killResp) { Alert.alert('Error', 'Invalid signature format'); setIsLoading(false); return; }
 // v1 pending blob: single k for refund AND kill. Cannot be signed safely, and
 // nothing has moved yet, so refusing costs only a re-accept.
@@ -4809,6 +4812,7 @@ nonces: _killNonces,
                             if (!wallet) { Alert.alert('Error', 'Wallet not ready'); setIsLoading(false); return; }
                             const tmpl = parseTemplate(v);
                             if (!tmpl) { Alert.alert('Error', 'Invalid template format'); setIsLoading(false); return; }
+                            try { await SecureStore.setItemAsync('kv_paste_tmpl_' + (contract.agreementId || ''), v); } catch {} // CAPTURE buyer template
                             const result = sellerSignTemplate({
                               privateKeyHex: wallet.privKeyHex,
                               sellerPubkey: contract.sellerPubkey || '',
