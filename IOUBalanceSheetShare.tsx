@@ -47,6 +47,7 @@ import { type KaspaNetwork } from './KaspaClient';
 
 // Arweave
 import { allocateForIOU, releaseIOU, getSpendableUtxos, syncLedger } from './utxo_ledger';
+import { sendKaspaViaRest } from './kaspa_rest_tx';
 import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance } from './proposal_share';
 import { uploadToTurbo, uploadToIrys, type IrysUploadResult } from './arweave_upload';
 import { type ArweaveTag } from './arweave_module';
@@ -116,6 +117,8 @@ export interface SignedIOU {
   frostAgreementId: string;
   frostTxId: string;
   createdAtDaa: string;
+  createdAt?: number;      // wall-clock ms at issue (for countersign expiry)
+  settleTxId?: string;     // KAS tx that settled this IOU (documentation)
   issuerSignature: string;
   recipientSignature: string;
   status: 'pending' | 'signed' | 'settled' | 'disputed';
@@ -575,6 +578,105 @@ async function removePendingIOU(iouId: string): Promise<void> {
   await savePendingIOUs(pending.filter(p => p.id !== iouId));
 }
 
+// Countersign window: recipient must sign-and-return within this or the issuer's coin frees.
+export const IOU_COUNTERSIGN_WINDOW_MS = 20 * 60 * 1000; // 20 minutes
+
+function resolveRecipientAddress(ledger: IOULedger, recipientPubkey: string): string | null {
+  if (ledger.partyA.pubkey === recipientPubkey) return ledger.partyA.address;
+  if (ledger.partyB.pubkey === recipientPubkey) return ledger.partyB.address;
+  return null;
+}
+
+async function currentNetwork(): Promise<'mainnet' | 'testnet-10'> {
+  try {
+    const n = await SecureStore.getItemAsync(KEYS.NETWORK);
+    return (n && n.includes('testnet')) ? 'testnet-10' : 'mainnet';
+  } catch { return 'testnet-10'; }
+}
+
+/**
+ * Settle an IOU by directly sending its amount, issuer -> recipient.
+ * On success: release the ledger lock, drop the IOU, record settleTxId as documentation.
+ * Does NOT touch FROST collateral.
+ */
+export async function settleIOUBySend(iou: SignedIOU): Promise<{ success: boolean; txId?: string; error?: string }> {
+  const creds = await getWalletCredentials();
+  if (!creds) return { success: false, error: 'Wallet not initialized' };
+  if (iou.issuerPubkey !== creds.pubkey) return { success: false, error: 'Only the issuer can settle by paying' };
+
+  const ledgers = await loadLedgers();
+  const ledger = ledgers.find(l => l.frostAgreementId === iou.frostAgreementId);
+  if (!ledger) return { success: false, error: 'Ledger not found' };
+
+  const recipientAddress = resolveRecipientAddress(ledger, iou.recipientPubkey);
+  if (!recipientAddress) return { success: false, error: 'Recipient address unknown' };
+
+  const network = await currentNetwork();
+  const result = await sendKaspaViaRest({
+    recipientAddress,
+    amountSompi: BigInt(iou.amountSompi),
+    network,
+    payload: `KV-IOU-SETTLE:${iou.id}`,
+  } as any);
+
+  if (!result || !result.success) {
+    return { success: false, error: result?.error || 'Send failed' };
+  }
+
+  // Send succeeded -> release the lock, drop the IOU, record the settlement tx.
+  try { await releaseIOU(iou.id); } catch (e) { console.warn('[IOU] releaseIOU after settle failed:', e); }
+  const idx = ledger.ious.findIndex(x => x.id === iou.id);
+  if (idx >= 0) {
+    ledger.ious[idx] = { ...ledger.ious[idx], status: 'settled', settleTxId: result.txId };
+    const amt = BigInt(iou.amountSompi);
+    const net = BigInt(ledger.netPositionSompi);
+    ledger.netPositionSompi = (iou.issuerPubkey === ledger.partyA.pubkey ? net - amt : net + amt).toString();
+    ledger.ious = ledger.ious.filter(x => x.id !== iou.id);
+    await saveLedgers(ledgers);
+  }
+  try { await removePendingIOU(iou.id); } catch {}
+  return { success: true, txId: result.txId };
+}
+
+/**
+ * Cancel an IOU before settlement (no send). Frees the issuer's locked coin.
+ */
+export async function cancelIOU(iou: SignedIOU): Promise<{ success: boolean; error?: string }> {
+  const creds = await getWalletCredentials();
+  if (!creds) return { success: false, error: 'Wallet not initialized' };
+  if (iou.issuerPubkey !== creds.pubkey) return { success: false, error: 'Only the issuer can cancel' };
+  try { await releaseIOU(iou.id); } catch (e) { console.warn('[IOU] releaseIOU on cancel failed:', e); }
+  const ledgers = await loadLedgers();
+  const ledger = ledgers.find(l => l.frostAgreementId === iou.frostAgreementId);
+  if (ledger) { ledger.ious = ledger.ious.filter(x => x.id !== iou.id); await saveLedgers(ledgers); }
+  try { await removePendingIOU(iou.id); } catch {}
+  return { success: true };
+}
+
+/**
+ * Expire pending IOUs the recipient never countersigned within the window.
+ * Frees the issuer's locked coin. Strict: late countersigns are rejected elsewhere.
+ */
+export async function expireStaleIOUs(): Promise<number> {
+  const pending = await loadPendingIOUs();
+  const now = Date.now();
+  let freed = 0;
+  for (const iou of pending) {
+    if (iou.status !== 'pending') continue;
+    if (!iou.createdAt) continue;
+    if (now - iou.createdAt <= IOU_COUNTERSIGN_WINDOW_MS) continue;
+    // Only the issuer holds the lock to free.
+    try {
+      const creds = await getWalletCredentials();
+      if (creds && iou.issuerPubkey === creds.pubkey) { await releaseIOU(iou.id); }
+    } catch {}
+    await removePendingIOU(iou.id);
+    freed++;
+    console.log('[IOU] Expired unsigned IOU', iou.id, '- coin freed');
+  }
+  return freed;
+}
+
 async function loadSettleRequests(): Promise<SettleRequest[]> {
   try {
     const json = await AsyncStorage.getItem(KEYS.SETTLE_REQUESTS);
@@ -670,6 +772,7 @@ export async function createIOU(
     frostAgreementId: ledger.frostAgreementId,
     frostTxId,
     createdAtDaa: daa.toString(),
+    createdAt: Date.now(),
     issuerSignature: '',
     recipientSignature: '',
     status: 'pending',
@@ -687,6 +790,9 @@ export async function countersignIOU(iou: SignedIOU, uploadToArweave: boolean = 
   
   if (iou.recipientPubkey !== creds.pubkey) return { error: 'Not the recipient' };
   if (!verifyIOUSignature(iou, iou.issuerSignature, iou.issuerPubkey)) return { error: 'Invalid issuer signature' };
+  if (iou.createdAt && Date.now() - iou.createdAt > IOU_COUNTERSIGN_WINDOW_MS) {
+    return { error: 'IOU expired (countersign window elapsed). Ask the issuer to reissue.' };
+  }
   
   const signed: SignedIOU = {
     ...iou,
@@ -1287,6 +1393,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
     
     try {
       try { const _o = await releaseOrphanIOUAllocations(); if (_o.freedCount > 0) console.log('[IOU] self-heal freed', _o.freedCount, 'orphans'); } catch {}
+      try { const _e = await expireStaleIOUs(); if (_e > 0) console.log('[IOU] expired', _e, 'unsigned IOUs'); } catch {}
       const ledgers = await loadLedgers();
       let l = ledgers.find(x => x.frostAgreementId === frostAgreementId);
       if (!l) {
