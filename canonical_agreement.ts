@@ -92,7 +92,9 @@ function pkEq(a?: string, b?: string): boolean {
 export function canonicalVerify(tags: any, myPubkey: string): CanonicalAgreement {
   // Step 0: Extract tag values (handles Arweave, TownHall, and direct formats)
   const kvPubkey = tags.pubkey || tags['KV-Pubkey'] || tags.partyA?.pubkey || tags.party_a?.pubkey || '';
-  const kvCounterparty = tags.counterpartyPubkey || tags['KV-Counterparty'] || '';
+  let kvCounterparty = tags.counterpartyPubkey || tags['KV-Counterparty'] || '';
+  /* CP-SELF-REPAIR: if counterparty missing or self-referential (== proposer), and I am not the proposer, I must be the counterparty */
+  if ((!kvCounterparty || pkEq(kvCounterparty, kvPubkey)) && myPubkey && !pkEq(myPubkey, kvPubkey)) kvCounterparty = myPubkey;
   const kvBuyerAmt = parseInt(tags.buyerAmountSompi || tags['KV-BuyerAmount'] || '0', 10);
   const kvAmount = parseInt(tags.amount_sompi || tags['KV-Amount'] || '0', 10);
   const kvDesc = tags.description || '';

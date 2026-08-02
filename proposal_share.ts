@@ -92,6 +92,35 @@ function hashCounterSign(proposal: TradeProposal): Uint8Array {
 // WALLET ACCESS
 // ============================================================================
 
+async function _kvResolvePrivHex(): Promise<string | null> {
+  const isHex = (v: string | null): v is string => !!v && /^[0-9a-fA-F]{64}$/.test(v.trim());
+  // 1) plain-hex candidates
+  for (const k of ['kv_private_key', 'kasvillage_private_key', 'kv_l1_privkey']) {
+    const v = await SecureStore.getItemAsync(k);
+    if (isHex(v)) { console.log('[KVKey] using plain key:', k); return v.trim(); }
+  }
+  // 2) encrypted envelope (JSON { privateKeyEnc }) XOR scheme from avatar_arweave_upload
+  try {
+    const env = await SecureStore.getItemAsync('kv_l1_privkey_enc');
+    const deviceKey = await SecureStore.getItemAsync('device_encryption_key');
+    if (env && deviceKey) {
+      const stored = JSON.parse(env) as { privateKeyEnc: string };
+      const encHex = stored.privateKeyEnc;
+      const Crypto = require('expo-crypto');
+      const keyStream = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, deviceKey + encHex);
+      const out: string[] = [];
+      for (let i = 0; i < 64; i += 2) {
+        const eb = parseInt(encHex.slice(i, i + 2), 16);
+        const kb = parseInt(keyStream.slice(i % keyStream.length, (i % keyStream.length) + 2), 16);
+        out.push((eb ^ kb).toString(16).padStart(2, '0'));
+      }
+      const hex = out.join('');
+      if (isHex(hex)) { console.log('[KVKey] using decrypted envelope'); return hex; }
+    }
+  } catch (e) { console.warn('[KVKey] envelope decrypt failed:', e); }
+  console.warn('[KVKey] no valid private key found');
+  return null;
+}
 async function getMyCredentials(): Promise<{
   pubkey: string; address: string; privkey: string; name: string; apt: string; network: string;
 } | null> {
@@ -99,8 +128,7 @@ async function getMyCredentials(): Promise<{
                  await SecureStore.getItemAsync('kaspa_pubkey') ||
                  await SecureStore.getItemAsync('kv_public_key') || '';
   const address = await SecureStore.getItemAsync('kaspa_address') || '';
-  const privkey = await SecureStore.getItemAsync('kv_l1_privkey_enc') ||
-                  await SecureStore.getItemAsync('kasvillage_private_key') || '';
+  const privkey = (await _kvResolvePrivHex()) || '';
   const network = await SecureStore.getItemAsync('kv_network') || 'testnet-10';
 
   if (!pubkey || !address || !privkey) return null;
@@ -208,6 +236,9 @@ export async function createProposal(
 export function decodeProposal(encoded: string): TradeProposal | null {
   try {
     let json: string;
+    /* KV1-EXTRACT: tolerate full share text - pull kv1: token from anywhere in paste */
+    const _m = (encoded || '').match(/kv1:[A-Za-z0-9+\/=]+/);
+    if (_m) encoded = _m[0];
     if (encoded.startsWith('kv1:')) {
       json = atob(encoded.slice(4));
     } else if (encoded.startsWith('{')) {
