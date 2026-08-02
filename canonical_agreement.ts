@@ -80,6 +80,15 @@ export function normalizeAgreement(raw: any): any {
 //   myAmount = role === buyer ? buyerAmount : sellerAmount
 //   FROST = MuSig(buyer_pubkey, seller_pubkey, agreementId)
 //
+// x-only parity-agnostic pubkey equality (odd-y 03.. safe)
+function pkEq(a?: string, b?: string): boolean {
+  const x = (a || '').trim().toLowerCase();
+  const y = (b || '').trim().toLowerCase();
+  const xx = x.length === 66 ? x.slice(2) : x;
+  const yy = y.length === 66 ? y.slice(2) : y;
+  return !!xx && xx === yy;
+}
+
 export function canonicalVerify(tags: any, myPubkey: string): CanonicalAgreement {
   // Step 0: Extract tag values (handles Arweave, TownHall, and direct formats)
   const kvPubkey = tags.pubkey || tags['KV-Pubkey'] || tags.partyA?.pubkey || tags.party_a?.pubkey || '';
@@ -106,8 +115,8 @@ export function canonicalVerify(tags: any, myPubkey: string): CanonicalAgreement
   // Step 3: Determine role
   // CANONICAL: proposer pubkey (KV-Pubkey) = BUYER, always
   let role: 'buyer' | 'seller' | 'unknown' = 'unknown';
-  if (myPubkey === kvPubkey) role = 'buyer';
-  else if (myPubkey === kvCounterparty) role = 'seller';
+  if (pkEq(myPubkey, kvPubkey)) role = 'buyer';
+  else if (pkEq(myPubkey, kvCounterparty)) role = 'seller';
 
   // Step 4: Compute my send amount
   const myAmountSompi = role === 'buyer' ? kvBuyerAmt : sellerAmtComputed;
@@ -215,5 +224,5 @@ export function canonicalAcceptorRole(): 'seller' { return 'seller'; }
 // Validate: if proposer pubkey matches myPubkey, I am buyer
 // If I am accepting (not proposing), I am seller
 export function canonicalDetermineRole(proposerPubkey: string, myPubkey: string): 'buyer' | 'seller' {
-  return proposerPubkey === myPubkey ? 'buyer' : 'seller';
+  return pkEq(proposerPubkey, myPubkey) ? 'buyer' : 'seller';
 }
