@@ -444,13 +444,29 @@ export async function sendKaspaViaRest(params: {
     // 4. Build final outputs (amountSompi=0 means send all back to self)
     const sendAmount = amountSompi === 0n ? selectedAmount - fee : amountSompi;
     const change = selectedAmount - sendAmount - fee;
+
+    // Value-backed IOU floor: locked sompi on spent coins must survive as change.
+    let lockedOnSpent = 0n;
+    try {
+      const { getLockedSompiByKey } = await import('./utxo_ledger');
+      const lockedByKey = await getLockedSompiByKey(senderAddress);
+      for (const u of selectedUtxos) {
+        const k = `${u.outpoint.transactionId}:${u.outpoint.index}`;
+        lockedOnSpent += (lockedByKey.get(k) || 0n);
+      }
+    } catch (e) { console.warn('[REST-TX] locked-map fetch failed:', e); }
+    if (lockedOnSpent > 0n && change < lockedOnSpent) {
+      return { success: false, error: `Would spend IOU-backed value: ${Number(lockedOnSpent) / 1e8} KAS reserved, but change would be only ${Number(change) / 1e8} KAS. Settle IOUs or reduce the amount.` };
+    }
     const outputsData: { value: bigint; scriptVersion: number; script: Uint8Array }[] = [
       { value: sendAmount, scriptVersion: 0, script: recipientScript },
     ];
     if (change > 0n && !isDust(change, senderScript.length)) {
       outputsData.push({ value: change, scriptVersion: 0, script: senderScript });
+    } else if (change > 0n && lockedOnSpent === 0n) {
+      fee += change; // Absorb dust change into fee (safe: no IOU-backed value rides here)
     } else if (change > 0n) {
-      fee += change; // Absorb dust change into fee
+      return { success: false, error: `IOU-backed change (${Number(change) / 1e8} KAS) is below dust and cannot be preserved. Settle IOUs or adjust the amount.` };
     }
     
     // 5. Sign inputs
@@ -541,6 +557,17 @@ export async function sendKaspaViaRest(params: {
     }
     const txId = result.transactionId || bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(tx))));
     const explorerBase = network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';
+
+    // Re-anchor IOU allocations from spent coins onto the change UTXO (value-backed continuity).
+    if (lockedOnSpent > 0n) {
+      try {
+        const changeIndex = outputsData.length > 1 ? 1 : 0;
+        const changeVal = outputsData[changeIndex]?.value ?? 0n;
+        const spentKeys = selectedUtxos.map(u => `${u.outpoint.transactionId}:${u.outpoint.index}`);
+        const { reanchorAllocations } = await import('./utxo_ledger');
+        await reanchorAllocations(spentKeys, txId, changeIndex, changeVal.toString());
+      } catch (e) { console.warn('[REST-TX] allocation re-anchor failed (non-fatal):', e); }
+    }
     
     // Merkle archive: per-TX proof to Arweave (fire-and-forget, ~0.6 KB, free)
     uploadPerTxProof({

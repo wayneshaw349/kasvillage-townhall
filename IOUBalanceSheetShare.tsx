@@ -46,7 +46,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { type KaspaNetwork } from './KaspaClient';
 
 // Arweave
-import { allocateForIOU, releaseIOU, getSpendableUtxos } from './utxo_ledger';
+import { allocateForIOU, releaseIOU, getSpendableUtxos, syncLedger } from './utxo_ledger';
 import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance } from './proposal_share';
 import { uploadToTurbo, uploadToIrys, type IrysUploadResult } from './arweave_upload';
 import { type ArweaveTag } from './arweave_module';
@@ -223,6 +223,35 @@ function mapStatus(s: SignedIOU['status']): CoinStatus {
 // WALLET CREDENTIALS
 // ============================================================================
 
+async function _kvResolvePrivHex(): Promise<string | null> {
+  const isHex = (v: string | null): v is string => !!v && /^[0-9a-fA-F]{64}$/.test(v.trim());
+  // 1) plain-hex candidates
+  for (const k of ['kv_private_key', 'kasvillage_private_key', 'kv_l1_privkey']) {
+    const v = await SecureStore.getItemAsync(k);
+    if (isHex(v)) { console.log('[KVKey] using plain key:', k); return v.trim(); }
+  }
+  // 2) encrypted envelope (JSON { privateKeyEnc }) XOR scheme from avatar_arweave_upload
+  try {
+    const env = await SecureStore.getItemAsync('kv_l1_privkey_enc');
+    const deviceKey = await SecureStore.getItemAsync('device_encryption_key');
+    if (env && deviceKey) {
+      const stored = JSON.parse(env) as { privateKeyEnc: string };
+      const encHex = stored.privateKeyEnc;
+      const Crypto = require('expo-crypto');
+      const keyStream = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, deviceKey + encHex);
+      const out: string[] = [];
+      for (let i = 0; i < 64; i += 2) {
+        const eb = parseInt(encHex.slice(i, i + 2), 16);
+        const kb = parseInt(keyStream.slice(i % keyStream.length, (i % keyStream.length) + 2), 16);
+        out.push((eb ^ kb).toString(16).padStart(2, '0'));
+      }
+      const hex = out.join('');
+      if (isHex(hex)) { console.log('[KVKey] using decrypted envelope'); return hex; }
+    }
+  } catch (e) { console.warn('[KVKey] envelope decrypt failed:', e); }
+  console.warn('[KVKey] no valid private key found');
+  return null;
+}
 async function getWalletCredentials(): Promise<{ address: string; pubkey: string; privkey: string } | null> {
   try {
     const address = await SecureStore.getItemAsync(KEYS.ADDRESS);
@@ -230,7 +259,7 @@ async function getWalletCredentials(): Promise<{ address: string; pubkey: string
     const pubkey = await SecureStore.getItemAsync('kv_l1_pubkey') || await SecureStore.getItemAsync('public_key') || await SecureStore.getItemAsync('kv_public_key');
       console.log('[IOU] resolved pubkey:', !!pubkey);
       if (!pubkey) { console.log('[IOU] no pubkey in any key'); return null; }
-    const privkey = await SecureStore.getItemAsync(KEYS.PRIVKEY_ENC);
+    const privkey = await _kvResolvePrivHex();
     
     if (!address || !pubkey || !privkey) return null;
     return { address, pubkey, privkey };
@@ -395,15 +424,50 @@ async function releaseBatches(iouId: string): Promise<void> {
   await saveBatches(batches);
 }
 
+// Free allocations whose IOU no longer exists in any active ledger (mirrors releaseOrphanCollateral).
+export async function releaseOrphanIOUAllocations(): Promise<{ freedSompi: bigint; freedCount: number }> {
+  const [batches, ledgers, pending] = await Promise.all([loadBatches(), loadLedgers(), loadPendingIOUs()]);
+  const live = new Set<string>();
+  for (const l of ledgers) for (const iou of l.ious) if (iou.status === 'pending' || iou.status === 'signed') live.add(iou.id);
+  for (const p of pending) live.add(p.id);
+  let freedSompi = 0n; let freedCount = 0;
+  for (const batch of batches.values()) {
+    const keep: typeof batch.allocations = [];
+    for (const a of batch.allocations) {
+      if (live.has(a.iouId)) { keep.push(a); }
+      else { freedSompi += a.amountSompi; freedCount++; batch.allocatedSompi -= a.amountSompi; batch.freeSompi += a.amountSompi; }
+    }
+    batch.allocations = keep;
+  }
+  await saveBatches(batches);
+  if (freedCount > 0) console.log('[IOU] Freed ' + freedCount + ' orphan allocations, ' + (Number(freedSompi)/1e8) + ' KAS');
+  return { freedSompi, freedCount };
+}
+
 // ============================================================================
 // WALLET STATE
 // ============================================================================
 
 export async function getWalletState(address: string): Promise<WalletState> {
   try { await releaseStaleAllocations(); } catch {}
-  const [batchMap, userXP] = await Promise.all([syncBatches(address), getUserXP()]);
-  const batches = Array.from(batchMap.values());
-  
+  const [{ allEntries }, userXP] = await Promise.all([syncLedger(address), getUserXP()]);
+
+  const batches: SompiBatch[] = allEntries.map((e: any) => {
+    const total = BigInt(e.amountSompi);
+    const allocated = BigInt(e.allocatedSompi ?? '0');
+    return {
+      tag: e.utxoKey,
+      txId: e.txId,
+      index: e.index,
+      totalSompi: total,
+      allocatedSompi: allocated,
+      freeSompi: total - allocated,
+      receivedAtDaa: 0n,
+      allocations: ((e.allocations ?? []) as { iouId: string; sompi: string }[])
+        .map(a => ({ iouId: a.iouId, amountSompi: BigInt(a.sompi), allocatedAt: 0 })),
+    };
+  });
+
   return {
     batches,
     totalBalance: batches.reduce((s, b) => s + b.totalSompi, 0n),
@@ -582,7 +646,7 @@ export async function createIOU(
   if (!check.ok) return { error: check.reason!, needsSettle: check.needsSettle };
   
   const iouId = generateId();
-  const alloc = await allocateBatches(creds.address, iouId, amountSompi);
+  const alloc = await allocateForIOU(creds.address, amountSompi, iouId);
   if (alloc.error) return { error: alloc.error, needsSettle: true };
   
   // Get DAA score via REST (wRPC not available from React Native/Hermes)
@@ -609,7 +673,7 @@ export async function createIOU(
     issuerSignature: '',
     recipientSignature: '',
     status: 'pending',
-    backedByBatches: alloc.batches,
+    backedByBatches: alloc.allocations,
   };
   
   iou.issuerSignature = signIOUSync(iou, creds.privkey);
@@ -719,7 +783,7 @@ export async function markSettled(ledgerId: string, settlementTxId: string): Pro
   
   for (const iou of ledger.ious) {
     if (iou.status === 'signed') {
-      await releaseBatches(iou.id);
+      await releaseIOU(iou.id);
       iou.status = 'settled';
     }
   }
@@ -1222,6 +1286,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
     else setRefreshing(true);
     
     try {
+      try { const _o = await releaseOrphanIOUAllocations(); if (_o.freedCount > 0) console.log('[IOU] self-heal freed', _o.freedCount, 'orphans'); } catch {}
       const ledgers = await loadLedgers();
       let l = ledgers.find(x => x.frostAgreementId === frostAgreementId);
       if (!l) {

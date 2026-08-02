@@ -41,6 +41,10 @@ export interface LedgerEntry {
   pubkey?: string;           // my pubkey (proves ownership)
   commitHash?: string;       // SHA256(txId + index + agreementId + role + pubkey)
   covenantWarning?: boolean; // true if script is NOT standard P2PK
+  allocatedSompi?: string;                          // portion locked (BigInt as string) — IOU partial-alloc
+  allocations?: { iouId: string; sompi: string }[]; // per-IOU breakdown; one coin may back many IOUs
+  isCoinbase?: boolean;    // coinbase UTXOs need maturity before spending
+  blockDaaScore?: string;  // DAA score at UTXO creation (BigInt as string)
 }
 
 export interface SpendableResult {
@@ -127,6 +131,16 @@ async function getApiBase(): Promise<string> {
   return isTestnet ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
 }
 
+async function getVirtualDaaScore(apiBase: string): Promise<bigint | null> {
+  try {
+    const r = await fetch(`${apiBase}/info/blockdag`);
+    if (!r.ok) return null;
+    const j: any = await r.json();
+    const v = j?.virtualDaaScore ?? j?.virtual_daa_score;
+    return v != null ? BigInt(v) : null;
+  } catch { return null; }
+}
+
 // ============================================================================
 // SYNC WITH L1
 // ============================================================================
@@ -140,6 +154,67 @@ async function getApiBase(): Promise<string> {
 export async function getFreeUtxoKeys(address: string): Promise<Set<string>> {
   const r = await syncLedger(address);
   return new Set(r.utxos.map(e => e.utxoKey));
+}
+
+/**
+ * Map of utxoKey -> locked (allocated) sompi, for coins with any IOU allocation.
+ * Send path uses this to keep IOU-backed value in the wallet via a change floor.
+ */
+export async function getLockedSompiByKey(address: string): Promise<Map<string, bigint>> {
+  const r = await syncLedger(address);
+  const m = new Map<string, bigint>();
+  for (const e of r.allEntries) {
+    const alloc = BigInt(e.allocatedSompi ?? '0');
+    if (alloc > 0n) m.set(e.utxoKey, alloc);
+  }
+  return m;
+}
+
+/**
+ * After a send consumes partially-locked coins, move their IOU allocations onto the
+ * change UTXO so the backing record survives the spend. Called post-broadcast.
+ * changeUtxoKey = `${newTxId}:${changeIndex}`. changeAmountSompi is the change output value.
+ */
+export async function reanchorAllocations(
+  spentKeys: string[],
+  newTxId: string,
+  changeIndex: number,
+  changeAmountSompi: string,
+): Promise<void> {
+  const ledger = await loadLedger();
+  const moved: { iouId: string; sompi: string }[] = [];
+  for (const key of spentKeys) {
+    const e = ledger.get(key);
+    if (e?.allocations && e.allocations.length) {
+      for (const a of e.allocations) moved.push({ iouId: a.iouId, sompi: a.sompi });
+    }
+    // The spent coin is gone on L1; drop its ledger entry now (sync would anyway).
+    ledger.delete(key);
+  }
+  if (moved.length === 0) { await saveLedger(ledger); return; }
+
+  const changeKey = `${newTxId}:${changeIndex}`;
+  const totalMoved = moved.reduce((acc, a) => acc + BigInt(a.sompi), 0n);
+  const existing = ledger.get(changeKey);
+  if (existing) {
+    existing.allocations = [ ...(existing.allocations ?? []), ...moved ];
+    existing.allocatedSompi = String(BigInt(existing.allocatedSompi ?? '0') + totalMoved);
+    if (BigInt(existing.allocatedSompi) >= BigInt(existing.amountSompi)) existing.status = 'iou-allocated';
+  } else {
+    // Change UTXO not yet in ledger (pre-sync) — seed it so allocations aren't lost.
+    const [txId, idxStr] = changeKey.split(':');
+    ledger.set(changeKey, {
+      utxoKey: changeKey,
+      txId,
+      index: Number(idxStr),
+      amountSompi: String(changeAmountSompi),
+      status: BigInt(totalMoved) >= BigInt(changeAmountSompi || '0') ? 'iou-allocated' : 'free',
+      allocatedSompi: String(totalMoved),
+      allocations: moved,
+    });
+  }
+  await saveLedger(ledger);
+  console.log(`[UTXO-Ledger] Re-anchored ${moved.length} allocation(s) (${Number(totalMoved) / 1e8} KAS) onto ${changeKey}`);
 }
 
 export async function syncLedger(address: string): Promise<SpendableResult> {
@@ -181,6 +256,8 @@ export async function syncLedger(address: string): Promise<SpendableResult> {
         amountSompi: String(amount),
         status: 'free',
         covenantWarning: !covenantCheck,
+        isCoinbase: (u.utxoEntry?.isCoinbase ?? u.isCoinbase) || false,
+        blockDaaScore: String(u.utxoEntry?.blockDaaScore ?? u.blockDaaScore ?? '0'),
       });
     }
   }
@@ -194,14 +271,16 @@ export async function syncLedger(address: string): Promise<SpendableResult> {
   }
 
   if (isPrimary) await saveLedger(ledger);
-  return computeBalances(ledger);
+  const vdaa = await getVirtualDaaScore(apiBase);
+  return computeBalances(ledger, vdaa);
 }
 
 // ============================================================================
 // BALANCE COMPUTATION
 // ============================================================================
 
-function computeBalances(ledger: Map<string, LedgerEntry>): SpendableResult {
+function computeBalances(ledger: Map<string, LedgerEntry>, virtualDaaScore?: bigint | null): SpendableResult {
+  const COINBASE_MATURITY = 100n;
   let totalBalance = 0n;
   let committedBalance = 0n;
   let iouAllocated = 0n;
@@ -211,21 +290,29 @@ function computeBalances(ledger: Map<string, LedgerEntry>): SpendableResult {
 
   for (const entry of ledger.values()) {
     const amt = BigInt(entry.amountSompi);
+    const alloc = BigInt(entry.allocatedSompi ?? '0');
     totalBalance += amt;
     allEntries.push(entry);
 
-    switch (entry.status) {
-      case 'free':
-        spendableBalance += amt;
-        freeUtxos.push(entry);
-        break;
-      case 'iou-allocated':
-        iouAllocated += amt;
-        break;
-      case 'collateral-committed':
-      case 'collateral-locked':
-        committedBalance += amt;
-        break;
+    if (entry.status === 'collateral-committed' || entry.status === 'collateral-locked') {
+      // Whole coin bound to FROST collateral — unavailable.
+      committedBalance += amt;
+      continue;
+    }
+
+    // Immature coinbase — network would reject a spend; treat as unavailable.
+    if (entry.isCoinbase && virtualDaaScore != null && entry.blockDaaScore != null) {
+      const age = virtualDaaScore - BigInt(entry.blockDaaScore);
+      if (age < COINBASE_MATURITY) continue;
+    }
+
+    // IOU partial locking: allocated portion frozen, remainder spendable.
+    iouAllocated += alloc;
+    const freeRem = amt - alloc;
+    if (freeRem > 0n) {
+      spendableBalance += freeRem;
+      // Emit remainder amount so the send path only sees the unlocked slice.
+      freeUtxos.push({ ...entry, amountSompi: String(freeRem) });
     }
   }
 
@@ -357,36 +444,42 @@ export async function allocateForIOU(
   address: string,
   amountSompi: bigint,
   iouId: string
-): Promise<{ success: boolean; allocatedKeys: string[]; error?: string }> {
+): Promise<{ success: boolean; allocations: { tag: string; amountSompi: string }[]; error?: string }> {
   const result = await syncLedger(address);
 
   if (result.spendableBalance < amountSompi) {
     return {
       success: false,
-      allocatedKeys: [],
+      allocations: [],
       error: `Insufficient free balance for IOU. Have ${Number(result.spendableBalance) / 1e8} KASPA free, need ${Number(amountSompi) / 1e8} KASPA. Settle existing IOUs to free up funds.`,
     };
   }
 
   const ledger = await loadLedger();
   let remaining = amountSompi;
-  const allocatedKeys: string[] = [];
+  const allocations: { tag: string; amountSompi: string }[] = [];
 
-  const freeEntries = Array.from(ledger.values())
-    .filter(e => e.status === 'free')
-    .sort((a, b) => Number(BigInt(a.amountSompi) - BigInt(b.amountSompi)));
+  // Partial allocation: take from each coin's FREE remainder (amount - already-allocated).
+  // Collateral coins are skipped (whole-coin FROST bound). IOU locks are sompi-level.
+  const candidates = Array.from(ledger.values())
+    .filter(e => e.status !== 'collateral-committed' && e.status !== 'collateral-locked')
+    .map(e => ({ e, free: BigInt(e.amountSompi) - BigInt(e.allocatedSompi ?? '0') }))
+    .filter(x => x.free > 0n)
+    .sort((a, b) => Number(a.free - b.free));
 
-  for (const entry of freeEntries) {
+  for (const { e, free } of candidates) {
     if (remaining <= 0n) break;
-    entry.status = 'iou-allocated';
-    entry.commitReason = iouId;
-    entry.committedAt = Date.now();
-    allocatedKeys.push(entry.utxoKey);
-    remaining -= BigInt(entry.amountSompi);
+    const take = free >= remaining ? remaining : free;
+    e.allocatedSompi = String(BigInt(e.allocatedSompi ?? '0') + take);
+    e.allocations = [ ...(e.allocations ?? []), { iouId, sompi: String(take) } ];
+    if (BigInt(e.allocatedSompi) >= BigInt(e.amountSompi)) e.status = 'iou-allocated';
+    allocations.push({ tag: e.utxoKey, amountSompi: String(take) });
+    remaining -= take;
   }
 
   await saveLedger(ledger);
-  return { success: true, allocatedKeys };
+  console.log(`[UTXO-Ledger] IOU ${iouId}: locked ${Number(amountSompi) / 1e8} KAS across ${allocations.length} coin(s)`);
+  return { success: true, allocations };
 }
 
 /**
@@ -395,10 +488,20 @@ export async function allocateForIOU(
 export async function releaseIOU(iouId: string): Promise<void> {
   const ledger = await loadLedger();
   for (const entry of ledger.values()) {
-    if (entry.commitReason === iouId && entry.status === 'iou-allocated') {
+    if (!entry.allocations) continue;
+    const freed = entry.allocations
+      .filter(a => a.iouId === iouId)
+      .reduce((acc, a) => acc + BigInt(a.sompi), 0n);
+    if (freed === 0n) continue;
+    entry.allocations = entry.allocations.filter(a => a.iouId !== iouId);
+    entry.allocatedSompi = String(BigInt(entry.allocatedSompi ?? '0') - freed);
+    if (BigInt(entry.allocatedSompi) <= 0n) {
+      entry.allocatedSompi = '0';
+      entry.allocations = undefined;
+      if (entry.status === 'iou-allocated') entry.status = 'free';
+    } else if (entry.status === 'iou-allocated') {
+      // partially freed -> spendable remainder exists again
       entry.status = 'free';
-      entry.commitReason = undefined;
-      entry.committedAt = undefined;
     }
   }
   await saveLedger(ledger);
