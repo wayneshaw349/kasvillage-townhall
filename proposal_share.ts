@@ -221,7 +221,7 @@ export async function createProposal(
 
   // Encode as compact base64 for sharing
   const json = JSON.stringify(signedProposal);
-  const encoded = `kv1:${btoa(json)}`;
+  const encoded = `kv1:${b64e(json)}`;
 
   // Store locally
   await storeProposal(signedProposal, 'proposed');
@@ -233,14 +233,20 @@ export async function createProposal(
 // VERIFY & DECODE PROPOSAL
 // ============================================================================
 
+/* B64-UTF8: RN btoa/atob are Latin-1 only - unicode names (emoji) crash them */
+function b64e(str: string): string { return btoa(unescape(encodeURIComponent(str))); }
+function b64d(b64: string): string { try { return decodeURIComponent(escape(atob(b64))); } catch { return atob(b64); } }
+
 export function decodeProposal(encoded: string): TradeProposal | null {
   try {
     let json: string;
     /* KV1-EXTRACT: tolerate full share text - pull kv1: token from anywhere in paste */
-    const _m = (encoded || '').match(/kv1:[A-Za-z0-9+\/=]+/);
+    /* KV1-WS: base64 may be line-wrapped by share sheets - join whitespace inside token */
+    const _joined = (encoded || '').replace(/(kv1:[A-Za-z0-9+\/=]*)(?:\s+([A-Za-z0-9+\/=]{8,}))+/g, (m) => m.replace(/\s+/g, ''));
+    const _m = _joined.match(/kv1:[A-Za-z0-9+\/=]+/);
     if (_m) encoded = _m[0];
     if (encoded.startsWith('kv1:')) {
-      json = atob(encoded.slice(4));
+      json = b64d(encoded.slice(4));
     } else if (encoded.startsWith('{')) {
       json = encoded;
     } else {
@@ -251,6 +257,38 @@ export function decodeProposal(encoded: string): TradeProposal | null {
     return parsed as TradeProposal;
   } catch {
     return null;
+  }
+}
+
+/* KV1A-DECODE: acceptance (counter-signed proposal) decode + verify */
+export function decodeAcceptance(encoded: string): CounterSignedProposal | null {
+  try {
+    const _joined = (encoded || '').replace(/(kv1a:[A-Za-z0-9+\/=]*)(?:\s+([A-Za-z0-9+\/=]{8,}))+/g, (m) => m.replace(/\s+/g, ''));
+    const _m = _joined.match(/kv1a:[A-Za-z0-9+\/=]+/);
+    if (!_m) return null;
+    const parsed = JSON.parse(b64d(_m[0].slice(5)));
+    if (!parsed.proposal || !parsed.counterSig || !parsed.counterPubkey) return null;
+    return parsed as CounterSignedProposal;
+  } catch {
+    return null;
+  }
+}
+
+export function verifyAcceptance(a: CounterSignedProposal): { valid: boolean; error?: string } {
+  const inner = verifyProposal(a.proposal);
+  if (!inner.valid) return { valid: false, error: 'Inner proposal invalid: ' + (inner.error || '') };
+  try {
+    const hash = hashCounterSign(a.proposal);
+    const sig = (secp256k1 as any).Signature.fromCompact(hexToBytes(a.counterSig));
+    for (const rec of [0, 1]) {
+      try {
+        const pk = bytesToHex(sig.addRecoveryBit(rec).recoverPublicKey(hash).toRawBytes(true));
+        if (pk.startsWith(a.counterPubkey)) return { valid: true };
+      } catch {}
+    }
+    return { valid: false, error: 'Counter-signature does not match acceptor pubkey' };
+  } catch (e: any) {
+    return { valid: false, error: 'Counter-sig verify failed: ' + e.message };
   }
 }
 
@@ -324,7 +362,7 @@ export async function acceptProposal(
 
   // Encode for sharing back
   const json = JSON.stringify(counterSigned);
-  const encoded = `kv1a:${btoa(json)}`;
+  const encoded = `kv1a:${b64e(json)}`;
 
   // Allocate UTXOs for this accepted proposal (prevents double-spend)
   try {
