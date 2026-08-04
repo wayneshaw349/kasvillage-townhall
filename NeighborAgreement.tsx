@@ -125,7 +125,7 @@ import { secp256k1 as secpCurve } from '@noble/curves/secp256k1';
 import { proposeAgreement, acceptAgreement, confirmAgreement, getAgreementStatus, recordCollateral, listMyAgreements, queryAgreementsFromArweave, queryCounterpartyAgreed, inscribeAgreementToArweave, postFrostR, getFrostR, listProposedAgreements, submitPartialSig } from './townhall_client';
 import { getUserStats } from './wallet_registration_v2';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { upsertAgreement as laUpsert, advanceStep as laStep, abortAgreement as laAbort, recordArweaveTx as laArTx, listActiveAgreements, derivePhase, routeForPhase } from './local_agreements';
+import { upsertAgreement as laUpsert, advanceStep as laStep, abortAgreement as laAbort, recordArweaveTx as laArTx, listActiveAgreements, derivePhase, routeForPhase, recordPayload } from './local_agreements';
 import * as Clipboard from 'expo-clipboard';
 
 import {
@@ -1074,10 +1074,19 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   const [stagedCosign, setStagedCosign] = useState('');
   const [stagedKill, setStagedKill] = useState('');
   const [stagedSig, setStagedSig] = useState('');
+  const [dossierAgrId, setDossierAgrId] = useState<string | null>(null);
+  const [dossierData, setDossierData] = useState<any>(null);
+  const [dossierExplain, setDossierExplain] = useState<string | null>(null); // which slot's explanation is expanded
+  const [shipAgrId, setShipAgrId] = useState<string | null>(null);
+  const [shipCarrier, setShipCarrier] = useState<'UPS'|'USPS'|'FedEx'|'DHL'>('UPS');
+  const [shipPickup, setShipPickup] = useState('');   // carrier pickup point (recommended, not a home address)
+  const [shipWeight, setShipWeight] = useState('');   // declared weight/dims
+  const [shipTracking, setShipTracking] = useState(''); // tracking number after buying label externally
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [manualAgrId, setManualAgrId] = useState('');
   const [resumeAsCollateral, setResumeAsCollateral] = useState(false);
   const collateralRef = React.useRef(false);
+  const pastedTypeRef = React.useRef<'simple' | 'trade' | null>(null); /* TYPE-FIELD: explicit type from the last parsed KV proposal */
   const [manualLookupResult, setManualLookupResult] = useState<any>(null);
   const [manualVerCode, setManualVerCode] = useState('');
   const [frostActiveList, setFrostActiveList] = useState<FrostActiveEntry[]>([]);
@@ -1117,7 +1126,24 @@ function ceremonyStatus(phase: string, role: 'buyer' | 'seller' | null): { stepN
   }
 }
 
-const TurnBanner: React.FC<{ phase: string; role: 'buyer' | 'seller' | null }> = ({ phase, role }) => {
+const SHIP_CARRIER_URL: Record<string, string> = {
+  UPS: 'https://www.ups.com/ship',
+  USPS: 'https://cns.usps.com',
+  FedEx: 'https://www.fedex.com/en-us/online/rating.html',
+  DHL: 'https://mydhl.express.dhl',
+};
+
+const DOSSIER_EXPLAIN: Record<string, string> = {
+  proposal: 'AN OFFER TO TRADE. Lists who is buying, who is selling, the amounts, and is signed by the proposer. Pasting it lets you review and accept. Accepting means you agree to lock your collateral. You are NOT sending money by pasting - only by funding later.',
+  templates: 'THE SELLER\'S REFUND + KILL TEMPLATES. The refund lets the seller reclaim their own collateral if the trade times out. The kill neutralises that refund once you fund. Co-signing these does NOT send your money - it lets the seller fund first. These transactions can only pay the funder or return money to escrow; they cannot pay a stranger, and the refund cannot fire before the agreed timeout.',
+  cosig: 'YOUR CO-SIGNATURES on the refund and kill. Sending these back lets the seller fund the escrow. You are NOT sending money at this step.',
+  response: 'THE SELLER\'S SIGNATURE on the release. Combined with yours it completes the payout to the seller. This is the final signing step before funds move.',
+  kill: 'A TRANSACTION THAT ONLY MOVES ESCROW MONEY BACK TO ESCROW - it pays no one. It exists so the seller\'s refund is cancelled once you fund. Safe to hold; broadcasting it costs nothing and cannot take anyone\'s money.',
+};
+// Note: these explain what each payload TYPE does. The app\'s guards (signature check,
+// template verification, kill-gate) verify the actual contents when you act.
+
+const TurnBanner: React.FC<{ phase: string; role: 'buyer' | 'seller' | null; onPaste?: () => void }> = ({ phase, role, onPaste }) => {
   const st = ceremonyStatus(phase, role);
   if (phase === 'complete' || phase === 'aborted' || !role) return null;
   return (
@@ -1127,6 +1153,7 @@ const TurnBanner: React.FC<{ phase: string; role: 'buyer' | 'seller' | null }> =
         <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: st.mine ? '#15803d' : '#94a3b8' }}>Step {st.stepNum} of {st.total}</Text>
       </View>
       <Text style={{ fontSize: rs.font(11), color: st.mine ? '#15803d' : '#64748b', marginTop: 3 }}>{st.label}</Text>
+      {onPaste ? (<TouchableOpacity onPress={onPaste} style={{ marginTop: 6, backgroundColor: '#4f46e5', borderRadius: 8, paddingVertical: 8, alignItems: 'center' }}><Text style={{ color: '#fff', fontSize: rs.font(11), fontWeight: 'bold' }}>Paste from Clipboard</Text></TouchableOpacity>) : null}
     </View>
   );
 };
@@ -2312,8 +2339,8 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
           _phase = _ph.phase; _bal = _ph.balanceKas; _b = _ph.buyerKas; _se = _ph.sellerKas; _frost = _ph.frostAddress;
           _route = _mod.routeForPhase(_ph.phase);
         } catch (e) { console.warn('[LocalList] derivePhase failed', _a.agrId, e); _b = Number(_a.buyerAmountSompi || 0) / 1e8; _se = Number(_a.sellerAmountSompi || 0) / 1e8; }
-        const _role = _a.origin === 'mine' ? 'buyer' : (_a.role || 'seller');
-        _rows.push({ agrId: _a.agrId, role: _role, phase: _phase || _a.step || 'proposed', route: _route, balanceKas: _bal, buyerKas: _b, sellerKas: _se, frostAddress: _frost, network: _a.network || 'testnet-10', frostCounter: _a.frostCounter, description: _a.description || _a.agrId, updatedAt: _a.updatedAt || _a.createdAt || 0 });
+        const _role = _a.role || (_a.origin === 'mine' ? 'buyer' : 'seller'); /* ROLE-LABEL-FIX: stored role wins; origin fallback only */
+        _rows.push({ agrId: _a.agrId, role: _role, phase: _phase || _a.step || 'proposed', route: _route, balanceKas: _bal, buyerKas: _b, sellerKas: _se, frostAddress: _frost, network: _a.network || 'testnet-10', frostCounter: _a.frostCounter, buyerPubkey: _a.buyerPubkey || '', sellerPubkey: _a.sellerPubkey || '', description: _a.description || _a.agrId /* RESUME-PUBKEY-FIX */, updatedAt: _a.updatedAt || _a.createdAt || 0 });
       }
       _rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
       setLocalList(_rows);
@@ -2322,17 +2349,103 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
     setLocalLoading(false);
   };
 
+  const handleBannerPaste = async () => { /* BANNER-PASTE: one-tap clipboard routing for ceremony payloads */
+    try {
+      const txt = (await Clipboard.getStringAsync()) || '';
+      const _rt = txt.trim();
+      if (!_rt) { Alert.alert('Clipboard Empty', 'Copy the payload from your DM first.'); return; }
+      if (_rt.startsWith('KV-STEP-')) {
+        const _rnl = _rt.indexOf('\n');
+        const _rhdr = _rnl >= 0 ? _rt.slice(0, _rnl) : _rt;
+        const _rbody = _rnl >= 0 ? _rt.slice(_rnl + 1).trim() : '';
+        const _rm = _rhdr.match(/^KV-STEP-(\d+)-([A-Z]+)\|(.+)$/);
+        if (_rm && _rbody) {
+          const _rkind = _rm[2]; const _rhAgr = _rm[3].trim();
+          const _rcur = contract.agreementId || '';
+          if (_rhAgr && _rcur && _rhAgr !== _rcur) { Alert.alert('Different Agreement', 'This payload is for ' + _rhAgr + ' but ' + _rcur + ' is open. Switch via the Active tab first.'); return; }
+          if (_rkind === 'TEMPLATES') { recordPayload((_rhAgr || contract.agreementId || ''), 'templates', _rbody, 'in').catch(()=>{}); setStagedCosign(_rbody); if (!role) setRole('buyer'); setStep(3); Alert.alert('Routed', 'Seller templates staged. Review and co-sign below.'); return; }
+          if (_rkind === 'COSIG') { recordPayload((_rhAgr || contract.agreementId || ''), 'cosig', _rbody, 'in').catch(()=>{}); setStagedSig(_rbody); if (!role) setRole('seller'); setStep(3); Alert.alert('Routed', 'Buyer co-signature staged.'); return; }
+          if (_rkind === 'RESPONSE') { recordPayload((_rhAgr || contract.agreementId || ''), 'response', _rbody, 'in').catch(()=>{}); setSellerResponseB64(_rbody); if (!role) setRole('buyer'); setStep(5); Alert.alert('Routed', 'Seller response staged.'); return; }
+          if (_rkind === 'TEMPLATE') { if (!role) setRole('seller'); setStep(5); Alert.alert('Routed', 'Template payload staged - continue at release.'); return; }
+        }
+        Alert.alert('Unrecognized Payload', 'KV-STEP header found but could not be parsed. Re-copy the full message.');
+        return;
+      }
+      if (_rt.indexOf('KV|') >= 0) { /* BANNER-PROPOSAL-ROUTE: send to the reviewed accept path, never auto-accept */
+        setStep(3);
+        Alert.alert('Proposal Detected', 'This looks like a buyer proposal. It is on your clipboard - paste it into the blue "Paste Buyer Proposal" box below to review the signature and accept. (Proposals are reviewed and accepted deliberately, not routed automatically.)');
+        return;
+      }
+      Alert.alert('Not a Ceremony Payload', 'Clipboard does not start with KV-STEP-. For a proposal (KV|...), use the blue Paste Buyer Proposal box.');
+    } catch (e) { Alert.alert('Paste Failed', e instanceof Error ? e.message : String(e)); }
+  };
+
+  const buildShipMessage = (): string => {
+    const lines = [];
+    lines.push('KasVillage shipping plan (recommended practice - not verified by the app):');
+    lines.push('');
+    lines.push('Carrier: ' + shipCarrier);
+    lines.push('Deliver to PICKUP POINT (not a home): ' + (shipPickup || '[buyer to fill in a ' + shipCarrier + ' pickup location near the buyer]'));
+    if (shipWeight) lines.push('Declared weight/size: ' + shipWeight);
+    if (shipTracking) lines.push('Tracking #: ' + shipTracking);
+    lines.push('');
+    lines.push('Steps: buyer buys the label to the pickup point above and sends it here; seller ships the item at a ' + shipCarrier + ' location using that label; buyer collects at the pickup point with ID.');
+    lines.push('Optional: seller records one continuous video (item -> box -> label -> sealed -> handoff) and DMs it to the buyer. The app never stores video.');
+    lines.push('');
+    lines.push('Note: these are steps you carry out yourselves. The app does not verify shipping. Your enforced protection is the collateral + reputation system.');
+    return lines.join('\n');
+  };
+
+  const loadDossier = async (agrId: string) => {
+    try {
+      const _m = await import('./local_agreements');
+      const _rec = await _m.getAgreement(agrId);
+      const _pp = (_rec && _rec.pastedPayloads) ? _rec.pastedPayloads : {};
+      const slots: any[] = [];
+      if (_rec && _rec.proposalBody) slots.push({ kind: 'proposal', text: _rec.proposalBody, dir: _rec.origin === 'mine' ? 'out' : 'in', at: _rec.createdAt });
+      (['templates','cosig','response','kill'] as const).forEach(k => {
+        const e = (_pp as any)[k];
+        if (e && e.text) slots.push({ kind: k, text: e.text, dir: e.dir, at: e.at });
+      });
+      setDossierData({ agrId, description: _rec?.description || agrId.slice(0, 12), slots });
+      setDossierExplain(null);
+      setDossierAgrId(agrId);
+    } catch (e) { Alert.alert('Dossier', 'Could not load payloads: ' + (e instanceof Error ? e.message : String(e))); }
+  };
+
   const resumeLocal = async (row: any) => {
     try {
+      // [RESUME-ROLE-GUARD] If the stored role is not a real buyer/seller, the record is
+      // ambiguous. Branch on escrow balance: funded => NEVER restart (would strand funds),
+      // recover from the original proposal paste. Empty => safe to start over.
+      if (row.role !== 'buyer' && row.role !== 'seller') {
+        const _rb = Number(row.balanceKas || 0);
+        if (_rb > 0) {
+          console.warn('[RESUME-ROLE-GUARD] role unresolved but escrow FUNDED', _rb, '- blocking restart, must recover');
+          Alert.alert(
+            'Do Not Start Over - Escrow Is Funded',
+            'This agreement holds ' + _rb.toFixed(2) + ' KAS in escrow, but your role could not be determined from the stored record. Do NOT create a new agreement - that would risk the funds. Recover by pasting the ORIGINAL proposal from your DM, which restores buyer/seller identity. If you cannot find it, ask the other party to resend it.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+        console.warn('[RESUME-ROLE-GUARD] role unresolved, escrow empty - safe to restart');
+        Alert.alert(
+          'Could Not Determine Your Role',
+          'This agreement could not be read as buyer or seller, and nothing is funded in escrow. It is safe to start over - re-paste the original proposal from your DM, or ask the other party to resend it.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
       if (row.route === 'release') {
-        setContract({ agreementId: row.agrId, multisigAddress: row.frostAddress, frostData: { address: row.frostAddress, network: row.network, frostCounter: row.frostCounter }, itemPriceKas: row.buyerKas, sellerCommitmentKas: row.sellerKas } as any);
+        setContract({ agreementId: row.agrId, multisigAddress: row.frostAddress, frostData: { address: row.frostAddress, network: row.network, frostCounter: row.frostCounter }, itemPriceKas: row.buyerKas, sellerCommitmentKas: row.sellerKas, buyerPubkey: row.buyerPubkey || '', sellerPubkey: row.sellerPubkey || '' } as any);
         setRole(row.role); setStep(5);
         Alert.alert('Resumed at Release', 'Escrow holds ' + (row.balanceKas || 0).toFixed(2) + ' KAS.');
         return;
       }
       if (row.route === 'done') { Alert.alert('Already Complete', 'This agreement is finished (escrow ' + (row.balanceKas || 0).toFixed(2) + ' KAS).'); return; }
-      setContract({ agreementId: row.agrId, multisigAddress: row.frostAddress, frostData: { address: row.frostAddress, network: row.network, frostCounter: row.frostCounter }, itemPriceKas: row.buyerKas, sellerCommitmentKas: row.sellerKas, buyerPubkey: '', sellerPubkey: '' } as any);
-      setRole(row.role); setStep(row.route === 'poll' ? 3 : 4);
+      setContract({ agreementId: row.agrId, multisigAddress: row.frostAddress, frostData: { address: row.frostAddress, network: row.network, frostCounter: row.frostCounter }, itemPriceKas: row.buyerKas, sellerCommitmentKas: row.sellerKas, buyerPubkey: row.buyerPubkey || '', sellerPubkey: row.sellerPubkey || '' } as any);
+      setRole(row.role); setStep(row.route === 'poll' || row.route === 'inbox' ? 3 : 4); /* INBOX-ROUTE-FIX: paste/ceremony phases resume at step 3, never release */
       Alert.alert('Resuming — ' + String(row.phase).replace('_', ' '), 'Escrow at ' + (row.balanceKas || 0).toFixed(2) + ' KAS. Funding continues automatically.');
     } catch (e) { console.warn('[LocalList] resume failed:', e); Alert.alert('Error', e instanceof Error ? e.message : 'Resume failed'); }
   };
@@ -2354,7 +2467,8 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
       // k born HERE — canonical function
       // Cancel/Split mode: use buildReleaseTemplateFn with multiple outputs
       if (releaseMode === 'cancel' || releaseMode === 'split') {
-        const _bx = (contract.buyerPubkey || '').length === 66 ? (contract.buyerPubkey || '').slice(2) : (contract.buyerPubkey || '');
+        if (!(contract.buyerPubkey || '').trim() || !(contract.sellerPubkey || '').trim()) { Alert.alert('Missing Party Keys', 'This resumed agreement lacks the party pubkeys, so a release template cannot be built safely. Re-paste the ORIGINAL proposal from your DM to restore them - the escrow is untouched.'); setIsLoading(false); return; }
+      const _bx = (contract.buyerPubkey || '').length === 66 ? (contract.buyerPubkey || '').slice(2) : (contract.buyerPubkey || '');
         const _sx = (contract.sellerPubkey || '').length === 66 ? (contract.sellerPubkey || '').slice(2) : (contract.sellerPubkey || '');
 // nonces are generated inside buildReleaseTemplate, after the UTXO sort.
 const { template: _cTmpl, description: _cDesc, nonces: _cNonces } = buildReleaseTemplateFn({
@@ -2667,9 +2781,24 @@ const nextActionMsg = (ph: string, rl: string): string => {
           const _exPh = await _laMod.derivePhase(_agrId);
           const _exRoute = _laMod.routeForPhase(_exPh.phase);
           console.log('[Accept-Resume] held agreement', _agrId, 'step:', _exRec.step, 'phase:', _exPh.phase, 'route:', _exRoute);
+          // [RESUME-ROLE-GUARD] stored role must be real; branch on escrow balance.
+          {
+            const _arRole = (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || ''));
+            if (_arRole !== 'buyer' && _arRole !== 'seller') {
+              const _arb = Number(_exPh.balanceKas || 0);
+              if (_arb > 0) {
+                console.warn('[RESUME-ROLE-GUARD] accept-resume: role unresolved but FUNDED', _arb, '- blocking restart');
+                Alert.alert('Do Not Start Over - Escrow Is Funded', 'This agreement holds ' + _arb.toFixed(2) + ' KAS in escrow, but your role could not be determined. Do NOT create a new agreement. Recover by pasting the ORIGINAL proposal from your DM. If you cannot find it, ask the other party to resend it.', [{ text: 'OK' }]);
+                return;
+              }
+              console.warn('[RESUME-ROLE-GUARD] accept-resume: role unresolved, escrow empty - safe to restart');
+              Alert.alert('Could Not Determine Your Role', 'This agreement could not be read as buyer or seller, and nothing is funded. It is safe to start over - re-paste the original proposal from your DM.', [{ text: 'OK' }]);
+              return;
+            }
+          }
           if (_exRoute === 'release') { setContract({ agreementId: _agrId, multisigAddress: _exPh.frostAddress, frostData: { address: _exPh.frostAddress, network: _exRec.network || 'testnet-10', frostCounter: _exRec.frostCounter }, itemPriceKas: _exPh.buyerKas, sellerCommitmentKas: _exPh.sellerKas } as any); setStep(5); Alert.alert('Resumed at Release', 'Escrow holds ' + _exPh.balanceKas.toFixed(2) + ' KAS.'); return; }
           if (_exRoute === 'done') { Alert.alert('Already Complete', 'This agreement is finished.'); return; }
-          setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
+          setStep(_exRoute === 'inbox' || _exRoute === 'poll' ? 3 : 4); /* INBOX-ROUTE-FIX */ Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
         }
       } catch (_rgE) { console.warn('[Accept-Resume] guard failed, continuing to accept:', _rgE); }
     }
@@ -2753,7 +2882,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
       const normalized = normalizeAgreement(agreement);
       // Enrich: if counterparty missing, use the proposer pubkey (we know we're the acceptor)
       if (!normalized.counterpartyPubkey) {
-        normalized.counterpartyPubkey = myPubkey;
+        normalized.counterpartyPubkey = (normalized.pubkey && normalized.pubkey !== myPubkey) ? normalized.pubkey : ''; /* CP-SELF-FIX: counterparty = proposer, never self */
         // Swap: normalized.pubkey is the proposer (buyer), we are the acceptor (seller)
       }
       // Enrich: fetch buyer/seller split from Goldsky if missing
@@ -2770,7 +2899,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
             normalized.sellerAmountSompi = parseInt(gMap['KV-SellerAmount'] || '0', 10);
             if (!normalized.counterpartyPubkey || normalized.counterpartyPubkey === myPubkey) {
               // We are acceptor, so counterparty = KV-Counterparty from Arweave
-              normalized.counterpartyPubkey = gMap['KV-Counterparty'] || myPubkey;
+              normalized.counterpartyPubkey = gMap['KV-Counterparty'] || ((normalized.pubkey && normalized.pubkey !== myPubkey) ? normalized.pubkey : ''); /* CP-SELF-FIX */
               normalized.pubkey = gMap['KV-Pubkey'] || normalized.pubkey;
             }
             console.log('[Canonical-Enrich] Goldsky: buyer=', normalized.buyerAmountSompi, 'seller=', normalized.sellerAmountSompi, 'pub=', normalized.pubkey?.slice(0,16), 'cp=', normalized.counterpartyPubkey?.slice(0,16));
@@ -2791,6 +2920,21 @@ const nextActionMsg = (ph: string, rl: string): string => {
       // Override role from canonical
       if (role && canon.role && role !== canon.role) { Alert.alert('Role Mismatch', 'You selected ' + String(role).toUpperCase() + ', but this agreement lists your wallet as the ' + String(canon.role).toUpperCase() + '. Check that you opened the right agreement.'); setIsLoading(false); setAcceptingId(null); return; } /* ROLE-MATCH-GUARD */
       setRole(canon.role as any);
+      // [ROLE-GUARD] Canonical must resolve a real role before we derive FROST + auto-send.
+      // A missing/unknown role means the proposal could not be read as buyer-or-seller
+      // (e.g. counterparty pubkey empty or == self). Proceeding would derive an escrow
+      // and stall at sendsFirst=false/mySendAmount=0. FROST is not derived yet here, so
+      // escrow is empty by definition => safe to stop and re-paste. No funds at risk.
+      if (canon.role !== 'buyer' && canon.role !== 'seller') {
+        console.warn('[ROLE-GUARD] canonical role unresolved:', canon.role, '- blocking derivation (escrow empty, safe to restart)');
+        Alert.alert(
+          'Could Not Determine Your Role',
+          'This proposal could not be read as buyer or seller - the counterparty identity is missing or ambiguous. Nothing has been funded, so it is safe to start over. Re-paste the original proposal from the DM, or ask the other party to resend it.',
+          [{ text: 'OK' }]
+        );
+        setIsLoading(false);
+        return;
+      }
       console.log('[Neighbor] BOTH AGREED � deriving FROST and auto-sending collateral');
       if (true) {
         // Party A = seller (proposer), Party B = buyer (acceptor)
@@ -3045,6 +3189,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                 createdAt: Date.now(),
               }));
               try { await Clipboard.setStringAsync('KV-STEP-2-TEMPLATES|' + agrId + '\nKasVillage refund+kill templates. In Neighbor Agreement, paste ALL of this into the box titled "Paste seller refund template" (amber), co-sign, and send your signature back.\n\n' + _refund.templateB64 + '|' + _kill.templateB64); } catch {}
+              recordPayload(agrId, 'templates', _refund.templateB64 + '|' + _kill.templateB64, 'out').catch(()=>{});
       await SecureStore.setItemAsync('kv_refund_b64_' + agrId, _refund.templateB64 + '|' + _kill.templateB64).catch(() => {}); // REUSE-GUARD store
               console.log('[Refund] Template built + persisted. lockTime =', String(_rNow + BigInt(canon.timeoutN || 0)), '— awaiting buyer co-signature.');
       laUpsert({ agrId, predictedFundingTxId: txResult.predictedTxId }).then(() => laStep(agrId, 'templates_built')).catch(() => {});
@@ -3111,19 +3256,19 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
           } catch (e) { console.warn('[Neighbor] Arweave accept inscription failed:', e); }
 
           // Reduce spendable (input cap) — Agreed-Send poll handles auto-send
-          const myLockAmount = BigInt(Math.floor(sellerAmount * 1e8));
+          const myLockAmount = BigInt(Math.floor(((canon?.role === 'buyer' ? buyerKas : sellerKas) || 0) * 1e8)); /* LOCK-OWN-SHARE: acceptor locks only their side, never the total */
           if (myLockAmount > 0n) {
             try {
               // commitForCollateral from utxo_ledger (canonicalCommit imported statically)
               const sellerTagResult = await canonicalCommit(wallet.address, myLockAmount, agrId, canon?.role || 'seller', myPubkey || '');
           console.log('[UTXO-Tag] Seller accept tagged:', sellerTagResult.success, 'role:', canon?.role, 'hashes:', sellerTagResult.commitHashes?.length);
-              console.log('[Neighbor] Spendable reduced by', sellerAmount, 'KASPA for', agrId);
+              console.log('[Neighbor] Spendable reduced by', Number(myLockAmount) / 1e8, 'KASPA for', agrId);
             } catch (e) { console.warn('[Neighbor] Ledger commit skipped:', e); }
           }
           // Set state and go to step 3 — poll handles the rest
           // Role already set by canonical module above
           // setRole(iAmProposer ? 'seller' : 'buyer');
-          setAgreementType('trade');
+          { const _t = pastedTypeRef.current || 'trade'; setAgreementType(_t); if (_t === 'simple') console.log('[Type-Field] Collateral agreement accepted — releaseMode will be cancel (return-both)'); } /* TYPE-FIELD: explicit type from signed proposal; effect at agreementType==='simple' flips releaseMode to cancel */
           setStep(3);
           // AUTO-CONFIRM on TownHall — breaks the Arweave polling deadlock
           try {
@@ -3425,6 +3570,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                         const _myPk = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(_wallet.privKeyHex));
                         const _kvClean = _raw.substring(_kvStart).split('\n')[0].replace(/\s*Sent from my iPhone.*$/i, '').trim();
                         const _p = parseProposal(_kvClean);
+                        pastedTypeRef.current = (_p as any)?.agreementType === 'simple' ? 'simple' : ((_p as any)?.agreementType === 'trade' ? 'trade' : null); if (pastedTypeRef.current) console.log('[Type-Field] resume pasted agreementType:', pastedTypeRef.current);
                         if (!_p) { Alert.alert('Invalid', 'Could not parse that proposal.'); setIsLoading(false); return; }
                         // Same gate as accept: the buyer's signature over the body is the only integrity check.
                         if (_p.valid === false) { Alert.alert('Proposal Rejected', _p.error || 'Signature invalid — do not proceed.'); setIsLoading(false); return; }
@@ -3473,8 +3619,11 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                         } catch (e) { console.warn('[Resume] UTXO query failed — assuming step 3:', e); }
                         if (role && role !== _role) { Alert.alert('Role Mismatch', 'You selected ' + String(role).toUpperCase() + ', but this proposal lists your wallet as the ' + String(_role).toUpperCase() + '. Check that you pasted the right agreement.'); setIsLoading(false); return; }
                         setRole(_role);
-                        setAgreementType(collateralRef.current ? 'simple' : 'trade');
-                        if (collateralRef.current) { setReleaseMode('cancel'); console.log('[Resume] Collateral mode: cancel (2 outputs)'); }
+                        /* TYPE-FIELD: explicit type from signed proposal is authoritative; toggle is manual override for pre-type records. Amount heuristic REMOVED — trades with seller collateral also dual-commit. */
+                        const _explicitType = (_p as any)?.agreementType as string | undefined;
+                        const _isColl = _explicitType === 'simple' ? true : (_explicitType === 'trade' ? collateralRef.current : (collateralRef.current || pastedTypeRef.current === 'simple'));
+                        setAgreementType(_isColl ? 'simple' : 'trade');
+                        if (_isColl) { setReleaseMode('cancel'); console.log('[Resume] Collateral detected (' + (collateralRef.current ? 'toggle' : 'dual-commitment') + ') - mode: cancel (2 outputs)'); }
                         collateralRef.current = false;
                         setResumeAsCollateral(false);
                         setContract({
@@ -3694,6 +3843,12 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                   </View>
                 )}
 
+                {/* INBOX-NOTICE: honest discovery-only framing */}
+                <View style={{ backgroundColor: '#f8fafc', borderColor: '#e2e8f0', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                  <Text style={{ fontSize: rs.font(10), color: '#64748b', lineHeight: rs.font(15) }}>
+                    Discovery view. The list below is this device's own record of your agreements. To act on one, tap it to resume, or paste its original proposal. The pasted proposal is the source of truth - the list is for finding and reopening, not for driving the deal.
+                  </Text>
+                </View>
                 {/* LOCAL-TABS: source of truth is local_agreements. Arweave inbox still runs in background. */}
                 <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8, alignItems: 'center' }}>
                   {[{k:'active',l:'Active'},{k:'buyer',l:'Buyer'},{k:'seller',l:'Seller'}].map(t => (
@@ -3709,7 +3864,8 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                   const _f = localList.filter(r => activeTab === 'active' ? true : r.role === activeTab);
                   if (_f.length === 0) return (<View style={{ backgroundColor: '#f5f5f4', borderRadius: 8, padding: 16, alignItems: 'center', marginBottom: 8 }}><Text style={{ color: '#78716c', fontSize: rs.font(11) }}>{localLoading ? 'Loading...' : 'No ' + (activeTab === 'active' ? 'active' : activeTab) + ' agreements'}</Text></View>);
                   return _f.map((r: any, i: number) => (
-                    <TouchableOpacity key={r.agrId + i} onPress={() => resumeLocal(r)} style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#c7d2fe', borderRadius: 12, padding: 12, marginBottom: 8 }}>
+                    <View key={r.agrId + i} style={{ marginBottom: 8 }}>
+                    <TouchableOpacity onPress={() => resumeLocal(r)} style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#c7d2fe', borderRadius: 12, padding: 12 }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: '#3730a3', flex: 1 }} numberOfLines={1}>{r.description}</Text>
                         <View style={{ backgroundColor: r.role === 'buyer' ? '#dcfce7' : '#dbeafe', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 6 }}>
@@ -3719,6 +3875,13 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                       <Text style={{ fontSize: rs.font(10), color: '#6366f1', marginTop: 4 }}>{String(r.phase).replace(/_/g, ' ')} - {(r.balanceKas || 0).toFixed(2)} KAS in escrow</Text>
                       <Text style={{ fontSize: rs.font(9), color: '#78716c', marginTop: 2 }}>{r.agrId}  -  buyer {r.buyerKas} / seller {r.sellerKas} KAS</Text>
                     </TouchableOpacity>
+                      <TouchableOpacity onPress={() => loadDossier(r.agrId)} style={{ marginTop: 4, backgroundColor: '#f1f5f9', borderRadius: 8, paddingVertical: 6, alignItems: 'center' }}>
+                        <Text style={{ fontSize: rs.font(10), color: '#4f46e5', fontWeight: 'bold' }}>📄 Payloads</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => setShipAgrId(r.agrId)} style={{ marginTop: 4, backgroundColor: '#f0f9ff', borderRadius: 8, paddingVertical: 6, alignItems: 'center' }}>
+                        <Text style={{ fontSize: rs.font(10), color: '#0369a1', fontWeight: 'bold' }}>📦 Shipping</Text>
+                      </TouchableOpacity>
+                    </View>
                   ));
                 })()}
                 {/* PASTE BUYER PROPOSAL */}
@@ -3745,10 +3908,10 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               const _rcur = contract.agreementId || '';
                               if (!_rcur) { Alert.alert('No Agreement Open', 'This payload belongs to ' + _rhAgr + '. Open that agreement first (Active tab or Resume), then paste again.'); return; }
                               if (_rhAgr && _rhAgr !== _rcur) { Alert.alert('Different Agreement', 'This payload is for ' + _rhAgr + ' but ' + _rcur + ' is open. Switch via the Active tab, then paste again.'); return; }
-                              if (_rkind === 'TEMPLATES') { setStagedCosign(_rbody); if (!role) setRole('buyer'); setStep(3); Alert.alert('Routed', 'Seller templates staged. Review and tap Co-sign when ready.'); return; }
-                              if (_rkind === 'COSIG') { setStagedSig(_rbody); if (!role) setRole('seller'); setStep(3); Alert.alert('Routed', 'Buyer co-signature staged. Review and tap Sign & Fund when ready.'); return; }
+                              if (_rkind === 'TEMPLATES') { recordPayload((_rhAgr || contract.agreementId || ''), 'templates', _rbody, 'in').catch(()=>{}); setStagedCosign(_rbody); if (!role) setRole('buyer'); setStep(3); Alert.alert('Routed', 'Seller templates staged. Review and tap Co-sign when ready.'); return; }
+                              if (_rkind === 'COSIG') { recordPayload((_rhAgr || contract.agreementId || ''), 'cosig', _rbody, 'in').catch(()=>{}); setStagedSig(_rbody); if (!role) setRole('seller'); setStep(3); Alert.alert('Routed', 'Buyer co-signature staged. Review and tap Sign & Fund when ready.'); return; }
                               if (_rkind === 'TEMPLATE') { if (!role) setRole('seller'); setStep(5); try { await Clipboard.setStringAsync(_rbody); } catch {} Alert.alert('Routed', 'Buyer template is on your clipboard. Paste it into the template box to sign.'); return; }
-                              if (_rkind === 'RESPONSE') { setSellerResponseB64(_rbody); if (!role) setRole('buyer'); setStep(5); Alert.alert('Routed', 'Seller response staged. Tap Process Seller Response when ready.'); return; }
+                              if (_rkind === 'RESPONSE') { recordPayload((_rhAgr || contract.agreementId || ''), 'response', _rbody, 'in').catch(()=>{}); setSellerResponseB64(_rbody); if (!role) setRole('buyer'); setStep(5); Alert.alert('Routed', 'Seller response staged. Tap Process Seller Response when ready.'); return; }
                               console.warn('[Router] Unknown KV-STEP kind:', _rkind, '- falling through');
                             }
                           }
@@ -3779,11 +3942,12 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                                 console.log("[Paste-Resume] existing agreement", parsed.agrId, "step:", _exRec.step, "phase:", _exPh.phase, "route:", _exRoute);
                                 if (_exRoute === "release") { setContract({ agreementId: parsed.agrId, multisigAddress: _exPh.frostAddress, frostData: { address: _exPh.frostAddress, network: parsed.network || "testnet-10", frostCounter: parsed.frostCounter }, itemPriceKas: _exPh.buyerKas, sellerCommitmentKas: _exPh.sellerKas } as any); setStep(5); Alert.alert("Resumed at Release", "You already hold this agreement. Escrow: " + _exPh.balanceKas.toFixed(2) + " KAS."); return; }
                                 if (_exRoute === "done") { Alert.alert("Already Complete", "This agreement is finished."); return; }
-                                setStep(4); Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
+                                setStep(_exRoute === 'inbox' || _exRoute === 'poll' ? 3 : 4); /* INBOX-ROUTE-FIX */ Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
                               }
                             }
       laUpsert({ agrId: parsed.agrId, role: 'seller', origin: 'given', buyerPubkey: parsed.buyerPubkey, sellerPubkey: parsed.sellerPubkey, buyerAmountSompi: String(parsed.buyerAmountSompi ?? ''), sellerAmountSompi: String(parsed.sellerAmountSompi ?? ''), frostCounter: parsed.frostCounter, timeoutN: parsed.timeoutN, network: parsed.network, description: parsed.description, verificationCode: parsed.verificationCode, buyerR: parsed.buyerR }).catch(() => {});
                             console.log("[Seller-Paste-DEBUG] parsed.frostCounter:", parsed.frostCounter, "parsed keys:", Object.keys(parsed).join(","));
+                          pastedTypeRef.current = (parsed as any).agreementType === "simple" ? "simple" : ((parsed as any).agreementType === "trade" ? "trade" : null); console.log("[Type-Field] pasted agreementType:", pastedTypeRef.current);
                             Alert.alert("Proposal Found", "Item: " + (parsed.description || "N/A") + "\nAmount: " + (Number(parsed.buyerAmountSompi || 0)/1e8) + " KAS\nCode: " + (parsed.verificationCode || ""), [
                               { text: "Cancel", style: "cancel" },
                               { text: "Accept", onPress: () => {
@@ -4065,7 +4229,13 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
             {/* Step 3: Lock Funds */}
             {step === 3 && (
               <View>
-                <TurnBanner phase={sellerLocked && buyerLocked ? 'fully_funded' : sellerLocked ? 'seller_funded' : (role === 'seller' ? 'cosigned' : 'templates_ready')} role={role} />
+                {/* DOSSIER-ACCESS: reach this agreement's payloads from inside the ceremony */}
+                {contract.agreementId ? (
+                  <TouchableOpacity onPress={() => loadDossier(contract.agreementId || '')} style={{ alignSelf: 'flex-end', backgroundColor: '#f1f5f9', borderRadius: 8, paddingVertical: 5, paddingHorizontal: 10, marginBottom: 6 }}>
+                    <Text style={{ fontSize: rs.font(10), color: '#4f46e5', fontWeight: 'bold' }}>📄 Payloads</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TurnBanner onPaste={handleBannerPaste} phase={sellerLocked && buyerLocked ? 'fully_funded' : sellerLocked ? 'seller_funded' : (role === 'seller' ? 'cosigned' : 'templates_ready')} role={role} />
                 <Text style={styles.stepTitle}>Step 1: Lock Collateral (FROST 2-of-2)</Text>
                 
                 {/* Counterparty Address Input */}
@@ -4156,6 +4326,10 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                             Alert.alert('Copied (unchanged)', 'The ORIGINAL signed proposal was re-copied - identical to what your counterparty already has. Send it via DM; they paste it in the BLUE box.');
                             return;
                           }
+                          if (role !== 'buyer') { /* SELLER-RECOPY-GUARD: only the buyer can (re)generate their own signed proposal. A seller-side rebuild fabricates buyer=self / seller=empty and poisons the stored proposalBody. */
+                            Alert.alert('Original Proposal Not on This Device', 'Only the buyer can generate the signed proposal. Ask the buyer to re-copy it (their Payloads dossier has it) and DM it to you, then paste it here. Rebuilding it on this device would break the signature.');
+                            return;
+                          }
                           const shareText = generateProposal({
                             agrId: contract.agreementId || '',
                             buyerAddress: myAddress || '',
@@ -4169,6 +4343,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                             sellerPubkey: contract.sellerPubkey || '',
                             timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN),
                             buyerPrivKeyHex: _wallet?.privKeyHex || '', frostCounter: (contract.frostData ? contract.frostData.frostCounter : undefined) ?? 0,
+                            agreementType: (agreementType === 'simple' ? 'simple' : 'trade'), /* TYPE-FIELD: collateral vs trade travels in the signed proposal */
                             description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),
                           });
                           Clipboard.setStringAsync(shareText);
@@ -4220,7 +4395,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           multiline
                           autoCapitalize="none"
                           autoCorrect={false}
-                          onChangeText={(txt) => { const _sv = stripKvHeader(txt); if (_sv.length >= 20) setStagedCosign(_sv); }}
+                          value={stagedCosign} /* AUTOFILL-VALUE */ onChangeText={(txt) => { const _sv = stripKvHeader(txt); setStagedCosign(_sv); }}
                         />
                         {stagedCosign.length >= 20 && (
                           <TouchableOpacity onPress={async () => { const v = stagedCosign; setStagedCosign('');
@@ -4276,6 +4451,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                                 setIsLoading(false); return;
                               }
                               try { await Clipboard.setStringAsync('KV-STEP-3-COSIG|' + (contract.agreementId || '') + '\n' + _res.responseB64 + '|' + _killRes.responseB64); } catch {}
+                              recordPayload((contract.agreementId || ''), 'cosig', _res.responseB64 + '|' + _killRes.responseB64, 'out').catch(()=>{});
                               try { await SecureStore.setItemAsync('kv_paste_cosign_' + (contract.agreementId || ''), v); } catch {} // CAPTURE seller templates
                               console.log('[Refund-Cosign] Signed. lockTime =', _tmpl.lt, 'now =', String(_now), 'N =', String(_N));
                               console.log('[Kill-Cosign] Signed. kills utxo', (_killT.u[0]?.t || '').slice(0, 16) + ':0');
@@ -4336,7 +4512,11 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                     {/* 2d: SELLER AGGREGATES REFUND THEN FUNDS */}
                     {role === 'seller' && contract.multisigAddress && (
                       <View style={{ backgroundColor: '#f0fdf4', borderRadius: 12, borderWidth: 2, borderColor: '#22c55e', padding: 14, marginBottom: 16 }}>
-                        <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#166534', marginBottom: 4 }}>SELLER STEP 2 — Paste Buyer's Refund Signature</Text>
+                        {/* TEMPLATE-RESEND: stored refund+kill templates re-copyable after resume */}
+                  <TouchableOpacity onPress={async () => { try { const _agr = contract.agreementId || ''; const _b64 = await SecureStore.getItemAsync('kv_refund_b64_' + _agr); if (!_b64) { Alert.alert('No Templates Stored', 'Refund/kill templates were never generated on this device for this agreement. They are created when you (seller) accept and freeze collateral.'); return; } const _hdr = 'KV-STEP-2-TEMPLATES|' + _agr + '\nKasVillage refund+kill templates. In Neighbor Agreement, paste ALL of this into the box titled "Paste seller refund template" (amber), co-sign, and send your signature back.\n\n' + _b64; await Clipboard.setStringAsync(_hdr); recordPayload(_agr, 'templates', _b64, 'out').catch(() => {}); Alert.alert('Templates Copied', 'Re-copied the stored refund+kill templates. Send to the buyer to co-sign.'); } catch (e: any) { Alert.alert('Error', e.message); } }} style={{ backgroundColor: '#f59e0b', borderRadius: 8, padding: 10, alignItems: 'center', marginBottom: 8 }}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Copy Refund/Kill Templates (resend)</Text>
+                  </TouchableOpacity>
+                  <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#166534', marginBottom: 4 }}>SELLER STEP 2 — Paste Buyer's Refund Signature</Text>
                         <Text style={{ fontSize: rs.font(10), color: '#15803d', marginBottom: 8 }}>Your collateral is frozen but NOT sent. Paste the buyer's co-signature — your reclaim is stored first, then the collateral goes out.</Text>
                         <TextInput
                           style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#86efac', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: rs.font(11), fontFamily: 'monospace', color: '#1c1917', minHeight: 60 }}
@@ -4345,7 +4525,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           multiline
                           autoCapitalize="none"
                           autoCorrect={false}
-                          onChangeText={(txt) => { const _sv = stripKvHeader(txt); if (_sv.length >= 20) setStagedSig(_sv); }}
+                          value={stagedSig} /* AUTOFILL-VALUE */ onChangeText={(txt) => { const _sv = stripKvHeader(txt); setStagedSig(_sv); }}
                         />
                         {stagedSig.length >= 20 && (
                           <TouchableOpacity onPress={async () => { const v = stagedSig; setStagedSig('');
@@ -4443,7 +4623,7 @@ nonces: _killNonces,
                                      A rate-limit is not a durability failure - the SlothQueue holds the item and lands it when
                                      poison decays. Funding must not be hostage to Irys cooldowns. Hard-block only on real failures. */
                                   const _arErr = String((_arRes && _arRes.error) || '');
-                                  if (/cooldown|queued|rate/i.test(_arErr)) {
+                                  if (/cooldown|queued|rate|402|x402/i.test(_arErr)) { /* 402-TOLERANT */
                                     console.warn('[Refund] Arweave rate-limited (' + _arErr.slice(0,60) + ') - proceeding to fund; SlothQueue will land the inscription.');
                                   } else {
                                   console.warn('[Refund] Arweave inscription FAILED:', _arRes && _arRes.error);
@@ -4453,10 +4633,10 @@ nonces: _killNonces,
                                 }
                                 console.log('[Refund] Inscribed to Arweave:', _arRes.txId, '- survives phone loss.');
                               } catch (_arE) {
-                                console.warn('[Refund] Arweave inscription threw:', _arE);
+                                console.warn('[Refund] Arweave inscription threw:', _arE); if (/cooldown|queued|rate|402|x402/i.test(String(_arE))) { console.warn('[Refund] threw rate-limit - proceeding; SlothQueue lands it.'); } else {
                                 Alert.alert('Backup Failed', 'Could not publish the signed refund to Arweave. Nothing was sent.');
                                 setIsLoading(false); return;
-                              }
+                              } }
                               console.log('[Refund] Signed refund STORED. lockTime =', _lockTime, '— now funding.');
                               const _sentK = 'kv_funded_' + _agrId;
       await SecureStore.setItemAsync(_sentK, _p.predictedTxId);
@@ -4814,6 +4994,14 @@ nonces: _killNonces,
                           {releaseMode === 'cancel' ? '↩ Cancellation — each party receives their collateral back' : releaseMode === 'split' ? '⚖ Settlement — custom split' : '✓ Release — payment transfers to seller'}
                         </Text>
                       </View>
+                      {/* MODE-SELECTOR: release/cancel/split always switchable before building */}
+                      <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+                        {(['release','cancel'] /* SPLIT-DISABLED: no engine case in computeReleaseOutputs — re-enable only with custom-amounts flow */ as const).map((m) => (
+                          <TouchableOpacity key={m} disabled={templateBuilt} onPress={() => setReleaseMode(m)} style={{ flex: 1, padding: 8, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: releaseMode === m ? '#059669' : '#d6d3d1', backgroundColor: releaseMode === m ? '#d1fae5' : '#fafaf9', opacity: templateBuilt ? 0.5 : 1 }}>
+                            <Text style={{ fontSize: 11, fontWeight: 'bold', color: releaseMode === m ? '#065f46' : '#78716c' }}>{m === 'release' ? 'Release' : m === 'cancel' ? 'Return Both' : 'Split'}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
                       <View style={{ marginBottom: 10 }}>
                         <Text style={{ fontSize: 12, fontWeight: '600', color: '#1e40af', marginBottom: 2 }}>Confirmation / Receipt # (optional)</Text>
                         <Text style={{ fontSize: 10, color: '#4338ca', marginBottom: 4 }}>{"Saved to Arweave as proof you received the item.\nShare separately in DM � do NOT mix with signed response."}</Text>
@@ -4898,6 +5086,7 @@ nonces: _killNonces,
                             });
                             if ('error' in result) { Alert.alert('Verification Failed', result.error); setIsLoading(false); return; }
                             try { await Clipboard.setStringAsync('KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + '\n' + result.responseB64); } catch {}
+                            recordPayload((contract.agreementId || ''), 'response', result.responseB64, 'out').catch(()=>{});
                             console.log('[Ceremony-Seller] Signed! Response:', result.responseB64.length, 'chars');
                             // Inscribe signed + tracking to Arweave (dispute evidence)
                             try {
@@ -5258,6 +5447,82 @@ nonces: _killNonces,
         counterpartyAlias={role === 'buyer' ? 'Seller' : 'Buyer'}
         onClose={() => setIouModalVisible(false)}
       />
+    {/* DOSSIER PANEL: on-device record of every payload for one agreement. Copy = clipboard only (low automation). Explain = layman text. */}
+    <Modal visible={!!dossierAgrId} animationType="slide" transparent onRequestClose={() => setDossierAgrId(null)}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+        <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, maxHeight: '82%' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text style={{ fontSize: rs.font(15), fontWeight: '900', color: '#1e293b', flex: 1 }} numberOfLines={1}>Payloads — {dossierData?.description || ''}</Text>
+            <TouchableOpacity onPress={() => setDossierAgrId(null)} style={{ paddingHorizontal: 10, paddingVertical: 4 }}><Text style={{ fontSize: rs.font(16), color: '#64748b', fontWeight: 'bold' }}>✕</Text></TouchableOpacity>
+          </View>
+          <Text style={{ fontSize: rs.font(10), color: '#94a3b8', marginBottom: 10 }}>Everything pasted or created for this agreement, kept on this device. Copy any item and paste it where needed. Tap Explain for a plain-language description.</Text>
+          <ScrollView style={{ maxHeight: 460 }}>
+            {(!dossierData || !dossierData.slots || dossierData.slots.length === 0) ? (
+              <Text style={{ fontSize: rs.font(12), color: '#78716c', textAlign: 'center', paddingVertical: 24 }}>No payloads captured yet for this agreement.</Text>
+            ) : dossierData.slots.map((slot: any, idx: number) => {
+              const LABELS: Record<string,string> = { proposal: 'Proposal (offer to trade)', templates: 'Refund + Kill Templates', cosig: 'Your Co-signatures', response: 'Seller Response', kill: 'Kill Transaction' };
+              const label = LABELS[slot.kind] || slot.kind;
+              const isExplained = dossierExplain === slot.kind;
+              return (
+                <View key={slot.kind + idx} style={{ borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: '#334155', flex: 1 }}>{label}</Text>
+                    <View style={{ backgroundColor: slot.dir === 'in' ? '#dbeafe' : '#dcfce7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1, marginLeft: 6 }}>
+                      <Text style={{ fontSize: rs.font(8), fontWeight: 'bold', color: slot.dir === 'in' ? '#1e40af' : '#166534' }}>{slot.dir === 'in' ? 'RECEIVED' : 'CREATED'}</Text>
+                    </View>
+                  </View>
+                  <Text style={{ fontSize: rs.font(8), color: '#94a3b8', marginTop: 2 }}>{slot.at ? new Date(slot.at).toLocaleString() : ''}</Text>
+                  <View style={{ flexDirection: 'row', marginTop: 8 }}>
+                    <TouchableOpacity onPress={async () => { try { await Clipboard.setStringAsync(slot.text); Alert.alert('Copied', label + ' is on your clipboard. Paste it where needed (or tap the banner Paste button).'); } catch {} }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginRight: 8 }}>
+                      <Text style={{ color: '#fff', fontSize: rs.font(11), fontWeight: 'bold' }}>Copy</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setDossierExplain(isExplained ? null : slot.kind)} style={{ backgroundColor: isExplained ? '#e0e7ff' : '#f1f5f9', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 }}>
+                      <Text style={{ color: '#4f46e5', fontSize: rs.font(11), fontWeight: 'bold' }}>{isExplained ? 'Hide' : 'Explain'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {isExplained ? (<Text style={{ fontSize: rs.font(10), color: '#475569', marginTop: 8, lineHeight: rs.font(15) }}>{DOSSIER_EXPLAIN[slot.kind] || 'No description available.'}</Text>) : null}
+                </View>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+    {/* SHIP-HELPER PANEL: guided, recommended-practice shipping. App does NOT verify or buy labels. */}
+    <Modal visible={!!shipAgrId} animationType="slide" transparent onRequestClose={() => setShipAgrId(null)}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+        <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, maxHeight: '88%' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <Text style={{ fontSize: rs.font(15), fontWeight: '900', color: '#1e293b' }}>Shipping Helper</Text>
+            <TouchableOpacity onPress={() => setShipAgrId(null)} style={{ paddingHorizontal: 10, paddingVertical: 4 }}><Text style={{ fontSize: rs.font(16), color: '#64748b', fontWeight: 'bold' }}>✕</Text></TouchableOpacity>
+          </View>
+          <Text style={{ fontSize: rs.font(10), color: '#b45309', backgroundColor: '#fffbeb', borderColor: '#fde68a', borderWidth: 1, borderRadius: 8, padding: 8, marginBottom: 10, lineHeight: rs.font(14) }}>Recommended practice, not verified by the app. Ship to a carrier PICKUP POINT (not a home address) to protect privacy and reduce fraud. Your enforced protection is the collateral + reputation system.</Text>
+          <ScrollView style={{ maxHeight: 500 }}>
+            <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#334155', marginBottom: 4 }}>Carrier</Text>
+            <View style={{ flexDirection: 'row', marginBottom: 10 }}>
+              {(['UPS','USPS','FedEx','DHL'] as const).map(c => (
+                <TouchableOpacity key={c} onPress={() => setShipCarrier(c)} style={{ flex: 1, backgroundColor: shipCarrier === c ? '#4f46e5' : '#f1f5f9', borderRadius: 8, paddingVertical: 8, marginRight: 4, alignItems: 'center' }}>
+                  <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: shipCarrier === c ? '#fff' : '#475569' }}>{c}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#334155', marginBottom: 4 }}>Pickup point (near the buyer - not a home address)</Text>
+            <TextInput value={shipPickup} onChangeText={setShipPickup} placeholder={'e.g. ' + shipCarrier + ' Access Point, 123 Main St, City'} multiline style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 8, fontSize: rs.font(11), minHeight: 44, marginBottom: 10 }} />
+            <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#334155', marginBottom: 4 }}>Declared weight / size (optional)</Text>
+            <TextInput value={shipWeight} onChangeText={setShipWeight} placeholder='e.g. 1.5 lb, 10x8x4 in' style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 8, fontSize: rs.font(11), marginBottom: 10 }} />
+            <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#334155', marginBottom: 4 }}>Tracking # (after buying the label)</Text>
+            <TextInput value={shipTracking} onChangeText={setShipTracking} placeholder='paste tracking number here' autoCapitalize='characters' style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 8, fontSize: rs.font(11), marginBottom: 12 }} />
+            <TouchableOpacity onPress={() => { try { Linking.openURL(SHIP_CARRIER_URL[shipCarrier]); } catch {} }} style={{ backgroundColor: '#0ea5e9', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginBottom: 8 }}>
+              <Text style={{ color: '#fff', fontSize: rs.font(11), fontWeight: 'bold' }}>Open {shipCarrier} to buy the label</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={async () => { try { await Clipboard.setStringAsync(buildShipMessage()); Alert.alert('Copied', 'Shipping message copied. DM it to your counterparty.'); } catch {} }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginBottom: 4 }}>
+              <Text style={{ color: '#fff', fontSize: rs.font(11), fontWeight: 'bold' }}>Copy shipping message for DM</Text>
+            </TouchableOpacity>
+            <Text style={{ fontSize: rs.font(9), color: '#94a3b8', textAlign: 'center', marginTop: 6, marginBottom: 4 }}>The app does not buy labels or verify shipping. Buy the label on the carrier site; keep any video peer-to-peer.</Text>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
     </Modal>
   );
 };

@@ -47,6 +47,7 @@ export interface KVProposal {
   sellerPubkey?: string | null;
   buyerPubkeyRaw?: string;
   timeoutN?: number;          // refund timeout in DAA blocks (buyer sets)
+  agreementType?: 'simple' | 'trade'; // simple = collateral (return-both on fulfill); trade = payout to seller
   valid?: boolean;
   error?: string;
 }
@@ -66,12 +67,13 @@ export function generateProposal(params: {
   frostCounter?: number;
   sellerPubkey?: string;
   timeoutN?: number;
+  agreementType?: 'simple' | 'trade';
 }): string {
   const desc = (params.description || 'Agreement').replace(/[|\n\r]/g, ' ').trim();
   
   const _body = ['KV', params.agrId, params.buyerAddress, params.sellerAddress,
     params.buyerAmountSompi.toString(), params.sellerAmountSompi.toString(),
-    params.network, params.buyerR, params.verificationCode, desc, (params as any).buyerPubkey || '', String((params as any).frostCounter ?? ''), (params as any).sellerPubkey || '', String((params as any).timeoutN ?? '')].join('|');
+    params.network, params.buyerR, params.verificationCode, desc, (params as any).buyerPubkey || '', String((params as any).frostCounter ?? ''), (params as any).sellerPubkey || '', String((params as any).timeoutN ?? ''), ((params as any).agreementType === 'simple' ? 'simple' : 'trade')].join('|');
   let _sig = '';
   try {
     if ((params as any).buyerPrivKeyHex) {
@@ -98,8 +100,12 @@ export function parseProposal(text: string): KVProposal | null {
   };
   const sellerPubkeyRaw = parts[12] || '';
   const timeoutNRaw = parts[13] || '';
-  const _sig = parts[14] || '';
-  const _bodyOnly = parts.slice(1, 14).join('|');
+  /* TYPE-FIELD v2: parts[14] = 'simple'|'trade' (signed), sig moves to parts[15]. Old pastes: parts[14] is the sig (hex/empty). */
+  const _p14 = parts[14] || '';
+  const _hasType = (_p14 === 'simple' || _p14 === 'trade');
+  proposal.agreementType = _hasType ? (_p14 as 'simple' | 'trade') : undefined;
+  const _sig = _hasType ? (parts[15] || '') : _p14;
+  const _bodyOnly = parts.slice(1, _hasType ? 15 : 14).join('|');
 
   proposal.buyerPubkey = proposal.buyerPubkeyRaw || addressToPubkey(proposal.buyerAddress);
   proposal.sellerPubkey = sellerPubkeyRaw || addressToPubkey(proposal.sellerAddress);
