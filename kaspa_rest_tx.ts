@@ -346,6 +346,7 @@ export async function sendKaspaViaRest(params: {
   network: KaspaNetwork;
   payload?: string;
   prepareOnly?: boolean;    // freeze + predict txid, do NOT broadcast
+  fundingAgrId?: string;    // OWN-AGR-SPEND: UTXOs committed to THIS agreement are spendable by its own funding tx
 }): Promise<RestTxResult> {
   const { senderAddress, recipientAddress, amountSompi, privateKeyHex, network, payload } = params;
   
@@ -359,8 +360,17 @@ export async function sendKaspaViaRest(params: {
 
     // Filter to ledger-free UTXOs (exclude collateral + IOU-backed)
     try {
-      const { getFreeUtxoKeys } = await import('./utxo_ledger');
+      const { getFreeUtxoKeys, getAgreementCommitments } = await import('./utxo_ledger');
       const freeKeys = await getFreeUtxoKeys(senderAddress);
+      /* OWN-AGR-SPEND: a UTXO reserved FOR this agreement must be usable BY this agreement's own funding tx — otherwise a whole-UTXO commit larger than the send amount self-deadlocks the sender. Only THIS agrId's tags unlock; all other collateral stays protected. */
+      if (params.fundingAgrId) {
+        try {
+          const _own = await getAgreementCommitments(params.fundingAgrId);
+          let _added = 0;
+          for (const _e of (_own || [])) { if (_e.utxoKey && !freeKeys.has(_e.utxoKey)) { freeKeys.add(_e.utxoKey); _added++; } }
+          if (_added > 0) console.log('[REST-TX] Own-agr spend: unlocked', _added, 'committed UTXO(s) for', params.fundingAgrId);
+        } catch (e) { console.warn('[REST-TX] Own-agr unlock skipped:', e); }
+      }
       if (freeKeys && freeKeys.size > 0) {
         const before = utxos.length;
         const filtered = utxos.filter(u => freeKeys.has(`${(u as any).outpoint?.transactionId || (u as any).transactionId}:${(u as any).outpoint?.index ?? (u as any).index ?? 0}`));

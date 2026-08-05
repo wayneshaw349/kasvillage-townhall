@@ -1563,6 +1563,7 @@ function parseClipboard(raw: string): {
               amountSompi: BigInt(expectedBuyer),
               privateKeyHex: rWallet.privKeyHex,
               network: rWallet.network || 'testnet-10',
+              fundingAgrId: entry.agrId, /* OWN-AGR-SPEND */
             });
             if (rResult.success) {
               await AsyncStorage.setItem(sentKey, rResult.txId || String(Date.now()));
@@ -1716,6 +1717,7 @@ function parseClipboard(raw: string): {
                   amountSompi: BigInt(myExpected),
                   privateKeyHex: wallet.privKeyHex,
                   network: wallet.network || 'testnet-10',
+                  fundingAgrId: contract.agreementId || '', /* OWN-AGR-SPEND */
                 });
                 if (sendResult.success) {
                   await AsyncStorage.setItem(sentKey, sendResult.txId || String(Date.now()));
@@ -3126,6 +3128,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
                 amountSompi: BigInt(immediateSendAmount),
                 privateKeyHex: wallet.privKeyHex,
                 network: wallet.network || 'testnet-10',
+                fundingAgrId: agrId, /* OWN-AGR-SPEND */
                 prepareOnly: true,
                 // [NONCE-STRIP] dead nonce generator removed from this path.
                 // Its k was derived from {frost, aggPubkey, to, amount} with no sighash,
@@ -3340,6 +3343,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
         amountSompi: myLockAmount,
         privateKeyHex: wallet.privKeyHex,
         network: wallet.network,
+        fundingAgrId: contract.agreementId || '', /* OWN-AGR-SPEND */
       });
 
       if (!result.success) {
