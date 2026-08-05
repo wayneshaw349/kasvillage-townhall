@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('AppNaviagator.tsx','utf8');s=s.replace("navigation={{ goBack: () => setScreen('dashboard') }}","navigation={{ goBack: () => setScreen('dashboard') }}\n          onNavigatePhoneProof={() => setScreen('phone_proof')}");fs.writeFileSync('AppNaviagator.tsx',s);console.log('done');

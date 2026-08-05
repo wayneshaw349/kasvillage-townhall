@@ -46,7 +46,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { type KaspaNetwork } from './KaspaClient';
 
 // Arweave
-import { allocateForIOU, releaseIOU, getSpendableUtxos, syncLedger } from './utxo_ledger';
+import { allocateForIOU, releaseIOU, getSpendableUtxos, syncLedger , releaseOrphanIOUs } from './utxo_ledger';
 import { sendKaspaViaRest } from './kaspa_rest_tx';
 import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance, decodeAcceptance, verifyAcceptance } from './proposal_share';
 import { uploadToTurbo, uploadToIrys, type IrysUploadResult } from './arweave_upload';
@@ -255,6 +255,7 @@ async function _kvResolvePrivHex(): Promise<string | null> {
   console.warn('[KVKey] no valid private key found');
   return null;
 }
+const _p2hex = (t: string) => Array.from(new TextEncoder().encode(t)).map(b => b.toString(16).padStart(2, '0')).join(''); /* PAYLOAD-HEX */
 async function getWalletCredentials(): Promise<{ address: string; pubkey: string; privkey: string } | null> {
   try {
     const address = await SecureStore.getItemAsync(KEYS.ADDRESS);
@@ -613,10 +614,12 @@ export async function settleIOUBySend(iou: SignedIOU): Promise<{ success: boolea
 
   const network = await currentNetwork();
   const result = await sendKaspaViaRest({
+    senderAddress: creds.address,
+    privateKeyHex: creds.privkey,
     recipientAddress,
     amountSompi: BigInt(iou.amountSompi),
     network,
-    payload: `KV-IOU-SETTLE:${iou.id}`,
+    payload: _p2hex('KV-IOU-SETTLE:' + iou.id),
   } as any);
 
   if (!result || !result.success) {
@@ -1371,6 +1374,11 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
   const [proposalSending, setProposalSending] = useState(false);
   const [pasteInput, setPasteInput] = useState('');
   const [incomingAcceptance, setIncomingAcceptance] = useState<any>(null); /* KV1A-ROUTE */
+  /* PROP-IOU-PERSIST: kv1/kv1a proposal-IOUs survive close via AsyncStorage */
+  const [propIOUs, setPropIOUs] = useState<any[]>([]);
+  React.useEffect(() => { (async () => { try { const j = await AsyncStorage.getItem('kv_prop_ious'); const arr = j ? JSON.parse(j) : []; setPropIOUs(arr); /* ORPHAN-IOU-SWEEP-CALL: free stale iou-*/ const liveProp = arr.filter((p: any) => p.status === 'awaiting_acceptance' || p.status === 'accepted').map((p: any) => 'prop_' + p.nonce); const pend = await loadPendingIOUs(); const liveSigned = pend.filter((i: any) => i.status === 'pending' || i.status === 'signed').map((i: any) => i.id); const ledgers = await loadLedgers(); const liveLedger: string[] = []; for (const l of ledgers) for (const i of (l.ious || [])) if (i.status === 'pending' || i.status === 'signed') liveLedger.push(i.id); const freed = await releaseOrphanIOUs([...liveProp, ...liveSigned, ...liveLedger]); if (freed) console.log('[IOU] Orphan sweep freed', freed, 'stale allocation(s)'); } catch (e) { console.warn('[IOU] orphan sweep failed:', e); } })(); }, []);
+  const upsertPropIOU = async (rec: any) => { setPropIOUs(prev => { const old = prev.find(p => p.nonce === rec.nonce) || {}; const next = [{ ...old, ...rec }, ...prev.filter(p => p.nonce !== rec.nonce)]; AsyncStorage.setItem('kv_prop_ious', JSON.stringify(next)).catch(() => {}); return next; }); };
+  const removePropIOU = async (nonce: string) => { setPropIOUs(prev => { const next = prev.filter(p => p.nonce !== nonce); AsyncStorage.setItem('kv_prop_ious', JSON.stringify(next)).catch(() => {}); return next; }); };
   const [incomingProposal, setIncomingProposal] = useState<any>(null);
   const [proposalVerified, setProposalVerified] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -1697,7 +1705,29 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
             </TouchableOpacity>
             {showActive && (
               <View style={{ backgroundColor: '#0a0a0a', borderRadius: 8, padding: 10, marginTop: 4 }}>
-                <Text style={{ color: '#888', fontSize: 12, textAlign: 'center' }}>No active IOUs — create one below</Text>
+                {propIOUs.length === 0 ? (
+                  <Text style={{ color: '#888', fontSize: 12, textAlign: 'center' }}>No active IOUs — create one below</Text>
+                ) : propIOUs.map((pi: any) => (
+                  <View key={pi.nonce} style={{ backgroundColor: '#1a1a2e', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                    <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>{(Number(pi.amountSompi || 0) / 1e8).toFixed(4)} KAS {pi.role === 'issuer' ? '(you owe)' : '(owed to you)'}</Text>
+                    <Text style={{ color: '#888', fontSize: 11 }}>{pi.status === 'awaiting_acceptance' ? 'Awaiting acceptance' : pi.role === 'recipient' ? ('Accepted — awaiting payment from ' + (pi.fromName || 'issuer')) : ('Accepted by ' + (pi.counterName || 'recipient'))}</Text>
+                    {pi.desc ? <Text style={{ color: '#666', fontSize: 11 }}>{pi.desc}</Text> : null}
+                    {pi.role === 'issuer' && pi.status === 'accepted' && pi.counterAddr ? (
+                      <TouchableOpacity onPress={async () => { try { const amt = BigInt(pi.amountSompi); const network = await currentNetwork(); const creds = await getWalletCredentials(); if (!creds) throw new Error('Wallet not initialized'); const r = await sendKaspaViaRest({ senderAddress: creds.address, privateKeyHex: creds.privkey, recipientAddress: pi.counterAddr, amountSompi: amt, network, payload: _p2hex('KV-IOU-SETTLE:prop_' + pi.nonce) } as any); if (!r || !r.success) throw new Error(r?.error || 'Send failed'); try { await releaseIOU('prop_' + pi.nonce); } catch {} await removePropIOU(pi.nonce); Alert.alert('Settled', 'Paid ' + (Number(amt) / 1e8).toFixed(4) + ' KAS. TX: ' + (r.txId || '').slice(0, 16)); } catch (e: any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 6, backgroundColor: '#27AE60', padding: 8, borderRadius: 6, alignItems: 'center' }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>{'\u{1F4B8}'} Pay & Settle</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {pi.role === 'issuer' ? (
+                      <TouchableOpacity onPress={async () => { try { try { await releaseIOU('prop_' + pi.nonce); } catch {} await removePropIOU(pi.nonce); Alert.alert('Cancelled', 'IOU cancelled — lock freed.'); } catch (e: any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 6, backgroundColor: '#333', padding: 8, borderRadius: 6, alignItems: 'center' }}>
+                        <Text style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: 12 }}>{'\u2715'} Cancel</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity onPress={() => removePropIOU(pi.nonce)} style={{ marginTop: 6, backgroundColor: '#333', padding: 8, borderRadius: 6, alignItems: 'center' }}>
+                        <Text style={{ color: '#888', fontSize: 12 }}>Dismiss (paid / void)</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
               </View>
             )}
 
@@ -1723,7 +1753,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
                   const spendable = await getSpendableUtxos(addr);
                   if (spendable.spendableBalance < amtSompi) throw new Error('Insufficient free balance: ' + (Number(spendable.spendableBalance)/1e8).toFixed(4) + ' KAS available');
                   const p = await createProposal('iou', parseFloat(proposalAmount), proposalDesc); if ('error' in p) throw new Error(p.error); const alloc = await allocateForIOU(addr, amtSompi, 'prop_' + p.proposal.nonce); /* nonce-linked allocation */
-                  if (!alloc.success) throw new Error(alloc.error || 'Allocation failed');
+                  if (!alloc.success) throw new Error(alloc.error || 'Allocation failed'); await upsertPropIOU({ nonce: p.proposal.nonce, role: 'issuer', status: 'awaiting_acceptance', amountSompi: String(amtSompi), desc: proposalDesc || '', created: Date.now() });
                   /* PROP-FIRST: moved above allocation */
                   
                   await shareProposal(p.encoded, parseFloat(proposalAmount)||0); } catch(e:any) { Alert.alert('Error', e.message); } setProposalSending(false); }} disabled={proposalSending || !proposalAmount} style={{ marginTop: 12, backgroundColor: '#D4AF37', padding: 12, borderRadius: 8, alignItems: 'center', opacity: proposalSending || !proposalAmount ? 0.5 : 1 }}>
@@ -1735,7 +1765,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
               <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 10, padding: 14 }}>
                 <Text style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>Paste proposal from sender</Text>
                 <TextInput value={pasteInput} onChangeText={setPasteInput} placeholder="Paste proposal here..." placeholderTextColor="#555" multiline style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 12, borderWidth: 1, borderColor: '#333', minHeight: 80 }} />
-                <TouchableOpacity onPress={async () => { try { if (/kv1a:/.test(pasteInput)) { const acc = decodeAcceptance(pasteInput.trim()); if (!acc) throw new Error('Invalid acceptance'); const va = verifyAcceptance(acc); if (!va.valid) throw new Error(va.error || 'Acceptance failed verification'); const myPk = (await SecureStore.getItemAsync('kv_public_key')) || ''; if (!myPk.startsWith(acc.proposal.from)) throw new Error('This acceptance is not for your proposal'); setIncomingAcceptance(acc); setIncomingProposal(null); Alert.alert('Acceptance Verified', 'Signed by ' + (acc.counterName || acc.counterPubkey.slice(0,12)) + ' - Pay & Settle or Cancel below.'); return; } const d = decodeProposal(pasteInput.trim()); if(!d) throw new Error('Invalid proposal'); const v = await verifyProposal(d); setIncomingProposal(d); setProposalVerified(v.valid); } catch(e:any) { Alert.alert('Invalid', e.message); } }} disabled={!pasteInput.trim()} style={{ marginTop: 12, backgroundColor: '#49d6aa', padding: 12, borderRadius: 8, alignItems: 'center', opacity: !pasteInput.trim() ? 0.5 : 1 }}>
+                <TouchableOpacity onPress={async () => { try { if (/kv1a:/.test(pasteInput)) { const acc = decodeAcceptance(pasteInput.trim()); if (!acc) throw new Error('Invalid acceptance'); const va = verifyAcceptance(acc); if (!va.valid) throw new Error(va.error || 'Acceptance failed verification'); const myPk = (await SecureStore.getItemAsync('kv_public_key')) || ''; if (!myPk.startsWith(acc.proposal.from)) throw new Error('This acceptance is not for your proposal'); setIncomingAcceptance(acc); setIncomingProposal(null); await upsertPropIOU({ nonce: acc.proposal.nonce, role: 'issuer', status: 'accepted', amountSompi: String(acc.proposal.amount || '0'), desc: acc.proposal.desc || '', counterName: acc.counterName || '', counterAddr: acc.counterAddr || '', counterPubkey: acc.counterPubkey || '', accepted: Date.now() }); Alert.alert('Acceptance Verified', 'Signed by ' + (acc.counterName || acc.counterPubkey.slice(0,12)) + ' - Pay & Settle or Cancel below.'); return; } const d = decodeProposal(pasteInput.trim()); if(!d) throw new Error('Invalid proposal'); const v = await verifyProposal(d); setIncomingProposal(d); setProposalVerified(v.valid); } catch(e:any) { Alert.alert('Invalid', e.message); } }} disabled={!pasteInput.trim()} style={{ marginTop: 12, backgroundColor: '#49d6aa', padding: 12, borderRadius: 8, alignItems: 'center', opacity: !pasteInput.trim() ? 0.5 : 1 }}>
                   <Text style={{ color: '#000', fontWeight: 'bold' }}>Verify Proposal</Text>
                 </TouchableOpacity>
                 {incomingAcceptance && (
@@ -1743,10 +1773,10 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
                     <Text style={{ color: '#fff', fontSize: 14 }}>Acceptance: {(Number(incomingAcceptance.proposal?.amount || 0) / 1e8).toFixed(4)} KAS</Text>
                     <Text style={{ color: '#888', fontSize: 12 }}>Signed by: {incomingAcceptance.counterName || incomingAcceptance.counterPubkey?.slice(0,12)}</Text>
                     <Text style={{ color: '#888', fontSize: 11 }}>Pays to: {incomingAcceptance.counterAddr?.slice(0,24)}...</Text>
-                    <TouchableOpacity onPress={async () => { try { const amt = BigInt(incomingAcceptance.proposal.amount); const network = await currentNetwork(); const r = await sendKaspaViaRest({ recipientAddress: incomingAcceptance.counterAddr, amountSompi: amt, network, payload: 'KV-IOU-SETTLE:prop_' + incomingAcceptance.proposal.nonce } as any); if (!r || !r.success) throw new Error(r?.error || 'Send failed'); try { await releaseIOU('prop_' + incomingAcceptance.proposal.nonce); } catch {} setIncomingAcceptance(null); setPasteInput(''); Alert.alert('Settled', 'Paid ' + (Number(amt)/1e8).toFixed(4) + ' KAS. TX: ' + (r.txId || '').slice(0,16)); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 8, backgroundColor: '#27AE60', padding: 10, borderRadius: 8, alignItems: 'center' }}>
+                    <TouchableOpacity onPress={async () => { try { const amt = BigInt(incomingAcceptance.proposal.amount); const network = await currentNetwork(); const creds = await getWalletCredentials(); if (!creds) throw new Error('Wallet not initialized'); /* SETTLE-CREDS */ const r = await sendKaspaViaRest({ senderAddress: creds.address, privateKeyHex: creds.privkey, recipientAddress: incomingAcceptance.counterAddr, amountSompi: amt, network, payload: _p2hex('KV-IOU-SETTLE:prop_' + incomingAcceptance.proposal.nonce) } as any); if (!r || !r.success) throw new Error(r?.error || 'Send failed'); try { await releaseIOU('prop_' + incomingAcceptance.proposal.nonce); } catch {} await removePropIOU(incomingAcceptance.proposal.nonce); setIncomingAcceptance(null); setPasteInput(''); Alert.alert('Settled', 'Paid ' + (Number(amt)/1e8).toFixed(4) + ' KAS. TX: ' + (r.txId || '').slice(0,16)); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 8, backgroundColor: '#27AE60', padding: 10, borderRadius: 8, alignItems: 'center' }}>
                       <Text style={{ color: '#fff', fontWeight: 'bold' }}>{'\u{1F4B8}'} Pay & Settle</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={async () => { try { try { await releaseIOU('prop_' + incomingAcceptance.proposal.nonce); } catch {} setIncomingAcceptance(null); setPasteInput(''); Alert.alert('Cancelled', 'IOU cancelled - locked coin freed.'); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 8, backgroundColor: '#333', padding: 10, borderRadius: 8, alignItems: 'center' }}>
+                    <TouchableOpacity onPress={async () => { try { try { await releaseIOU('prop_' + incomingAcceptance.proposal.nonce); } catch {} await removePropIOU(incomingAcceptance.proposal.nonce); setIncomingAcceptance(null); setPasteInput(''); Alert.alert('Cancelled', 'IOU cancelled - locked coin freed.'); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 8, backgroundColor: '#333', padding: 10, borderRadius: 8, alignItems: 'center' }}>
                       <Text style={{ color: '#e74c3c', fontWeight: 'bold' }}>{'\u2715'} Cancel IOU</Text>
                     </TouchableOpacity>
                   </View>
@@ -1757,7 +1787,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
                     <Text style={{ color: '#888', fontSize: 12 }}>From: {incomingProposal.fromName || incomingProposal.from?.slice(0,16)}</Text>
                     <Text style={{ color: proposalVerified ? '#27AE60' : '#e74c3c', fontSize: 12, marginTop: 4 }}>{proposalVerified ? 'Verified' : 'INVALID'}</Text>
                     {proposalVerified && (
-                      <TouchableOpacity onPress={async () => { try { const a = await acceptProposal(incomingProposal); if('error' in a) throw new Error(a.error); await shareAcceptance(a.encoded, Number(incomingProposal?.amount || 0) / 1e8); Alert.alert('Accepted', 'IOU accepted and shared'); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 8, backgroundColor: '#27AE60', padding: 10, borderRadius: 8, alignItems: 'center' }}>
+                      <TouchableOpacity onPress={async () => { try { const a = await acceptProposal(incomingProposal); if('error' in a) throw new Error(a.error); await shareAcceptance(a.encoded, Number(incomingProposal?.amount || 0) / 1e8); await upsertPropIOU({ nonce: incomingProposal.nonce, role: 'recipient', status: 'accepted', amountSompi: String(incomingProposal.amount || '0'), desc: incomingProposal.desc || '', fromName: incomingProposal.fromName || '', from: incomingProposal.from || '', created: Date.now() }); Alert.alert('Accepted', 'IOU accepted and shared'); } catch(e:any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 8, backgroundColor: '#27AE60', padding: 10, borderRadius: 8, alignItems: 'center' }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold' }}>Accept IOU</Text>
                       </TouchableOpacity>
                     )}

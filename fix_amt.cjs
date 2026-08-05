@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');s=s.replace(/const amtSompi = BigInt\(proposal[^)]*\)/,"const amtSompi = BigInt(String(Math.floor(parseFloat(proposalAmount) * 1e8)))");fs.writeFileSync('IOUBalanceSheetShare.tsx',s);console.log('done');

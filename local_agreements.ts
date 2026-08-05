@@ -47,6 +47,16 @@ const STEP_ORDER: Record<AgrStep, number> = {
   aborted: 99,
 };
 
+/** Ceremony payloads captured to the on-device dossier. PUBLIC text only:
+ *  proposal body, base64 templates/cosig/response, kill tx JSON. NEVER nonces/keys. */
+export type PayloadKind = 'proposal' | 'templates' | 'cosig' | 'response' | 'kill';
+
+export interface PastedPayload {
+  text: string;                 // raw payload exactly as pasted or created
+  dir: 'in' | 'out';            // 'in' = pasted/received, 'out' = created on this device
+  at: number;                   // capture timestamp
+}
+
 export interface LocalAgreement {
   agrId: string;
   role: AgrRole;
@@ -69,6 +79,8 @@ export interface LocalAgreement {
   description?: string;
   verificationCode?: string;   // public — presented to both parties at ceremony
   buyerR?: string;             // public nonce commitment
+  /** DOSSIER: every ceremony payload seen for this agreement, keyed by kind. Public text only. */
+  pastedPayloads?: Partial<Record<PayloadKind, PastedPayload>>;
   // -- provenance / recovery pointers --
   arweaveTxIds?: string[];     // every inscription tx seen for this agrId
   predictedFundingTxId?: string;
@@ -394,4 +406,40 @@ export function routeForPhase(phase: DerivedPhase): 'inbox' | 'poll' | 'release'
     case 'complete': case 'aborted': return 'done';
     default: return 'inbox';
   }
+}
+
+// ---------------------------------------------------------------------------
+// DOSSIER: capture public ceremony payloads for copy-back. No secrets here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Record a public payload against an agreement's dossier. Safe to call at any
+ * paste-in or create-out point. Stores raw text + direction + timestamp under
+ * its kind. Last write per kind wins. Silently ignores empty text.
+ * NEVER pass nonces, k, d_tweaked, or private keys - PUBLIC payloads only.
+ */
+export async function recordPayload(
+  agrId: string,
+  kind: PayloadKind,
+  text: string,
+  dir: 'in' | 'out',
+): Promise<void> {
+  if (!agrId || !text || !text.trim()) return;
+  await locked(async () => {
+    const env = await readEnvelope();
+    const rec = env.agreements[agrId];
+    if (!rec) { console.warn('[Dossier] recordPayload: unknown agr', agrId.slice(0, 16)); return; }
+    const pp = rec.pastedPayloads || {};
+    pp[kind] = { text: text.trim(), dir, at: Date.now() };
+    rec.pastedPayloads = pp;
+    rec.updatedAt = Date.now();
+    await writeEnvelope(env);
+    console.log('[Dossier] recorded', kind, dir, 'for', agrId.slice(0, 16));
+  });
+}
+
+/** Read the dossier payloads for an agreement (public text only). */
+export async function getPayloads(agrId: string): Promise<Partial<Record<PayloadKind, PastedPayload>>> {
+  const rec = await getAgreement(agrId);
+  return (rec && rec.pastedPayloads) ? rec.pastedPayloads : {};
 }

@@ -1,3 +1,0 @@
-﻿const fs=require('fs');let n=fs.readFileSync('NeighborAgreement.tsx','utf8');
-n=n.replace("                            buyerPubkey: contract.buyerPubkey || '',\n                            description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),\n                          });","                            buyerPubkey: contract.buyerPubkey || '',\n                            frostCounter: (contract.frostData as any)?.frostCounter ?? 0,\n                            description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''),\n                          });");
-fs.writeFileSync('NeighborAgreement.tsx',n);console.log('done');

@@ -840,6 +840,7 @@ export async function lookupByAddress(
 ): Promise<{ pubkey: string | null; stats: CounterpartyStats | null }> {
   // LOCAL-DECODE: the address encodes the x-only pubkey — no inscription needed to resolve it.
   let pubkey: string | null = null;
+  let _winStats: any = null;
   try {
     const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
     const _dp = (address.split(':')[1] || '');
@@ -854,7 +855,7 @@ export async function lookupByAddress(
           const _r = await fetch('https://kasvillage.app.runonflux.io/user-stats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pubkey: _cand }) });
           if (_r.ok) {
             const _st = await _r.json();
-            if ((_st.total_samples || 0) > 0 || (_st.successes || 0) > 0) { pubkey = _cand; console.log('[Resolve] Address decoded locally — prefix ' + _pfx + ' has history'); break; }
+            if ((_st.total_samples || 0) > 0 || (_st.successes || 0) > 0) { pubkey = _cand; _winStats = _st; console.log('[Resolve] Address decoded locally — prefix ' + _pfx + ' has history'); break; }
           }
         } catch {}
       }
@@ -865,6 +866,10 @@ export async function lookupByAddress(
   if (!pubkey) {
     console.warn('[Resolve] No pubkey found for address:', address.slice(0, 16));
     return { pubkey: null, stats: null };
+  }
+  if (_winStats) {
+    const _mapped = computeStats(pubkey, _winStats.xp || 0, _winStats.successes || 0, _winStats.deadlocks || 0);
+    return { pubkey, stats: _mapped };
   }
   const result = await lookupCounterparty(pubkey, options);
   return { pubkey, stats: result.stats };
@@ -880,11 +885,21 @@ export async function lookupByApt(
   // Derivation-verified resolver: tolerant of 'N'/'APT-N' tag forms, rejects squatters.
   let pubkey: string | null = null;
   try { pubkey = (await _resolveAptVerified(apt)) || null; } catch (e) { console.warn('[Resolve] Verified APT resolve failed:', e); }
-  if (!pubkey) pubkey = await resolvePubkeyFromArweave('KV-APT', apt);
+  if (!pubkey) pubkey = await resolvePubkeyFromArweave('KV-Apt', apt);
   if (!pubkey) {
     console.warn('[Resolve] No pubkey found for apt:', apt);
     return { pubkey: null, stats: null };
   }
+  // APT: direct /user-stats (same source as pubkey & address paths)
+  try {
+    const _r = await fetch('https://kasvillage.app.runonflux.io/user-stats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pubkey }) });
+    if (_r.ok) {
+      const _st = await _r.json();
+      if ((_st.total_samples || 0) > 0 || (_st.successes || 0) > 0 || (_st.xp || 0) > 0) {
+        return { pubkey, stats: computeStats(pubkey, _st.xp || 0, _st.successes || 0, _st.deadlocks || 0) };
+      }
+    }
+  } catch (e) { console.warn('[Resolve] APT direct stats failed, falling back:', e); }
   const result = await lookupCounterparty(pubkey, options);
   return { pubkey, stats: result.stats };
 }

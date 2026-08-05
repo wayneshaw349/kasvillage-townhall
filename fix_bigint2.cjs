@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');s=s.replace("BigInt(Math.floor(parseFloat(proposalAmount) * 1e8))","BigInt(proposalAmount.includes('.') ? proposalAmount.split('.')[0] + (proposalAmount.split('.')[1] || '').padEnd(8,'0').slice(0,8) : proposalAmount + '00000000')");fs.writeFileSync('IOUBalanceSheetShare.tsx',s);console.log('done');

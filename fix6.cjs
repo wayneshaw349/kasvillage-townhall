@@ -1,3 +1,0 @@
-﻿const fs=require('fs');let u=fs.readFileSync('utxo_ledger.ts','utf8');
-u=u.replace("for (const e of arr) {\n    if ((e.status === 'collateral-committed' || e.status === 'collateral-locked') && (!e.agreementId || !activeAgreementIds.includes(e.agreementId))) { e.status = 'free'; e.agreementId = undefined; n++; }\n  }","for (const [, e] of arr) {\n    if ((e.status === 'collateral-committed' || e.status === 'collateral-locked') && (!e.commitReason || !activeAgreementIds.includes(e.commitReason))) { e.status = 'free'; e.commitReason = undefined; n++; }\n  }");
-fs.writeFileSync('utxo_ledger.ts',u);console.log('done');

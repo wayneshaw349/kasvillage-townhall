@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('NeighborAgreement.tsx','utf8');s=s.replace(/const \[step, setStep\]/,"const [showBalanceSheet, setShowBalanceSheet] = useState(false);\n  const [step, setStep]");fs.writeFileSync('NeighborAgreement.tsx',s);console.log('done');

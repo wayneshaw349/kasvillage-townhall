@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');s=s.replace("PUBKEY: 'kaspa_pubkey'","PUBKEY: 'kv_l1_pubkey'");fs.writeFileSync('IOUBalanceSheetShare.tsx',s);console.log('done');

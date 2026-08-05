@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('NeighborAgreement.tsx','utf8');s=s.replace(/console\.log\('\[BalanceSheet\] TODO'\)/g,"setShowBalanceSheet(true)");fs.writeFileSync('NeighborAgreement.tsx',s);console.log('done');

@@ -363,7 +363,7 @@ export async function inscribeAttestationToArweave(params: {
       { name: 'KV-DeviceHash', value: attestation.deviceHash },
       { name: 'KV-Pubkey', value: pubkey },
       { name: 'KV-Platform', value: attestation.platform },
-      { name: 'KV-Apt', value: apt },
+      { name: 'KV-Apt', value: apt.replace(/^APT-/i,'') },
       { name: 'Content-Type', value: 'application/json' },
     ];
 

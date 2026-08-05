@@ -73,7 +73,7 @@ import { generateStealthKeys, StealthKeys } from './stealth_watcher';
 // CONSTANTS
 // ============================================================================
 const ARWEAVE_GATEWAY = 'https://arweave.net';
-const BUNDLR_NODE = 'https://node2.irys.xyz';
+const BUNDLR_NODE = 'https://upload.ardrive.io';
 
 // ============================================================================
 // HELPERS (defined before use)
@@ -450,7 +450,7 @@ export async function createWallet(options?: {
       wallet = { ...derived, kaspaAddress: kaspaAddressFromXOnly(xOnly, hrp), seed: seedBytes };
     } else {
       // FALLBACK: random entropy
-      const { entropyToMnemonic, mnemonicToSeed, deriveKaspaHDKey } = await import('./bip39_wallet');
+      const { entropyToMnemonic } = await import('./bip39_wallet'); const { mnemonicToSeedV2: mnemonicToSeed, deriveKaspaHDKeyV2: deriveKaspaHDKey } = await import('./bip39_v2');
       const randomEntropy = await Crypto.getRandomBytesAsync(16);
       const mnemonic = await entropyToMnemonic(randomEntropy);
       const seed = await mnemonicToSeed(mnemonic, '');
@@ -483,6 +483,7 @@ export async function createWallet(options?: {
       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
     await SecureStore.setItemAsync(STORE_KEYS.REGISTRATION_STATUS, 'wallet_created');
+    await SecureStore.setItemAsync('kv_kdf_version', 'v2');
     await AsyncStorage.setItem(STORE_KEYS.USER_STATS, JSON.stringify(createDefaultUserStats()));
 
     // === ENCRYPTED KEY STORAGE (for identity_inscription_v6 compatibility) ===
@@ -542,7 +543,7 @@ export async function previewAddressFromMnemonic(
 ): Promise<{ address: string; publicKeyHex: string } | null> {
   try {
     if (!mnemonic || mnemonic.trim().split(/\s+/).length !== 12) return null;
-    const { mnemonicToSeed, deriveKaspaHDKey } = await import('./bip39_wallet');
+    const { mnemonicToSeedV2: mnemonicToSeed, deriveKaspaHDKeyV2: deriveKaspaHDKey } = await import('./bip39_v2');
     const seed = await mnemonicToSeed(mnemonic, '');
     const hdKey = deriveKaspaHDKey(seed);
     const pubBytes = getPublicKey(hdKey.privateKey, true);
@@ -566,7 +567,7 @@ export async function restoreWalletFromMnemonic(
       return { success: false, error: 'Invalid recovery phrase (need 12 words)' };
     }
 
-    const { mnemonicToSeed, deriveKaspaHDKey } = await import('./bip39_wallet');
+    const { mnemonicToSeedV2: mnemonicToSeed, deriveKaspaHDKeyV2: deriveKaspaHDKey } = await import('./bip39_v2');
 
     // EMPTY passphrase — must match createWallet's random branch exactly.
     const seed = await mnemonicToSeed(mnemonic, '');
@@ -618,6 +619,7 @@ export async function restoreWalletFromMnemonic(
       keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
     await SecureStore.setItemAsync(STORE_KEYS.REGISTRATION_STATUS, 'wallet_created');
+    await SecureStore.setItemAsync('kv_kdf_version', 'v2');
 
     // preserve stats cache if present, else seed defaults (TownHall refills by pubkey)
     const existingStats = await AsyncStorage.getItem(STORE_KEYS.USER_STATS);

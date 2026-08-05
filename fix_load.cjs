@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('IOUBalanceSheetShare.tsx','utf8');s=s.replace("if (visible && frostAgreementId) loadData();","if (visible && frostAgreementId) { loadData(); } else if (visible) { setLoading(false); }");fs.writeFileSync('IOUBalanceSheetShare.tsx',s);console.log('done');

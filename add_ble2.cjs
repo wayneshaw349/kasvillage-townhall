@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('QRPayNearby.tsx','utf8');s=s.replace(/apt: deriveAPT\(pub\),\r?\n/,"apt: deriveAPT(pub),\n        bleUUID: 'KV-BLE-0001',\n");fs.writeFileSync('QRPayNearby.tsx',s);console.log('done');

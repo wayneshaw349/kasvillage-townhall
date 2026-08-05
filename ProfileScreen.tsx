@@ -416,7 +416,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
                       { name: 'Content-Type', value: 'application/json' },
                       { name: 'KV-Type', value: 'device-attestation' },
             { name: 'KV-Pubkey', value: pubkey },
-            { name: 'KV-Apt', value: apt },
+            { name: 'KV-Apt', value: apt.replace(/^APT-/i,'') },
             { name: 'KV-DeviceHash', value: deviceHash || '' },
             { name: 'KV-SerialHash', value: sh },
             { name: 'KV-Platform', value: Platform.OS },

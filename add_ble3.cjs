@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('QRPayNearby.tsx','utf8');s=s.replace(/\} as QRPayload\);/,"  bleUUID: '6b617376-696c-6c61-6765-000000000001',\n    } as QRPayload);");fs.writeFileSync('QRPayNearby.tsx',s);console.log('done');

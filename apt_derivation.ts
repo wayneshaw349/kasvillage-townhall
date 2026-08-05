@@ -52,7 +52,7 @@ async function queryAptOwner(apt: string): Promise<string | null> {
       transactions(
         tags: [
           { name: "App-Name", values: ["KasVillage"] },
-          { name: "KV-Apt", values: ["${apt}"] }
+          { name: "KV-Apt", values: ["${apt}", "APT-${apt}"] }
         ],
         sort: HEIGHT_DESC,
         first: 1

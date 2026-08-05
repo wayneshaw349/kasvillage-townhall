@@ -55,6 +55,8 @@ const SUBNETWORK_ID_SIZE = 20;
 // ============================================================================
 export interface RestTxResult {
   success: boolean; txId?: string; explorerUrl?: string; error?: string;
+  predictedTxId?: string;   // set when prepareOnly — the frozen tx's id
+  preparedTx?: any;         // set when prepareOnly — signed body, NOT broadcast
 }
 
 interface UtxoResponse {
@@ -343,6 +345,7 @@ export async function sendKaspaViaRest(params: {
   privateKeyHex: string;
   network: KaspaNetwork;
   payload?: string;
+  prepareOnly?: boolean;    // freeze + predict txid, do NOT broadcast
 }): Promise<RestTxResult> {
   const { senderAddress, recipientAddress, amountSompi, privateKeyHex, network, payload } = params;
   
@@ -441,13 +444,29 @@ export async function sendKaspaViaRest(params: {
     // 4. Build final outputs (amountSompi=0 means send all back to self)
     const sendAmount = amountSompi === 0n ? selectedAmount - fee : amountSompi;
     const change = selectedAmount - sendAmount - fee;
+
+    // Value-backed IOU floor: locked sompi on spent coins must survive as change.
+    let lockedOnSpent = 0n;
+    try {
+      const { getLockedSompiByKey } = await import('./utxo_ledger');
+      const lockedByKey = await getLockedSompiByKey(senderAddress);
+      for (const u of selectedUtxos) {
+        const k = `${u.outpoint.transactionId}:${u.outpoint.index}`;
+        lockedOnSpent += (lockedByKey.get(k) || 0n);
+      }
+    } catch (e) { console.warn('[REST-TX] locked-map fetch failed:', e); }
+    if (lockedOnSpent > 0n && change < lockedOnSpent) {
+      return { success: false, error: `Would spend IOU-backed value: ${Number(lockedOnSpent) / 1e8} KAS reserved, but change would be only ${Number(change) / 1e8} KAS. Settle IOUs or reduce the amount.` };
+    }
     const outputsData: { value: bigint; scriptVersion: number; script: Uint8Array }[] = [
       { value: sendAmount, scriptVersion: 0, script: recipientScript },
     ];
     if (change > 0n && !isDust(change, senderScript.length)) {
       outputsData.push({ value: change, scriptVersion: 0, script: senderScript });
+    } else if (change > 0n && lockedOnSpent === 0n) {
+      fee += change; // Absorb dust change into fee (safe: no IOU-backed value rides here)
     } else if (change > 0n) {
-      fee += change; // Absorb dust change into fee
+      return { success: false, error: `IOU-backed change (${Number(change) / 1e8} KAS) is below dust and cannot be preserved. Settle IOUs or adjust the amount.` };
     }
     
     // 5. Sign inputs
@@ -506,6 +525,12 @@ export async function sendKaspaViaRest(params: {
       });
       console.log('[REST-TX] PREDICTED txid:', _predictedTxId, '| escrow outpoint =', _predictedTxId + ':0');
     } catch (e) { console.warn('[REST-TX] txid prediction failed (non-fatal):', e); }
+    // FREEZE POINT — return the signed-but-unbroadcast tx + its predicted id
+    if (params.prepareOnly) {
+      if (!_predictedTxId) return { success: false, error: 'txid prediction failed — cannot prepare refund' };
+      console.log('[REST-TX] PREPARE-ONLY — frozen, not broadcast. txid:', _predictedTxId);
+      return { success: true, predictedTxId: _predictedTxId, preparedTx: tx };
+    }
     console.log('[REST-TX] === SUBMITTING TX ===');
     console.log('[REST-TX] Inputs:', signedInputs.length);
     console.log('[REST-TX] Outputs:', outputsData.length);
@@ -553,6 +578,32 @@ export async function sendKaspaViaRest(params: {
   } catch (e: any) {
     console.error('[REST-TX] EXCEPTION:', e.message, e.stack?.slice(0, 200));
     return { success: false, error: e.message || 'Transaction failed' };
+  }
+}
+
+// ============================================================================
+// BROADCAST A PREPARED (FROZEN) TX — the body must be byte-identical to the one
+// whose txid was predicted, or the refund points at a UTXO that never exists.
+// ============================================================================
+export async function broadcastPreparedTx(tx: any, network: KaspaNetwork): Promise<RestTxResult> {
+  try {
+    const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transaction: tx, allowOrphan: false }),
+    });
+    if (!submitResp.ok) {
+      const errBody = await submitResp.text();
+      console.error('[REST-TX] Prepared submit FAILED:', submitResp.status, errBody);
+      return { success: false, error: `Submit failed (${submitResp.status}): ${errBody}` };
+    }
+    const result = await submitResp.json();
+    const txId = result.transactionId || '';
+    const explorerBase = network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';
+    console.log('[REST-TX] Prepared tx broadcast:', txId);
+    return { success: true, txId, explorerUrl: explorerBase + txId };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Broadcast failed' };
   }
 }
 

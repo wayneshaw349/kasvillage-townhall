@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('SendKAS.tsx','utf8');s=s.replace(/const \{ price: kasPrice \} = useKaspaPrice\(\);/,"const { usdPerKas } = useKaspaPrice();");fs.writeFileSync('SendKAS.tsx',s);console.log('done');

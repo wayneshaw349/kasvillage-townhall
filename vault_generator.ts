@@ -22,7 +22,8 @@
 import * as Crypto from 'expo-crypto';
 import { sha256 } from '@noble/hashes/sha256';
 import { getPublicKey } from '@noble/secp256k1';
-import { entropyToMnemonic, mnemonicToSeed, deriveKaspaHDKey } from './bip39_wallet';
+import { entropyToMnemonic } from './bip39_wallet';
+import { mnemonicToSeedV2 as mnemonicToSeed, deriveKaspaHDKeyV2 as deriveKaspaHDKey } from './bip39_v2';
 import { splitWithVerify, recoverFromWires } from './shamir_wire';
 
 const ENTROPY_LEN = 16;      // 128-bit -> 12 words

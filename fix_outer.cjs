@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('Dashboard.tsx','utf8');s=s.replace(/onNavigateTxHistory\?: \(\) => void;\r?\n/g,(m)=>m+'  onNavigatePhoneProof?: () => void;\n');fs.writeFileSync('Dashboard.tsx',s);console.log('done');

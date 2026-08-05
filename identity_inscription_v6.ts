@@ -59,7 +59,7 @@ export interface InscribeIdentityResult {
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const IRYS_UPLOAD_URL  = 'https://node2.irys.xyz/tx';
+const IRYS_UPLOAD_URL  = 'https://upload.ardrive.io/v1/tx';
 const ARWEAVE_GATEWAY  = 'https://arweave.net';
 const SUBNETWORK_NATIVE_HEX = '0000000000000000000000000000000000000000';
 const DUST_SOMPI       = 546n;

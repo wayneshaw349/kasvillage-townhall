@@ -1,4 +1,0 @@
-﻿const fs=require('fs');let q=fs.readFileSync('QRPayNearby.tsx','utf8');
-q=q.replace("const [showIOUSheet, setShowIOUSheet] = useState(false);","const [showIOUSheet, setShowIOUSheet] = useState(false);\n  const [requestedAmt, setRequestedAmt] = useState(0);");
-q=q.replace("if (parsed.type === 'kasvillage_pay' && parsed.address) {\n        setResolvedAddress(parsed.address);\n        Alert.alert('Found!', `${parsed.name || 'Villager'} (${parsed.apt})\\n${parsed.address.slice(0, 30)}...`);","if (parsed.type === 'kasvillage_pay' && parsed.address) {\n        setResolvedAddress(parsed.address);\n        if (parsed.requestAmountKAS > 0) setRequestedAmt(parsed.requestAmountKAS);\n        Alert.alert('Found!', `${parsed.name || 'Villager'} (${parsed.apt})${parsed.requestAmountKAS > 0 ? '\\nRequesting ' + parsed.requestAmountKAS + ' KAS' : ''}\\n${parsed.address.slice(0, 30)}...`);");
-fs.writeFileSync('QRPayNearby.tsx',q);console.log('done');

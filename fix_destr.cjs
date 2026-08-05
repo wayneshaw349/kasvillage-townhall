@@ -1,1 +1,0 @@
-﻿const fs=require('fs');let s=fs.readFileSync('Dashboard.tsx','utf8');s=s.replace(/onNavigatePOBox,\r?\n  activeMode/g,'onNavigatePOBox,\n  onNavigatePhoneProof,\n  activeMode');fs.writeFileSync('Dashboard.tsx',s);console.log('done');

@@ -314,6 +314,18 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
           }
         }
       } catch (e) { console.warn('[DashStats] IOU error:', e); }
+    /* PROP-IOU-DASH: proposal-based IOUs (kv1/kv1a) from kv_prop_ious */
+    try {
+      const pj = await AsyncStorage.getItem('kv_prop_ious');
+      if (pj) {
+        const arr = JSON.parse(pj);
+        for (const pi of arr) {
+          const amt = BigInt(pi.amountSompi || '0');
+          if (pi.role === 'issuer' && pi.status === 'accepted') iousOwedSompi += amt;
+          if (pi.role === 'recipient' && pi.status === 'accepted') iousOwedToYouSompi += amt;
+        }
+      }
+    } catch (e) { console.warn('[DashStats] prop-IOU error:', e); }
 
       // 4) TX history: direct send/receive
       let totalSentSompi = 0n;
@@ -1026,6 +1038,24 @@ const WalletOverview: React.FC<{
   ds: ReturnType<typeof useDashboardStats>;
 }> = ({ balance, xp, onDeposit, onWithdraw, onSend, onPayNearby, onNavigateProfile, onNavigateNeighbor, onNavigateTxHistory, onNavigatePOBox,
   onNavigatePhoneProof, onNavigateBalanceSheet, activeMode, onSwitchMode, balanceSompi = 0n, ds }) => {
+  const [collatOpen, setCollatOpen] = React.useState(false);
+  const [collatRows, setCollatRows] = React.useState<{ agreementId: string; sompi: bigint; role: string; count: number }[]>([]);
+  const loadCollat = React.useCallback(async () => {
+    try {
+      const { getTaggedUtxos } = require("./utxo_ledger");
+      const { committed, locked } = await getTaggedUtxos();
+      const byAgr: Record<string, { sompi: bigint; role: string; count: number }> = {};
+      for (const it of [...committed, ...locked]) {
+        const id = it.agreementId || "(untagged)";
+        if (!byAgr[id]) byAgr[id] = { sompi: 0n, role: it.role || "unknown", count: 0 };
+        byAgr[id].sompi += BigInt(it.entry.amountSompi);
+        byAgr[id].count += 1;
+      }
+      const rows = Object.entries(byAgr).map(([agreementId, v]) => ({ agreementId, sompi: v.sompi, role: v.role, count: v.count }));
+      rows.sort((a, b) => Number(b.sompi - a.sompi));
+      setCollatRows(rows);
+    } catch (e) { console.warn("[Collat] load failed", e); setCollatRows([]); }
+  }, []);
   const { formattedPrice, usdPerKas, loading: priceLoading, isStale } = useKaspaPrice({ autoStart: true });
   console.log('[WalletUI] render balanceSompi:', balanceSompi.toString());
   const kasBalance = Number(balanceSompi) / 100_000_000;
@@ -1162,10 +1192,35 @@ const WalletOverview: React.FC<{
           <Text style={{ color: "#888", fontSize: 13 }}>Total On-Chain</Text>
           <Text style={{ color: "#D4AF37", fontSize: 13, fontWeight: "bold" }}>{(Number(ds.totalBalanceSompi) / 1e8).toFixed(4)} KASPA</Text>
         </View>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
-          <Text style={{ color: "#888", fontSize: 13 }}>Collateral (FROST)</Text>
+        <TouchableOpacity onPress={() => { loadCollat(); setCollatOpen(true); }} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
+          <Text style={{ color: "#888", fontSize: 13 }}>Collateral (FROST) ⓘ</Text>
           <Text style={{ color: "#E67E22", fontSize: 13 }}>{((Number(ds.totalBalanceSompi || 0) - Number(ds.spendableBalanceSompi || 0)) / 1e8).toFixed(4)} KASPA</Text>
-        </View>
+        </TouchableOpacity>
+        <Modal visible={collatOpen} transparent animationType="fade" onRequestClose={() => setCollatOpen(false)}>
+          <TouchableOpacity activeOpacity={1} onPress={() => setCollatOpen(false)} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 20 }}>
+            <TouchableOpacity activeOpacity={1} onPress={() => {}} style={{ backgroundColor: "#1a1a1a", borderRadius: 12, padding: 16, borderWidth: 1, borderColor: "#E67E22" }}>
+              <Text style={{ color: "#E67E22", fontSize: 16, fontWeight: "bold", marginBottom: 4 }}>Locked Collateral</Text>
+              <Text style={{ color: "#888", fontSize: 12, marginBottom: 12 }}>{(collatRows.reduce((a, r) => a + Number(r.sompi), 0) / 1e8).toFixed(4)} KASPA across {collatRows.length} agreement{collatRows.length === 1 ? "" : "s"}</Text>
+              <ScrollView style={{ maxHeight: 320 }}>
+                {collatRows.length === 0 ? (
+                  <Text style={{ color: "#666", fontSize: 13, paddingVertical: 12 }}>No tagged collateral in local ledger.</Text>
+                ) : collatRows.map((r) => (
+                  <TouchableOpacity key={r.agreementId} onPress={() => { Clipboard.setStringAsync(r.agreementId); Alert.alert("Copied", r.agreementId); }} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#333" }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                      <Text style={{ color: "#D4AF37", fontSize: 13, fontWeight: "bold" }}>{(Number(r.sompi) / 1e8).toFixed(4)} KAS</Text>
+                      <Text style={{ color: "#888", fontSize: 11 }}>{r.role} · {r.count} UTXO{r.count === 1 ? "" : "s"}</Text>
+                    </View>
+                    <Text style={{ color: "#aaa", fontSize: 11, marginTop: 2 }} numberOfLines={1}>{r.agreementId}</Text>
+                    <Text style={{ color: "#555", fontSize: 10, marginTop: 2 }}>tap to copy ID</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity onPress={() => setCollatOpen(false)} style={{ marginTop: 12, paddingVertical: 10, backgroundColor: "#333", borderRadius: 8 }}>
+                <Text style={{ color: "#fff", fontSize: 13, textAlign: "center", fontWeight: "bold" }}>Close</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
         <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
           <Text style={{ color: "#888", fontSize: 13 }}>IOU-Backed UTXOs</Text>
           <Text style={{ color: "#E67E22", fontSize: 13 }}>{(Number(ds.iouAllocatedSompi) / 1e8).toFixed(4)} KASPA</Text>

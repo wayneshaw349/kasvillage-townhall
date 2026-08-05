@@ -889,7 +889,7 @@ async function sendKASFromVault(
 
   let hdPriv: Uint8Array | null = null;
   try {
-    const { mnemonicToSeed, deriveKaspaHDKey } = await import('./bip39_wallet');
+    const { mnemonicToSeedV2: mnemonicToSeed, deriveKaspaHDKeyV2: deriveKaspaHDKey } = await import('./bip39_v2');
     const { previewAddressFromMnemonic } = await import('./wallet_registration_v2');
 
     const storedVaultAddr = (await SecureStore.getItemAsync('kv_vault_address')) || '';

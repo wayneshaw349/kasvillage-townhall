@@ -1055,7 +1055,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
               { name: 'App-Name', value: 'KasVillage' },
               { name: 'KV-Type', value: 'stats-proof' },
               { name: 'KV-Pubkey', value: myPubkey },
-              { name: 'KV-APT', value: myApt },
+              { name: 'KV-Apt', value: (myApt || '').replace(/^APT-/i,'') },
               { name: 'KV-Address', value: myAddress || '' },
               { name: 'KV-ProofType', value: data.proof.proof_type || 'Halo2-IPA-Stats-Mock-V2' },
               { name: 'KV-Successes', value: String(data.stats?.successes || 0) },
@@ -1298,6 +1298,50 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
       Alert.alert('Copied', 'APT number copied to clipboard');
     }
   };
+  const [aptRegistering, setAptRegistering] = React.useState(false);
+  // Register (backfill) APT -> pubkey mapping on Arweave. APT is derived from pubkey, so record is self-verifying.
+  const handleRegisterApt = async () => {
+    if (!myPubkey) { Alert.alert('No pubkey', 'Cannot register APT without a public key.'); return; }
+    setAptRegistering(true);
+    try {
+      const { deriveApt } = await import('./apt_derivation');
+      const aptNum = deriveApt(myPubkey);
+      // Skip if a record already maps this APT to this pubkey
+      try {
+        const gql = JSON.stringify({ query: `{ transactions(tags: [{ name: "App-Name", values: ["KasVillage"] }, { name: "KV-Apt", values: ["${aptNum}"] }], sort: HEIGHT_DESC, first: 1) { edges { node { tags { name value } } } } }` });
+        const chk = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: gql });
+        if (chk.ok) {
+          const j = await chk.json();
+          const tags = j?.data?.transactions?.edges?.[0]?.node?.tags;
+          const existingPk = tags?.find((t: {name:string}) => t.name === 'KV-Pubkey')?.value;
+          if (existingPk === myPubkey) { Alert.alert('Already registered', `APT-${aptNum} is already linked to your key.`); setAptRegistering(false); return; }
+        }
+      } catch (e) { console.warn('[APT-Register] pre-check failed, proceeding', e); }
+      const arweaveUpload = await import('./arweave_upload');
+      const payload = JSON.stringify({ v: 1, type: 'apt-registration', apt: 'APT-' + aptNum, pubkey: myPubkey, address: myAddress || '', timestamp: Date.now() });
+      const tags = [
+        { name: 'App-Name', value: 'KasVillage' },
+        { name: 'KV-Type', value: 'apt-registration' },
+        { name: 'KV-Apt', value: aptNum },
+        { name: 'KV-Pubkey', value: myPubkey },
+        { name: 'KV-Address', value: myAddress || '' },
+        { name: 'Content-Type', value: 'application/json' },
+      ];
+      let txId = '';
+      let upErr = '';
+      const _up = arweaveUpload.uploadToTurbo || (arweaveUpload as any).uploadToIrys;
+      if (_up) {
+        const r: any = await _up(payload, tags);
+        txId = r?.txId || r?.id || r?.transaction?.id || '';
+        if (!txId) upErr = r?.error || (r?.success === false ? 'Upload rejected' : 'No transaction id returned');
+      } else { upErr = 'No upload function available'; }
+      if (txId) { Alert.alert('APT Registered', `APT-${aptNum} is now searchable.\nTX: ${txId.slice(0,16)}...`); }
+      else { Alert.alert('Upload failed', upErr + '.\nEnsure your wallet key is available, then retry.'); }
+    } catch (e: any) {
+      console.warn('[APT-Register] failed', e);
+      Alert.alert('Registration failed', String(e?.message || e));
+    } finally { setAptRegistering(false); }
+  };
   
   // Get icon for result type
   const getTypeIcon = (type?: string) => {
@@ -1470,6 +1514,13 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
                   <Copy size={rs.s(18)} color={COLORS.amber600} />
                 </TouchableOpacity>
               </View>
+              <TouchableOpacity
+                style={{ marginTop: 8, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: COLORS.amber600, borderRadius: 8, alignItems: 'center', opacity: aptRegistering ? 0.6 : 1 }}
+                disabled={aptRegistering}
+                onPress={handleRegisterApt}
+              >
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>{aptRegistering ? 'Registering…' : 'Register APT (make searchable)'}</Text>
+              </TouchableOpacity>
               
               <View style={styles.identityRow}>
                 <View style={styles.identityInfo}>
@@ -1642,7 +1693,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           ) : (
             <View style={styles.needTraitsBox}>
               <Text style={styles.needTraitsText}>
-                Need {6 - traitCount} more traits to verify
+                This identity was created with {traitCount} of 6 traits. Traits are set once, before the wallet is made, and cannot be added later. Reaching seller (Passport) tier requires creating a new identity - which starts reputation and XP from zero.
               </Text>
               <View style={styles.traitProgress}>
                 <View
@@ -1653,7 +1704,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
                 />
               </View>
               <Text style={styles.traitProgressText}>
-                {traitCount}/6 traits
+                {traitCount}/6 traits (fixed at creation)
               </Text>
             </View>
           )}

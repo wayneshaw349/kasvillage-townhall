@@ -13,7 +13,7 @@ import * as Crypto from 'expo-crypto';
 // CONSTANTS
 // =============================================================================
 
-const IRYS_UPLOAD_URL = 'https://turbo.ardrive.io/v1/tx';
+const IRYS_UPLOAD_URL = 'https://upload.ardrive.io/v1/tx'; // TURBO-SWAP: upload host, free small items; turbo.ardrive.io is payment host (402s via AR.IO bundler)
 const ARWEAVE_GATEWAY = 'https://arweave.net';
 const SIGNATURE_TYPE_SECP256K1 = 3;
 
@@ -227,7 +227,7 @@ async function uploadToIrys(
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      console.error(`[Arweave] Upload failed ${response.status}: ${text}`);
+      console.error(`[Arweave] Upload failed ${response.status} from ${(response as any).url} redirected=${(response as any).redirected}: ${text.slice(0,200)}`);
       return { 
         success: false, 
         error: `Upload failed: ${response.status} ${text.slice(0, 100)}` 

@@ -390,8 +390,11 @@ export async function commitForCollateral(
   const freeEntries = Array.from(ledger.values())
     .filter(e => e.status === 'free')
     .sort((a, b) => Number(BigInt(a.amountSompi) - BigInt(b.amountSompi)));
+  /* SMALLEST-COVER: prefer the single smallest coin that covers the amount - binds one coin instead of dragging large coins into small agreements */
+  const _coverEntry = freeEntries.find(e => BigInt(e.amountSompi) >= amountSompi);
+  const _pickList = _coverEntry ? [_coverEntry] : freeEntries;
 
-  for (const entry of freeEntries) {
+  for (const entry of _pickList) {
     if (remaining <= 0n) break;
     entry.status = 'collateral-committed';
     entry.commitReason = agreementId;
@@ -515,6 +518,36 @@ export async function releaseIOU(iouId: string): Promise<void> {
  * Get only free UTXOs formatted for kaspa_rest_tx consumption.
  * Drop-in filter: call this instead of fetching UTXOs directly from REST.
  */
+/**
+ * ORPHAN-IOU-SWEEP: release allocations whose iouId matches no live IOU/prop record.
+ * Mirrors releaseOrphanCollateral. Pass the set of live ids (SignedIOU ids + 'prop_'+nonce
+ * for pending/accepted prop-IOUs). Anything else is stale and frees.
+ */
+export async function releaseOrphanIOUs(liveIouIds: string[]): Promise<number> {
+  const live = new Set(liveIouIds);
+  const ledger = await loadLedger();
+  let freedCount = 0;
+  for (const entry of ledger.values()) {
+    if (!entry.allocations || !entry.allocations.length) continue;
+    const stale = entry.allocations.filter(a => !live.has(a.iouId));
+    if (!stale.length) continue;
+    const freed = stale.reduce((acc, a) => acc + BigInt(a.sompi), 0n);
+    entry.allocations = entry.allocations.filter(a => live.has(a.iouId));
+    entry.allocatedSompi = String(BigInt(entry.allocatedSompi ?? '0') - freed);
+    if (BigInt(entry.allocatedSompi) <= 0n) {
+      entry.allocatedSompi = '0';
+      entry.allocations = entry.allocations.length ? entry.allocations : undefined;
+      if (entry.status === 'iou-allocated') entry.status = 'free';
+    } else if (entry.status === 'iou-allocated') {
+      entry.status = 'free';
+    }
+    freedCount += stale.length;
+    console.log('[UTXO-Ledger] Orphan IOU sweep freed', Number(freed) / 1e8, 'KAS from', entry.utxoKey.slice(0, 20), '(', stale.map(a => a.iouId).join(','), ')');
+  }
+  if (freedCount) await saveLedger(ledger);
+  return freedCount;
+}
+
 export async function getSpendableUtxos(address: string): Promise<{
   utxos: any[];
   spendableBalance: bigint;
@@ -643,8 +676,11 @@ export async function canonicalCommit(
   const freeEntries = Array.from(ledger.values())
     .filter(e => e.status === 'free')
     .sort((a, b) => Number(BigInt(a.amountSompi) - BigInt(b.amountSompi)));
+  /* SMALLEST-COVER: prefer the single smallest coin that covers the amount - binds one coin instead of dragging large coins into small agreements */
+  const _coverEntry = freeEntries.find(e => BigInt(e.amountSompi) >= amountSompi);
+  const _pickList = _coverEntry ? [_coverEntry] : freeEntries;
 
-  for (const entry of freeEntries) {
+  for (const entry of _pickList) {
     if (remaining <= 0n) break;
     // Compute commit hash
     const hashInput = entry.utxoKey + agreementId + role + pubkey;
