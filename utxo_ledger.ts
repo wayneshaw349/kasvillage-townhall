@@ -1,73 +1,69 @@
 // ============================================================================
-// KASVILLAGE - UNIFIED UTXO LEDGER
+// KASVILLAGE - VIRTUAL COMMITMENT LEDGER (v2)
 // ============================================================================
-// Single source of truth for what's spendable in the wallet.
-// Every send path must check this ledger before spending.
+// Replaces per-UTXO tagging with amount-based virtual commitments.
 //
-// UTXO States:
-//   free              — available to spend or commit
-//   iou-allocated     — backing an IOU, can't spend until settled
-//   collateral-committed — pledged to agreement, auto-send pending
-//   collateral-locked — sent to FROST address (consumed on L1)
+//   spendable = L1 balance − Σ(collateral rows, unlocked) − Σ(IOU rows)
 //
-// Flow:
-//   User agrees to collateral → commitUtxos() marks as 'collateral-committed'
-//   Auto-send fires → markLocked() changes to 'collateral-locked'
-//   L1 confirms → UTXO disappears from REST (consumed), ledger auto-cleans
-//   IOU issued → allocateForIOU() marks as 'iou-allocated'
-//   IOU settled → releaseIOU() marks as 'free'
+// Coins are never individually reserved. A 6-KAS agreement reserves 6 KAS of
+// *value*, not whichever coin happened to cover it. This eliminates the
+// whole-UTXO over-commit, the own-agreement self-deadlock, stale coin tags,
+// and phantom-outpoint debris — the entire bug class of coin-granular tags.
 //
-// ALL send functions call getSpendableUtxos() which filters out non-free UTXOs
+// What is still per-coin (safety, not accounting):
+//   - covenant script classification (never spend/accept non-P2PK)
+//   - coinbase maturity (network rejects immature spends)
+//   - prepared-input reservation (a frozen prepared tx's inputs must not be
+//     spent by another send before its broadcast)
+//
+// Export surface is byte-compatible with v1 so consumers don't change.
+// LedgerEntry rows returned by query functions are synthesized
+// ("virtual:<id>") — commitHash is now SHA256('v2'+id+role+pubkey), coin-free.
 // ============================================================================
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
 // ============================================================================
-// TYPES
+// TYPES (unchanged shapes)
 // ============================================================================
 
 export type UtxoStatus = 'free' | 'iou-allocated' | 'collateral-committed' | 'collateral-locked';
 
 export interface LedgerEntry {
-  utxoKey: string;           // "txId:index"
+  utxoKey: string;
   txId: string;
   index: number;
-  amountSompi: string;       // BigInt as string for storage
+  amountSompi: string;
   status: UtxoStatus;
-  commitReason?: string;     // agreementId or iouId
-  committedAt?: number;      // timestamp
-  role?: 'buyer' | 'seller'; // canonical role in agreement
-  pubkey?: string;           // my pubkey (proves ownership)
-  commitHash?: string;       // SHA256(txId + index + agreementId + role + pubkey)
-  covenantWarning?: boolean; // true if script is NOT standard P2PK
-  allocatedSompi?: string;                          // portion locked (BigInt as string) — IOU partial-alloc
-  allocations?: { iouId: string; sompi: string }[]; // per-IOU breakdown; one coin may back many IOUs
-  isCoinbase?: boolean;    // coinbase UTXOs need maturity before spending
-  blockDaaScore?: string;  // DAA score at UTXO creation (BigInt as string)
+  commitReason?: string;
+  committedAt?: number;
+  role?: 'buyer' | 'seller';
+  pubkey?: string;
+  commitHash?: string;
+  covenantWarning?: boolean;
+  allocatedSompi?: string;
+  allocations?: { iouId: string; sompi: string }[];
+  isCoinbase?: boolean;
+  blockDaaScore?: string;
 }
 
 export interface SpendableResult {
-  totalBalance: bigint;      // all UTXOs on L1
-  committedBalance: bigint;  // collateral-committed + collateral-locked
-  iouAllocated: bigint;      // iou-allocated
-  spendableBalance: bigint;  // free only
-  utxos: LedgerEntry[];      // free UTXOs only
-  allEntries: LedgerEntry[]; // everything
+  totalBalance: bigint;
+  committedBalance: bigint;
+  iouAllocated: bigint;
+  spendableBalance: bigint;
+  utxos: LedgerEntry[];      // spendable coins (full amounts; safety-filtered)
+  allEntries: LedgerEntry[]; // coins + synthesized commitment rows
 }
 
 // ============================================================================
-
-// ============================================================================
-// COVENANT DETECTION
-// ============================================================================
-// Pure P2PK on Kaspa is always: 20{32-byte x-only pubkey}ac = 68 hex chars
-// Anything else is a covenant or unknown script type
+// COVENANT DETECTION (unchanged)
 // ============================================================================
 
 export function isPureP2PK(scriptPubKey: string): boolean {
-  return scriptPubKey.length === 68 
-    && scriptPubKey.startsWith('20') 
+  return scriptPubKey.length === 68
+    && scriptPubKey.startsWith('20')
     && scriptPubKey.endsWith('ac');
 }
 
@@ -89,40 +85,107 @@ export function classifyUtxo(scriptPubKey: string): { safety: UtxoSafety; reason
   return { safety: 'unknown', reason: 'Non-standard script format' };
 }
 
-// STORAGE
+// ============================================================================
+// STORAGE — one small JSON blob of amount rows. No per-coin state persisted.
 // ============================================================================
 
-const LEDGER_KEY = 'kv_utxo_ledger';
-
-export async function releaseOrphanCollateral(activeAgreementIds: string[]): Promise<number> {
-  const arr = await loadLedger();
-  let n = 0;
-  for (const [, e] of arr) {
-    if ((e.status === 'iou-allocated' || e.status === 'collateral-committed' || e.status === 'collateral-locked') && (!e.commitReason || !activeAgreementIds.includes(e.commitReason))) { e.status = 'free'; e.commitReason = undefined; n++; }
-  }
-  await saveLedger(arr);
-  return n;
+interface CollateralRow {
+  agrId: string;
+  sompi: string;              // BigInt as string
+  role: 'buyer' | 'seller';
+  pubkey: string;
+  at: number;
+  locked: boolean;            // true after funds actually sent to FROST — value
+                              // left the wallet, so row no longer reduces spendable
+  commitHash: string;
 }
+
+interface IouRow {
+  iouId: string;
+  sompi: string;
+  at: number;
+}
+
+interface VStore {
+  v: 2;
+  collateral: CollateralRow[];
+  ious: IouRow[];
+  pendingInputs: { id: string; keys: string[]; at: number }[]; // frozen prepared-tx inputs
+}
+
+const VSTORE_KEY = 'kv_vcommit_v2';
+const LEGACY_LEDGER_KEY = 'kv_utxo_ledger';
 const NETWORK_KEY = 'kaspa_network';
 
-async function loadLedger(): Promise<Map<string, LedgerEntry>> {
+function emptyStore(): VStore { return { v: 2, collateral: [], ious: [], pendingInputs: [] }; }
+
+async function loadStore(): Promise<VStore> {
   try {
-    const json = await AsyncStorage.getItem(LEDGER_KEY);
-    if (!json) return new Map();
-    const arr: LedgerEntry[] = JSON.parse(json);
-    return new Map(arr.map(e => [e.utxoKey, e]));
-  } catch {
-    return new Map();
-  }
+    const json = await AsyncStorage.getItem(VSTORE_KEY);
+    if (!json) return await migrateLegacy();
+    const s = JSON.parse(json);
+    if (s?.v !== 2) return emptyStore();
+    s.collateral = s.collateral || [];
+    s.ious = s.ious || [];
+    s.pendingInputs = s.pendingInputs || [];
+    return s as VStore;
+  } catch { return emptyStore(); }
 }
 
-async function saveLedger(ledger: Map<string, LedgerEntry>): Promise<void> {
-  const arr = Array.from(ledger.values());
-  await AsyncStorage.setItem(LEDGER_KEY, JSON.stringify(arr));
+async function saveStore(s: VStore): Promise<void> {
+  await AsyncStorage.setItem(VSTORE_KEY, JSON.stringify(s));
+}
+
+// One-time migration: fold legacy per-coin tags into amount rows, then retire the key.
+async function migrateLegacy(): Promise<VStore> {
+  const s = emptyStore();
+  try {
+    const json = await AsyncStorage.getItem(LEGACY_LEDGER_KEY);
+    if (!json) return s;
+    const arr: LedgerEntry[] = JSON.parse(json);
+    const byAgr = new Map<string, { sompi: bigint; role: 'buyer' | 'seller'; pubkey: string; locked: boolean }>();
+    const byIou = new Map<string, bigint>();
+    for (const e of arr) {
+      if ((e.status === 'collateral-committed' || e.status === 'collateral-locked') && e.commitReason) {
+        const cur = byAgr.get(e.commitReason) || { sompi: 0n, role: (e.role || 'buyer') as 'buyer' | 'seller', pubkey: e.pubkey || '', locked: true };
+        cur.sompi += BigInt(e.amountSompi || '0');
+        if (e.status === 'collateral-committed') cur.locked = false; // any unlocked coin => row still reduces spendable
+        byAgr.set(e.commitReason, cur);
+      }
+      for (const a of (e.allocations || [])) {
+        byIou.set(a.iouId, (byIou.get(a.iouId) || 0n) + BigInt(a.sompi || '0'));
+      }
+    }
+    for (const [agrId, v] of byAgr) {
+      s.collateral.push({ agrId, sompi: v.sompi.toString(), role: v.role, pubkey: v.pubkey, at: Date.now(), locked: v.locked, commitHash: await computeCommitHash(agrId, v.role, v.pubkey) });
+    }
+    for (const [iouId, sompi] of byIou) {
+      s.ious.push({ iouId, sompi: sompi.toString(), at: Date.now() });
+    }
+    await AsyncStorage.setItem(VSTORE_KEY, JSON.stringify(s));
+    await AsyncStorage.removeItem(LEGACY_LEDGER_KEY);
+    console.log('[VLedger] Migrated legacy tags:', s.collateral.length, 'agreements,', s.ious.length, 'IOU allocations');
+  } catch (e) { console.warn('[VLedger] legacy migration skipped:', e); }
+  return s;
+}
+
+async function computeCommitHash(id: string, role: string, pubkey: string): Promise<string> {
+  try {
+    const { sha256 } = await import('@noble/hashes/sha256');
+    const bytes = sha256(new TextEncoder().encode('v2' + id + role + pubkey));
+    return Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch { return ''; }
+}
+
+function sumCollateralUnlocked(s: VStore): bigint {
+  return s.collateral.filter(r => !r.locked).reduce((a, r) => a + BigInt(r.sompi), 0n);
+}
+function sumIous(s: VStore): bigint {
+  return s.ious.reduce((a, r) => a + BigInt(r.sompi), 0n);
 }
 
 // ============================================================================
-// API HELPER
+// API HELPER (unchanged)
 // ============================================================================
 
 async function getApiBase(): Promise<string> {
@@ -142,80 +205,8 @@ async function getVirtualDaaScore(apiBase: string): Promise<bigint | null> {
 }
 
 // ============================================================================
-// SYNC WITH L1
+// SYNC: fetch L1 coins, apply safety filters, subtract virtual commitments
 // ============================================================================
-
-/**
- * Sync ledger with L1 UTXOs.
- * - New UTXOs from L1 → added as 'free'
- * - UTXOs consumed on L1 (no longer in REST response) → removed from ledger
- * - Existing ledger entries keep their status (committed/allocated stays)
- */
-export async function getFreeUtxoKeys(address: string): Promise<Set<string>> {
-  const r = await syncLedger(address);
-  return new Set(r.utxos.map(e => e.utxoKey));
-}
-
-/**
- * Map of utxoKey -> locked (allocated) sompi, for coins with any IOU allocation.
- * Send path uses this to keep IOU-backed value in the wallet via a change floor.
- */
-export async function getLockedSompiByKey(address: string): Promise<Map<string, bigint>> {
-  const r = await syncLedger(address);
-  const m = new Map<string, bigint>();
-  for (const e of r.allEntries) {
-    const alloc = BigInt(e.allocatedSompi ?? '0');
-    if (alloc > 0n) m.set(e.utxoKey, alloc);
-  }
-  return m;
-}
-
-/**
- * After a send consumes partially-locked coins, move their IOU allocations onto the
- * change UTXO so the backing record survives the spend. Called post-broadcast.
- * changeUtxoKey = `${newTxId}:${changeIndex}`. changeAmountSompi is the change output value.
- */
-export async function reanchorAllocations(
-  spentKeys: string[],
-  newTxId: string,
-  changeIndex: number,
-  changeAmountSompi: string,
-): Promise<void> {
-  const ledger = await loadLedger();
-  const moved: { iouId: string; sompi: string }[] = [];
-  for (const key of spentKeys) {
-    const e = ledger.get(key);
-    if (e?.allocations && e.allocations.length) {
-      for (const a of e.allocations) moved.push({ iouId: a.iouId, sompi: a.sompi });
-    }
-    // The spent coin is gone on L1; drop its ledger entry now (sync would anyway).
-    ledger.delete(key);
-  }
-  if (moved.length === 0) { await saveLedger(ledger); return; }
-
-  const changeKey = `${newTxId}:${changeIndex}`;
-  const totalMoved = moved.reduce((acc, a) => acc + BigInt(a.sompi), 0n);
-  const existing = ledger.get(changeKey);
-  if (existing) {
-    existing.allocations = [ ...(existing.allocations ?? []), ...moved ];
-    existing.allocatedSompi = String(BigInt(existing.allocatedSompi ?? '0') + totalMoved);
-    if (BigInt(existing.allocatedSompi) >= BigInt(existing.amountSompi)) existing.status = 'iou-allocated';
-  } else {
-    // Change UTXO not yet in ledger (pre-sync) — seed it so allocations aren't lost.
-    const [txId, idxStr] = changeKey.split(':');
-    ledger.set(changeKey, {
-      utxoKey: changeKey,
-      txId,
-      index: Number(idxStr),
-      amountSompi: String(changeAmountSompi),
-      status: BigInt(totalMoved) >= BigInt(changeAmountSompi || '0') ? 'iou-allocated' : 'free',
-      allocatedSompi: String(totalMoved),
-      allocations: moved,
-    });
-  }
-  await saveLedger(ledger);
-  console.log(`[UTXO-Ledger] Re-anchored ${moved.length} allocation(s) (${Number(totalMoved) / 1e8} KAS) onto ${changeKey}`);
-}
 
 export async function syncLedger(address: string): Promise<SpendableResult> {
   const apiBase = await getApiBase();
@@ -223,9 +214,8 @@ export async function syncLedger(address: string): Promise<SpendableResult> {
   if (!resp.ok) throw new Error('UTXO fetch failed: ' + resp.status);
   const rawUtxos: any[] = await resp.json();
 
-  // PRIMARY-GUARD: only the primary (hot) wallet address may read/write the
-  // persisted ledger. Any other address (vault, counterparty) gets an
-  // ephemeral in-memory ledger so it can never clobber hot state.
+  // PRIMARY-GUARD: only the primary (hot) wallet reads/writes persisted rows.
+  // Other addresses (vault, counterparty) compute against zero commitments.
   let isPrimary = true;
   try {
     const primary = (await SecureStore.getItemAsync('kv_kaspa_address'))
@@ -233,354 +223,255 @@ export async function syncLedger(address: string): Promise<SpendableResult> {
     if (primary && address !== primary) isPrimary = false;
   } catch {}
 
-  const ledger = isPrimary ? await loadLedger() : new Map<string, LedgerEntry>();
+  const store = isPrimary ? await loadStore() : emptyStore();
+  const vdaa = await getVirtualDaaScore(apiBase);
+  const COINBASE_MATURITY = 100n;
+  const pending = new Set(store.pendingInputs.flatMap(p => p.keys));
 
-  // Build set of L1 UTXOs
-  const l1Keys = new Set<string>();
+  let totalBalance = 0n;
+  const coins: LedgerEntry[] = [];
+  const spendCoins: LedgerEntry[] = [];
+
   for (const u of rawUtxos) {
     const txId = u.outpoint?.transactionId || u.transactionId || '';
     const index = u.outpoint?.index ?? u.index ?? 0;
     const key = `${txId}:${index}`;
-    const amount = u.utxoEntry?.amount || u.amount || '0';
-    l1Keys.add(key);
+    const amount = String(u.utxoEntry?.amount || u.amount || '0');
+    const spk = u.utxoEntry?.scriptPublicKey?.scriptPublicKey || u.utxoEntry?.scriptPublicKey || '';
+    const pure = isPureP2PK(spk);
+    if (!pure) { console.warn('[UTXO-Safety] ⚠️ Non-standard script detected:', key, 'script:', String(spk).slice(0, 20) + '...', 'len:', String(spk).length); }
+    const isCoinbase = (u.utxoEntry?.isCoinbase ?? u.isCoinbase) || false;
+    const daa = String(u.utxoEntry?.blockDaaScore ?? u.blockDaaScore ?? '0');
 
-    if (!ledger.has(key)) {
-      // New UTXO from L1 — mark as free
-      const spk = u.utxoEntry?.scriptPublicKey?.scriptPublicKey || u.utxoEntry?.scriptPublicKey || '';
-      const covenantCheck = isPureP2PK(spk);
-      if (!covenantCheck) { console.warn('[UTXO-Safety] ⚠️ Non-standard script detected:', key, 'script:', spk.slice(0,20) + '...', 'len:', spk.length); }
-      ledger.set(key, {
-        utxoKey: key,
-        txId,
-        index,
-        amountSompi: String(amount),
-        status: 'free',
-        covenantWarning: !covenantCheck,
-        isCoinbase: (u.utxoEntry?.isCoinbase ?? u.isCoinbase) || false,
-        blockDaaScore: String(u.utxoEntry?.blockDaaScore ?? u.blockDaaScore ?? '0'),
-      });
+    const entry: LedgerEntry = {
+      utxoKey: key, txId, index, amountSompi: amount, status: 'free',
+      covenantWarning: !pure, isCoinbase, blockDaaScore: daa,
+    };
+    totalBalance += BigInt(amount);
+    coins.push(entry);
+
+    // spendability safety filters (per-coin, kept from v1)
+    if (isCoinbase && vdaa != null) {
+      const age = vdaa - BigInt(daa);
+      if (age < COINBASE_MATURITY) continue;
     }
+    if (pending.has(key)) continue; // reserved by a frozen prepared tx
+    spendCoins.push(entry);
   }
 
-  // Remove entries consumed on L1 (collateral-locked UTXOs that are now spent)
-  for (const [key, entry] of ledger) {
-    if (!l1Keys.has(key)) {
-      // UTXO no longer on L1 — consumed
-      ledger.delete(key);
-    }
-  }
+  const committedBalance = sumCollateralUnlocked(store);
+  const iouAllocated = sumIous(store);
+  let spendableBalance = totalBalance - committedBalance - iouAllocated;
+  if (spendableBalance < 0n) spendableBalance = 0n;
 
-  if (isPrimary) await saveLedger(ledger);
-  const vdaa = await getVirtualDaaScore(apiBase);
-  return computeBalances(ledger, vdaa);
+  // allEntries: real coins + synthesized commitment rows (for display consumers)
+  const allEntries = [...coins, ...synthRows(store)];
+
+  return { totalBalance, committedBalance, iouAllocated, spendableBalance, utxos: spendCoins, allEntries };
+}
+
+function synthRows(store: VStore): LedgerEntry[] {
+  const rows: LedgerEntry[] = [];
+  for (const r of store.collateral) {
+    rows.push({
+      utxoKey: 'virtual:' + r.agrId, txId: 'virtual', index: 0,
+      amountSompi: r.sompi,
+      status: r.locked ? 'collateral-locked' : 'collateral-committed',
+      commitReason: r.agrId, committedAt: r.at, role: r.role, pubkey: r.pubkey, commitHash: r.commitHash,
+    });
+  }
+  for (const r of store.ious) {
+    rows.push({
+      utxoKey: 'virtual:' + r.iouId, txId: 'virtual', index: 0,
+      amountSompi: r.sompi, status: 'iou-allocated', commitReason: r.iouId, committedAt: r.at,
+      allocatedSompi: r.sompi, allocations: [{ iouId: r.iouId, sompi: r.sompi }],
+    });
+  }
+  return rows;
 }
 
 // ============================================================================
-// BALANCE COMPUTATION
+// COMPAT SHIMS (v1 signatures preserved)
 // ============================================================================
 
-function computeBalances(ledger: Map<string, LedgerEntry>, virtualDaaScore?: bigint | null): SpendableResult {
-  const COINBASE_MATURITY = 100n;
-  let totalBalance = 0n;
-  let committedBalance = 0n;
-  let iouAllocated = 0n;
-  let spendableBalance = 0n;
-  const freeUtxos: LedgerEntry[] = [];
-  const allEntries: LedgerEntry[] = [];
+/** All safe-to-spend coin keys. Amount gating happens via canSpend, not coin exclusion. */
+export async function getFreeUtxoKeys(address: string): Promise<Set<string>> {
+  const r = await syncLedger(address);
+  return new Set(r.utxos.map(e => e.utxoKey));
+}
 
-  for (const entry of ledger.values()) {
-    const amt = BigInt(entry.amountSompi);
-    const alloc = BigInt(entry.allocatedSompi ?? '0');
-    totalBalance += amt;
-    allEntries.push(entry);
+/** v2: IOU locks are value-level, not coin-level. Send-path floor now uses getLockedTotals. */
+export async function getLockedSompiByKey(_address: string): Promise<Map<string, bigint>> {
+  return new Map();
+}
 
-    if (entry.status === 'collateral-committed' || entry.status === 'collateral-locked') {
-      // Whole coin bound to FROST collateral — unavailable.
-      committedBalance += amt;
-      continue;
-    }
+/** v2 no-op: allocations aren't anchored to coins, so nothing to re-anchor after a spend. */
+export async function reanchorAllocations(
+  _spentKeys: string[], _newTxId: string, _changeIndex: number, _changeAmountSompi: string,
+): Promise<void> { /* no-op by design */ }
 
-    // Immature coinbase — network would reject a spend; treat as unavailable.
-    if (entry.isCoinbase && virtualDaaScore != null && entry.blockDaaScore != null) {
-      const age = virtualDaaScore - BigInt(entry.blockDaaScore);
-      if (age < COINBASE_MATURITY) continue;
-    }
+/** New: total value that must remain in the wallet (unlocked collateral + IOU backing). */
+export async function getLockedTotals(): Promise<{ collateral: bigint; iou: bigint; total: bigint }> {
+  const s = await loadStore();
+  const collateral = sumCollateralUnlocked(s);
+  const iou = sumIous(s);
+  return { collateral, iou, total: collateral + iou };
+}
 
-    // IOU partial locking: allocated portion frozen, remainder spendable.
-    iouAllocated += alloc;
-    const freeRem = amt - alloc;
-    if (freeRem > 0n) {
-      spendableBalance += freeRem;
-      // Emit remainder amount so the send path only sees the unlocked slice.
-      freeUtxos.push({ ...entry, amountSompi: String(freeRem) });
-    }
-  }
+// ============================================================================
+// PREPARED-INPUT RESERVATION (freeze → broadcast protection)
+// ============================================================================
 
-  return {
-    totalBalance,
-    committedBalance,
-    iouAllocated,
-    spendableBalance,
-    utxos: freeUtxos,
-    allEntries,
-  };
+export async function reservePreparedInputs(id: string, keys: string[]): Promise<void> {
+  const s = await loadStore();
+  s.pendingInputs = s.pendingInputs.filter(p => p.id !== id);
+  s.pendingInputs.push({ id, keys, at: Date.now() });
+  await saveStore(s);
+  console.log('[VLedger] Reserved', keys.length, 'prepared input(s) for', id);
+}
+
+export async function releasePreparedInputs(id: string): Promise<void> {
+  const s = await loadStore();
+  const before = s.pendingInputs.length;
+  s.pendingInputs = s.pendingInputs.filter(p => p.id !== id);
+  if (s.pendingInputs.length !== before) await saveStore(s);
 }
 
 // ============================================================================
 // COMMIT / RESERVE OPERATIONS
 // ============================================================================
 
-/**
- * Check if wallet has enough spendable balance for an amount.
- * Call BEFORE agreeing to any collateral or IOU.
- */
 export async function canSpend(address: string, amountSompi: bigint): Promise<{
-  ok: boolean;
-  spendable: bigint;
-  total: bigint;
-  committed: bigint;
-  iouAllocated: bigint;
-  shortage?: bigint;
+  ok: boolean; spendable: bigint; total: bigint; committed: bigint; iouAllocated: bigint; shortage?: bigint;
 }> {
   const result = await syncLedger(address);
   if (result.spendableBalance >= amountSompi) {
-    return {
-      ok: true,
-      spendable: result.spendableBalance,
-      total: result.totalBalance,
-      committed: result.committedBalance,
-      iouAllocated: result.iouAllocated,
-    };
+    return { ok: true, spendable: result.spendableBalance, total: result.totalBalance, committed: result.committedBalance, iouAllocated: result.iouAllocated };
   }
-  return {
-    ok: false,
-    spendable: result.spendableBalance,
-    total: result.totalBalance,
-    committed: result.committedBalance,
-    iouAllocated: result.iouAllocated,
-    shortage: amountSompi - result.spendableBalance,
-  };
+  return { ok: false, spendable: result.spendableBalance, total: result.totalBalance, committed: result.committedBalance, iouAllocated: result.iouAllocated, shortage: amountSompi - result.spendableBalance };
 }
 
-/**
- * Commit UTXOs for collateral. Called when user agrees to an agreement.
- * Marks enough free UTXOs as 'collateral-committed' to cover the amount.
- * Returns the committed UTXO keys (for tracking).
- */
 export async function commitForCollateral(
-  address: string,
-  amountSompi: bigint,
-  agreementId: string
+  address: string, amountSompi: bigint, agreementId: string,
 ): Promise<{ success: boolean; committedKeys: string[]; error?: string }> {
-  const result = await syncLedger(address);
+  const r = await canonicalCommit(address, amountSompi, agreementId, 'buyer', '');
+  return { success: r.success, committedKeys: r.committedKeys, error: r.error };
+}
 
-  if (result.spendableBalance < amountSompi) {
+export async function canonicalCommit(
+  address: string, amountSompi: bigint, agreementId: string,
+  role: 'buyer' | 'seller', pubkey: string,
+): Promise<{ success: boolean; committedKeys: string[]; commitHashes: string[]; error?: string }> {
+  const result = await syncLedger(address);
+  const s = await loadStore();
+  const existing = s.collateral.find(r => r.agrId === agreementId);
+
+  // Idempotent upsert: re-committing the same agreement replaces its row.
+  const already = existing && !existing.locked ? BigInt(existing.sompi) : 0n;
+  const effectiveSpendable = result.spendableBalance + already;
+  if (effectiveSpendable < amountSompi) {
     return {
-      success: false,
-      committedKeys: [],
-      error: `Insufficient spendable balance. Have ${Number(result.spendableBalance) / 1e8} KASPA free, need ${Number(amountSompi) / 1e8} KASPA. ${result.committedBalance > 0n ? `${Number(result.committedBalance) / 1e8} KASPA already committed to other agreements.` : ''} ${result.iouAllocated > 0n ? `${Number(result.iouAllocated) / 1e8} KASPA allocated to IOUs.` : ''}`.trim(),
+      success: false, committedKeys: [], commitHashes: [],
+      error: `Insufficient: have ${Number(effectiveSpendable) / 1e8} free, need ${Number(amountSompi) / 1e8} KASPA`,
     };
   }
 
-  const ledger = await loadLedger();
-  let remaining = amountSompi;
-  const committedKeys: string[] = [];
+  const hash = await computeCommitHash(agreementId, role, pubkey);
+  s.collateral = s.collateral.filter(r => r.agrId !== agreementId);
+  s.collateral.push({ agrId: agreementId, sompi: amountSompi.toString(), role, pubkey, at: Date.now(), locked: false, commitHash: hash });
+  await saveStore(s);
 
-  // Sort free UTXOs by amount ascending (use smallest first)
-  const freeEntries = Array.from(ledger.values())
-    .filter(e => e.status === 'free')
-    .sort((a, b) => Number(BigInt(a.amountSompi) - BigInt(b.amountSompi)));
-  /* SMALLEST-COVER: prefer the single smallest coin that covers the amount - binds one coin instead of dragging large coins into small agreements */
-  const _coverEntry = freeEntries.find(e => BigInt(e.amountSompi) >= amountSompi);
-  const _pickList = _coverEntry ? [_coverEntry] : freeEntries;
-
-  for (const entry of _pickList) {
-    if (remaining <= 0n) break;
-    entry.status = 'collateral-committed';
-    entry.commitReason = agreementId;
-    entry.committedAt = Date.now();
-    committedKeys.push(entry.utxoKey);
-    remaining -= BigInt(entry.amountSompi);
-  }
-
-  await saveLedger(ledger);
-  console.log(`[UTXO-Ledger] Committed ${committedKeys.length} UTXOs for ${agreementId}, remaining free: ${Number(result.spendableBalance - amountSompi) / 1e8} KASPA`);
-  return { success: true, committedKeys };
+  console.log(`[UTXO-Tag] Committed ${Number(amountSompi) / 1e8} KAS (virtual) to ${agreementId} as ${role.toUpperCase()}`);
+  console.log(`[UTXO-Tag] Hashes: ${hash}`);
+  return { success: true, committedKeys: ['virtual:' + agreementId], commitHashes: [hash] };
 }
 
-/**
- * Mark committed UTXOs as locked (sent to FROST).
- * Called after sendKaspaViaRest succeeds for collateral.
- */
+/** Funds actually sent to FROST — value left the wallet; row stops reducing spendable. */
 export async function markLocked(agreementId: string): Promise<void> {
-  const ledger = await loadLedger();
-  for (const entry of ledger.values()) {
-    if (entry.status === 'collateral-committed' && entry.commitReason === agreementId) {
-      entry.status = 'collateral-locked';
-    }
+  const s = await loadStore();
+  let changed = false;
+  for (const r of s.collateral) {
+    if (r.agrId === agreementId && !r.locked) { r.locked = true; changed = true; }
   }
-  await saveLedger(ledger);
-  console.log(`[UTXO-Ledger] Marked ${agreementId} UTXOs as locked`);
+  if (changed) { await saveStore(s); console.log(`[UTXO-Ledger] Marked ${agreementId} as locked (on-chain)`); }
 }
 
-/**
- * Release committed UTXOs back to free (agreement cancelled before sending).
- */
 export async function releaseCommitment(agreementId: string): Promise<void> {
-  const ledger = await loadLedger();
-  for (const entry of ledger.values()) {
-    if (entry.commitReason === agreementId && (entry.status === 'collateral-committed')) {
-      entry.status = 'free';
-      entry.commitReason = undefined;
-      entry.committedAt = undefined;
-    }
+  const s = await loadStore();
+  const before = s.collateral.length;
+  s.collateral = s.collateral.filter(r => r.agrId !== agreementId);
+  if (s.collateral.length !== before) {
+    await saveStore(s);
+    console.log(`[UTXO-Ledger] Released commitment for ${agreementId}`);
   }
-  await saveLedger(ledger);
-  console.log(`[UTXO-Ledger] Released commitment for ${agreementId}`);
 }
 
-/**
- * Allocate UTXOs for IOU backing.
- * Similar to commitForCollateral but uses 'iou-allocated' status.
- */
+export async function releaseOrphanCollateral(activeAgreementIds: string[]): Promise<number> {
+  const s = await loadStore();
+  const before = s.collateral.length + s.ious.length;
+  s.collateral = s.collateral.filter(r => activeAgreementIds.includes(r.agrId));
+  const n = before - (s.collateral.length + s.ious.length);
+  if (n > 0) await saveStore(s);
+  return n;
+}
+
+// ============================================================================
+// IOU (value-level, same external shape)
+// ============================================================================
+
 export async function allocateForIOU(
-  address: string,
-  amountSompi: bigint,
-  iouId: string
+  address: string, amountSompi: bigint, iouId: string,
 ): Promise<{ success: boolean; allocations: { tag: string; amountSompi: string }[]; error?: string }> {
   const result = await syncLedger(address);
-
   if (result.spendableBalance < amountSompi) {
     return {
-      success: false,
-      allocations: [],
+      success: false, allocations: [],
       error: `Insufficient free balance for IOU. Have ${Number(result.spendableBalance) / 1e8} KASPA free, need ${Number(amountSompi) / 1e8} KASPA. Settle existing IOUs to free up funds.`,
     };
   }
-
-  const ledger = await loadLedger();
-  let remaining = amountSompi;
-  const allocations: { tag: string; amountSompi: string }[] = [];
-
-  // Partial allocation: take from each coin's FREE remainder (amount - already-allocated).
-  // Collateral coins are skipped (whole-coin FROST bound). IOU locks are sompi-level.
-  const candidates = Array.from(ledger.values())
-    .filter(e => e.status !== 'collateral-committed' && e.status !== 'collateral-locked')
-    .map(e => ({ e, free: BigInt(e.amountSompi) - BigInt(e.allocatedSompi ?? '0') }))
-    .filter(x => x.free > 0n)
-    .sort((a, b) => Number(a.free - b.free));
-
-  for (const { e, free } of candidates) {
-    if (remaining <= 0n) break;
-    const take = free >= remaining ? remaining : free;
-    e.allocatedSompi = String(BigInt(e.allocatedSompi ?? '0') + take);
-    e.allocations = [ ...(e.allocations ?? []), { iouId, sompi: String(take) } ];
-    if (BigInt(e.allocatedSompi) >= BigInt(e.amountSompi)) e.status = 'iou-allocated';
-    allocations.push({ tag: e.utxoKey, amountSompi: String(take) });
-    remaining -= take;
-  }
-
-  await saveLedger(ledger);
-  console.log(`[UTXO-Ledger] IOU ${iouId}: locked ${Number(amountSompi) / 1e8} KAS across ${allocations.length} coin(s)`);
-  return { success: true, allocations };
+  const s = await loadStore();
+  s.ious = s.ious.filter(r => r.iouId !== iouId);
+  s.ious.push({ iouId, sompi: amountSompi.toString(), at: Date.now() });
+  await saveStore(s);
+  console.log(`[UTXO-Ledger] IOU ${iouId}: locked ${Number(amountSompi) / 1e8} KAS (virtual)`);
+  return { success: true, allocations: [{ tag: 'virtual:' + iouId, amountSompi: amountSompi.toString() }] };
 }
 
-/**
- * Release IOU allocation (IOU settled or cancelled).
- */
 export async function releaseIOU(iouId: string): Promise<void> {
-  const ledger = await loadLedger();
-  for (const entry of ledger.values()) {
-    if (!entry.allocations) continue;
-    const freed = entry.allocations
-      .filter(a => a.iouId === iouId)
-      .reduce((acc, a) => acc + BigInt(a.sompi), 0n);
-    if (freed === 0n) continue;
-    entry.allocations = entry.allocations.filter(a => a.iouId !== iouId);
-    entry.allocatedSompi = String(BigInt(entry.allocatedSompi ?? '0') - freed);
-    if (BigInt(entry.allocatedSompi) <= 0n) {
-      entry.allocatedSompi = '0';
-      entry.allocations = undefined;
-      if (entry.status === 'iou-allocated') entry.status = 'free';
-    } else if (entry.status === 'iou-allocated') {
-      // partially freed -> spendable remainder exists again
-      entry.status = 'free';
-    }
-  }
-  await saveLedger(ledger);
+  const s = await loadStore();
+  const before = s.ious.length;
+  s.ious = s.ious.filter(r => r.iouId !== iouId);
+  if (s.ious.length !== before) await saveStore(s);
 }
 
-// ============================================================================
-// SPENDABLE UTXO FILTER (for sendKaspaViaRest)
-// ============================================================================
-
-/**
- * Get only free UTXOs formatted for kaspa_rest_tx consumption.
- * Drop-in filter: call this instead of fetching UTXOs directly from REST.
- */
-/**
- * ORPHAN-IOU-SWEEP: release allocations whose iouId matches no live IOU/prop record.
- * Mirrors releaseOrphanCollateral. Pass the set of live ids (SignedIOU ids + 'prop_'+nonce
- * for pending/accepted prop-IOUs). Anything else is stale and frees.
- */
 export async function releaseOrphanIOUs(liveIouIds: string[]): Promise<number> {
   const live = new Set(liveIouIds);
-  const ledger = await loadLedger();
-  let freedCount = 0;
-  for (const entry of ledger.values()) {
-    if (!entry.allocations || !entry.allocations.length) continue;
-    const stale = entry.allocations.filter(a => !live.has(a.iouId));
-    if (!stale.length) continue;
-    const freed = stale.reduce((acc, a) => acc + BigInt(a.sompi), 0n);
-    entry.allocations = entry.allocations.filter(a => live.has(a.iouId));
-    entry.allocatedSompi = String(BigInt(entry.allocatedSompi ?? '0') - freed);
-    if (BigInt(entry.allocatedSompi) <= 0n) {
-      entry.allocatedSompi = '0';
-      entry.allocations = entry.allocations.length ? entry.allocations : undefined;
-      if (entry.status === 'iou-allocated') entry.status = 'free';
-    } else if (entry.status === 'iou-allocated') {
-      entry.status = 'free';
-    }
-    freedCount += stale.length;
-    console.log('[UTXO-Ledger] Orphan IOU sweep freed', Number(freed) / 1e8, 'KAS from', entry.utxoKey.slice(0, 20), '(', stale.map(a => a.iouId).join(','), ')');
-  }
-  if (freedCount) await saveLedger(ledger);
-  return freedCount;
+  const s = await loadStore();
+  const stale = s.ious.filter(r => !live.has(r.iouId));
+  if (!stale.length) return 0;
+  for (const r of stale) console.log('[UTXO-Ledger] Orphan IOU sweep freed', Number(BigInt(r.sompi)) / 1e8, 'KAS (', r.iouId, ')');
+  s.ious = s.ious.filter(r => live.has(r.iouId));
+  await saveStore(s);
+  return stale.length;
 }
+
+// ============================================================================
+// SPENDABLE / DISPLAY
+// ============================================================================
 
 export async function getSpendableUtxos(address: string): Promise<{
-  utxos: any[];
-  spendableBalance: bigint;
-  totalBalance: bigint;
+  utxos: any[]; spendableBalance: bigint; totalBalance: bigint;
 }> {
   const result = await syncLedger(address);
-
-  // Convert free ledger entries back to REST UTXO format
   const utxos = result.utxos.map(e => ({
     outpoint: { transactionId: e.txId, index: e.index },
-    utxoEntry: { amount: e.amountSompi, scriptPublicKey: '', blockDaaScore: '0' },
+    utxoEntry: { amount: e.amountSompi, scriptPublicKey: '', blockDaaScore: e.blockDaaScore || '0' },
   }));
-
-  return {
-    utxos,
-    spendableBalance: result.spendableBalance,
-    totalBalance: result.totalBalance,
-  };
+  return { utxos, spendableBalance: result.spendableBalance, totalBalance: result.totalBalance };
 }
 
-// ============================================================================
-// DISPLAY HELPERS
-// ============================================================================
-
-/**
- * Get full balance breakdown for UI display.
- */
 export async function getBalanceBreakdown(address: string): Promise<{
-  total: number;       // KAS
-  spendable: number;   // KAS
-  committed: number;   // KAS (collateral)
-  iouBacked: number;   // KAS (IOU)
-  frozen: number;      // KAS (committed + iou)
+  total: number; spendable: number; committed: number; iouBacked: number; frozen: number;
 }> {
   const result = await syncLedger(address);
   return {
@@ -592,227 +483,81 @@ export async function getBalanceBreakdown(address: string): Promise<{
   };
 }
 
-/**
- * Get commitments for a specific agreement (for UI display).
- */
 export async function getAgreementCommitments(agreementId: string): Promise<LedgerEntry[]> {
-  const ledger = await loadLedger();
-  return Array.from(ledger.values()).filter(e => e.commitReason === agreementId);
+  const s = await loadStore();
+  return synthRows(s).filter(e => e.commitReason === agreementId);
 }
 
-/**
- * Clear all ledger data (for wallet reset/recovery).
- */
-
-// ============================================================================
-
-// ============================================================================
-// EXPIRY: Auto-release uncommitted tags after timeout
-// ============================================================================
-
-const COMMIT_EXPIRY_MS = 20 * 60 * 1000; // 20 minutes (testing), change to 24h for production
-
-/**
- * Release stale committed UTXOs that were never sent (seller ghosted).
- * Call periodically (e.g. on app resume, inbox refresh).
- */
-export async function releaseExpiredCommitments(): Promise<number> {
-  const ledger = await loadLedger();
-  const now = Date.now();
-  let released = 0;
-
-  for (const entry of ledger.values()) {
-    if (entry.status === 'collateral-committed' && entry.committedAt) {
-      const age = now - entry.committedAt;
-      if (age > COMMIT_EXPIRY_MS) {
-        console.log('[UTXO-Expiry] Releasing stale tag:', entry.utxoKey, 'age:', Math.floor(age / 60000), 'min, agr:', entry.commitReason);
-        entry.status = 'free';
-        entry.commitReason = undefined;
-        entry.committedAt = undefined;
-        entry.role = undefined;
-        entry.pubkey = undefined;
-        entry.commitHash = undefined;
-        released++;
-      }
-    }
-  }
-
-  if (released > 0) {
-    await saveLedger(ledger);
-    console.log('[UTXO-Expiry] Released', released, 'stale commitments');
-  }
-  return released;
-}
-
-// CANONICAL COMMIT (binds UTXOs to agreement with role proof)
-// ============================================================================
-
-/**
- * Canonical commit: tags UTXOs with agreement, role, pubkey, and commitHash.
- * The commitHash is a tamper-proof binding: SHA256(txId:index + agreementId + role + pubkey)
- * This proves: "UTXO X was committed to AGR_Y by BUYER/SELLER pubkey Z"
- */
-export async function canonicalCommit(
-  address: string,
-  amountSompi: bigint,
-  agreementId: string,
-  role: 'buyer' | 'seller',
-  pubkey: string,
-): Promise<{ success: boolean; committedKeys: string[]; commitHashes: string[]; error?: string }> {
-  const result = await syncLedger(address);
-
-  if (result.spendableBalance < amountSompi) {
-    return {
-      success: false, committedKeys: [], commitHashes: [],
-      error: `Insufficient: have ${Number(result.spendableBalance) / 1e8} free, need ${Number(amountSompi) / 1e8} KASPA`,
-    };
-  }
-
-  const ledger = await loadLedger();
-  let remaining = amountSompi;
-  const committedKeys: string[] = [];
-  const commitHashes: string[] = [];
-
-  const freeEntries = Array.from(ledger.values())
-    .filter(e => e.status === 'free')
-    .sort((a, b) => Number(BigInt(a.amountSompi) - BigInt(b.amountSompi)));
-  /* SMALLEST-COVER: prefer the single smallest coin that covers the amount - binds one coin instead of dragging large coins into small agreements */
-  const _coverEntry = freeEntries.find(e => BigInt(e.amountSompi) >= amountSompi);
-  const _pickList = _coverEntry ? [_coverEntry] : freeEntries;
-
-  for (const entry of _pickList) {
-    if (remaining <= 0n) break;
-    // Compute commit hash
-    const hashInput = entry.utxoKey + agreementId + role + pubkey;
-    const encoder = new TextEncoder();
-    const hashBytes = await (async () => {
-      try {
-        const { sha256 } = await import('@noble/hashes/sha256');
-        return sha256(encoder.encode(hashInput));
-      } catch {
-        // Fallback: use simple string hash
-        return encoder.encode(hashInput);
-      }
-    })();
-    const hash = Array.from(hashBytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('');
-
-    entry.status = 'collateral-committed';
-    entry.commitReason = agreementId;
-    entry.committedAt = Date.now();
-    entry.role = role;
-    entry.pubkey = pubkey;
-    entry.commitHash = hash;
-    committedKeys.push(entry.utxoKey);
-    commitHashes.push(hash);
-    remaining -= BigInt(entry.amountSompi);
-  }
-
-  await saveLedger(ledger);
-  console.log(`[UTXO-Tag] Committed ${committedKeys.length} UTXOs (${Number(amountSompi) / 1e8} KAS) to ${agreementId} as ${role.toUpperCase()}`);
-  console.log(`[UTXO-Tag] Hashes: ${commitHashes.join(', ')}`);
-  return { success: true, committedKeys, commitHashes };
-}
-
-/**
- * Verify that UTXOs are properly committed to an agreement.
- * Returns true if commitHashes match recomputed values.
- */
-export async function verifyCommitment(agreementId: string, role: 'buyer' | 'seller', pubkey: string): Promise<{
-  valid: boolean;
-  utxoCount: number;
-  totalSompi: bigint;
-}> {
-  const ledger = await loadLedger();
-  let totalSompi = 0n;
-  let utxoCount = 0;
-  let valid = true;
-
-  for (const entry of ledger.values()) {
-    if (entry.commitReason === agreementId && entry.role === role) {
-      utxoCount++;
-      totalSompi += BigInt(entry.amountSompi);
-      // Verify hash
-      if (entry.commitHash) {
-        const hashInput = entry.utxoKey + agreementId + role + pubkey;
-        try {
-          const { sha256 } = await import('@noble/hashes/sha256');
-          const expected = Array.from(sha256(new TextEncoder().encode(hashInput)).slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('');
-          if (expected !== entry.commitHash) {
-            console.warn('[UTXO-Tag] Hash mismatch for', entry.utxoKey);
-            valid = false;
-          }
-        } catch {}
-      }
-    }
-  }
-
-  console.log(`[UTXO-Tag] Verified ${agreementId}: ${utxoCount} UTXOs, ${Number(totalSompi) / 1e8} KAS, valid: ${valid}`);
-  return { valid, utxoCount, totalSompi };
-}
-
-/**
- * Get all UTXO tags for display (balance sheet / tax tracking).
- */
 export async function getTaggedUtxos(): Promise<{
   free: LedgerEntry[];
   committed: { entry: LedgerEntry; agreementId: string; role: string }[];
   locked: { entry: LedgerEntry; agreementId: string; role: string }[];
   iou: { entry: LedgerEntry; iouId: string }[];
 }> {
-  const ledger = await loadLedger();
-  const free: LedgerEntry[] = [];
+  const s = await loadStore();
   const committed: any[] = [];
   const locked: any[] = [];
   const iou: any[] = [];
-
-  for (const entry of ledger.values()) {
-    switch (entry.status) {
-      case 'free': free.push(entry); break;
-      case 'collateral-committed': committed.push({ entry, agreementId: entry.commitReason || '', role: entry.role || 'unknown' }); break;
-      case 'collateral-locked': locked.push({ entry, agreementId: entry.commitReason || '', role: entry.role || 'unknown' }); break;
-      case 'iou-allocated': iou.push({ entry, iouId: entry.commitReason || '' }); break;
-    }
+  for (const e of synthRows(s)) {
+    if (e.status === 'collateral-committed') committed.push({ entry: e, agreementId: e.commitReason || '', role: e.role || 'unknown' });
+    else if (e.status === 'collateral-locked') locked.push({ entry: e, agreementId: e.commitReason || '', role: e.role || 'unknown' });
+    else if (e.status === 'iou-allocated') iou.push({ entry: e, iouId: e.commitReason || '' });
   }
-
-  return { free, committed, locked, iou };
+  return { free: [], committed, locked, iou };
 }
 
-
-
 // ============================================================================
-// DUPLICATE PROPOSAL GUARD
+// EXPIRY + GUARDS
 // ============================================================================
 
-/**
- * Check if an agreement ID already has committed UTXOs.
- * Call BEFORE proposing to prevent duplicate proposals.
- */
-export async function isAlreadyCommitted(agreementId: string): Promise<{
-  committed: boolean;
-  utxoCount: number;
-  totalSompi: bigint;
-  status: UtxoStatus | null;
+const COMMIT_EXPIRY_MS = 20 * 60 * 1000;   // unlocked commitments (never funded)
+const PENDING_EXPIRY_MS = 30 * 60 * 1000;  // frozen prepared-tx input reservations
+
+export async function releaseExpiredCommitments(): Promise<number> {
+  const s = await loadStore();
+  const now = Date.now();
+  let released = 0;
+  const keep: CollateralRow[] = [];
+  for (const r of s.collateral) {
+    if (!r.locked && now - r.at > COMMIT_EXPIRY_MS) {
+      console.log('[UTXO-Expiry] Releasing stale commitment:', r.agrId, 'age:', Math.floor((now - r.at) / 60000), 'min');
+      released++;
+    } else keep.push(r);
+  }
+  s.collateral = keep;
+  const pBefore = s.pendingInputs.length;
+  s.pendingInputs = s.pendingInputs.filter(p => now - p.at <= PENDING_EXPIRY_MS);
+  if (released > 0 || s.pendingInputs.length !== pBefore) {
+    await saveStore(s);
+    if (released > 0) console.log('[UTXO-Expiry] Released', released, 'stale commitments');
+  }
+  return released;
+}
+
+export async function verifyCommitment(agreementId: string, role: 'buyer' | 'seller', pubkey: string): Promise<{
+  valid: boolean; utxoCount: number; totalSompi: bigint;
 }> {
-  const ledger = await loadLedger();
-  let totalSompi = 0n;
-  let utxoCount = 0;
-  let status: UtxoStatus | null = null;
+  const s = await loadStore();
+  const row = s.collateral.find(r => r.agrId === agreementId && r.role === role);
+  if (!row) return { valid: false, utxoCount: 0, totalSompi: 0n };
+  const expected = await computeCommitHash(agreementId, role, pubkey);
+  const valid = !!row.commitHash && row.commitHash === expected;
+  console.log(`[UTXO-Tag] Verified ${agreementId}: ${Number(BigInt(row.sompi)) / 1e8} KAS, valid: ${valid}`);
+  return { valid, utxoCount: 1, totalSompi: BigInt(row.sompi) };
+}
 
-  for (const entry of ledger.values()) {
-    if (entry.commitReason === agreementId) {
-      utxoCount++;
-      totalSompi += BigInt(entry.amountSompi);
-      status = entry.status;
-    }
-  }
-
-  if (utxoCount > 0) {
-    console.log('[UTXO-Guard] AGR', agreementId, 'already has', utxoCount, 'tagged UTXOs:', Number(totalSompi) / 1e8, 'KAS, status:', status);
-  }
-
-  return { committed: utxoCount > 0, utxoCount, totalSompi, status };
+export async function isAlreadyCommitted(agreementId: string): Promise<{
+  committed: boolean; utxoCount: number; totalSompi: bigint; status: UtxoStatus | null;
+}> {
+  const s = await loadStore();
+  const row = s.collateral.find(r => r.agrId === agreementId);
+  if (!row) return { committed: false, utxoCount: 0, totalSompi: 0n, status: null };
+  const status: UtxoStatus = row.locked ? 'collateral-locked' : 'collateral-committed';
+  console.log('[UTXO-Guard] AGR', agreementId, 'already committed:', Number(BigInt(row.sompi)) / 1e8, 'KAS, status:', status);
+  return { committed: true, utxoCount: 1, totalSompi: BigInt(row.sompi), status };
 }
 
 export async function clearLedger(): Promise<void> {
-  await AsyncStorage.removeItem(LEDGER_KEY);
+  await AsyncStorage.removeItem(VSTORE_KEY);
+  await AsyncStorage.removeItem(LEGACY_LEDGER_KEY);
 }

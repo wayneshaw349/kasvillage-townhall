@@ -360,17 +360,9 @@ export async function sendKaspaViaRest(params: {
 
     // Filter to ledger-free UTXOs (exclude collateral + IOU-backed)
     try {
-      const { getFreeUtxoKeys, getAgreementCommitments } = await import('./utxo_ledger');
+      const { getFreeUtxoKeys } = await import('./utxo_ledger');
       const freeKeys = await getFreeUtxoKeys(senderAddress);
-      /* OWN-AGR-SPEND: a UTXO reserved FOR this agreement must be usable BY this agreement's own funding tx — otherwise a whole-UTXO commit larger than the send amount self-deadlocks the sender. Only THIS agrId's tags unlock; all other collateral stays protected. */
-      if (params.fundingAgrId) {
-        try {
-          const _own = await getAgreementCommitments(params.fundingAgrId);
-          let _added = 0;
-          for (const _e of (_own || [])) { if (_e.utxoKey && !freeKeys.has(_e.utxoKey)) { freeKeys.add(_e.utxoKey); _added++; } }
-          if (_added > 0) console.log('[REST-TX] Own-agr spend: unlocked', _added, 'committed UTXO(s) for', params.fundingAgrId);
-        } catch (e) { console.warn('[REST-TX] Own-agr unlock skipped:', e); }
-      }
+      /* OWN-AGR-SPEND removed: virtual ledger has no coin tags to unlock */
       if (freeKeys && freeKeys.size > 0) {
         const before = utxos.length;
         const filtered = utxos.filter(u => freeKeys.has(`${(u as any).outpoint?.transactionId || (u as any).transactionId}:${(u as any).outpoint?.index ?? (u as any).index ?? 0}`));
@@ -455,28 +447,35 @@ export async function sendKaspaViaRest(params: {
     const sendAmount = amountSompi === 0n ? selectedAmount - fee : amountSompi;
     const change = selectedAmount - sendAmount - fee;
 
-    // Value-backed IOU floor: locked sompi on spent coins must survive as change.
-    let lockedOnSpent = 0n;
+    /* BALANCE-FLOOR (v2): committed collateral + IOU backing is value-level, not
+       coin-level. After this send, wallet balance must not drop below the locked
+       total — unless this send IS the funding for a committed agreement
+       (fundingAgrId), whose own commitment is excluded from the floor. */
     try {
-      const { getLockedSompiByKey } = await import('./utxo_ledger');
-      const lockedByKey = await getLockedSompiByKey(senderAddress);
-      for (const u of selectedUtxos) {
-        const k = `${u.outpoint.transactionId}:${u.outpoint.index}`;
-        lockedOnSpent += (lockedByKey.get(k) || 0n);
+      const { getLockedTotals, getAgreementCommitments } = await import('./utxo_ledger');
+      const lt = await getLockedTotals();
+      let floor = lt.total;
+      if (params.fundingAgrId) {
+        const own = await getAgreementCommitments(params.fundingAgrId);
+        for (const e of own) { if (e.status === 'collateral-committed') floor -= BigInt(e.amountSompi); }
+        if (floor < 0n) floor = 0n;
       }
-    } catch (e) { console.warn('[REST-TX] locked-map fetch failed:', e); }
-    if (lockedOnSpent > 0n && change < lockedOnSpent) {
-      return { success: false, error: `Would spend IOU-backed value: ${Number(lockedOnSpent) / 1e8} KAS reserved, but change would be only ${Number(change) / 1e8} KAS. Settle IOUs or reduce the amount.` };
-    }
+      if (floor > 0n) {
+        let walletTotal = 0n;
+        for (const u of utxos) walletTotal += BigInt(u.utxoEntry?.amount || (u as any).amount || '0');
+        const after = walletTotal - sendAmount - fee;
+        if (after < floor) {
+          return { success: false, error: `Would spend reserved value: ${Number(floor) / 1e8} KAS locked (collateral + IOU), wallet would drop to ${Number(after) / 1e8} KAS. Settle or reduce the amount.` };
+        }
+      }
+    } catch (e) { console.warn('[REST-TX] balance-floor check failed (non-fatal):', e); }
     const outputsData: { value: bigint; scriptVersion: number; script: Uint8Array }[] = [
       { value: sendAmount, scriptVersion: 0, script: recipientScript },
     ];
     if (change > 0n && !isDust(change, senderScript.length)) {
       outputsData.push({ value: change, scriptVersion: 0, script: senderScript });
-    } else if (change > 0n && lockedOnSpent === 0n) {
-      fee += change; // Absorb dust change into fee (safe: no IOU-backed value rides here)
     } else if (change > 0n) {
-      return { success: false, error: `IOU-backed change (${Number(change) / 1e8} KAS) is below dust and cannot be preserved. Settle IOUs or adjust the amount.` };
+      fee += change; // Absorb dust change into fee (v2: locked value is balance-level, never rides a specific coin)
     }
     
     // 5. Sign inputs
@@ -568,16 +567,7 @@ export async function sendKaspaViaRest(params: {
     const txId = result.transactionId || bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(tx))));
     const explorerBase = network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';
 
-    // Re-anchor IOU allocations from spent coins onto the change UTXO (value-backed continuity).
-    if (lockedOnSpent > 0n) {
-      try {
-        const changeIndex = outputsData.length > 1 ? 1 : 0;
-        const changeVal = outputsData[changeIndex]?.value ?? 0n;
-        const spentKeys = selectedUtxos.map(u => `${u.outpoint.transactionId}:${u.outpoint.index}`);
-        const { reanchorAllocations } = await import('./utxo_ledger');
-        await reanchorAllocations(spentKeys, txId, changeIndex, changeVal.toString());
-      } catch (e) { console.warn('[REST-TX] allocation re-anchor failed (non-fatal):', e); }
-    }
+    /* re-anchor removed: v2 IOU locks are value-level; nothing coin-anchored to move */
     
     // Merkle archive: per-TX proof to Arweave (fire-and-forget, ~0.6 KB, free)
     uploadPerTxProof({
