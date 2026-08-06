@@ -3949,7 +3949,8 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                                 setStep(_exRoute === 'inbox' || _exRoute === 'poll' ? 3 : 4); /* INBOX-ROUTE-FIX */ Alert.alert('Resuming - ' + _exPh.phase.replace('_',' '), nextActionMsg(_exPh.phase, (_exRec.origin === 'mine' ? 'buyer' : (_exRec.role || 'seller'))) /* ROLE-BY-PUBKEY: origin 'mine'=I authored=buyer; else stored role */); return;
                               }
                             }
-      laUpsert({ agrId: parsed.agrId, role: 'seller', origin: 'given', buyerPubkey: parsed.buyerPubkey, sellerPubkey: parsed.sellerPubkey, buyerAmountSompi: String(parsed.buyerAmountSompi ?? ''), sellerAmountSompi: String(parsed.sellerAmountSompi ?? ''), frostCounter: parsed.frostCounter, timeoutN: parsed.timeoutN, network: parsed.network, description: parsed.description, verificationCode: parsed.verificationCode, buyerR: parsed.buyerR }).catch(() => {});
+      const _pkMine = ((await SecureStore.getItemAsync('kv_public_key')) || '').replace(/^0[23]/, ''); const _pkBuyer = String(parsed.buyerPubkey || '').replace(/^0[23]/, ''); const _rolePaste = (_pkMine && _pkBuyer === _pkMine) ? 'buyer' : 'seller'; console.log('[Paste-Role] derived:', _rolePaste);
+      laUpsert({ agrId: parsed.agrId, role: _rolePaste as any, origin: _rolePaste === 'buyer' ? 'mine' : 'given', buyerPubkey: parsed.buyerPubkey, sellerPubkey: parsed.sellerPubkey, buyerAmountSompi: String(parsed.buyerAmountSompi ?? ''), sellerAmountSompi: String(parsed.sellerAmountSompi ?? ''), frostCounter: parsed.frostCounter, timeoutN: parsed.timeoutN, network: parsed.network, description: parsed.description, verificationCode: parsed.verificationCode, buyerR: parsed.buyerR }).catch(() => {});
                             console.log("[Seller-Paste-DEBUG] parsed.frostCounter:", parsed.frostCounter, "parsed keys:", Object.keys(parsed).join(","));
                           pastedTypeRef.current = (parsed as any).agreementType === "simple" ? "simple" : ((parsed as any).agreementType === "trade" ? "trade" : null); console.log("[Type-Field] pasted agreementType:", pastedTypeRef.current);
                             Alert.alert("Proposal Found", "Item: " + (parsed.description || "N/A") + "\nAmount: " + (Number(parsed.buyerAmountSompi || 0)/1e8) + " KAS\nCode: " + (parsed.verificationCode || ""), [
@@ -4419,7 +4420,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               const _dag = await fetch(_api + '/info/blockdag');
                               const _now = BigInt((_dag.ok ? await _dag.json() : {})?.virtualDaaScore || 0);
                               if (_now === 0n) { Alert.alert('Error', 'Could not read the current DAA score — cannot check the timeout.'); setIsLoading(false); return; }
-                              const _esc = p2pkScript((contract.frostData?.aggregatedPubkey || '').slice(2));
+                              const _esc = await (async () => { const _pkA = contract.frostData?.aggregatedPubkey || ''; if (_pkA) return p2pkScript(_pkA.length === 66 ? _pkA.slice(2) : _pkA); try { const _net = String(contract.frostData?.network || 'testnet-10'); const _base = _net === 'mainnet' ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org'; const _uj = await (await fetch(_base + '/addresses/' + (contract.multisigAddress || '') + '/utxos')).json(); const _s0 = Array.isArray(_uj) && _uj[0]?.utxoEntry?.scriptPublicKey?.scriptPublicKey; if (_s0) { console.log('[Esc-Validate] escrow script from chain (resume fallback)'); return String(_s0); } } catch (_fe) { console.warn('[Esc-Validate] chain fallback failed:', _fe); } return p2pkScript(''); })();
                               const _N = BigInt(Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN));
                               // predictedTxId is the seller's own prediction — the buyer cannot recompute it
                               // (they don't know the seller's UTXO selection). Lying there only breaks the
@@ -4495,12 +4496,13 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               if (!_pred || _in?.previousOutpoint?.index !== 0) { Alert.alert('Invalid', 'Kill tx does not spend an escrow output at index 0.'); return; }
                               if ((_kt.transaction.inputs || []).length !== 1 || (_kt.transaction.outputs || []).length !== 1) { Alert.alert('Invalid', 'Kill tx must have exactly 1 input and 1 output.'); return; }
                               // It must pay back into the escrow, never to a person.
-                              const _esc = p2pkScript((contract.frostData?.aggregatedPubkey || '').slice(2));
+                              const _esc = await (async () => { const _pkA = contract.frostData?.aggregatedPubkey || ''; if (_pkA) return p2pkScript(_pkA.length === 66 ? _pkA.slice(2) : _pkA); try { const _net = String(contract.frostData?.network || 'testnet-10'); const _base = _net === 'mainnet' ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org'; const _uj = await (await fetch(_base + '/addresses/' + (contract.multisigAddress || '') + '/utxos')).json(); const _s0 = Array.isArray(_uj) && _uj[0]?.utxoEntry?.scriptPublicKey?.scriptPublicKey; if (_s0) { console.log('[Esc-Validate] escrow script from chain (resume fallback)'); return String(_s0); } } catch (_fe) { console.warn('[Esc-Validate] chain fallback failed:', _fe); } return p2pkScript(''); })();
                               const _outScript = _out?.scriptPublicKey?.scriptPublicKey || _out?.scriptPublicKey || '';
                               if (String(_outScript) !== _esc) { Alert.alert('Rejected', 'The kill tx does not return the collateral to the escrow. Do not fund.'); return; }
                               if (Number(_kt.transaction.lockTime || 0) !== 0) { Alert.alert('Rejected', 'The kill tx has a lockTime — it must be broadcastable immediately.'); return; }
                               await SecureStore.setItemAsync('kv_kill_' + (contract.agreementId || ''), JSON.stringify({ txBody: _kt, predictedTxId: _pred, createdAt: Date.now() }));
                               console.log('[Kill] Stored. Kills utxo', _pred.slice(0, 16) + ':0');
+                              recordPayload(contract.agreementId || '', 'kill', v, 'in').catch(() => {});
                               Alert.alert('Kill Tx Stored', 'Your payment can now go out. It will be broadcast automatically just before you fund.');
                             } catch (e) {
                               console.warn('[Kill] Store failed:', e);
@@ -4517,6 +4519,10 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                     {role === 'seller' && contract.multisigAddress && (
                       <View style={{ backgroundColor: '#f0fdf4', borderRadius: 12, borderWidth: 2, borderColor: '#22c55e', padding: 14, marginBottom: 16 }}>
                         {/* TEMPLATE-RESEND: stored refund+kill templates re-copyable after resume */}
+                  {/* KILL-RESEND: signed kill tx re-copyable after resume */}
+                  <TouchableOpacity onPress={async () => { try { const _agr = contract.agreementId || ''; const _kj = await SecureStore.getItemAsync('kv_killsend_' + _agr); if (!_kj) { Alert.alert('No Kill Tx Stored', 'The signed kill was never aggregated on this device for this agreement. It is created when you Sign & Fund.'); return; } const _k = JSON.parse(_kj); await Clipboard.setStringAsync(JSON.stringify(_k.txBody)); recordPayload(_agr, 'kill', JSON.stringify(_k.txBody), 'out').catch(() => {}); Alert.alert('Kill Tx Copied', 'Send it to the buyer. They cannot fund without it.'); } catch (e: any) { Alert.alert('Error', e.message); } }} style={{ backgroundColor: '#dc2626', borderRadius: 8, padding: 10, alignItems: 'center', marginBottom: 8 }}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Copy Kill Tx (resend)</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity onPress={async () => { try { const _agr = contract.agreementId || ''; const _b64 = await SecureStore.getItemAsync('kv_refund_b64_' + _agr); if (!_b64) { Alert.alert('No Templates Stored', 'Refund/kill templates were never generated on this device for this agreement. They are created when you (seller) accept and freeze collateral.'); return; } const _hdr = 'KV-STEP-2-TEMPLATES|' + _agr + '\nKasVillage refund+kill templates. In Neighbor Agreement, paste ALL of this into the box titled "Paste seller refund template" (amber), co-sign, and send your signature back.\n\n' + _b64; await Clipboard.setStringAsync(_hdr); recordPayload(_agr, 'templates', _b64, 'out').catch(() => {}); Alert.alert('Templates Copied', 'Re-copied the stored refund+kill templates. Send to the buyer to co-sign.'); } catch (e: any) { Alert.alert('Error', e.message); } }} style={{ backgroundColor: '#f59e0b', borderRadius: 8, padding: 10, alignItems: 'center', marginBottom: 8 }}>
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Copy Refund/Kill Templates (resend)</Text>
                   </TouchableOpacity>
@@ -4664,6 +4670,8 @@ nonces: _killNonces,
                               updateFrostEntry(_agrId, { timeoutN: Number(_p.N) });
                               // Paste 4: the buyer needs this to fund. Safe to hand over — it can only
                               // move the collateral from escrow back to escrow, never to a person.
+                              try { await SecureStore.setItemAsync('kv_killsend_' + _agrId, JSON.stringify({ txBody: _killAgg.txBody, predictedTxId: _p.predictedTxId, createdAt: Date.now() })); console.log('[Kill] Signed kill persisted (kv_killsend_)'); } catch (_ke) { console.warn('[Kill] killsend persist failed:', _ke); }
+                              recordPayload(_agrId, 'kill', JSON.stringify(_killAgg.txBody), 'out').catch(() => {});
                               try { await Clipboard.setStringAsync(JSON.stringify(_killAgg.txBody)); } catch {}
                               Alert.alert('Collateral Sent — Send Kill Tx', 'Reclaim secured, then funded.\nTX: ' + (_br.txId || '').slice(0, 16) + '...\n\nThe KILL TX is now on your clipboard. Send it to the buyer — they cannot fund without it.\n\nIf they never fund, reclaim after ' + (Number(_p.N) / DAA_PER_MIN) + ' min.');
                             } catch (e) {
