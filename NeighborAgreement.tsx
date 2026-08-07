@@ -104,6 +104,7 @@ import {// Types
   exchangePubkeys,
   createFrostAgreement,
   cleanup as cleanupFrost, aggregateToAddress} from './frost_complete';
+import { buildRecord as srBuild, signRecord as srSign, verifyRecordSig as srVerify, appendRecord as srAppend, descHash as srDescHash } from './stat_records';
 import { validateEscrowDestination } from './frost_complete';
 import { sendPushToCounterparty } from './push_notifications';
 
@@ -2489,7 +2490,8 @@ agrId: contract.agreementId || '',
 await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: _cNonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })), createdAt: Date.now() }));
         await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(_cTmpl));
         const _b64 = encodeTemplate(_cTmpl);
-        try { await Clipboard.setStringAsync('KV-STEP-6-TEMPLATE|' + (contract.agreementId || '') + '\n' + _b64); } catch {}
+        let _ssigC = ''; try { const _srecC = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: String(((JSON.parse(atob(_b64)) as any).u?.[0]?.txId) || ''), escrowDaaScore: 0, myPubkey: contract.buyerPubkey || '', cpPubkey: contract.sellerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(_b64)) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: Number((contract as any).timeoutN || 0), descriptionHash: srDescHash((contract as any).description || ''), outcome: ((((JSON.parse(atob(_b64)) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, anchor: null }); _ssigC = srSign(_srecC, wallet.privKeyHex); await SecureStore.setItemAsync('kv_statrec_my_' + (contract.agreementId || ''), JSON.stringify({ rec: _srecC, mySig: _ssigC })); } catch (_se) { console.warn('[StatSig] build/sign failed:', _se); }
+        try { await Clipboard.setStringAsync('KV-STEP-6-TEMPLATE|' + (contract.agreementId || '') + (_ssigC ? '|STATSIG:' + _ssigC : '') + '\n' + _b64); } catch {}
         setTemplateBuilt(true);
         console.log('[Ceremony] ' + releaseMode + ' template built:', _b64.length, 'chars,', _cDesc);
         Alert.alert('Template Copied (' + releaseMode + ')', _cDesc + '\nOutputs: ' + _cTmpl.o.length + '\n\nSend to counterparty.');
@@ -2511,7 +2513,8 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
       // v2: one k per input, array order == template u[] order.
       await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: result.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })), createdAt: Date.now() }));
       await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(result.template));
-      try { await Clipboard.setStringAsync('KV-STEP-6-TEMPLATE|' + (contract.agreementId || '') + '\n' + result.templateB64); } catch {}
+      let _ssig = ''; try { const _srec = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: String(((JSON.parse(atob(result.templateB64)) as any).u?.[0]?.txId) || ''), escrowDaaScore: 0, myPubkey: contract.buyerPubkey || '', cpPubkey: contract.sellerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(result.templateB64)) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: Number((contract as any).timeoutN || 0), descriptionHash: srDescHash((contract as any).description || ''), outcome: ((((JSON.parse(atob(result.templateB64)) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, anchor: null }); _ssig = srSign(_srec, wallet.privKeyHex); await SecureStore.setItemAsync('kv_statrec_my_' + (contract.agreementId || ''), JSON.stringify({ rec: _srec, mySig: _ssig })); } catch (_se) { console.warn('[StatSig] build/sign failed:', _se); }
+      try { await Clipboard.setStringAsync('KV-STEP-6-TEMPLATE|' + (contract.agreementId || '') + (_ssig ? '|STATSIG:' + _ssig : '') + '\n' + result.templateB64); } catch {}
 
       console.log('[Ceremony] Template built:', result.templateB64.length, 'chars');
       setTemplateBuilt(true);
@@ -2528,6 +2531,13 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
       if (!pastedText) { Alert.alert('Error', 'Nothing in clipboard'); return; }
 
       const resp = parseResponse(stripKvHeader(pastedText));
+      try {
+        const _cpSig = (((pastedText.split('\n')[0] || '').match(/STATSIG:([0-9a-fA-F]+)/) || [])[1]) || '';
+        if (_cpSig) {
+          const _mj = await SecureStore.getItemAsync('kv_statrec_my_' + (contract.agreementId || ''));
+          if (_mj) { const _m = JSON.parse(_mj); const _r = await srAppend(_m.rec, _m.mySig, _cpSig); console.log('[StatSig] seller attestation ' + (_r.ok ? 'CHAINED' : 'REJECTED: ' + _r.error)); }
+        } else { console.log('[StatSig] no seller sig in response header (older sender)'); }
+      } catch (_se) { console.warn('[StatSig] buyer append failed:', _se); }
       if (!resp || !resp.R || !resp.s || !Array.isArray(resp.s)) {
         Alert.alert('Error', 'Invalid seller response — expected base64 with R + partial sigs');
         return;
@@ -5097,7 +5107,14 @@ nonces: _killNonces,
                               template: tmpl,
                             });
                             if ('error' in result) { Alert.alert('Verification Failed', result.error); setIsLoading(false); return; }
-                            try { await Clipboard.setStringAsync('KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + '\n' + result.responseB64); } catch {}
+                            let _mySSig = ''; try {
+                              const _inSig = (((v.split('\n')[0] || '').match(/STATSIG:([0-9a-fA-F]+)/) || [])[1]) || '';
+                              const _sRec = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: String(((JSON.parse(atob(stripKvHeader(v))) as any).u?.[0]?.txId) || ''), escrowDaaScore: 0, myPubkey: contract.sellerPubkey || '', cpPubkey: contract.buyerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(stripKvHeader(v))) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: Number((contract as any).timeoutN || 0), descriptionHash: srDescHash((contract as any).description || ''), outcome: ((((JSON.parse(atob(stripKvHeader(v))) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, anchor: null });
+                              if (_inSig) { const _r = await srAppend(_sRec, '', _inSig); console.log('[StatSig] buyer attestation ' + (_r.ok ? 'CHAINED' : 'REJECTED: ' + _r.error)); } else { console.log('[StatSig] no buyer sig in template header (older sender)'); }
+                              _mySSig = srSign(_sRec, wallet.privKeyHex);
+                              const _pr = await (await import('./stat_records')).loadChain(); const _mine = _pr.find((c: any) => c.agrId === (contract.agreementId || '')); if (_mine) { _mine.mySignature = _mySSig; await (await import('@react-native-async-storage/async-storage')).default.setItem('kv_stat_chain_v1', JSON.stringify(_pr)); }
+                            } catch (_se) { console.warn('[StatSig] seller side failed:', _se); }
+                            try { await Clipboard.setStringAsync('KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + (_mySSig ? '|STATSIG:' + _mySSig : '') + '\n' + result.responseB64); } catch {}
                             recordPayload((contract.agreementId || ''), 'response', result.responseB64, 'out').catch(()=>{});
                             console.log('[Ceremony-Seller] Signed! Response:', result.responseB64.length, 'chars');
                             // Inscribe signed + tracking to Arweave (dispute evidence)
