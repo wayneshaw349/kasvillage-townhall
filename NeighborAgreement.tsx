@@ -2532,7 +2532,7 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
 
       const resp = parseResponse(stripKvHeader(pastedText));
       try {
-        const _cpSig = (((pastedText.split('\n')[0] || '').match(/STATSIG:([0-9a-fA-F]+)/) || [])[1]) || '';
+        console.log('[StatSig-Recv]', (pastedText.split('\n')[0] || '').slice(0, 90)); const _cpSig = ((pastedText.match(/STATSIG:([0-9a-fA-F]{100,})/) || [])[1]) || '';
         if (_cpSig) {
           const _mj = await SecureStore.getItemAsync('kv_statrec_my_' + (contract.agreementId || ''));
           if (_mj) { const _m = JSON.parse(_mj); const _r = await srAppend(_m.rec, _m.mySig, _cpSig); console.log('[StatSig] seller attestation ' + (_r.ok ? 'CHAINED' : 'REJECTED: ' + _r.error)); }
@@ -2604,6 +2604,7 @@ const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_twe
       if (submitResp.ok) {
         const txId = (await submitResp.json()).transactionId || '';
         console.log('[Ceremony-Buyer] Release TX:', txId);
+        try { const _cj = (await AsyncStorage.getItem('kv_stat_chain_v1')) || '[]'; const _ca = JSON.parse(_cj); const _cr = _ca.find((c: any) => c.agrId === (contract.agreementId || '')); if (_cr) { _cr.anchor = { releaseTxid: txId }; await AsyncStorage.setItem('kv_stat_chain_v1', JSON.stringify(_ca)); console.log('[StatSig] anchor stamped:', txId.slice(0, 16)); } } catch (_ae) { console.warn('[StatSig] anchor stamp failed:', _ae); }
         // Inscribe buyer confirmation to Arweave (dispute evidence)
         if (sellerTrackingNum.trim()) {
           try {
@@ -3516,7 +3517,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
           <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", paddingVertical: 4, gap: 6 }}>
             <TouchableOpacity onPress={() => { if (step > 1) { setStep(1); } else { onClose(); } }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#2563eb", fontSize: 12, fontWeight: "bold" }}>{"< Back"}</Text></TouchableOpacity>
             <TouchableOpacity onPress={async () => { await clearAgreementSession(); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setRole(null); setAgreementType(null); setTemplateBuilt(false); setTemplateBuilt(false); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, itemDescription: "", stipulations: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "", expiryHours: 24 }); Alert.alert("Cleared", "Session reset"); }} style={{ padding: 8, backgroundColor: "#fee2e2", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "bold" }}>Reset</Text></TouchableOpacity>
-            <TouchableOpacity onPress={async () => { const keys = await AsyncStorage.getAllKeys(); const kvKeys = keys.filter((k) => k.startsWith("kv_") || k.startsWith("frost_") || k.startsWith("FROST_")); await AsyncStorage.multiRemove(kvKeys); await AsyncStorage.removeItem("kv_agreement_session"); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, description: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "" }); Alert.alert("Cleared", "All FROST state cleared (" + kvKeys.length + " keys)"); }} style={{ padding: 8, backgroundColor: "#fef3c7", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#92400e", fontSize: 10, fontWeight: "bold" }}>Clear All</Text></TouchableOpacity>
+            <TouchableOpacity onPress={async () => { const keys = await AsyncStorage.getAllKeys(); const kvKeys = keys.filter((k) => k.startsWith("kv_") || k.startsWith("frost_") || k.startsWith("FROST_")); await AsyncStorage.multiRemove(kvKeys); await AsyncStorage.removeItem("kv_agreement_session"); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, description: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "" }); Alert.alert("Cleared", "All FROST state cleared (" + kvKeys.length + " keys)"); }} style={{ padding: 8, backgroundColor: "#fef3c7", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#92400e", fontSize: 10, fontWeight: "bold" }}>Clear All</Text></TouchableOpacity><TouchableOpacity onPress={async () => { try { const _cj = (await AsyncStorage.getItem("kv_stat_chain_v1")) || "[]"; const _ca = JSON.parse(_cj); await Clipboard.setStringAsync(JSON.stringify({ kind: "KVSTAT-BUNDLE", v: 3, records: _ca })); Alert.alert("Rep Exported", _ca.length + " records copied to clipboard"); } catch (_e) { Alert.alert("Export failed", String(_e)); } }} style={{ padding: 8, backgroundColor: "#dcfce7", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#166534", fontSize: 10, fontWeight: "bold" }}>Export Rep</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => { setShowBalanceSheet(!showBalanceSheet); }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text></TouchableOpacity>
           </View>
           <Text style={{ fontSize: 10, color: "#78716c", textAlign: "center", paddingVertical: 4 }}>(Two-Party Collateral / Good Faith Deposit)</Text>
@@ -5108,13 +5109,13 @@ nonces: _killNonces,
                             });
                             if ('error' in result) { Alert.alert('Verification Failed', result.error); setIsLoading(false); return; }
                             let _mySSig = ''; try {
-                              const _inSig = (((v.split('\n')[0] || '').match(/STATSIG:([0-9a-fA-F]+)/) || [])[1]) || '';
+                              const _inSig = ((v.match(/STATSIG:([0-9a-fA-F]{100,})/) || [])[1]) || '';
                               const _sRec = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: String(((JSON.parse(atob(stripKvHeader(v))) as any).u?.[0]?.txId) || ''), escrowDaaScore: 0, myPubkey: contract.sellerPubkey || '', cpPubkey: contract.buyerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(stripKvHeader(v))) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: Number((contract as any).timeoutN || 0), descriptionHash: srDescHash((contract as any).description || ''), outcome: ((((JSON.parse(atob(stripKvHeader(v))) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, anchor: null });
                               if (_inSig) { const _r = await srAppend(_sRec, '', _inSig); console.log('[StatSig] buyer attestation ' + (_r.ok ? 'CHAINED' : 'REJECTED: ' + _r.error)); } else { console.log('[StatSig] no buyer sig in template header (older sender)'); }
                               _mySSig = srSign(_sRec, wallet.privKeyHex);
                               const _pr = await (await import('./stat_records')).loadChain(); const _mine = _pr.find((c: any) => c.agrId === (contract.agreementId || '')); if (_mine) { _mine.mySignature = _mySSig; await (await import('@react-native-async-storage/async-storage')).default.setItem('kv_stat_chain_v1', JSON.stringify(_pr)); }
                             } catch (_se) { console.warn('[StatSig] seller side failed:', _se); }
-                            try { await Clipboard.setStringAsync('KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + (_mySSig ? '|STATSIG:' + _mySSig : '') + '\n' + result.responseB64); } catch {}
+                            try { const _hdr = 'KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + (_mySSig ? '|STATSIG:' + _mySSig : ''); console.log('[StatSig-Emit]', _hdr.slice(0, 90)); await Clipboard.setStringAsync(_hdr + '\n' + result.responseB64); } catch {}
                             recordPayload((contract.agreementId || ''), 'response', result.responseB64, 'out').catch(()=>{});
                             console.log('[Ceremony-Seller] Signed! Response:', result.responseB64.length, 'chars');
                             // Inscribe signed + tracking to Arweave (dispute evidence)
@@ -5156,7 +5157,7 @@ nonces: _killNonces,
                 </View>
                       {sellerResponseB64 ? (
                         <TouchableOpacity
-                          onPress={async () => { try { await Clipboard.setStringAsync(sellerResponseB64); Alert.alert('Copied!', 'Send this to the buyer.'); } catch {} }}
+                          onPress={async () => { try { let _ss = ''; try { const _cj = (await AsyncStorage.getItem('kv_stat_chain_v1')) || '[]'; const _cr = JSON.parse(_cj).find((c: any) => c.agrId === (contract.agreementId || '')); _ss = (_cr && _cr.mySignature) || ''; } catch {} await Clipboard.setStringAsync('KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + (_ss ? '|STATSIG:' + _ss : '') + '\n' + sellerResponseB64); Alert.alert('Copied!', 'Send this to the buyer.'); } catch {} }}
                           style={{ backgroundColor: '#059669', borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 8 }}
                         >
                           <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Copy Response & Send to Buyer</Text>
