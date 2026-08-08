@@ -16,3 +16,12 @@ verify_*.cjs
 *.bak_*
 .DS_Store
 Thumbs.db
+*.bak
+*.bak2
+*.bak3
+*.bak4
+bundle.json
+buyer.json
+seller.json
+honest.json
+forged.json
