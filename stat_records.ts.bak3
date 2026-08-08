@@ -48,9 +48,6 @@ export interface StatRecord {
   timeoutN: number;
   descriptionHash: string;    // sha256 hex of description (raw stays off the export)
   outcome: 'complete' | 'cancel' | 'deadlock';
-  frostCounter: number;       // public; travels in the proposal paste. OUTSIDE signed bytes:
-                              // deriveAddress(deriveAggregateKey(pk1, pk2, frostCounter)) must
-                              // equal frostAddr, so a forged counter fails derivation on its own.
   anchor: ChainAnchor | null; // set after broadcast via setAnchor()
   ts: number;                 // creation time (informational, not security-relevant)
   prevHash: string;           // hex sha256 of previous record's signedBytes; 64 zeros for genesis
