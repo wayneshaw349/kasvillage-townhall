@@ -213,9 +213,11 @@ async function buildAns104DataItem(
 // IRYS UPLOAD
 // =============================================================================
 
+let _ARWEAVE_402_DEAD = false; // set on first 402; skip uploads for the session
 async function uploadToIrys(
   dataItemBytes: Uint8Array,
 ): Promise<ArweaveUploadResult> {
+  if (_ARWEAVE_402_DEAD) return { success: false, error: 'arweave disabled (402 payment required this session)' };
   try {
     const response = await fetch(IRYS_UPLOAD_URL, {
       method: 'POST',
@@ -227,7 +229,8 @@ async function uploadToIrys(
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      console.error(`[Arweave] Upload failed ${response.status} from ${(response as any).url} redirected=${(response as any).redirected}: ${text.slice(0,200)}`);
+      if (response.status === 402) { if (!_ARWEAVE_402_DEAD) { _ARWEAVE_402_DEAD = true; console.log('[Arweave] disabled for session: bundler requires payment (402). Inscriptions continue on Kaspa payloads.'); } return { success: false, error: 'Upload failed: 402' }; }
+      console.error(`[Arweave] Upload failed ${response.status}: ${text.slice(0,120)}`);
       return { 
         success: false, 
         error: `Upload failed: ${response.status} ${text.slice(0, 100)}` 

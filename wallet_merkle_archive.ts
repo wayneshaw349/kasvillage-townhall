@@ -602,6 +602,7 @@ export async function uploadPerTxProof(params: {
     ];
     if (params.uploadFn) {
       const arTxId = await params.uploadFn(JSON.stringify(proof), tags);
+      if (!arTxId) { console.log('[MerkleArchive] Per-TX proof skipped (uploader returned no id)'); return null; }
       console.log('[MerkleArchive] Per-TX proof uploaded:', arTxId);
       return arTxId;
     }

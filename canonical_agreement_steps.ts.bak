@@ -35,6 +35,13 @@ const N = secp256k1.CURVE.n;
 const G = secp256k1.ProjectivePoint.BASE;
 const SIGHASH_KEY = new TextEncoder().encode('TransactionSigningHash');
 
+// Kaspa TransactionSigningHash is KEYED blake2b-256. The runtime honors `key`
+// (L1-proven; verified against installed @noble/hashes) but the resolved .d.ts
+// omits it. The cast below is TYPE-ONLY - runtime bytes are unchanged.
+function keyedBlake2b(data: Uint8Array): Uint8Array {
+  return blake2b(data, { dkLen: 32, key: SIGHASH_KEY } as unknown as { dkLen: number });
+}
+
 function mod(a: bigint, m: bigint): bigint {
   return ((a % m) + m) % m;
 }
@@ -72,7 +79,9 @@ function w64(v: bigint): Uint8Array {
 // ============================================================================
 // SCHEMA VERSION
 // ============================================================================
-export const AGREEMENT_SCHEMA_VERSION = 1;
+// v2: R is per-input. v1 templates (one R, N inputs) leak the wallet key and
+// are rejected by parseTemplate/parseResponse.
+export const AGREEMENT_SCHEMA_VERSION = 2;
 
 // ============================================================================
 // STEP DEFINITIONS
@@ -153,8 +162,9 @@ export interface TxTemplate {
   u: TxTemplateInput[];   // UTXOs (sorted by txId)
   o: TxTemplateOutput[];  // Outputs [buyer, seller]
   f: string;              // Fee sompi
-  R: string;              // Buyer R nonce (compressed point hex)
+R: string[];            // Buyer R nonces - ONE PER INPUT, aligned with u[]
   agr: string;            // Agreement ID
+  lt?: string;            // lockTime (DAA) — '0' for release/cancel, set for refund
 }
 
 // ============================================================================
@@ -162,7 +172,7 @@ export interface TxTemplate {
 // ============================================================================
 
 export interface SellerResponse {
-  R: string;       // Seller R nonce (compressed point hex)
+R: string[];     // Seller R nonces - ONE PER INPUT, aligned with the template u[]
   s: string[];     // Partial s values (one per input, hex)
 }
 
@@ -171,7 +181,7 @@ export interface SellerResponse {
 // ============================================================================
 
 /** How funds leave the FROST address */
-export type ReleaseMode = 'release' | 'cancel';
+export type ReleaseMode = 'release' | 'cancel' | 'refund';
 
 /**
  * Compute outputs for each release mode.
@@ -194,6 +204,12 @@ export function computeReleaseOutputs(
   const scriptB = p2pkScript(partyB_xOnly);
 
   switch (mode) {
+    case 'refund': {
+      return {
+        outputs: [{ v: net.toString(), s: scriptA }],
+        description: 'Timelocked refund: ' + (Number(net) / 1e8).toFixed(4) + ' KAS returned',
+      };
+    }
     case 'release': {
       // Trade complete: seller (party receiving payment) gets everything
       // Caller determines which party is the recipient
@@ -239,13 +255,21 @@ export function buildReleaseTemplate(params: {
   partyB_depositSompi: bigint;
   mode: ReleaseMode;
   fee?: bigint;
-  R_hex: string;
+  privateKeyHex: string;
+  buyerPubkey: string;
+  sellerPubkey: string;
+  counter: number;
   agrId: string;
-}): { template: TxTemplate; description: string } {
+}): { template: TxTemplate; description: string; nonces: FrostNonce[] } {
   const sorted = [...params.utxos].sort((a, b) => a.txId.localeCompare(b.txId));
   const totalIn = sorted.reduce((s, u) => s + BigInt(u.amount), 0n);
   const numOutputs = params.mode === 'release' ? 1 : 2;
   const fee = params.fee || BigInt(sorted.length * 115000 + numOutputs * 48000 + 5000);
+
+  // ONE k PER INPUT. Generated AFTER the sort so R[i] lines up with u[i].
+  const nonces: FrostNonce[] = sorted.map(() =>
+    generateNonce(params.privateKeyHex, params.buyerPubkey, params.sellerPubkey, params.counter)
+  );
 
   const { outputs, description } = computeReleaseOutputs(
     params.mode, totalIn, fee,
@@ -258,10 +282,11 @@ export function buildReleaseTemplate(params: {
       u: sorted.map((u) => ({ t: u.txId, i: u.index, a: u.amount, s: u.scriptPubKey })),
       o: outputs,
       f: fee.toString(),
-      R: params.R_hex,
+      R: nonces.map((n) => n.R_hex),
       agr: params.agrId,
     },
     description,
+    nonces,
   };
 }
 
@@ -291,8 +316,8 @@ export async function fetchFeeEstimate(
   } catch {
     // Toccata fallback formula: fee = 100 * max(compute_grams, 2 * tx_bytes)
     // Typical FROST tx: 2 inputs, 2 outputs
-    // tx_bytes � 35 + 2*(41+65) + 2*(9+34) = 333 bytes
-    // compute_grams � 333 + 2*340 + 2*1000 = 3013
+    // tx_bytes � 35 + 2*(41+65) + 2*(9+34) = 333 bytes
+    // compute_grams � 333 + 2*340 + 2*1000 = 3013
     // fee = 100 * max(3013, 2*333) = 100 * 3013 = 301300 sompi
     const txBytes = 333; // typical FROST 2-in-2-out
     const computeGrams = txBytes + 2 * 340 + 2 * 1000;
@@ -380,6 +405,34 @@ export function p2pkScript(xOnlyHex: string): string {
 }
 
 /**
+ * [L-GUARD] Assert the signing-side aggregate key matches the escrow script being spent.
+ * If the counter (or pubkey set) used at signing diverges from the one used at address
+ * derivation, L differs, the aggregate key differs, and the signature can never satisfy
+ * the escrow script - the failure would surface only at broadcast, or worse, in a stored
+ * refund that silently cannot fire. This makes the divergence throw loudly BEFORE any k
+ * is used or anything is signed.
+ */
+export function assertLMatch(
+  agg: { aggXOnly: string },
+  templateInputs: Array<{ s: string; t?: string }>,
+  fnName: string,
+  counter?: number
+): void {
+  const expected = p2pkScript(agg.aggXOnly);
+  for (let gi = 0; gi < templateInputs.length; gi++) {
+    const got = (templateInputs[gi] && templateInputs[gi].s) || '';
+    if (got !== expected) {
+      throw new Error(
+        '[L-MISMATCH] ' + fnName + ': input ' + gi + ' escrow script does not match the aggregate key derived at signing time. ' +
+        'counter=' + String(counter) + ' derived=' + expected.slice(0, 20) + '... input=' + got.slice(0, 20) + '... ' +
+        'The signing counter/pubkeys differ from the ones used to derive the escrow address. NOTHING was signed. ' +
+        'Do not retry with a guessed counter - resume from the original proposal paste.'
+      );
+    }
+  }
+}
+
+/**
  * Derive FROST address string from aggregate key.
  * Uses Kaspa bech32 encoding.
  */
@@ -441,8 +494,8 @@ export function deriveAddress(
  */
 export function verificationCode(pubkeyA: string, pubkeyB: string): string {
   const [pk1, pk2] = [pubkeyA, pubkeyB].sort();
-  const hash = sha256(new Uint8Array([...hexToBytes(pk1), ...hexToBytes(pk2)]));
-  return bytesToHex(hash).slice(0, 4).toUpperCase();
+  const hash = sha256(new TextEncoder().encode('FROST_VERIFY:' + pk1 + pk2)); // [UNIFIED] match frost_complete
+  return bytesToHex(hash).slice(0, 12).toUpperCase();
 }
 
 // ============================================================================
@@ -462,28 +515,21 @@ export interface CanonicalOutput {
 }
 
 function hashPrevOutputs(inputs: CanonicalInput[]): Uint8Array {
-  return blake2b(
-    concat(...inputs.map((i) => concat(hexToBytes(i.txId), w32(i.index)))),
-    { dkLen: 32, key: SIGHASH_KEY }
+  return keyedBlake2b(
+    concat(...inputs.map((i) => concat(hexToBytes(i.txId), w32(i.index))))
   );
 }
 
 function hashSequences(inputs: CanonicalInput[]): Uint8Array {
-  return blake2b(concat(...inputs.map(() => w64(0n))), {
-    dkLen: 32,
-    key: SIGHASH_KEY,
-  });
+  return keyedBlake2b(concat(...inputs.map(() => w64(0n))));
 }
 
 function hashSigOpCounts(inputs: CanonicalInput[]): Uint8Array {
-  return blake2b(new Uint8Array(inputs.map(() => 1)), {
-    dkLen: 32,
-    key: SIGHASH_KEY,
-  });
+  return keyedBlake2b(new Uint8Array(inputs.map(() => 1)));
 }
 
 function hashOutputs(outputs: CanonicalOutput[]): Uint8Array {
-  return blake2b(
+  return keyedBlake2b(
     concat(
       ...outputs.map((o) =>
         concat(
@@ -493,8 +539,7 @@ function hashOutputs(outputs: CanonicalOutput[]): Uint8Array {
           hexToBytes(o.script)
         )
       )
-    ),
-    { dkLen: 32, key: SIGHASH_KEY }
+    )
   );
 }
 
@@ -505,13 +550,14 @@ function hashOutputs(outputs: CanonicalOutput[]): Uint8Array {
 export function computeSighash(
   inputs: CanonicalInput[],
   outputs: CanonicalOutput[],
-  inputIndex: number
+  inputIndex: number,
+  lockTime: bigint = 0n
 ): Uint8Array {
   const inp = inputs[inputIndex];
   const spk = hexToBytes(inp.scriptPubKey);
   const subnetId = new Uint8Array(20); // all zeros = native
 
-  return blake2b(
+  return keyedBlake2b(
     concat(
       w16(0),                         // version
       hashPrevOutputs(inputs),
@@ -526,13 +572,12 @@ export function computeSighash(
       w64(0n),                        // sequence
       w8(1),                          // sigOpCount
       hashOutputs(outputs),
-      w64(0n),                        // lockTime
+      w64(lockTime),                  // lockTime
       subnetId,                       // native subnetwork
       w64(0n),                        // gas
       new Uint8Array(32),             // payload hash (empty)
       w8(1)                           // sighash type: ALL
-    ),
-    { dkLen: 32, key: SIGHASH_KEY }
+    )
   );
 }
 
@@ -572,7 +617,7 @@ export function generateNonce(
   if (aggBytes[0] === 0x03) d = mod(N - d, N);
 
   // Random k
-  const kBytes = secp256k1.utils.randomPrivateKey();
+  const kBytes = (secp256k1 as any).utils.randomPrivateKey(); // type-only cast; runtime proven
   let k = mod(BigInt('0x' + bytesToHex(kBytes)), N);
   if (k === 0n) k = 1n;
 
@@ -599,7 +644,7 @@ export function partialSign(
 ): { s_hex: string; R_agg_x_hex: string } {
   // R_agg = R_mine + R_counterparty
   const Rc = secp256k1.ProjectivePoint.fromHex(counterpartyR_hex);
-  let Ragg = G.multiply(nonce.k).add(Rc);
+  let Ragg: any = (G.multiply(nonce.k) as any).add(Rc); // type-only cast; runtime proven
   let k = nonce.k;
 
   // BIP340: negate k if R_agg has odd y
@@ -672,7 +717,7 @@ export function buildTemplate(params: {
   sellerXOnly: string;
   buyerAmountSompi: bigint;
   fee: bigint;
-  buyerR_hex: string;
+buyerR_hex: string[];   // one per input, sorted order
   agrId: string;
 }): TxTemplate {
   const { utxos, buyerXOnly, sellerXOnly, buyerAmountSompi, fee, buyerR_hex, agrId } = params;
@@ -690,7 +735,7 @@ export function buildTemplate(params: {
       { v: sellerAmt.toString(), s: p2pkScript(sellerXOnly) },
     ],
     f: fee.toString(),
-    R: buyerR_hex,
+R: buyerR_hex,
     agr: agrId,
   };
 }
@@ -704,6 +749,16 @@ export function parseTemplate(b64: string): TxTemplate | null {
     const json = atob(b64);
     const obj = JSON.parse(json);
     if (!obj.u || !obj.o || !obj.R || !Array.isArray(obj.u) || !Array.isArray(obj.o)) {
+      return null;
+    }
+    // v1 templates carried ONE R for N inputs. Signing one leaks the wallet key
+    // by division. Refuse to parse rather than refuse to sign.
+    if (!Array.isArray(obj.R)) {
+      console.warn('[Template] REJECTED: v1 format (single R for all inputs). Ask for a fresh template.');
+      return null;
+    }
+    if (obj.R.length !== obj.u.length) {
+      console.warn('[Template] REJECTED:', obj.R.length, 'R nonces for', obj.u.length, 'inputs.');
       return null;
     }
     return obj as TxTemplate;
@@ -779,6 +834,15 @@ export function parseResponse(b64: string): SellerResponse | null {
   try {
     const obj = JSON.parse(atob(b64));
     if (!obj.R || !obj.s || !Array.isArray(obj.s)) return null;
+    // Same gate as parseTemplate: a scalar R means one k signed every input.
+    if (!Array.isArray(obj.R)) {
+      console.warn('[Response] REJECTED: v1 format (single R for all inputs).');
+      return null;
+    }
+    if (obj.R.length !== obj.s.length) {
+      console.warn('[Response] REJECTED:', obj.R.length, 'R nonces for', obj.s.length, 'partials.');
+      return null;
+    }
     return obj as SellerResponse;
   } catch {
     return null;
@@ -851,7 +915,7 @@ export function buildTxBody(
         amount: o.v,
         scriptPublicKey: { version: 0, scriptPublicKey: o.s },
       })),
-      lockTime: '0',
+      lockTime: template.lt || '0',
       subnetworkId: SUBNETWORK_NATIVE,
       gas: '0',
       payload: '',
@@ -912,6 +976,36 @@ export function canTransition(
  *
  * k lifetime starts HERE.
  */
+// ============================================================================
+// SELLER REFUND (timelocked reclaim) — pure wrapper over the refund-mode ceremony.
+// The SELLER is the reclaiming party (partyA): they get the single output back.
+// Party mapping: seller pubkey -> buyerPubkey slot (partyA/scriptA in refund mode).
+// The predicted escrow UTXO is computed by the caller (computeTxId) and passed in.
+// lockTime = fundDAA + N; both parties co-sign; broadcastable only after N.
+// ============================================================================
+export function buildSellerRefund(params: {
+  sellerPrivKeyHex: string;
+  sellerPubkey: string;   // reclaiming party (partyA) - receives the refund output
+  buyerPubkey: string;    // counterparty (partyB)
+  counter: number;
+  predictedEscrowUtxo: { txId: string; index: number; amount: string; scriptPubKey: string };
+  fundDAA: bigint;
+  N: bigint;              // timeout window in DAA (from proposal)
+  agrId: string;
+}): { template: TxTemplate; templateB64: string; nonces: FrostNonce[]; sighashes: string[] } {
+  return buyerBuildTemplate({
+    privateKeyHex: params.sellerPrivKeyHex,
+    buyerPubkey: params.sellerPubkey,   // partyA = seller = gets the refund output
+    sellerPubkey: params.buyerPubkey,   // partyB = buyer = counterparty
+    counter: params.counter,
+    utxos: [params.predictedEscrowUtxo],
+    buyerAmountSompi: BigInt(params.predictedEscrowUtxo.amount),
+    releaseMode: 'refund',
+    lockTime: params.fundDAA + params.N,
+    agrId: params.agrId,
+  });
+}
+
 export function buyerBuildTemplate(params: {
   privateKeyHex: string;
   buyerPubkey: string;
@@ -923,24 +1017,16 @@ export function buyerBuildTemplate(params: {
   releaseMode?: ReleaseMode;
   fee?: bigint;
   agrId: string;
+  lockTime?: bigint;
 }): {
   template: TxTemplate;
   templateB64: string;
-  nonce: FrostNonce;
+  nonces: FrostNonce[];
   sighashes: string[];
 } {
-  const numOutputs = (params.releaseMode || 'release') === 'release' ? 1 : 2;
+  const numOutputs = ((params.releaseMode || 'release') === 'cancel') ? 2 : 1;
   const fee = params.fee || BigInt(params.utxos.length * 115000 + numOutputs * 48000 + 5000);
 
-  // Generate nonce (k born)
-  const nonce = generateNonce(
-    params.privateKeyHex,
-    params.buyerPubkey,
-    params.sellerPubkey,
-    params.counter
-  );
-
-  // Build template
   const buyerXOnly =
     params.buyerPubkey.length === 66 ? params.buyerPubkey.slice(2) : params.buyerPubkey;
   const sellerXOnly =
@@ -950,6 +1036,13 @@ export function buyerBuildTemplate(params: {
   const sorted = [...params.utxos].sort((a, b) => a.txId.localeCompare(b.txId));
   const totalIn = sorted.reduce((s, u) => s + BigInt(u.amount), 0n);
   const sellerDeposit = params.sellerAmountSompi ?? (totalIn - params.buyerAmountSompi - fee);
+
+  // ONE k PER INPUT (k born here, one per input). Sharing a k across inputs gives
+  // d = (s0-s1)/(e0-e1) - the wallet key by division. Generated after the sort so
+  // R[i] lines up with u[i].
+  const nonces: FrostNonce[] = sorted.map(() =>
+    generateNonce(params.privateKeyHex, params.buyerPubkey, params.sellerPubkey, params.counter)
+  );
 
   const { outputs } = computeReleaseOutputs(
     mode, totalIn, fee,
@@ -961,11 +1054,11 @@ export function buyerBuildTemplate(params: {
     u: sorted.map((u) => ({ t: u.txId, i: u.index, a: u.amount, s: u.scriptPubKey })),
     o: outputs,
     f: fee.toString(),
-    R: nonce.R_hex,
+    R: nonces.map((n) => n.R_hex),
     agr: params.agrId,
+    lt: (params.lockTime ?? 0n).toString(),
   };
 
-  // Compute sighashes
   const inputs: CanonicalInput[] = template.u.map((u) => ({
     txId: u.t,
     index: u.i,
@@ -979,13 +1072,13 @@ export function buyerBuildTemplate(params: {
 
   const sighashes: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    sighashes.push(bytesToHex(computeSighash(inputs, canonOutputs, i)));
+    sighashes.push(bytesToHex(computeSighash(inputs, canonOutputs, i, BigInt(template.lt || '0'))));
   }
 
   return {
     template,
     templateB64: encodeTemplate(template),
-    nonce,
+    nonces,
     sighashes,
   };
 }
@@ -1009,7 +1102,12 @@ export function sellerSignTemplate(params: {
 } | { error: string } {
   const { privateKeyHex, sellerPubkey, buyerPubkey, counter, template } = params;
 
-  // Verify template
+  // A template with fewer R nonces than inputs is a v1 template. Signing it would
+  // publish two s values under one k and hand over the wallet key. Refuse.
+  if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
+    return { error: 'Template carries ' + (Array.isArray(template.R) ? template.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). One k per input is required - refusing to sign. Ask for a fresh template.' };
+  }
+
   const sellerXOnly =
     sellerPubkey.length === 66 ? sellerPubkey.slice(2) : sellerPubkey;
   const verification = verifyTemplate(template, sellerXOnly);
@@ -1017,13 +1115,9 @@ export function sellerSignTemplate(params: {
     return { error: verification.error || 'Template verification failed' };
   }
 
-  // Derive aggregate key
   const agg = deriveAggregateKey(buyerPubkey, sellerPubkey, counter);
+  assertLMatch(agg, template.u, 'sellerSignTemplate/buyerAggregate', counter); // [L-GUARD]
 
-  // Generate seller nonce (k born — dies at end of this function)
-  const nonce = generateNonce(privateKeyHex, buyerPubkey, sellerPubkey, counter);
-
-  // Compute partial sigs
   const inputs: CanonicalInput[] = template.u.map((u) => ({
     txId: u.t,
     index: u.i,
@@ -1036,14 +1130,17 @@ export function sellerSignTemplate(params: {
   }));
 
   const partials: string[] = [];
+  const myR: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    const shHex = bytesToHex(computeSighash(inputs, outputs, i));
-    const ps = partialSign(nonce, template.R, agg.aggXOnly, shHex);
+    // Fresh k for THIS input only. Born and dies inside this loop iteration.
+    const nonce = generateNonce(privateKeyHex, buyerPubkey, sellerPubkey, counter);
+    myR.push(nonce.R_hex);
+    const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
+    const ps = partialSign(nonce, template.R[i], agg.aggXOnly, shHex);
     partials.push(ps.s_hex);
   }
 
-  // k dies here — nonce goes out of scope, garbage collected
-  const response: SellerResponse = { R: nonce.R_hex, s: partials };
+  const response: SellerResponse = { R: myR, s: partials };
 
   return {
     response,
@@ -1059,16 +1156,31 @@ export function sellerSignTemplate(params: {
  * Caller MUST destroy buyer nonce after this returns.
  */
 export function buyerAggregate(params: {
-  nonce: FrostNonce;
+  nonces: FrostNonce[];
   buyerPubkey: string;
   sellerPubkey: string;
   counter: number;
   template: TxTemplate;
   sellerResponse: SellerResponse;
 }): { txBody: object; signatures: string[] } | { error: string } {
-  const { nonce, buyerPubkey, sellerPubkey, counter, template, sellerResponse } = params;
+  const { nonces, buyerPubkey, sellerPubkey, counter, template, sellerResponse } = params;
+
+  // Every array must line up with u[], or somebody reused a k.
+  if (!Array.isArray(nonces) || nonces.length !== template.u.length) {
+    return { error: 'Have ' + (Array.isArray(nonces) ? nonces.length : 0) + ' nonce(s) for ' + template.u.length + ' input(s) - one k per input is required.' };
+  }
+  if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
+    return { error: 'Template carries the wrong number of R nonces - refusing.' };
+  }
+  if (!Array.isArray(sellerResponse.R) || sellerResponse.R.length !== template.u.length) {
+    return { error: 'Counterparty sent ' + (Array.isArray(sellerResponse.R) ? sellerResponse.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). They reused a k - do NOT broadcast, and tell them to update.' };
+  }
+  if (sellerResponse.s.length !== template.u.length) {
+    return { error: 'Counterparty sent ' + sellerResponse.s.length + ' partial(s) for ' + template.u.length + ' input(s).' };
+  }
 
   const agg = deriveAggregateKey(buyerPubkey, sellerPubkey, counter);
+  assertLMatch(agg, template.u, 'sellerSignTemplate/buyerAggregate', counter); // [L-GUARD]
 
   const inputs: CanonicalInput[] = template.u.map((u) => ({
     txId: u.t,
@@ -1084,19 +1196,17 @@ export function buyerAggregate(params: {
   const signatures: string[] = [];
 
   for (let i = 0; i < inputs.length; i++) {
-    const shHex = bytesToHex(computeSighash(inputs, outputs, i));
+    const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
 
-    // Buyer partial
-    const buyerPartial = partialSign(nonce, sellerResponse.R, agg.aggXOnly, shHex);
+    // nonces[i] signed input i and nothing else.
+    const buyerPartial = partialSign(nonces[i], sellerResponse.R[i], agg.aggXOnly, shHex);
 
-    // Aggregate
     const sigHex = aggregateSigs(
       buyerPartial.R_agg_x_hex,
       buyerPartial.s_hex,
       sellerResponse.s[i]
     );
 
-    // Verify before broadcast
     if (!verifySig(sigHex, shHex, agg.aggXOnly)) {
       return { error: `Input ${i} failed BIP340 verification. Aborting.` };
     }
@@ -1108,6 +1218,223 @@ export function buyerAggregate(params: {
     txBody: buildTxBody(template, signatures),
     signatures,
   };
+}
+
+// ============================================================================
+// SECTION 8b: REFUND CO-SIGN (counterparty side)
+// The refund pays ONLY the funder. verifyTemplate() would reject it outright
+// ('your output not found'), which is correct for a release but wrong here.
+// The co-signer's safety argument is different: I receive nothing, but this tx
+//   (a) spends ONLY the predicted escrow UTXO (which does not exist yet),
+//   (b) pays ONLY the funder's own P2PK script,
+//   (c) cannot confirm before lockTime = now + N.
+// ============================================================================
+export function verifyRefundTemplate(
+  template: TxTemplate,
+  funderXOnly: string,
+  expected: {
+    predictedTxId: string;
+    escrowScript: string;   // p2pkScript(frost aggXOnly)
+    N: bigint;              // from the signed proposal
+    currentDAA: bigint;
+    slackDAA?: bigint;         // how much longer than N is tolerated (default 600 = ~1 min)
+    minRemainingDAA?: bigint;  // how much clock must still remain (default 600 = ~1 min)
+  },
+): { valid: boolean; error?: string } {
+  const slack = expected.slackDAA ?? 600n;
+
+if (!Array.isArray(template.R) || template.R.length !== template.u.length) return { valid: false, error: 'Refund template must carry one R nonce per input (v2)' };
+if (template.u.length !== 1) return { valid: false, error: 'Refund must spend exactly 1 input, saw ' + template.u.length };
+  const u = template.u[0];
+  if (u.t !== expected.predictedTxId) return { valid: false, error: 'Refund input is not the predicted escrow txid' };
+  if (u.i !== 0) return { valid: false, error: 'Refund input index must be 0, saw ' + u.i };
+  if (u.s !== expected.escrowScript) return { valid: false, error: 'Refund input script is not the FROST escrow script' };
+
+  if (template.o.length !== 1) return { valid: false, error: 'Refund must have exactly 1 output, saw ' + template.o.length };
+  const funderScript = p2pkScript(funderXOnly);
+  if (template.o[0].s !== funderScript) return { valid: false, error: 'Refund output does not pay the funder' };
+  if (!isPureP2PK(template.o[0].s)) return { valid: false, error: 'Refund output is not standard P2PK — possible covenant' };
+
+  const lt = BigInt(template.lt || '0');
+  if (lt === 0n) return { valid: false, error: 'Refund has no lockTime — would be spendable immediately' };
+  // (a) Must not already be spendable, or the seller could reclaim the instant they fund.
+  //     The seller stamps lt at accept; the buyer checks it minutes later, so lt is always
+  //     somewhat behind currentDAA + N. That drift is the handshake, not an attack — what
+  //     matters is only that real time remains on the clock.
+  const minRemaining = expected.minRemainingDAA ?? 600n;   // ~1 min at 10 DAA/s
+  if (lt < expected.currentDAA + minRemaining) {
+    return { valid: false, error: 'lockTime ' + lt + ' has passed or is about to (now ' + expected.currentDAA + '). The agreed timeout is too short for the time this handshake took — start again with a longer one.' };
+  }
+  // (b) Must not claim materially longer than agreed.
+  if (lt > expected.currentDAA + expected.N + slack) {
+    return { valid: false, error: 'lockTime ' + lt + ' is longer than the agreed timeout (max ' + (expected.currentDAA + expected.N + slack) + ')' };
+  }
+
+  const totalIn = BigInt(u.a);
+  const totalOut = BigInt(template.o[0].v);
+  const fee = BigInt(template.f);
+  if (totalOut + fee > totalIn) return { valid: false, error: 'Inflation: output + fee exceed input' };
+  const minFee = BigInt(template.u.length * 115000 + template.o.length * 48000 + 5000);
+  if (fee < minFee) return { valid: false, error: 'Fee too low: ' + fee + ' < ' + minFee };
+
+  return { valid: true };
+}
+
+/** Counterparty co-signs the funder's timelocked refund. k born and dies here. */
+export function cosignRefundTemplate(params: {
+  privateKeyHex: string;
+  myPubkey: string;        // co-signer (buyer) - receives nothing
+  funderPubkey: string;    // seller - receives the refund output
+  counter: number;
+  template: TxTemplate;
+  expected: { predictedTxId: string; escrowScript: string; N: bigint; currentDAA: bigint; slackDAA?: bigint; minRemainingDAA?: bigint };
+}): { response: SellerResponse; responseB64: string } | { error: string } {
+  const { privateKeyHex, myPubkey, funderPubkey, counter, template } = params;
+
+  if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
+    return { error: 'Refund template carries ' + (Array.isArray(template.R) ? template.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). One k per input is required - refusing to sign.' };
+  }
+
+  const funderXOnly = funderPubkey.length === 66 ? funderPubkey.slice(2) : funderPubkey;
+  const v = verifyRefundTemplate(template, funderXOnly, params.expected);
+  if (!v.valid) return { error: v.error || 'Refund verification failed' };
+
+  const agg = deriveAggregateKey(funderPubkey, myPubkey, counter);
+  assertLMatch(agg, template.u, 'cosignRefund/cosignKill', counter); // [L-GUARD]
+
+  const inputs: CanonicalInput[] = template.u.map((u) => ({ txId: u.t, index: u.i, value: BigInt(u.a), scriptPubKey: u.s }));
+  const outputs: CanonicalOutput[] = template.o.map((o) => ({ value: BigInt(o.v), script: o.s }));
+
+  const partials: string[] = [];
+  const myR: string[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);  // fresh k per input
+    myR.push(nonce.R_hex);
+    const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
+    partials.push(partialSign(nonce, template.R[i], agg.aggXOnly, shHex).s_hex);
+  }
+
+  const response: SellerResponse = { R: myR, s: partials };
+  return { response, responseB64: encodeResponse(response) };
+}
+
+// ============================================================================
+// SECTION 8c: KILL TX
+// Spends the seller's predicted escrow UTXO A and pays it back to the SAME FROST
+// address. No lockTime. Nobody is paid — A simply stops existing, which kills the
+// refund (whose only input is A) by consensus, not by a guard.
+//
+// The seller pre-signs this at accept as the price of the buyer co-signing the
+// refund. Withholding it gains the seller nothing: the buyer then never funds, and
+// the seller's collateral just sits until they reclaim it at N.
+//
+// Why this is safe to hand over: the tx can only move A from escrow back to escrow.
+// It cannot pay anyone, so publishing it costs nothing.
+// ============================================================================
+export function buildKillTx(params: {
+  sellerPrivKeyHex: string;
+  sellerPubkey: string;
+  buyerPubkey: string;
+  counter: number;
+  predictedEscrowUtxo: { txId: string; index: number; amount: string; scriptPubKey: string };
+  agrId: string;
+  fee?: bigint;
+}): { template: TxTemplate; templateB64: string; nonces: FrostNonce[]; sighashes: string[] } {
+  const u = params.predictedEscrowUtxo;
+  const fee = params.fee || BigInt(1 * 115000 + 1 * 48000 + 5000);
+  const totalIn = BigInt(u.amount);
+  if (totalIn <= fee) throw new Error('Kill: escrow amount too low for fee');
+
+  // Fresh random k per input. NEVER derive k from the tx, and never share one
+  // across inputs: the refund and the kill spend the SAME utxo with DIFFERENT
+  // outputs, so a shared k would give d = (s1-s2)/(e1-e2) - the wallet key by
+  // division. Same reason two inputs of one tx may not share a k.
+  const inputsRaw = [{ t: u.txId, i: u.index, a: u.amount, s: u.scriptPubKey }];
+  const nonces: FrostNonce[] = inputsRaw.map(() =>
+    generateNonce(params.sellerPrivKeyHex, params.sellerPubkey, params.buyerPubkey, params.counter)
+  );
+
+  const template: TxTemplate = {
+    u: inputsRaw,
+    o: [{ v: (totalIn - fee).toString(), s: u.scriptPubKey }],  // back to the escrow
+    f: fee.toString(),
+    R: nonces.map((n) => n.R_hex),
+    agr: params.agrId,
+    lt: '0',                                                    // spendable immediately
+  };
+
+  const inputs: CanonicalInput[] = template.u.map((x) => ({ txId: x.t, index: x.i, value: BigInt(x.a), scriptPubKey: x.s }));
+  const outputs: CanonicalOutput[] = template.o.map((o) => ({ value: BigInt(o.v), script: o.s }));
+  const sighashes: string[] = [];
+  for (let i = 0; i < inputs.length; i++) sighashes.push(bytesToHex(computeSighash(inputs, outputs, i, 0n)));
+
+  return { template, templateB64: encodeTemplate(template), nonces, sighashes };
+}
+
+/** Buyer's check before co-signing the kill tx. It must only ever move A escrow->escrow. */
+export function verifyKillTemplate(
+  template: TxTemplate,
+  expected: { predictedTxId: string; escrowScript: string },
+): { valid: boolean; error?: string } {
+if (!Array.isArray(template.R) || template.R.length !== template.u.length) return { valid: false, error: 'Kill template must carry one R nonce per input (v2)' };
+if (template.u.length !== 1) return { valid: false, error: 'Kill must spend exactly 1 input, saw ' + template.u.length };
+  const u = template.u[0];
+  if (u.t !== expected.predictedTxId) return { valid: false, error: 'Kill input is not the predicted escrow txid' };
+  if (u.i !== 0) return { valid: false, error: 'Kill input index must be 0, saw ' + u.i };
+  if (u.s !== expected.escrowScript) return { valid: false, error: 'Kill input script is not the FROST escrow script' };
+
+  if (template.o.length !== 1) return { valid: false, error: 'Kill must have exactly 1 output, saw ' + template.o.length };
+  // THE point of the whole tx: the output goes back to escrow, not to a party.
+  if (template.o[0].s !== expected.escrowScript) return { valid: false, error: 'Kill output does not return to the escrow — it pays someone' };
+  if (!isPureP2PK(template.o[0].s)) return { valid: false, error: 'Kill output is not standard P2PK' };
+
+  if (BigInt(template.lt || '0') !== 0n) return { valid: false, error: 'Kill must have no lockTime — it has to be broadcastable at once' };
+
+  const totalIn = BigInt(u.a);
+  const totalOut = BigInt(template.o[0].v);
+  const fee = BigInt(template.f);
+  if (totalOut + fee > totalIn) return { valid: false, error: 'Inflation: output + fee exceed input' };
+  const minFee = BigInt(template.u.length * 115000 + template.o.length * 48000 + 5000);
+  if (fee < minFee) return { valid: false, error: 'Fee too low: ' + fee + ' < ' + minFee };
+
+  return { valid: true };
+}
+
+/** Buyer co-signs the kill tx. k born and dies here. */
+export function cosignKillTemplate(params: {
+  privateKeyHex: string;
+  myPubkey: string;        // co-signer (buyer)
+  funderPubkey: string;    // seller - whose UTXO is being consumed
+  counter: number;
+  template: TxTemplate;
+  expected: { predictedTxId: string; escrowScript: string };
+}): { response: SellerResponse; responseB64: string } | { error: string } {
+  const { privateKeyHex, myPubkey, funderPubkey, counter, template } = params;
+
+  if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
+    return { error: 'Kill template carries ' + (Array.isArray(template.R) ? template.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). One k per input is required - refusing to sign.' };
+  }
+
+  const v = verifyKillTemplate(template, params.expected);
+  if (!v.valid) return { error: v.error || 'Kill verification failed' };
+
+  const agg = deriveAggregateKey(funderPubkey, myPubkey, counter);
+  assertLMatch(agg, template.u, 'cosignRefund/cosignKill', counter); // [L-GUARD]
+
+  const inputs: CanonicalInput[] = template.u.map((u) => ({ txId: u.t, index: u.i, value: BigInt(u.a), scriptPubKey: u.s }));
+  const outputs: CanonicalOutput[] = template.o.map((o) => ({ value: BigInt(o.v), script: o.s }));
+
+  const partials: string[] = [];
+  const myR: string[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);  // fresh k per input
+    myR.push(nonce.R_hex);
+    const shHex = bytesToHex(computeSighash(inputs, outputs, i, 0n));
+    partials.push(partialSign(nonce, template.R[i], agg.aggXOnly, shHex).s_hex);
+  }
+
+  const response: SellerResponse = { R: myR, s: partials };
+  return { response, responseB64: encodeResponse(response) };
 }
 
 // ============================================================================

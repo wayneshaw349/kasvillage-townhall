@@ -2532,7 +2532,8 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
 
       const resp = parseResponse(stripKvHeader(pastedText));
       try {
-        console.log('[StatSig-Recv]', (pastedText.split('\n')[0] || '').slice(0, 90)); const _cpSig = ((pastedText.match(/STATSIG:([0-9a-fA-F]{100,})/) || [])[1]) || '';
+        console.log('[StatSig-Recv]', (pastedText.split('\n')[0] || '').slice(0, 90)); let _cpSig = ((pastedText.match(/STATSIG:([0-9a-fA-F]{100,})/) || [])[1]) || '';
+        if (!_cpSig) { try { const _ro = JSON.parse(atob(stripKvHeader(pastedText))); if (_ro && typeof _ro.ss === 'string' && _ro.ss.length >= 100) { _cpSig = _ro.ss; console.log('[StatSig] sig recovered from response body (ss)'); } } catch {} }
         if (_cpSig) {
           const _mj = await SecureStore.getItemAsync('kv_statrec_my_' + (contract.agreementId || ''));
           if (_mj) { const _m = JSON.parse(_mj); const _r = await srAppend(_m.rec, _m.mySig, _cpSig); console.log('[StatSig] seller attestation ' + (_r.ok ? 'CHAINED' : 'REJECTED: ' + _r.error)); }
@@ -2604,7 +2605,7 @@ const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_twe
       if (submitResp.ok) {
         const txId = (await submitResp.json()).transactionId || '';
         console.log('[Ceremony-Buyer] Release TX:', txId);
-        try { const _cj = (await AsyncStorage.getItem('kv_stat_chain_v1')) || '[]'; const _ca = JSON.parse(_cj); const _cr = _ca.find((c: any) => c.agrId === (contract.agreementId || '')); if (_cr) { _cr.anchor = { releaseTxid: txId }; await AsyncStorage.setItem('kv_stat_chain_v1', JSON.stringify(_ca)); console.log('[StatSig] anchor stamped:', txId.slice(0, 16)); } } catch (_ae) { console.warn('[StatSig] anchor stamp failed:', _ae); }
+        try { const _cj = (await AsyncStorage.getItem('kv_stat_chain_v1')) || '[]'; const _ca = JSON.parse(_cj); const _cr = _ca.find((c: any) => c.agrId === (contract.agreementId || '')); if (_cr) { _cr.anchor = { releaseTxId: txId, releaseDaaScore: 0, blockHash: '', acceptingBlockHash: '', blockTime: 0, utxoCommitment: '' }; await AsyncStorage.setItem('kv_stat_chain_v1', JSON.stringify(_ca)); console.log('[StatSig] anchor stamped:', txId.slice(0, 16)); } } catch (_ae) { console.warn('[StatSig] anchor stamp failed:', _ae); }
         // Inscribe buyer confirmation to Arweave (dispute evidence)
         if (sellerTrackingNum.trim()) {
           try {
@@ -5115,7 +5116,7 @@ nonces: _killNonces,
                               _mySSig = srSign(_sRec, wallet.privKeyHex);
                               const _pr = await (await import('./stat_records')).loadChain(); const _mine = _pr.find((c: any) => c.agrId === (contract.agreementId || '')); if (_mine) { _mine.mySignature = _mySSig; await (await import('@react-native-async-storage/async-storage')).default.setItem('kv_stat_chain_v1', JSON.stringify(_pr)); }
                             } catch (_se) { console.warn('[StatSig] seller side failed:', _se); }
-                            try { const _hdr = 'KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + (_mySSig ? '|STATSIG:' + _mySSig : ''); console.log('[StatSig-Emit]', _hdr.slice(0, 90)); await Clipboard.setStringAsync(_hdr + '\n' + result.responseB64); } catch {}
+                            try { const _hdr = 'KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + (_mySSig ? '|STATSIG:' + _mySSig : ''); if (_mySSig) { try { const _ro: any = JSON.parse(atob(result.responseB64)); _ro.ss = _mySSig; (result as any).responseB64 = btoa(JSON.stringify(_ro)); console.log('[StatSig] ss embedded in response body'); } catch (_ee) { console.warn('[StatSig] ss embed failed:', _ee); } } console.log('[StatSig-Emit]', _hdr.slice(0, 90)); await Clipboard.setStringAsync(_hdr + '\n' + result.responseB64); } catch {}
                             recordPayload((contract.agreementId || ''), 'response', result.responseB64, 'out').catch(()=>{});
                             console.log('[Ceremony-Seller] Signed! Response:', result.responseB64.length, 'chars');
                             // Inscribe signed + tracking to Arweave (dispute evidence)

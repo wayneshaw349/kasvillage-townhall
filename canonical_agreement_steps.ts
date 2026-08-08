@@ -174,6 +174,7 @@ R: string[];            // Buyer R nonces - ONE PER INPUT, aligned with u[]
 export interface SellerResponse {
 R: string[];     // Seller R nonces - ONE PER INPUT, aligned with the template u[]
   s: string[];     // Partial s values (one per input, hex)
+  ss?: string;     // StatSig attestation (KVSTAT3 schnorr sig) - transport only, NOT in signed bytes
 }
 
 // ============================================================================
