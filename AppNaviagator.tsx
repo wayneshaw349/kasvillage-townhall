@@ -769,6 +769,13 @@ export const AppNavigator: React.FC = () => {
               console.log('[AppNav] Push token registered + inscribed');
             }
           }).catch(e => console.warn('[AppNav] Push registration failed:', e));
+          (async () => {
+            try {
+              const _sr = await import('./stat_records');
+              const _n = await _sr.backfillAnchors();
+              if (_n) console.log('[AppNav] StatSig anchors backfilled:', _n);
+            } catch (_be) { console.warn('[AppNav] anchor backfill failed:', _be); }
+          })();
         }
       } catch {
         setScreen('onboarding');

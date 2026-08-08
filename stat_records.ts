@@ -195,3 +195,56 @@ export function verifyBundle(bundleJson: string, ownerPubkey: string): {
 // Residual risks by design: tail-truncation (owner can drop newest records — mitigate later
 // with a signed count anchor or pledge-payload commitment) and record-count claims require
 // the pledge UTXO liveness check (done by caller via keyless REST, never pruned).
+
+
+/**
+ * Backfill anchors for records that have none (typically the seller leg, which never
+ * broadcasts the release). For each unanchored record, fetch the FROST address history
+ * and find the transaction that spends OUT of escrow.
+ *
+ * Kill txs spend the escrow UTXO back INTO frostAddr, so they are filtered out by
+ * requiring at least one output paying somewhere other than frostAddr. Refund txs are
+ * NOT yet distinguished from release txs here — outcome derivation is a separate step.
+ *
+ * Bounded: at most maxRecords addresses per run. Safe to call on every app open.
+ */
+export async function backfillAnchors(maxRecords: number = 20): Promise<number> {
+  const chain = await loadChain();
+  const pending = chain.filter(c => c.frostAddr && (!c.anchor || !c.anchor.releaseTxId)).slice(0, maxRecords);
+  if (!pending.length) return 0;
+
+  let stamped = 0;
+  for (const rec of pending) {
+    try {
+      const net = rec.network === 'mainnet' ? 'mainnet' : 'testnet-10';
+      const base = net === 'mainnet' ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org';
+      const url = base + '/addresses/' + rec.frostAddr + '/full-transactions?limit=50&resolve_previous_outpoints=light';
+      const txs = await (await fetch(url)).json();
+      if (!Array.isArray(txs)) continue;
+
+      const spends = txs.filter((t: any) =>
+        Array.isArray(t.inputs) &&
+        t.inputs.some((i: any) => i && i.previous_outpoint_address === rec.frostAddr) &&
+        Array.isArray(t.outputs) &&
+        t.outputs.some((o: any) => o && o.script_public_key_address && o.script_public_key_address !== rec.frostAddr)
+      );
+      if (!spends.length) continue;
+
+      spends.sort((a: any, b: any) => Number(b.block_time || 0) - Number(a.block_time || 0));
+      const txId = spends[0].transaction_id || spends[0].transactionId || '';
+      if (!txId) continue;
+
+      const fetched = await fetchAnchor(txId, net);
+      await setAnchor(rec.agrId, fetched || {
+        releaseTxId: txId, releaseDaaScore: 0, blockHash: '',
+        acceptingBlockHash: '', blockTime: 0, utxoCommitment: '',
+      });
+      stamped++;
+      console.log('[StatSig] anchor backfilled:', rec.agrId, txId.slice(0, 16));
+    } catch (e) {
+      console.warn('[StatSig] backfill failed for', rec.agrId, e);
+    }
+  }
+  if (stamped) console.log('[StatSig] backfill stamped', stamped, 'of', pending.length, 'unanchored');
+  return stamped;
+}
