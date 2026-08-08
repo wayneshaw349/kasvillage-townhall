@@ -2161,11 +2161,23 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
         let _derivedAddr = '';
         try { _derivedAddr = deriveAddress(_xonly, _net as any); } catch (e) { console.warn('[OptionB] deriveAddress failed:', e); }
         console.log('[Neighbor][OptionB] Counterparty pubkey used directly:', _pk.slice(0,16), 'addr:', (_derivedAddr||'').slice(0,30));
-        if (role === 'buyer') {
-          setContract(prev => ({ ...prev, sellerPubkey: _pk, counterpartyPubkey: _pk }));
-        } else {
-          setContract(prev => ({ ...prev, buyerPubkey: _pk, counterpartyPubkey: _pk }));
-        }
+        (async () => {
+          let _mine = '';
+          try { _mine = ((await SecureStore.getItemAsync('kv_public_key')) || '').trim().toLowerCase(); } catch {}
+          if (_mine && _mine === _pk) {
+            console.warn('[OptionB] SELF-COUNTERPARTY BLOCKED:', _pk.slice(0, 16));
+            setCounterpartyKaspaAddr('');
+            setCounterpartyAddress(null);
+            setContract(prev => ({ ...prev, sellerPubkey: role === 'buyer' ? '' : prev.sellerPubkey, buyerPubkey: role === 'buyer' ? prev.buyerPubkey : '', counterpartyPubkey: '' }));
+            Alert.alert('That Is Your Own Key', 'You pasted your own public key as the counterparty. An agreement needs two different parties - paste the other party key.');
+            return;
+          }
+          if (role === 'buyer') {
+            setContract(prev => ({ ...prev, sellerPubkey: _pk, counterpartyPubkey: _pk }));
+          } else {
+            setContract(prev => ({ ...prev, buyerPubkey: _pk, counterpartyPubkey: _pk }));
+          }
+        })();
         if (_derivedAddr) { setCounterpartyKaspaAddr(_derivedAddr); setCounterpartyAddress(_derivedAddr); }
       } catch (e) { console.warn('[OptionB] pubkey branch failed:', e); }
       return;
@@ -3002,6 +3014,11 @@ const nextActionMsg = (ph: string, rl: string): string => {
         // Derive FROST address immediately with both pubkeys
         try {
           const frostNetwork = wallet.network || 'testnet-10';
+          if (myPubkey && proposerPubkey && String(myPubkey).toLowerCase() === String(proposerPubkey).toLowerCase()) {
+            console.error('[FROST-GUARD] ABORT: counterparty pubkey equals my own -', String(myPubkey).slice(0, 16));
+            Alert.alert('Cannot Derive Escrow', 'The counterparty key is identical to yours. A 2-of-2 escrow needs two distinct keys - re-check the pasted proposal or the saved contact.');
+            return;
+          }
           console.log('[FROST-DEBUG] pubkeyA:', myPubkey?.slice(0,16), 'pubkeyB:', proposerPubkey?.slice(0,16), 'network:', frostNetwork, 'agrId:', agrId);
           // Seller L1 loop: same algorithm as buyer, no relay dependency
           let frostData: any = canon.frostData || null; /* PASTE-ONLY: use canon address, skip L1 scan */
