@@ -3982,17 +3982,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
       laUpsert({ agrId: parsed.agrId, role: _rolePaste as any, origin: _rolePaste === 'buyer' ? 'mine' : 'given', buyerPubkey: parsed.buyerPubkey, sellerPubkey: parsed.sellerPubkey, buyerAmountSompi: String(parsed.buyerAmountSompi ?? ''), sellerAmountSompi: String(parsed.sellerAmountSompi ?? ''), frostCounter: parsed.frostCounter, timeoutN: parsed.timeoutN, network: parsed.network, description: parsed.description, verificationCode: parsed.verificationCode, buyerR: parsed.buyerR }).catch(() => {});
                             console.log("[Seller-Paste-DEBUG] parsed.frostCounter:", parsed.frostCounter, "parsed keys:", Object.keys(parsed).join(","));
                           pastedTypeRef.current = (parsed as any).agreementType === "simple" ? "simple" : ((parsed as any).agreementType === "trade" ? "trade" : null); console.log("[Type-Field] pasted agreementType:", pastedTypeRef.current);
-                            let _kvScanLine = '';
-                            try {
-                              const _cpPk = String((_rolePaste === 'buyer' ? parsed.sellerPubkey : parsed.buyerPubkey) || '');
-                              if (_cpPk) {
-                                const _sc = await (await import('./counterparty_scan')).scanCounterparty(_cpPk, String(parsed.network || 'testnet-10'), 15);
-                                _kvScanLine = _sc.total > 0
-                                  ? '\n\nOn-chain history\n' + _sc.settled + ' settled, ' + (_sc.deadlocked + _sc.open) + ' unresolved of ' + _sc.total + (_sc.truncated ? '+' : '') + '\nTraded with ' + _sc.distinctCounterparties + ' distinct part' + (_sc.distinctCounterparties === 1 ? 'y' : 'ies')
-                                  : '\n\nOn-chain history: none found';
-                              }
-                            } catch (_qe) { console.warn('[Scan] pre-trade lookup failed:', _qe); _kvScanLine = '\n\nOn-chain history: unavailable'; }
-                            Alert.alert("Proposal Found", "Item: " + (parsed.description || "N/A") + "\nAmount: " + (Number(parsed.buyerAmountSompi || 0)/1e8) + " KAS\nCode: " + (parsed.verificationCode || "") + _kvScanLine, [
+                            Alert.alert("Proposal Found", "Item: " + (parsed.description || "N/A") + "\nAmount: " + (Number(parsed.buyerAmountSompi || 0)/1e8) + " KAS\nCode: " + (parsed.verificationCode || ""), [
                               { text: "Cancel", style: "cancel" },
                               { text: "Accept", onPress: () => {
                                 // Find matching agreement in inbox or create from parsed data
