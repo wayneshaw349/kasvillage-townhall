@@ -37,6 +37,7 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
+mod kaspa_relay;
 
 
 mod halo2_snark_module;
@@ -2414,7 +2415,7 @@ impl FrostRelayStore {
     pub fn propose(&self, agr: FrostAgreementData) -> Result<String, String> {
         let id = agr.agreement_id.clone();
         let mut s = self.agreements.write().unwrap();
-        if let Err(e) = townhall_verification_complete::validate_content_text(&agr.description) { return Err(e); }
+        if let Err(e) = crate::content_validator_sync::validate_content_text(&agr.description) { return Err(e.to_string()); }
         if s.contains_key(&id) { return Err("Agreement ID already exists".into()); }
         s.insert(id.clone(), agr); Ok(id)
     }
@@ -8367,6 +8368,7 @@ async fn main() -> std::io::Result<()> {
                     .wrap(Logger::default())
                     .wrap(Cors::permissive())
                     .configure(configure_routes_v3)
+                    .configure(kaspa_relay::configure_kaspa_relay_routes)
             })
             .bind(&addr)?
             .run()

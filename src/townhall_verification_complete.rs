@@ -3381,13 +3381,13 @@ pub async fn api_save_storefront(body: web::Json<StorefrontSaveRequest>) -> Http
         return HttpResponse::Unauthorized().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some("Invalid signature".into()) });
     }
     // Validate content for exploitation phrases
-    if let Err(e) = validate_content_text(&body.storefront.brand_name) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); }
-    if let Some(ref desc) = body.storefront.description { if let Err(e) = validate_content_text(desc) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); } }
-    if let Some(ref tag) = body.storefront.tagline { if let Err(e) = validate_content_text(tag) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); } }
-    for product in &body.storefront.products { if let Err(e) = validate_content_text(&product.name) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); } if let Err(e) = validate_content_text(&product.description) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }); } }
+    if let Err(e) = validate_content_text(&body.storefront.brand_name) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e.to_string()) }); }
+    if let Some(ref desc) = body.storefront.description { if let Err(e) = validate_content_text(desc) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e.to_string()) }); } }
+    if let Some(ref tag) = body.storefront.tagline { if let Err(e) = validate_content_text(tag) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e.to_string()) }); } }
+    for product in &body.storefront.products { if let Err(e) = validate_content_text(&product.name) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e.to_string()) }); } if let Err(e) = validate_content_text(&product.description) { return HttpResponse::BadRequest().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e.to_string()) }); } }
     match upload_storefront_to_arweave(&body.storefront).await {
         Ok(tx_id) => HttpResponse::Ok().json(StorefrontSaveResponse { success: true, arweave_tx: Some(tx_id), error: None }),
-        Err(e) => HttpResponse::InternalServerError().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e) }),
+        Err(e) => HttpResponse::InternalServerError().json(StorefrontSaveResponse { success: false, arweave_tx: None, error: Some(e.to_string()) }),
     }
 }
 
