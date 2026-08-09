@@ -25,3 +25,4 @@ buyer.json
 seller.json
 honest.json
 forged.json
+*.bak*
