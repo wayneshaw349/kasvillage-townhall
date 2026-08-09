@@ -3276,26 +3276,36 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         updatedAt: Date.now(),
       };
       
-      // Step 2: Upload to Arweave with queryable KV tags
+      // Step 2: KASPA-RAIL publish — record + pledge anchor + registry announce.
+      // The unspent pledge UTXO at the store address IS the trust anchor; spending it = delisting.
+      const { publishContent, announceToRegistry } = require('./payload_publish');
+      const { _kvResolvePrivHex } = require('./proposal_share');
+      const _priv = await _kvResolvePrivHex();
+      const _addr = (await SecureStore.getItemAsync('kaspa_address')) || '';
+      if (!_priv || !userPubkey || !_addr) throw new Error('wallet keys unavailable');
+      const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: 'testnet-10' as any };
+      const STORE_PLEDGE_SOMPI = 500_000_000n; // 5 KAS default stake
+      const _cfgHash = bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(storefrontConfig))));
+      const _pub: any = await publishContent(_owner, 'store', {
+        name: brandName,
+        category: storeCategory,
+        primaryLink,
+        configHash: _cfgHash,
+      }, 0, STORE_PLEDGE_SOMPI);
+      if (!_pub || _pub.success === false) throw new Error('store publish tx failed: ' + (_pub && _pub.error));
+      console.log('[Workspace] KASPA store published — addr:', _pub.storeAddress, 'tx:', _pub.txId || '');
+      (storefrontConfig as any).storeAddress = _pub.storeAddress;
+      (storefrontConfig as any).storeTxId = _pub.txId || '';
+      (storefrontConfig as any).pledgeSompi = STORE_PLEDGE_SOMPI.toString();
       try {
-        const { uploadToIrys } = await import('./arweave_upload');
-        const arResult = await uploadToIrys(JSON.stringify(storefrontConfig), [
-          { name: 'App-Name', value: 'KasVillage' },
-          { name: 'KV-Type', value: 'Storefront' },
-          { name: 'KV-StoreName', value: brandName },
-          { name: 'KV-Category', value: storeCategory },
-          { name: 'KV-Network', value: 'testnet-10' },
-          { name: 'KV-Owner', value: userPubkey },
-          { name: 'KV-PrimaryLink', value: primaryLink },
-          { name: 'Content-Type', value: 'application/json' },
-          { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
-        ]);
-        console.log('[Workspace] Published to Arweave:', arResult?.txId);
-      } catch (e) { console.warn('[Workspace] Arweave upload failed (saved locally):', e); }
+        const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory);
+        if (!_ann || _ann.success === false) console.warn('[Workspace] registry announce failed (store still live):', _ann && _ann.error);
+        else console.log('[Workspace] announced to registry:', _ann.registryAddr);
+      } catch (e) { console.warn('[Workspace] registry announce error (store still live):', e); }
       
       // Step 3: Save locally
       await SecureStore.setItemAsync('storefront_' + hostId, JSON.stringify(storefrontConfig));
-      Alert.alert('Published!', 'Storefront config inscribed to Arweave.\nBuyers can find your store banner and click through to ' + (socialLinks.instagram ? 'Instagram' : socialLinks.pinterest ? 'Pinterest' : 'Etsy') + '.');
+      Alert.alert('Published!', 'Storefront live on Kaspa L1.\nYour 5 KAS pledge anchors it — withdrawing the pledge delists the store.\nBuyers click through to ' + (socialLinks.instagram ? 'Instagram' : socialLinks.pinterest ? 'Pinterest' : 'Etsy') + '.');
     } catch (e) {
       console.error('Publish failed:', e);
       Alert.alert('Error', 'Failed to publish. Please try again.');
