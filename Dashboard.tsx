@@ -123,15 +123,14 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
       }
 
       console.log('[DashStats] pubkey:', resolvedPubkey.slice(0, 12) || 'NONE', 'addr:', addr.slice(0, 20) || 'NONE');
+      let kvScanResult: any = null;
       if (resolvedPubkey) {
         setKvScanning(true);
-        (async () => {
-          try {
-            const _sc = await require('./counterparty_scan').scanCounterparty(String(resolvedPubkey), 'testnet-10', 40);
-            setKvScan(_sc);
-          } catch (e) { console.warn('[DashStats] self-scan failed:', e); setKvScan({ error: true }); }
-          finally { setKvScanning(false); }
-        })();
+        try {
+          kvScanResult = await require('./counterparty_scan').scanCounterparty(String(resolvedPubkey), 'testnet-10', 40);
+          setKvScan(kvScanResult);
+        } catch (e) { console.warn('[DashStats] self-scan failed:', e); setKvScan({ error: true }); }
+        finally { setKvScanning(false); }
       }
 
       // Read local XP from kv_user_stats (TownHall writes here)
@@ -305,6 +304,20 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
         }
       } catch (e: any) {
         console.warn('[DashStats] TownHall fetch error (non-fatal):', e?.message || e);
+      }
+
+// KASPA-AUTHORITATIVE: consensus scan overrides Arweave-derived stats.
+      if (kvScanResult && !kvScanResult.error && kvScanResult.total > 0) {
+        agreementsCompleted = kvScanResult.settled;
+        deadlocks = kvScanResult.deadlocked;
+        pComplete = (1 + agreementsCompleted) / (2 + agreementsCompleted + deadlocks);
+        xp = Math.max(0, agreementsCompleted * 10 - deadlocks * 50);
+        let volFromChain = 0;
+        for (const esc of (kvScanResult.escrows || [])) {
+          if (esc.resolution === 'settled') volFromChain += Number(esc.fundedTotal || 0);
+        }
+        totalVolumeSompi = volFromChain;
+        console.log('[DashStats] KASPA-AUTHORITATIVE — settled:', agreementsCompleted, 'deadlocked:', deadlocks, 'xp:', xp, 'vol:', totalVolumeSompi / 1e8);
       }
 
       // 3) IOU ledgers: net positions
