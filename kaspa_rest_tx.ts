@@ -611,41 +611,34 @@ export async function sendKaspaViaRest(params: {
 // Takes the REST-shaped tx object; returns { transactionId } or { error }.
 // ============================================================================
 async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): Promise<{ transactionId?: string; error?: string }> {
-  try {
-    const { RpcClient, Resolver, NetworkId } = await import('@kcoin/kaspa-web3.js');
-    const _netId = network === 'mainnet' ? NetworkId.Mainnet : NetworkId.Testnet10;
-    const _rpc = new RpcClient({ resolver: new Resolver(), networkId: _netId });
+  // RELAY-SUBMIT: public tn10 wRPC is borsh-only and REST strips payloads, so
+  // payload txs go through the TownHall relay (stateless forwarder; the txid
+  // commits the payload, so PREDICT CHECK verifies the broadcast independently).
+  const RELAYS = [
+    'https://kasvillage.app.runonflux.io/api/kaspa/submit-tx',
+  ];
+  let lastErr = 'no relay reachable';
+  for (const url of RELAYS) {
     try {
-      await _rpc.connect();
-      const _wtx: any = {
-        id: idHint || '',
-        version: Number(restTx.version || 0),
-        inputs: (restTx.inputs || []).map((si: any) => ({
-          previousOutpoint: { transactionId: si.previousOutpoint.transactionId, index: Number(si.previousOutpoint.index) },
-          sequence: Number(si.sequence || 0),
-          sigOpCount: Number(si.sigOpCount || 1),
-          signatureScript: si.signatureScript,
-        })),
-        outputs: (restTx.outputs || []).map((o: any) => ({
-          value: Number(o.amount),
-          scriptPublicKey: { version: Number((o.scriptPublicKey && o.scriptPublicKey.version) || 0), script: o.scriptPublicKey.scriptPublicKey },
-        })),
-        lockTime: Number(restTx.lockTime || 0),
-        gas: Number(restTx.gas || 0),
-        subnetworkId: restTx.subnetworkId || SUBNETWORK_ID_NATIVE,
-        payload: restTx.payload || '',
-        mass: 0,
-        verb: undefined,
-      };
-      const _resp: any = await _rpc.submitTransaction({ transaction: _wtx, allowOrphan: false });
-      if (_resp && _resp.error && _resp.error.message) return { error: _resp.error.message };
-      return { transactionId: (_resp && _resp.transactionId) || '' };
-    } finally {
-      try { const _c: any = _rpc; (_c.dispose || _c.disconnect || (() => {})).call(_c); } catch {}
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction: restTx, allowOrphan: false, idHint }),
+      });
+      const bodyText = await resp.text();
+      let j: any = {};
+      try { j = JSON.parse(bodyText); } catch {}
+      if (resp.status === 422 || (resp.status === 400 && j.error)) {
+        // Node/gate rejection is final — same result on any relay.
+        return { error: String(j.error || bodyText.slice(0, 200)) };
+      }
+      if (!resp.ok) { lastErr = 'relay ' + resp.status + ': ' + bodyText.slice(0, 200); continue; }
+      return { transactionId: (j && j.transactionId) || '' };
+    } catch (e: any) {
+      lastErr = String((e && e.message) || e);
     }
-  } catch (e: any) {
-    return { error: String((e && e.message) || e) };
   }
+  return { error: 'relay submit failed: ' + lastErr };
 }
 
 export async function broadcastPreparedTx(tx: any, network: KaspaNetwork): Promise<RestTxResult> {
