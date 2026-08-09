@@ -29,7 +29,7 @@ import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils';
 // ---------------------------------------------------------------------------
 
 export const KV_MAGIC = 'KVP1'; // 4-byte marker, version 1
-export const PAYLOAD_SOFT_MAX = 1000; // bytes of JSON per record (probe-verified TBD)
+export const PAYLOAD_SOFT_MAX = 2000; // bytes of JSON per record — probe-verified on testnet-10 (2000B accepted, tx a2805928ce16)
 
 export type KvKind =
   | 'identity'

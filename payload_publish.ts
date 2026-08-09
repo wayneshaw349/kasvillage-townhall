@@ -184,6 +184,7 @@ export async function probePayloadLimit(owner: OwnerKeys, sizes: number[] = [500
     }
     const _last = results[results.length - 1];
     console.log('[Probe]', size, 'B ->', _last.ok ? 'ACCEPTED' : 'REJECTED', _last.error ? '| err: ' + _last.error : '', _last.txid ? '| tx: ' + _last.txid : '');
+    await new Promise(r => setTimeout(r, 5000)); // let the UTXO set settle before the next size
   }
   console.log('[Probe] summary:', JSON.stringify(results.map(r => ({ size: r.size, ok: r.ok }))));
   return results;

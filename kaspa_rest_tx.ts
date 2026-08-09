@@ -463,7 +463,7 @@ export async function sendKaspaViaRest(params: {
       if (floor > 0n) {
         let walletTotal = 0n;
         for (const u of utxos) walletTotal += BigInt(u.utxoEntry?.amount || (u as any).amount || '0');
-        const after = walletTotal - sendAmount - fee;
+        const after = (recipientAddress === senderAddress) ? walletTotal - fee : walletTotal - sendAmount - fee; // self-send only costs the fee
         if (after < floor) {
           return { success: false, error: `Would spend reserved value: ${Number(floor) / 1e8} KAS locked (collateral + IOU), wallet would drop to ${Number(after) / 1e8} KAS. Settle or reduce the amount.` };
         }
