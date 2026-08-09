@@ -2799,24 +2799,6 @@ const nextActionMsg = (ph: string, rl: string): string => {
     const _agrId = agreement.agreementId || agreement.agreement_id || '';
     if (acceptingId) { console.log('[Neighbor] Already accepting', acceptingId); return; }
     console.log('[Neighbor] Agree tapped:', _agrId);
-    if (!(agreement as any)._kvScanned) {
-      const _cpk = String(agreement.pubkey || agreement.partyA?.pubkey || agreement.party_a?.pubkey || agreement.buyerPubkey || '');
-      let _line = '';
-      try {
-        if (!_cpk) { _line = 'Counterparty key unavailable - cannot look up history.'; }
-        else {
-          const _sc = await (await import('./counterparty_scan')).scanCounterparty(_cpk, String(agreement.network || 'testnet-10'), 15);
-          _line = _sc.total > 0
-            ? _sc.settled + ' settled\n' + (_sc.deadlocked + _sc.open) + ' unresolved\n' + _sc.total + (_sc.truncated ? '+' : '') + ' escrows total\n\nTraded with ' + _sc.distinctCounterparties + ' distinct part' + (_sc.distinctCounterparties === 1 ? 'y' : 'ies') + '\n\nRead from Kaspa consensus. Unresolved means the trade did not settle - it does not say who walked away.'
-            : 'No escrow history found on-chain for this key.';
-        }
-      } catch (_qe) { console.warn('[Scan] accept-gate lookup failed:', _qe); _line = 'On-chain history unavailable right now.'; }
-      Alert.alert('Counterparty history', _line, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Accept', onPress: () => { handleAcceptFromInbox({ ...agreement, _kvScanned: true }); } },
-      ]);
-      return;
-    }
     { /* ACCEPT-RESUME-GUARD: a held agreement past proposed NEVER re-enters the ceremony - it resumes at its true phase. */
       try {
         const _laMod = await import('./local_agreements');
