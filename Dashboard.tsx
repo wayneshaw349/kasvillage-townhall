@@ -40,6 +40,8 @@ import { getFinancialSummary } from './proposal_share';
 // DASHBOARD STATS HOOK — UTXO Ledger + Arweave + IOU + TX History
 // ============================================================================
 function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, xpFallback: number = 0) {
+  const [kvScan, setKvScan] = useState<any>(null);
+  const [kvScanning, setKvScanning] = useState(false);
   const [stats, setStats] = useState({
     agreementsCompleted: 0,
     deadlocks: 0,
@@ -121,6 +123,16 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
       }
 
       console.log('[DashStats] pubkey:', resolvedPubkey.slice(0, 12) || 'NONE', 'addr:', addr.slice(0, 20) || 'NONE');
+      if (resolvedPubkey) {
+        setKvScanning(true);
+        (async () => {
+          try {
+            const _sc = await require('./counterparty_scan').scanCounterparty(String(resolvedPubkey), 'testnet-10', 40);
+            setKvScan(_sc);
+          } catch (e) { console.warn('[DashStats] self-scan failed:', e); setKvScan({ error: true }); }
+          finally { setKvScanning(false); }
+        })();
+      }
 
       // Read local XP from kv_user_stats (TownHall writes here)
       let localXp = 0;
@@ -378,7 +390,7 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  return { ...stats, refresh };
+  return { ...stats, kvScan, kvScanning, refresh };
 }
 
 // ============================================================================
@@ -1628,6 +1640,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
             />
           )}
           
+          {activeTab === 'wallet' && (ds.kvScanning || ds.kvScan) ? (
+            <View style={{ backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E0D5C5' }}>
+              <Text style={{ fontSize: 14, fontWeight: '900', color: '#8B7355', marginBottom: 8 }}>ON-CHAIN (KASPA)</Text>
+              {ds.kvScanning ? <Text style={{ fontSize: 12, color: '#A89880' }}>Reading the chain...</Text> : null}
+              {ds.kvScan && ds.kvScan.error ? <Text style={{ fontSize: 12, color: '#A89880' }}>Unavailable right now.</Text> : null}
+              {ds.kvScan && !ds.kvScan.error && ds.kvScan.total === 0 ? (
+                <Text style={{ fontSize: 12, color: '#A89880' }}>No escrow history on-chain yet.</Text>
+              ) : null}
+              {ds.kvScan && !ds.kvScan.error && ds.kvScan.total > 0 ? (
+                <View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{ fontSize: 22, fontWeight: '900', color: '#2E7D32' }}>{ds.kvScan.settled}</Text>
+                      <Text style={{ fontSize: 11, color: '#8B7355' }}>Settled</Text>
+                    </View>
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{ fontSize: 22, fontWeight: '900', color: '#B8860B' }}>{ds.kvScan.deadlocked + ds.kvScan.open}</Text>
+                      <Text style={{ fontSize: 11, color: '#8B7355' }}>Unresolved</Text>
+                    </View>
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{ fontSize: 22, fontWeight: '900', color: '#4A90D9' }}>{ds.kvScan.distinctCounterparties}</Text>
+                      <Text style={{ fontSize: 11, color: '#8B7355' }}>Parties</Text>
+                    </View>
+                  </View>
+                  <Text style={{ fontSize: 10, color: '#A89880', marginTop: 8, textAlign: 'center' }}>
+                    {ds.kvScan.total}{ds.kvScan.truncated ? '+' : ''} escrows from consensus - what a counterparty sees when they scan your key.
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
           {activeTab === 'mailbox' && (
             <TouchableOpacity style={dashStyles.placeholder} onPress={onNavigateMailbox} activeOpacity={0.7}>
               <Text style={dashStyles.placeholderText}>📬 Village / Mailbox</Text>
