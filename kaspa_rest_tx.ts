@@ -309,6 +309,46 @@ export function computeSighash(
 }
 
 // ============================================================================
+// PAYLOAD SIGHASH — SEPARATE PATH. computeSighash above is untouched and keeps
+// serving all empty-payload txs (plain sends, FROST-adjacent, refunds).
+// This variant applies the post-Crescendo rule: payload hash commits the actual
+// payload (keyed-blake2b over var_bytes) instead of the zero hash.
+// ============================================================================
+export function computeSighashPayload(
+  txVersion: number,
+  inputs: { txId: Uint8Array; index: number; sequence: bigint; sigOpCount: number; scriptVersion: number; scriptPubKey: Uint8Array; value: bigint }[],
+  outputs: { value: bigint; scriptVersion: number; script: Uint8Array }[],
+  inputIndex: number,
+  subnetworkId: Uint8Array,
+  lockTime: bigint, gas: bigint, isNative: boolean, payload: Uint8Array,
+): Uint8Array {
+  const inp = inputs[inputIndex];
+  const payloadHash = (isNative && payload.length === 0)
+    ? new Uint8Array(32)
+    : hashBlake2b(concat(writeU64LE(BigInt(payload.length)), payload));
+
+  return hashBlake2b(concat(
+    writeU16LE(txVersion),
+    hashPrevOutputs(inputs),
+    hashSequences(inputs),
+    hashSigOpCounts(inputs),
+    inp.txId, writeU32LE(inp.index),
+    writeU16LE(inp.scriptVersion),
+    writeU64LE(BigInt(inp.scriptPubKey.length)),
+    inp.scriptPubKey,
+    writeU64LE(inp.value),
+    writeU64LE(inp.sequence),
+    writeU8(inp.sigOpCount),
+    hashOutputs(outputs),
+    writeU64LE(lockTime),
+    subnetworkId,
+    writeU64LE(gas),
+    payloadHash,
+    writeU8(SIG_HASH_ALL),
+  ));
+}
+
+// ============================================================================
 // SEND KASPA VIA REST API
 // ============================================================================
 // Decode Kaspa bech32m address to scriptPublicKey bytes
@@ -493,7 +533,9 @@ export async function sendKaspaViaRest(params: {
     const signedInputs: any[] = [];
     
     for (let i = 0; i < inputsData.length; i++) {
-      const sighash = computeSighash(0, inputsData, outputsData, i, subnetworkId, 0n, 0n, true, payloadBytes);
+      const sighash = payloadBytes.length > 0
+        ? computeSighashPayload(0, inputsData, outputsData, i, subnetworkId, 0n, 0n, true, payloadBytes)
+        : computeSighash(0, inputsData, outputsData, i, subnetworkId, 0n, 0n, true, payloadBytes);
       const sig = schnorr.sign(sighash, privKeyBytes);
       const sigWithType = concat(sig, writeU8(SIG_HASH_ALL));
       const sigScript = concat(writeU8(sigWithType.length), sigWithType);
