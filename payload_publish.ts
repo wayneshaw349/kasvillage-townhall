@@ -178,11 +178,12 @@ export async function probePayloadLimit(owner: OwnerKeys, sizes: number[] = [500
         network: owner.network,
         payload: hex,
       });
-      results.push({ size, ok: !!(r && (r.txId || r.txid || r.success)), txid: r?.txId || r?.txid });
+      results.push({ size, ok: !!(r && (r.txId || r.txid || r.success)), txid: r?.txId || r?.txid, error: r?.error ? String(r.error) : undefined });
     } catch (e: any) {
       results.push({ size, ok: false, error: String(e?.message || e) });
     }
-    console.log('[Probe]', size, 'B ->', results[results.length - 1].ok ? 'ACCEPTED' : 'REJECTED');
+    const _last = results[results.length - 1];
+    console.log('[Probe]', size, 'B ->', _last.ok ? 'ACCEPTED' : 'REJECTED', _last.error ? '| err: ' + _last.error : '', _last.txid ? '| tx: ' + _last.txid : '');
   }
   console.log('[Probe] summary:', JSON.stringify(results.map(r => ({ size: r.size, ok: r.ok }))));
   return results;

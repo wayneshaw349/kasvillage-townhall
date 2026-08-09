@@ -266,18 +266,17 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         }
       }
 
+      // KASPA-AUTHORITATIVE: scan awaited; chain result feeds setResult below.
+      let _scanRes: any = null;
       if (lookupResult?.pubkey) {
-        // Consensus scan, non-blocking: server stats render first, chain fills in.
         const _pk = lookupResult.pubkey;
         setKvScan(null);
         setKvScanning(true);
-        (async () => {
-          try {
-            const _sc = await (await import('./counterparty_scan')).scanCounterparty(_pk, 'testnet-10', 40);
-            setKvScan(_sc);
-          } catch (e) { console.warn('[StatsLookup] scan failed:', e); setKvScan({ error: true }); }
-          finally { setKvScanning(false); }
-        })();
+        try {
+          _scanRes = await (await import('./counterparty_scan')).scanCounterparty(_pk, 'testnet-10', 40);
+          setKvScan(_scanRes);
+        } catch (e) { console.warn('[StatsLookup] scan failed:', e); setKvScan({ error: true }); }
+        finally { setKvScanning(false); }
       }
 
       if (lookupResult?.pubkey && lookupResult?.stats) {
@@ -345,13 +344,17 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
           }
         } catch (e) { console.warn('[StatsLookup] Proof query failed:', e); }
 
+        const _useChain = _scanRes && !_scanRes.error && _scanRes.total > 0;
+        const _cs = _useChain ? _scanRes.settled : (s.successes ?? 0);
+        const _cd = _useChain ? _scanRes.deadlocked : (s.deadlocks ?? 0);
+        if (_useChain) console.log('[StatsLookup] KASPA-AUTHORITATIVE — settled:', _cs, 'deadlocked:', _cd);
         setResult({
           pubkey: lookupResult.pubkey,
           apt: 'APT-' + deriveApt(lookupResult.pubkey),
-          xp: s.xp ?? 0,
-          pComplete: s.p_complete ?? s.pComplete ?? 0.5,
-          successes: s.successes ?? 0,
-          deadlocks: s.deadlocks ?? 0,
+          xp: _useChain ? Math.max(0, _cs * 10 - _cd * 50) : (s.xp ?? 0),
+          pComplete: _useChain ? (1 + _cs) / (2 + _cs + _cd) : (s.p_complete ?? s.pComplete ?? 0.5),
+          successes: _cs,
+          deadlocks: _cd,
           platform,
           lastAttested,
           deviceHashPrefix,

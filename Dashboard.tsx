@@ -1149,6 +1149,22 @@ const WalletOverview: React.FC<{
         <Text style={walletStyles.actionIcon}>{' '}</Text>
         <Text style={[walletStyles.actionLabel, { color: '#000' }]}>{activeMode === 'real' ? 'Real Kaspa' : 'Tutorial'}</Text>
       </TouchableOpacity>
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={async () => {
+        try {
+          const { probePayloadLimit } = require('./payload_publish');
+          const { _kvResolvePrivHex } = require('./proposal_share');
+          const pub = (await SecureStore.getItemAsync('kv_l1_pubkey')) || (await SecureStore.getItemAsync('kaspa_pubkey')) || (await SecureStore.getItemAsync('kv_public_key')) || '';
+          const addr = (await SecureStore.getItemAsync('kaspa_address')) || '';
+          const priv = await _kvResolvePrivHex();
+          if (!priv || !pub || !addr) { Alert.alert('Probe', 'Missing keys: priv=' + !!priv + ' pub=' + !!pub + ' addr=' + !!addr); return; }
+          Alert.alert('Probe', 'Running 4 test self-sends (500/1000/2000/5000B). Watch Metro.');
+          const res = await probePayloadLimit({ privateKeyHex: priv, pubkeyHex: pub, address: addr, network: 'testnet-10' });
+          Alert.alert('Probe done', res.map((r: any) => r.size + 'B: ' + (r.ok ? 'OK' : 'FAIL')).join('\n'));
+        } catch (e: any) { Alert.alert('Probe error', String((e && e.message) || e)); }
+      }}>
+        <Text style={walletStyles.actionIcon}>{'\u{1F9EA}'}</Text>
+        <Text style={walletStyles.actionLabel}>DEV Probe</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={walletStyles.actionBtn} onPress={onDeposit}>
         <Text style={walletStyles.actionIcon}>⬇️</Text>
         <Text style={walletStyles.actionLabel}>Receive</Text>

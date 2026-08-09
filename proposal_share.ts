@@ -92,7 +92,7 @@ function hashCounterSign(proposal: TradeProposal): Uint8Array {
 // WALLET ACCESS
 // ============================================================================
 
-async function _kvResolvePrivHex(): Promise<string | null> {
+export async function _kvResolvePrivHex(): Promise<string | null> {
   const isHex = (v: string | null): v is string => !!v && /^[0-9a-fA-F]{64}$/.test(v.trim());
   // 1) plain-hex candidates
   for (const k of ['kv_private_key', 'kasvillage_private_key', 'kv_l1_privkey']) {
