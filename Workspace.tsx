@@ -1063,8 +1063,6 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                           if (daaData.blueScore) startDaa = daaData.blueScore;
                         } catch {}
                         
-                        // Inscribe pledge on Arweave via Irys
-                        const { uploadToIrys: pledgeUpload } = await import('./arweave_upload');
                         try {
                           const { uploadToIrys: irysUpload } = await import('./arweave_upload');
                           await irysUpload(JSON.stringify({
@@ -3281,7 +3279,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       const { publishContent, announceToRegistry } = require('./payload_publish');
       const { _kvResolvePrivHex } = require('./proposal_share');
       const _priv = await _kvResolvePrivHex();
-      const _addr = (await SecureStore.getItemAsync('kaspa_address')) || '';
+      const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
       if (!_priv || !userPubkey || !_addr) throw new Error('wallet keys unavailable');
       const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: 'testnet-10' as any };
       const STORE_PLEDGE_SOMPI = 500_000_000n; // 5 KAS default stake
@@ -3384,7 +3382,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             {isPublishing ? <ActivityIndicator color="#fff" size="small" /> : <><Save size={rs.s(14)} color="#fff" /><Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(12) }}>Publish</Text></>}
           </TouchableOpacity>
         </View>
-        <Text style={{ fontSize: rs.font(9), color: '#a8a29e', textAlign: 'center', marginBottom: rs.s(8) }}>KasVillage verifies and posts to Arweave for you (FREE via Turbo)</Text>
+        <Text style={{ fontSize: rs.font(9), color: '#a8a29e', textAlign: 'center', marginBottom: rs.s(8) }}>Publish anchors your store on Kaspa L1 - 5 KAS pledge + 1 KAS announce (testnet)</Text>
         <Text style={{ fontSize: rs.font(8), color: '#a8a29e', textAlign: 'center', marginTop: rs.s(4), lineHeight: rs.font(12) }}>KasVillage is a reputation-scored directory and non-custodial escrow tool. Listings are hosted on whitelisted social platforms. KasVillage does not facilitate, process, or intermediate any sale. SDK compliance scan does not constitute endorsement. Users assume all risk.</Text>
 
         {/* Brand Tab */}
@@ -4143,7 +4141,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 </View>
               </View>
               <View style={{ backgroundColor: COLORS.amber50, borderRadius: rs.s(8), padding: rs.s(10) }}>
-                <Text style={{ fontSize: rs.font(10), color: COLORS.amber700, textAlign: 'center' }}>Tap "Publish" to make this live on Arweave.</Text>
+                <Text style={{ fontSize: rs.font(10), color: COLORS.amber700, textAlign: 'center' }}>Tap "Publish" to anchor this on Kaspa L1.</Text>
               </View>
             </SectionCard>
           </View>
