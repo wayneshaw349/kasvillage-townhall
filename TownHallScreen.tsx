@@ -232,6 +232,8 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
   const [lookupQuery, setLookupQuery] = useState('');
   const [isLooking, setIsLooking] = useState(false);
   const [result, setResult] = useState<StatsResult | null>(null);
+  const [kvScan, setKvScan] = useState<any>(null);
+  const [kvScanning, setKvScanning] = useState(false);
 
   const handleLookup = async () => {
     const q = lookupQuery.trim();
@@ -262,6 +264,20 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         } else {
           lookupResult = await lookupByApt(aptNum);
         }
+      }
+
+      if (lookupResult?.pubkey) {
+        // Consensus scan, non-blocking: server stats render first, chain fills in.
+        const _pk = lookupResult.pubkey;
+        setKvScan(null);
+        setKvScanning(true);
+        (async () => {
+          try {
+            const _sc = await (await import('./counterparty_scan')).scanCounterparty(_pk, 'testnet-10', 40);
+            setKvScan(_sc);
+          } catch (e) { console.warn('[StatsLookup] scan failed:', e); setKvScan({ error: true }); }
+          finally { setKvScanning(false); }
+        })();
       }
 
       if (lookupResult?.pubkey && lookupResult?.stats) {
@@ -380,7 +396,39 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
           )}
         </TouchableOpacity>
       </View>
-
+      {(kvScanning || kvScan) && (
+        <View style={{ marginTop: rs.s(12), padding: rs.s(12), backgroundColor: COLORS.stone100, borderRadius: rs.s(8), borderWidth: 1, borderColor: COLORS.stone200 }}>
+          <Text style={{ fontSize: rs.font(11), fontWeight: '700', color: COLORS.stone500, marginBottom: rs.s(6) }}>
+            ON-CHAIN HISTORY (KASPA)
+          </Text>
+          {kvScanning && <Text style={{ fontSize: rs.font(11), color: COLORS.stone400 }}>Reading the chain...</Text>}
+          {kvScan && kvScan.error && <Text style={{ fontSize: rs.font(11), color: COLORS.stone400 }}>Unavailable right now.</Text>}
+          {kvScan && !kvScan.error && kvScan.total === 0 && (
+            <Text style={{ fontSize: rs.font(11), color: COLORS.stone400 }}>No escrow history found for this key.</Text>
+          )}
+          {kvScan && !kvScan.error && kvScan.total > 0 && (
+            <>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.stone800 }}>{kvScan.settled}</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone500 }}>Settled</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.stone800 }}>{kvScan.deadlocked + kvScan.open}</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone500 }}>Unresolved</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.stone800 }}>{kvScan.distinctCounterparties}</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.stone500 }}>Parties</Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: rs.font(10), color: COLORS.stone400, marginTop: rs.s(8) }}>
+                {kvScan.total}{kvScan.truncated ? '+' : ''} escrows read from consensus. Unresolved means the trade did not settle - it does not say who walked away.
+              </Text>
+            </>
+          )}
+        </View>
+      )}
       {result && !result.error && (
         <View style={{
           marginTop: rs.s(12),
