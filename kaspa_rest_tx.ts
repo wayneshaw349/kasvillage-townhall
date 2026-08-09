@@ -546,19 +546,28 @@ export async function sendKaspaViaRest(params: {
     console.log('[REST-TX] Fee:', fee.toString(), 'sompi');
     console.log('[REST-TX] Payload:', payload ? payload.slice(0, 40) + '...' : 'none');
     console.log('[REST-TX] TX JSON:', JSON.stringify(tx).slice(0, 200) + '...');
-    const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transaction: tx, allowOrphan: false }),
-    });
-    
-    if (!submitResp.ok) {
-      const errBody = await submitResp.text();
-      console.error('[REST-TX] Submit FAILED:', submitResp.status, errBody);
-      return { success: false, error: `Submit failed (${submitResp.status}): ${errBody}` };
+    let result: any;
+    if (payload && payload.length > 0) {
+      console.log('[REST-TX] payload present -> submitting via wRPC (REST strips payload)');
+      const _w = await _wrpcSubmit(tx, network, _predictedTxId);
+      if (_w.error) {
+        console.error('[REST-TX] wRPC submit FAILED:', _w.error);
+        return { success: false, error: 'wRPC submit failed: ' + _w.error };
+      }
+      result = { transactionId: _w.transactionId };
+    } else {
+      const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction: tx, allowOrphan: false }),
+      });
+      if (!submitResp.ok) {
+        const errBody = await submitResp.text();
+        console.error('[REST-TX] Submit FAILED:', submitResp.status, errBody);
+        return { success: false, error: `Submit failed (${submitResp.status}): ${errBody}` };
+      }
+      result = await submitResp.json();
     }
-    
-    const result = await submitResp.json();
     console.log('[REST-TX] Submit response:', JSON.stringify(result));
     if (_predictedTxId) {
       const _nodeTxId = result.transactionId || '';
@@ -596,19 +605,73 @@ export async function sendKaspaViaRest(params: {
 // BROADCAST A PREPARED (FROZEN) TX — the body must be byte-identical to the one
 // whose txid was predicted, or the refund points at a UTXO that never exists.
 // ============================================================================
+// ============================================================================
+// WRPC SUBMIT — REST SubmitTxModel silently strips the payload field, so any tx
+// carrying a payload must go to the node over wRPC (@kcoin/kaspa-web3.js).
+// Takes the REST-shaped tx object; returns { transactionId } or { error }.
+// ============================================================================
+async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): Promise<{ transactionId?: string; error?: string }> {
+  try {
+    const { RpcClient, Resolver, NetworkId } = await import('@kcoin/kaspa-web3.js');
+    const _netId = network === 'mainnet' ? NetworkId.Mainnet : NetworkId.Testnet10;
+    const _rpc = new RpcClient({ resolver: new Resolver(), networkId: _netId });
+    try {
+      await _rpc.connect();
+      const _wtx: any = {
+        id: idHint || '',
+        version: Number(restTx.version || 0),
+        inputs: (restTx.inputs || []).map((si: any) => ({
+          previousOutpoint: { transactionId: si.previousOutpoint.transactionId, index: Number(si.previousOutpoint.index) },
+          sequence: Number(si.sequence || 0),
+          sigOpCount: Number(si.sigOpCount || 1),
+          signatureScript: si.signatureScript,
+        })),
+        outputs: (restTx.outputs || []).map((o: any) => ({
+          value: Number(o.amount),
+          scriptPublicKey: { version: Number((o.scriptPublicKey && o.scriptPublicKey.version) || 0), script: o.scriptPublicKey.scriptPublicKey },
+        })),
+        lockTime: Number(restTx.lockTime || 0),
+        gas: Number(restTx.gas || 0),
+        subnetworkId: restTx.subnetworkId || SUBNETWORK_ID_NATIVE,
+        payload: restTx.payload || '',
+        mass: 0,
+        verb: undefined,
+      };
+      const _resp: any = await _rpc.submitTransaction({ transaction: _wtx, allowOrphan: false });
+      if (_resp && _resp.error && _resp.error.message) return { error: _resp.error.message };
+      return { transactionId: (_resp && _resp.transactionId) || '' };
+    } finally {
+      try { const _c: any = _rpc; (_c.dispose || _c.disconnect || (() => {})).call(_c); } catch {}
+    }
+  } catch (e: any) {
+    return { error: String((e && e.message) || e) };
+  }
+}
+
 export async function broadcastPreparedTx(tx: any, network: KaspaNetwork): Promise<RestTxResult> {
   try {
-    const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transaction: tx, allowOrphan: false }),
-    });
-    if (!submitResp.ok) {
-      const errBody = await submitResp.text();
-      console.error('[REST-TX] Prepared submit FAILED:', submitResp.status, errBody);
-      return { success: false, error: `Submit failed (${submitResp.status}): ${errBody}` };
+    let result: any;
+    if (tx && tx.payload && tx.payload.length > 0) {
+      console.log('[REST-TX] prepared tx carries payload -> wRPC broadcast');
+      const _w = await _wrpcSubmit(tx, network, (tx.__predictedTxId as string) || '');
+      if (_w.error) {
+        console.error('[REST-TX] Prepared wRPC submit FAILED:', _w.error);
+        return { success: false, error: 'wRPC submit failed: ' + _w.error };
+      }
+      result = { transactionId: _w.transactionId };
+    } else {
+      const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction: tx, allowOrphan: false }),
+      });
+      if (!submitResp.ok) {
+        const errBody = await submitResp.text();
+        console.error('[REST-TX] Prepared submit FAILED:', submitResp.status, errBody);
+        return { success: false, error: `Submit failed (${submitResp.status}): ${errBody}` };
+      }
+      result = await submitResp.json();
     }
-    const result = await submitResp.json();
     const txId = result.transactionId || '';
     const explorerBase = network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';
     console.log('[REST-TX] Prepared tx broadcast:', txId);
