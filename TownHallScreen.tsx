@@ -64,6 +64,7 @@ import {
 } from 'lucide-react-native';
 import { deriveApt, deriveAptWithCheck, resolveAptToPubkey, verifyApt } from './apt_derivation';
 import { lookupByAddress, lookupByApt, lookupCounterparty } from './counterparty_lookup';
+import { LedgerService } from './LedgerService';
 
 const TOWNHALL_BASE = 'https://kasvillage.app.runonflux.io';
 
@@ -1804,6 +1805,8 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           </View>
         </View>
         
+        <LedgerService />
+
         <View style={styles.bottomSpacer} />
       </ScrollView>
       
