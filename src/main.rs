@@ -43,6 +43,7 @@ mod kaspa_relay;
 mod halo2_snark_module;
 mod townhall_verification_complete;
 mod content_validator_sync;
+mod node_registry;
 
 use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, Responder, middleware::Logger};
 use actix_cors::Cors;
@@ -8369,6 +8370,7 @@ async fn main() -> std::io::Result<()> {
                     .wrap(Cors::permissive())
                     .configure(configure_routes_v3)
                     .configure(kaspa_relay::configure_kaspa_relay_routes)
+                    .configure(node_registry::configure_node_registry_routes)
             })
             .bind(&addr)?
             .run()
