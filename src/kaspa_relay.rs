@@ -133,6 +133,27 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
 // Payload must be small; if it is a KVP1 record, its string fields must clear
 // the prohibited-word list. Non-KVP1 payloads are size-capped only.
 // ---------------------------------------------------------------------------
+// KVP1 k:"node" registry records get structural validation on top of the word gate.
+fn gate_node_record(v: &serde_json::Value) -> Result<(), String> {
+    let svc = v.get("svc").and_then(|s| s.as_str()).unwrap_or("");
+    if !matches!(svc, "index" | "relay" | "archive") {
+        return Err("node record: svc must be index|relay|archive".into());
+    }
+    let api = v.get("api").and_then(|s| s.as_str()).unwrap_or("");
+    if svc != "relay" && !api.starts_with("https://") {
+        return Err("node record: api must be https".into());
+    }
+    let payout = v.get("payout").and_then(|s| s.as_str()).unwrap_or("");
+    if !payout.starts_with("kaspatest:") && !payout.starts_with("kaspa:") {
+        return Err("node record: payout must be a kaspa address".into());
+    }
+    let net = v.get("net").and_then(|s| s.as_str()).unwrap_or("");
+    if net != "tn10" {
+        return Err("node record: net must be tn10".into());
+    }
+    Ok(())
+}
+
 fn gate_payload(payload: &[u8]) -> Result<(), String> {
     if payload.len() > MAX_PAYLOAD_BYTES {
         return Err(format!("payload exceeds {} bytes", MAX_PAYLOAD_BYTES));
@@ -140,6 +161,9 @@ fn gate_payload(payload: &[u8]) -> Result<(), String> {
     if payload.len() >= 4 && &payload[0..4] == b"KVP1" {
         if let Ok(text) = std::str::from_utf8(&payload[4..]) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
+                if v.get("k").and_then(|k| k.as_str()) == Some("node") {
+                    gate_node_record(&v)?;
+                }
                 let mut stack = vec![&v];
                 while let Some(node) = stack.pop() {
                     match node {
