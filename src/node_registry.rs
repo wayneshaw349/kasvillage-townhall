@@ -1,0 +1,206 @@
+// node_registry.rs — Archival/Indexer Registry + Proof-of-Storage Audit
+//
+// Registry records are themselves KVP1 payload txs sent to NODE_REGISTRY_ADDRESS
+// (self-indexing: discoverable by the same KVRead scan as every other record).
+//
+// Record shape: KVP1{"k":"node","svc":"index"|"relay"|"archive",
+//                    "api":"https://rest-base","payout":"kaspatest:...","net":"tn10"}
+//   output 0 = operator bond (to their own address; unspent = active)
+//   output 1 = 1 KAS announce to NODE_REGISTRY_ADDRESS (discovery)
+//
+// Routes:
+//   GET /api/nodes/registry — scan registry, bond status per record
+//   GET /api/nodes/audit    — run proof-of-storage audit, return pass/fail
+//
+// Audit v1: challenge each indexer with KasVillage txids drawn from the
+// registry itself (guaranteed history) + optional extra ids via env
+// KV_AUDIT_TXIDS (comma-separated). An indexer that doesn't store history
+// cannot return the correct payload hex.
+//
+// Wiring in main.rs:
+//   mod node_registry;
+//   .configure(node_registry::configure_node_registry_routes)
+
+use actix_web::{web, HttpResponse, Responder};
+use serde_json::json;
+
+const NODE_REGISTRY_ADDRESS: &str = "kaspatest:REPLACE_WITH_REGISTRY_ADDRESS";
+const TN10_API: &str = "https://api-tn10.kaspa.org";
+const MAX_REGISTRY_TXS: usize = 200;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NodeRecord {
+    pub txid: String,
+    pub svc: String,
+    pub api: String,
+    pub payout: String,
+    pub net: String,
+    pub bond_outpoint: String,
+    pub bond_amount: u64,
+    pub bond_address: String,
+    pub bond_unspent: bool,
+    pub daa_registered: u64,
+}
+
+fn http() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+fn parse_kvp1_node(payload_hex: &str) -> Option<serde_json::Value> {
+    let bytes = hex::decode(payload_hex).ok()?;
+    if bytes.len() < 4 || &bytes[0..4] != b"KVP1" { return None; }
+    let text = std::str::from_utf8(&bytes[4..]).ok()?;
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    if v.get("k")?.as_str()? == "node" { Some(v) } else { None }
+}
+
+async fn fetch_registry_records() -> Result<Vec<NodeRecord>, String> {
+    let client = http();
+    let url = format!(
+        "{}/addresses/{}/full-transactions?limit={}&resolve_previous_outpoints=no",
+        TN10_API, NODE_REGISTRY_ADDRESS, MAX_REGISTRY_TXS
+    );
+    let txs: serde_json::Value = client
+        .get(&url).send().await.map_err(|e| e.to_string())?
+        .json().await.map_err(|e| e.to_string())?;
+    let arr = txs.as_array().ok_or("unexpected registry response")?;
+
+    let mut records = Vec::new();
+    for tx in arr {
+        let payload = tx.get("payload").and_then(|p| p.as_str()).unwrap_or("");
+        let Some(rec) = parse_kvp1_node(payload) else { continue };
+        let txid = tx.get("transaction_id").and_then(|t| t.as_str()).unwrap_or("").to_string();
+        if txid.is_empty() { continue; }
+        let outputs = tx.get("outputs").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+        let Some(bond_out) = outputs.iter().find(|o| o.get("index").and_then(|i| i.as_u64()) == Some(0)) else { continue };
+        let bond_address = bond_out.get("script_public_key_address").and_then(|a| a.as_str()).unwrap_or("").to_string();
+        let bond_amount = bond_out.get("amount").and_then(|a| a.as_u64()).unwrap_or(0);
+
+        records.push(NodeRecord {
+            txid: txid.clone(),
+            svc: rec.get("svc").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            api: rec.get("api").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            payout: rec.get("payout").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            net: rec.get("net").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            bond_outpoint: format!("{}:0", txid),
+            bond_amount,
+            bond_address,
+            bond_unspent: false, // filled below
+            daa_registered: tx.get("accepting_block_blue_score").and_then(|d| d.as_u64()).unwrap_or(0),
+        });
+    }
+
+    // Bond status: outpoint present in the bond address's current utxo set.
+    let client2 = http();
+    for r in records.iter_mut() {
+        if r.bond_address.is_empty() { continue; }
+        let url = format!("{}/addresses/{}/utxos", TN10_API, r.bond_address);
+        if let Ok(resp) = client2.get(&url).send().await {
+            if let Ok(utxos) = resp.json::<serde_json::Value>().await {
+                if let Some(list) = utxos.as_array() {
+                    r.bond_unspent = list.iter().any(|u| {
+                        u.get("outpoint")
+                            .map(|o| {
+                                o.get("transactionId").and_then(|t| t.as_str()) == Some(r.txid.as_str())
+                                    && o.get("index").and_then(|i| i.as_u64()) == Some(0)
+                            })
+                            .unwrap_or(false)
+                    });
+                }
+            }
+        }
+    }
+
+    // Latest record per payout address wins (re-registration supersedes).
+    records.sort_by(|a, b| b.daa_registered.cmp(&a.daa_registered));
+    let mut seen = std::collections::HashSet::new();
+    records.retain(|r| seen.insert(r.payout.clone()));
+    Ok(records)
+}
+
+pub async fn get_registry() -> impl Responder {
+    match fetch_registry_records().await {
+        Ok(records) => HttpResponse::Ok().json(json!({
+            "registry": NODE_REGISTRY_ADDRESS,
+            "count": records.len(),
+            "nodes": records,
+        })),
+        Err(e) => HttpResponse::BadGateway().json(json!({ "error": e })),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Proof-of-storage audit
+// ---------------------------------------------------------------------------
+async fn truth_payload(client: &reqwest::Client, txid: &str) -> Option<String> {
+    let url = format!("{}/transactions/{}?inputs=false&outputs=false", TN10_API, txid);
+    let v: serde_json::Value = client.get(&url).send().await.ok()?.json().await.ok()?;
+    v.get("payload").and_then(|p| p.as_str()).map(|s| s.to_string())
+}
+
+pub async fn run_audit() -> impl Responder {
+    let records = match fetch_registry_records().await {
+        Ok(r) => r,
+        Err(e) => return HttpResponse::BadGateway().json(json!({ "error": e })),
+    };
+    let client = http();
+
+    // Challenge set: registry txids (guaranteed KasVillage history) + env extras.
+    let mut challenges: Vec<String> = records.iter().map(|r| r.txid.clone()).collect();
+    if let Ok(extra) = std::env::var("KV_AUDIT_TXIDS") {
+        challenges.extend(extra.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+    }
+    if challenges.is_empty() {
+        return HttpResponse::Ok().json(json!({ "nodes": [], "note": "no challenges available" }));
+    }
+
+    // Pseudo-random pick (time-seeded) — good enough: operators can't predict
+    // which id is chosen and must store all of them to always pass.
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs()).unwrap_or(0) as usize;
+
+    let mut results = Vec::new();
+    for (i, r) in records.iter().enumerate() {
+        if r.svc != "index" && r.svc != "archive" {
+            results.push(json!({ "payout": r.payout, "svc": r.svc, "audited": false, "reason": "svc not auditable" }));
+            continue;
+        }
+        if !r.bond_unspent {
+            results.push(json!({ "payout": r.payout, "audited": false, "pass": false, "reason": "bond spent" }));
+            continue;
+        }
+        let challenge = &challenges[(seed + i) % challenges.len()];
+        let truth = truth_payload(&client, challenge).await;
+        let their_url = format!("{}/transactions/{}?inputs=false&outputs=false", r.api.trim_end_matches('/'), challenge);
+        let theirs: Option<String> = match client.get(&their_url).send().await {
+            Ok(resp) => resp.json::<serde_json::Value>().await.ok()
+                .and_then(|v| v.get("payload").and_then(|p| p.as_str()).map(|s| s.to_string())),
+            Err(_) => None,
+        };
+        let pass = match (&truth, &theirs) {
+            (Some(t), Some(o)) => t == o,
+            _ => false,
+        };
+        results.push(json!({
+            "payout": r.payout,
+            "svc": r.svc,
+            "api": r.api,
+            "challenge_txid": challenge,
+            "audited": true,
+            "pass": pass,
+            "bond_unspent": r.bond_unspent,
+            "bond_amount": r.bond_amount,
+        }));
+    }
+
+    HttpResponse::Ok().json(json!({ "audited_at": seed, "nodes": results }))
+}
+
+pub fn configure_node_registry_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/api/nodes/registry", web::get().to(get_registry))
+        .route("/api/nodes/audit", web::get().to(run_audit));
+}
