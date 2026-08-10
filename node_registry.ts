@@ -14,7 +14,19 @@
 import * as SecureStore from 'expo-secure-store';
 import { sendKaspaViaRest, KaspaNetwork } from './kaspa_rest_tx';
 
-export const NODE_REGISTRY_ADDRESS = 'kaspatest:REPLACE_WITH_REGISTRY_ADDRESS';
+// Derived, not chosen: sha256("KV-REGISTRY-V1-node") as x-only -> bech32m.
+// Nobody holds the key; announce dust burns here. Must equal payload_publish's
+// registryAddress('node', net) � asserted at import below.
+export const NODE_REGISTRY_ADDRESS = 'kaspatest:qp35q2e5maacw03gyuh5pdr389y92nxp4dttxlr728pf0xcxytxd7nspt3z2k';
+try {
+  const { registryAddress } = require('./payload_publish');
+  const _derived = registryAddress('node', 'testnet-10');
+  if (_derived !== NODE_REGISTRY_ADDRESS) {
+    console.error('[NodeRegistry] ADDRESS MISMATCH � const:', NODE_REGISTRY_ADDRESS, 'derived:', _derived);
+    throw new Error('NODE_REGISTRY_ADDRESS does not match registryAddress("node")');
+  }
+  console.log('[NodeRegistry] address verified:', NODE_REGISTRY_ADDRESS);
+} catch (e) { console.error('[NodeRegistry] address assertion failed:', e); throw e; }
 const TOWNHALL_BASE = 'https://kasvillage.app.runonflux.io';
 export const NODE_BOND_SOMPI = 1_000_000_000n; // 10 KAS
 export const ANNOUNCE_SOMPI = 100_000_000n;    // 1 KAS

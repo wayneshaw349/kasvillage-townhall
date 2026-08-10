@@ -24,7 +24,9 @@
 use actix_web::{web, HttpResponse, Responder};
 use serde_json::json;
 
-const NODE_REGISTRY_ADDRESS: &str = "kaspatest:REPLACE_WITH_REGISTRY_ADDRESS";
+// Derived: sha256("KV-REGISTRY-V1-node") as x-only pubkey -> kaspa bech32m.
+// Mirrors payload_publish.ts registryAddress("node"). Unspendable by design.
+const NODE_REGISTRY_ADDRESS: &str = "kaspatest:qp35q2e5maacw03gyuh5pdr389y92nxp4dttxlr728pf0xcxytxd7nspt3z2k";
 const TN10_API: &str = "https://api-tn10.kaspa.org";
 const MAX_REGISTRY_TXS: usize = 200;
 
