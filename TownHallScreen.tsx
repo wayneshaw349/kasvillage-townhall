@@ -1091,6 +1091,56 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           await SecureStore.setItemAsync('kv_last_stats_proof', JSON.stringify(data.proof));
           await SecureStore.setItemAsync('kv_last_stats', JSON.stringify(data.stats));
         }
+
+        // DAPP ATTEST: anchor the Halo2-IPA-DApp-V1 proof on Kaspa L1.
+        // k:'dapp' announce (pledge-anchored, Mailbox-visible) + k:'attest'
+        // chunks carrying the proof. Replaces the dead Arweave path.
+        if (sendType === 'dapp' && data.verified && data.proof) {
+          try {
+            const { publishContent, announceToRegistry } = require('./payload_publish');
+            const { publishConfigChunks } = require('./config_chunks');
+            const { _kvResolvePrivHex } = require('./proposal_share');
+            const _priv = await _kvResolvePrivHex();
+            const _addr = (await SecureStore.getItemAsync('kv_kaspa_address'))
+              || (await SecureStore.getItemAsync('kaspa_address')) || '';
+            if (_priv && myPubkey && _addr) {
+              const _owner = { privateKeyHex: _priv, pubkeyHex: myPubkey, address: _addr, network: 'testnet-10' as any };
+              const DAPP_PLEDGE_SOMPI = 500_000_000n; // 5 KAS anchor
+              const _pub: any = await publishContent(_owner, 'dapp', {
+                name: sendName,
+                category: 'UtilityTool',
+                dappId: data.dapp_id,
+                codeHash: data.code_hash,
+                codeUrl: sendCodeUrl,
+                board: data.board,
+              }, 1, DAPP_PLEDGE_SOMPI); // nonce 1 = dapp slot (0 = store)
+              if (_pub && _pub.success !== false) {
+                console.log('[DAppAttest] published � addr:', _pub.storeAddress);
+                try { await announceToRegistry(_owner, _pub.storeAddress, sendName, 'dapp'); } catch {}
+                const _attest = {
+                  kind: 'dapp_verify',
+                  dappId: data.dapp_id,
+                  codeHash: data.code_hash,
+                  board: data.board,
+                  proofType: data.proof.proof_type,
+                  publicInputsHash: data.proof.public_inputs_hash,
+                  proofB64: (() => { try {
+                    const bytes = data.proof.proof_bytes;
+                    if (typeof bytes === 'string') return bytes;
+                    let bin = ''; for (const b of bytes) bin += String.fromCharCode(b);
+                    return btoa(bin);
+                  } catch { return ''; } })(),
+                  generatedAt: data.proof.generated_at,
+                };
+                const _ck: any = await publishConfigChunks(_owner, _pub.storeAddress, _attest);
+                if (_ck.success) console.log('[DAppAttest] proof anchored:', _ck.totalChunks, 'chunk(s), hash', _ck.hash.slice(0, 16));
+                else console.warn('[DAppAttest] proof anchor incomplete:', _ck.error);
+              } else {
+                console.warn('[DAppAttest] dapp publish failed:', _pub && _pub.error);
+              }
+            }
+          } catch (e) { console.warn('[DAppAttest] anchor error (verify still succeeded):', e); }
+        }
         // Inscribe stats proof to Arweave
         if (data.proof && myPubkey) {
           try {

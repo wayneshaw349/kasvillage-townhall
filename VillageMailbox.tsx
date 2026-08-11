@@ -54,7 +54,7 @@ import {
   FetchResult, Board, ServiceCategory, MailboxError,
   fetchDApps, fetchStorefronts, fetchCoupons, fetchAcademics, fetchServices,
   initMailboxAPI, isOnline, subscribeToNetworkChanges,
-} from './mailbox_arweave_api';
+} from './mailbox_kaspa_api';
 
 // ============================================================================
 // RESPONSIVE SCALER

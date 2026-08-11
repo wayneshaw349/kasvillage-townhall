@@ -276,6 +276,49 @@ export async function verifySDKOnArweave(sdkHash: string, constraintsHash: strin
 }
 
 // ============================================================================
+// VERIFY DAPP ON-CHAIN (trustless - no TownHall dependency)
+// The wallet hashes the code it is about to run and compares against the
+// codeHash inside the dapp's on-chain attest (Halo2-IPA-DApp-V1 proof chunks
+// at the dapp address). Mismatch = the served code differs from the scanned
+// code = REFUSE. This closes the scan-clean-serve-malicious gap.
+export async function verifyDAppOnChain(
+  dappAddress: string,
+  currentCodeHash: string,
+  network = 'testnet-10',
+): Promise<{ verified: boolean; reason: string; attestedHash?: string; proofType?: string }> {
+  try {
+    const { fetchRecords } = await import('./kaspa_payload');
+    const { fetchStoreConfig } = await import('./config_chunks');
+    const recs: any[] = await fetchRecords(dappAddress, network, 100);
+    const cfgRecs = recs.filter(r => (r as any).k === 'cfg' && r.d && typeof r.d.h === 'string');
+    if (!cfgRecs.length) return { verified: false, reason: 'no on-chain attest found' };
+    const byHash = new Map<string, any[]>();
+    for (const r of cfgRecs) { const a = byHash.get(r.d.h) || []; a.push(r); byHash.set(r.d.h, a); }
+    let best: any = null;
+    for (const [h, arr] of byHash) {
+      const tot = arr[0].d.tot;
+      if (new Set(arr.map(r => r.d.seq)).size < tot) continue;
+      const newest = Math.max(...arr.map(r => r.t));
+      if (!best || newest > best.newest) best = { h, newest };
+    }
+    if (!best) return { verified: false, reason: 'attest incomplete on chain' };
+    const { config } = await fetchStoreConfig(dappAddress, best.h, network);
+    if (!config || config.kind !== 'dapp_verify') return { verified: false, reason: 'no dapp_verify attest' };
+    if (!config.codeHash) return { verified: false, reason: 'attest missing codeHash' };
+    if (config.codeHash !== currentCodeHash) {
+      return {
+        verified: false,
+        reason: 'CODE MISMATCH - served code differs from scanned code. Do not run.',
+        attestedHash: config.codeHash,
+        proofType: config.proofType,
+      };
+    }
+    return { verified: true, reason: 'code hash matches on-chain attest', attestedHash: config.codeHash, proofType: config.proofType };
+  } catch (e: any) {
+    return { verified: false, reason: 'attest fetch failed: ' + String(e?.message || e) };
+  }
+}
+
 // VERIFY DAPP (called by wallet before interacting)
 // ============================================================================
 
