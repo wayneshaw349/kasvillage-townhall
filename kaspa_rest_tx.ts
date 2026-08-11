@@ -378,6 +378,12 @@ function addressToScript(address: string): Uint8Array {
   throw new Error('Unsupported address version: 0x' + version.toString(16));
 }
 
+// SPENT-TRACK: outpoints consumed by txs this session (REST index lags ~1-2s,
+// so back-to-back sends rebuild on already-spent UTXOs -> orphan rejection).
+const _spentOutpoints = new Set<string>();
+// Change outputs from our own accepted txs � chainable before REST sees them.
+const _pendingChange = new Map<string, { txId: string; index: number; amount: string; script: string; address: string }>();
+
 export async function sendKaspaViaRest(params: {
   senderAddress: string;
   recipientAddress: string;
@@ -396,6 +402,20 @@ export async function sendKaspaViaRest(params: {
     if (!resp.ok) throw new Error(`UTXO fetch failed: ${resp.status}`);
     const utxos: UtxoResponse[] = await resp.json();
     console.log('[REST-TX] UTXOs fetched:', utxos.length, 'from', senderAddress);
+    // SPENT-TRACK: drop outpoints already consumed this session
+    {
+      const _before = utxos.length;
+      const _kept = utxos.filter(u => !_spentOutpoints.has(((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0)));
+      utxos.length = 0; utxos.push(..._kept);
+      if (_kept.length !== _before) console.log('[REST-TX] Spent filter:', _before, '->', utxos.length);
+      for (const [k, c] of _pendingChange) {
+        if (c.address !== senderAddress) continue;
+        if (_spentOutpoints.has(k)) continue;
+        if (utxos.some(u => ((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0) === k)) { _pendingChange.delete(k); continue; }
+        utxos.push({ address: c.address, outpoint: { transactionId: c.txId, index: c.index }, utxoEntry: { amount: c.amount, scriptPublicKey: { scriptPublicKey: c.script }, blockDaaScore: '0', isCoinbase: false } } as any);
+        console.log('[REST-TX] Chained pending change:', k, c.amount);
+      }
+    }
     if (!utxos.length) return { success: false, error: 'No UTXOs available' };
 
     // Filter to ledger-free UTXOs (exclude collateral + IOU-backed)
@@ -636,6 +656,17 @@ export async function sendKaspaViaRest(params: {
       network: network === 'mainnet' ? 'mainnet' : 'testnet',
     }).catch(e => console.warn('[REST-TX] Merkle proof failed (non-fatal):', e));
 
+    // SPENT-TRACK: record consumed inputs + chainable change
+    try {
+      for (const u of selectedUtxos) {
+        _spentOutpoints.add(((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0));
+      }
+      const _sendAmt = amountSompi === 0n ? selectedAmount - fee : amountSompi;
+      const _chg = selectedAmount - _sendAmt - fee;
+      if (_chg > 0n) {
+        _pendingChange.set(txId + ':1', { txId, index: 1, amount: _chg.toString(), script: '20' + bytesToHex(xOnlyPubkey) + 'ac', address: senderAddress });
+      }
+    } catch (e) { console.warn('[REST-TX] spent-track record failed:', e); }
     return { success: true, txId, explorerUrl: explorerBase + txId };
   } catch (e: any) {
     console.error('[REST-TX] EXCEPTION:', e.message, e.stack?.slice(0, 200));
