@@ -39,7 +39,8 @@ export type KvKind =
   | 'academic'
   | 'service'
   | 'registry'   // announce record sent to a registry address
-  | 'attest';    // TownHall attestation/badge
+  | 'attest'     // TownHall attestation/badge
+  | 'cfg';       // storefront config chunk (gzip+base64, seq/tot/h in d)
 
 export interface KvRecord {
   k: KvKind;          // kind

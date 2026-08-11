@@ -3300,6 +3300,15 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         if (!_ann || _ann.success === false) console.warn('[Workspace] registry announce failed (store still live):', _ann && _ann.error);
         else console.log('[Workspace] announced to registry:', _ann.registryAddr);
       } catch (e) { console.warn('[Workspace] registry announce error (store still live):', e); }
+
+      // Step 2b: full config on-chain in gzip chunks - buyers render from these.
+      // Non-fatal: store is live either way; failure = "config pending".
+      try {
+        const { publishConfigChunks } = require('./config_chunks');
+        const _ck: any = await publishConfigChunks(_owner, _pub.storeAddress, storefrontConfig);
+        if (_ck.success) console.log('[Workspace] config chunks on-chain:', _ck.totalChunks, 'txs, hash', _ck.hash.slice(0, 16));
+        else console.warn('[Workspace] config chunks incomplete:', _ck.error, '- sent', _ck.txids.length + '/' + _ck.totalChunks);
+      } catch (e) { console.warn('[Workspace] config chunk error (store still live):', e); }
       
       // Step 3: Save locally
       await SecureStore.setItemAsync('storefront_' + hostId, JSON.stringify(storefrontConfig));
@@ -3411,7 +3420,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             {isPublishing ? <ActivityIndicator color="#fff" size="small" /> : <><Save size={rs.s(14)} color="#fff" /><Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(12) }}>Publish</Text></>}
           </TouchableOpacity>
         </View>
-        <Text style={{ fontSize: rs.font(9), color: '#a8a29e', textAlign: 'center', marginBottom: rs.s(8) }}>Publish anchors your store on Kaspa L1 - 5 KAS pledge + 1 KAS announce (testnet)</Text>
+        <Text style={{ fontSize: rs.font(9), color: '#a8a29e', textAlign: 'center', marginBottom: rs.s(8) }}>Publish anchors your store on Kaspa L1 - 5 KAS pledge (yours, staked) + 1 KAS announce (burned) + ~0.2-1 KAS config data (yours, staked). More pledge = higher visibility.</Text>
         <Text style={{ fontSize: rs.font(8), color: '#a8a29e', textAlign: 'center', marginTop: rs.s(4), lineHeight: rs.font(12) }}>KasVillage is a reputation-scored directory and non-custodial escrow tool. Listings are hosted on whitelisted social platforms. KasVillage does not facilitate, process, or intermediate any sale. SDK compliance scan does not constitute endorsement. Users assume all risk.</Text>
 
         {/* Brand Tab */}
