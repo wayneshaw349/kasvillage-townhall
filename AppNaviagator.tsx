@@ -59,6 +59,7 @@ import {
 import { startPriceFeed, subscribeToPriceUpdates, getKasPrice } from './kas_price_feed';
 import { getBalance as getKaspaBalance, setNetwork } from './kaspa_unified';
 import { getDeviceHash, getSerialHash } from './device_attestation';
+import { NodeRegisterScreen } from './NodeRegisterScreen';
 
 // ============================================================================
 // TYPES
@@ -78,6 +79,7 @@ type AppScreen =
   | 'snail_mode'
   | 'kaspa_test'
   | 'town_hall'
+  | 'node_register'
   | 'mailbox'
   | 'workspace'
   | 'entertainment'
@@ -1155,8 +1157,11 @@ export const AppNavigator: React.FC = () => {
     case 'kaspa_test':
       return <View style={{flex:1,backgroundColor:'#0A0A0A',justifyContent:'center',alignItems:'center'}}><Text style={{color:'#FFF'}}>Kaspa Test (disabled)</Text></View>;
 
+    case 'node_register':
+      return <NodeRegisterScreen onClose={() => setScreen('town_hall')} />;
+
     case 'town_hall':
-      return <TownHallScreen onClose={() => setScreen('dashboard')} />;
+      return <TownHallScreen onClose={() => setScreen('dashboard')} onNavigateNodeRegister={() => setScreen('node_register')} />;
 
     case 'mailbox':
       return (

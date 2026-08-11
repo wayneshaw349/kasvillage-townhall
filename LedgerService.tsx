@@ -16,12 +16,12 @@ import {
 } from './node_registry';
 
 const C = {
-  bg: '#0D1117', card: '#161B22', border: '#30363D',
-  text: '#E6EDF3', dim: '#8B949E', accent: '#49EACB',
+  bg: '#F5EFE6', card: '#EFE6D9', border: '#C8B79A',
+  text: '#3E2F23', dim: '#7A6A57', accent: '#D98E2B',
   good: '#3FB950', bad: '#F85149', warn: '#D29922',
 };
 
-export function LedgerService() {
+export function LedgerService({ onRegister }: { onRegister?: () => void } = {}) {
   const [nodes, setNodes] = useState<NodeRegistryEntry[]>([]);
   const [audit, setAudit] = useState<Record<string, NodeAuditEntry>>({});
   const [loading, setLoading] = useState(false);
@@ -123,7 +123,7 @@ export function LedgerService() {
           disabled={tipping || passing.length === 0}
           style={{ backgroundColor: passing.length ? C.accent : C.border, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 }}
         >
-          <Text style={{ color: '#0D1117', fontWeight: '700' }}>
+          <Text style={{ color: '#3E2F23', fontWeight: '700' }}>
             {tipping ? 'Sending…' : `Tip ${passing.length} verified`}
           </Text>
         </TouchableOpacity>
@@ -131,6 +131,15 @@ export function LedgerService() {
       <Text style={{ color: C.dim, fontSize: 10, marginTop: 6 }}>
         Tips split equally among verified operators. You pay from your wallet; KasVillage takes nothing.
       </Text>
+
+      {onRegister ? (
+        <TouchableOpacity
+          onPress={onRegister}
+          style={{ borderColor: C.border, borderWidth: 1, borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 12 }}
+        >
+          <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>Become an operator</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }

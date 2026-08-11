@@ -8301,6 +8301,7 @@ async fn api_verify_stats_proof(body: web::Json<serde_json::Value>) -> HttpRespo
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    node_registry::spawn_audit_loop();
     env_logger::init();
     
     let mode = std::env::var("KV_MODE").unwrap_or_else(|_| "townhall".into());

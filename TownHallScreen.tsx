@@ -151,6 +151,7 @@ const COLORS = {
 // ============================================================================
 interface TownHallScreenProps {
   onClose?: () => void;
+  onNavigateNodeRegister?: () => void;
 }
 
 interface VerificationResult {
@@ -856,7 +857,7 @@ const TownHallBackground: React.FC = () => {
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
+export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavigateNodeRegister }) => {
   // State
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -1805,7 +1806,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose }) => {
           </View>
         </View>
         
-        <LedgerService />
+        <LedgerService onRegister={onNavigateNodeRegister} />
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
