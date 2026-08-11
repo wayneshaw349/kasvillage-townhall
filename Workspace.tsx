@@ -3033,6 +3033,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   
   // Publishing state
   const [isPublishing, setIsPublishing] = useState(false);
+  const [pubStage, setPubStage] = useState('');
   
   // Modals
   const [showQualityGate, setShowQualityGate] = useState(false);
@@ -3252,7 +3253,25 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       return;
     }
     
+    let _chunkCount = 1;
+    try {
+      const { configToChunkData } = require('./config_chunks');
+      _chunkCount = configToChunkData({ brandName, storeCategory, hostId, stash }).chunks.length;
+    } catch {}
+    const _totalKas = 5 + 1 + _chunkCount * 0.2;
+    const _ok = await new Promise((resolve) => {
+      Alert.alert(
+        'Publish cost',
+        '5 KAS pledge (yours, staked)\n1 KAS announce (burned)\n' + _chunkCount + ' config chunk(s) x 0.2 KAS (yours, staked)\n\nTotal: ~' + _totalKas.toFixed(1) + ' KAS + fees',
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Publish', onPress: () => resolve(true) },
+        ]
+      );
+    });
+    if (!_ok) return;
     setIsPublishing(true);
+    setPubStage('Preparing keys...');
     
     try {
       // Step 1: Build storefront config
@@ -3284,6 +3303,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: 'testnet-10' as any };
       const STORE_PLEDGE_SOMPI = 500_000_000n; // 5 KAS default stake
       const _cfgHash = bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(storefrontConfig))));
+      setPubStage('Anchoring pledge on Kaspa L1...');
       const _pub: any = await publishContent(_owner, 'store', {
         name: brandName,
         category: storeCategory,
@@ -3296,6 +3316,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       (storefrontConfig as any).storeTxId = _pub.txId || '';
       (storefrontConfig as any).pledgeSompi = STORE_PLEDGE_SOMPI.toString();
       try {
+        setPubStage('Announcing to registry...');
         const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory);
         if (!_ann || _ann.success === false) console.warn('[Workspace] registry announce failed (store still live):', _ann && _ann.error);
         else console.log('[Workspace] announced to registry:', _ann.registryAddr);
@@ -3305,6 +3326,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       // Non-fatal: store is live either way; failure = "config pending".
       try {
         const { publishConfigChunks } = require('./config_chunks');
+        setPubStage('Publishing config (' + _chunkCount + ' chunk' + (_chunkCount > 1 ? 's' : '') + ')...');
         const _ck: any = await publishConfigChunks(_owner, _pub.storeAddress, storefrontConfig);
         if (_ck.success) console.log('[Workspace] config chunks on-chain:', _ck.totalChunks, 'txs, hash', _ck.hash.slice(0, 16));
         else console.warn('[Workspace] config chunks incomplete:', _ck.error, '- sent', _ck.txids.length + '/' + _ck.totalChunks);
@@ -3348,6 +3370,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     }
     
     setIsPublishing(false);
+    setTimeout(() => setPubStage(''), 4000);
   };
   
   // Passport gate
@@ -3419,6 +3442,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: rs.s(6), backgroundColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(10) }} onPress={handlePublishStorefront} disabled={isPublishing}>
             {isPublishing ? <ActivityIndicator color="#fff" size="small" /> : <><Save size={rs.s(14)} color="#fff" /><Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(12) }}>Publish</Text></>}
           </TouchableOpacity>
+        {pubStage ? (
+          <Text style={{ color: '#8B7355', fontSize: rs.font(10), textAlign: 'center', marginTop: 4 }}>{pubStage}</Text>
+        ) : null}
         </View>
         <Text style={{ fontSize: rs.font(9), color: '#a8a29e', textAlign: 'center', marginBottom: rs.s(8) }}>Publish anchors your store on Kaspa L1 - 5 KAS pledge (yours, staked) + 1 KAS announce (burned) + ~0.2-1 KAS config data (yours, staked). More pledge = higher visibility.</Text>
         <Text style={{ fontSize: rs.font(8), color: '#a8a29e', textAlign: 'center', marginTop: rs.s(4), lineHeight: rs.font(12) }}>KasVillage is a reputation-scored directory and non-custodial escrow tool. Listings are hosted on whitelisted social platforms. KasVillage does not facilitate, process, or intermediate any sale. SDK compliance scan does not constitute endorsement. Users assume all risk.</Text>
