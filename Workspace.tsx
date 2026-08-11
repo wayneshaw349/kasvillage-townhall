@@ -3304,6 +3304,35 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       // Step 3: Save locally
       await SecureStore.setItemAsync('storefront_' + hostId, JSON.stringify(storefrontConfig));
       Alert.alert('Published!', 'Storefront live on Kaspa L1.\nYour 5 KAS pledge anchors it — withdrawing the pledge delists the store.\nBuyers click through to ' + (socialLinks.instagram ? 'Instagram' : socialLinks.pinterest ? 'Pinterest' : 'Etsy') + '.');
+
+      // Tip prompt — only when at least one operator passed the storage audit.
+      // Dormant until the first archive node exists; activates itself after.
+      try {
+        const { fetchAudit, tipOperators } = require('./node_registry');
+        const _audit: any[] = await fetchAudit();
+        const _passing = _audit.filter((a: any) => a.pass === true);
+        if (_passing.length > 0) {
+          Alert.alert(
+            'Keep your store searchable?',
+            'Independent archive operators store KasVillage history on their own machines. ' +
+            'Your store stays findable in search because they keep serving its records. ' +
+            'A small tip (' + _passing.length + ' verified operator' + (_passing.length > 1 ? 's' : '') + ', split equally) keeps that archive running. KasVillage takes nothing.',
+            [
+              { text: 'Not now', style: 'cancel' },
+              {
+                text: 'Tip 1 KAS',
+                onPress: async () => {
+                  try {
+                    const res = await tipOperators({ totalSompi: 100_000_000n });
+                    if (res.success) Alert.alert('Thank you', 'Tip sent to ' + (res.paid || 0) + ' operator(s).');
+                    else Alert.alert('Tip failed', res.error || 'unknown error');
+                  } catch (te: any) { Alert.alert('Tip failed', String(te?.message || te)); }
+                },
+              },
+            ]
+          );
+        }
+      } catch (e) { console.log('[Workspace] tip prompt skipped:', e); }
     } catch (e) {
       console.error('Publish failed:', e);
       Alert.alert('Error', 'Failed to publish. Please try again.');
