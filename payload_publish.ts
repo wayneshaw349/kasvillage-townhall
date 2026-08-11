@@ -105,9 +105,10 @@ export async function announceToRegistry(
   storeAddress: string,
   name: string,
   category: string,
+  kind: string = 'store', // registry is per-KIND; category is payload metadata only
 ) {
   const rec = signRecord(makeRegistryAnnounce(owner.pubkeyHex, storeAddress, name, category), owner.privateKeyHex);
-  const regAddr = registryAddress(category, owner.network);
+  const regAddr = registryAddress(kind, owner.network);
   const res = await sendKaspaViaRest({
     senderAddress: owner.address,
     recipientAddress: regAddr,

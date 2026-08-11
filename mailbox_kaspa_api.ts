@@ -67,7 +67,9 @@ function visSort(a: { pledgeSompi: bigint; announcedAt: number }, b: { pledgeSom
 
 export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<StorefrontEntry>> {
   try {
+    console.log('[Mailbox] store scan -> registry', registryAddress('store', NET).slice(0, 30));
     const dir = await rebuildDirectory('store', registryAddress('store', NET), NET);
+    console.log('[Mailbox] store scan found', dir.length, 'entries:', dir.map((e: any) => e.name).join(', '));
     dir.sort(visSort as any);
     const items: StorefrontEntry[] = dir.map((e: any) => ({
       id: e.storeAddress,
