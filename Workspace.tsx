@@ -3315,12 +3315,6 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       (storefrontConfig as any).storeAddress = _pub.storeAddress;
       (storefrontConfig as any).storeTxId = _pub.txId || '';
       (storefrontConfig as any).pledgeSompi = STORE_PLEDGE_SOMPI.toString();
-      try {
-        setPubStage('Announcing to registry...');
-        const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _cfgHash });
-        if (!_ann || _ann.success === false) console.warn('[Workspace] registry announce failed (store still live):', _ann && _ann.error);
-        else console.log('[Workspace] announced to registry:', _ann.registryAddr);
-      } catch (e) { console.warn('[Workspace] registry announce error (store still live):', e); }
 
       // Step 2b: full config on-chain in gzip chunks - buyers render from these.
       // Non-fatal: store is live either way; failure = "config pending".
@@ -3330,6 +3324,14 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         const _ck: any = await publishConfigChunks(_owner, _pub.storeAddress, storefrontConfig);
         if (_ck.success) console.log('[Workspace] config chunks on-chain:', _ck.totalChunks, 'txs, hash', _ck.hash.slice(0, 16));
         else console.warn('[Workspace] config chunks incomplete:', _ck.error, '- sent', _ck.txids.length + '/' + _ck.totalChunks);
+        // Announce AFTER chunks so configHash matches the published chunk set exactly.
+        try {
+          setPubStage('Announcing to registry...');
+          const _annHash = _ck.success ? _ck.hash : _cfgHash;
+          const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _annHash });
+          if (!_ann || _ann.success === false) console.warn('[Workspace] registry announce failed (store still live):', _ann && _ann.error);
+          else console.log('[Workspace] announced to registry:', _ann.registryAddr, 'cfgHash:', _annHash.slice(0, 16));
+        } catch (e) { console.warn('[Workspace] registry announce error (store still live):', e); }
       } catch (e) { console.warn('[Workspace] config chunk error (store still live):', e); }
       
       // Step 3: Save locally
