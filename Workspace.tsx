@@ -3317,7 +3317,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       (storefrontConfig as any).pledgeSompi = STORE_PLEDGE_SOMPI.toString();
       try {
         setPubStage('Announcing to registry...');
-        const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory);
+        const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _cfgHash });
         if (!_ann || _ann.success === false) console.warn('[Workspace] registry announce failed (store still live):', _ann && _ann.error);
         else console.log('[Workspace] announced to registry:', _ann.registryAddr);
       } catch (e) { console.warn('[Workspace] registry announce error (store still live):', e); }

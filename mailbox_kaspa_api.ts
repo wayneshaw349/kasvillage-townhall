@@ -81,7 +81,9 @@ export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<St
       townhall: { verified: true, verifiedAt: e.announcedAt, verificationTx: e.storeAddress },
       createdAt: e.announcedAt * 1000,
       productCount: 0,
-    }));
+      primaryLink: e.primaryLink || '',
+      configHash: e.configHash || '',
+    } as any));
     return { items, hasMore: false, fromCache: false };
   } catch (e: any) {
     throw new MailboxError('store scan failed: ' + String(e?.message || e), 'SCAN');

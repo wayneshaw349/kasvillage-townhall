@@ -209,7 +209,9 @@ export interface DirectoryEntry {
   storeAddress: string;
   name: string;
   category: string;
-  pledgeSompi: bigint;   // live, from UTXO set at the store address
+  pledgeSompi: bigint;
+  primaryLink?: string;
+  configHash?: string;   // live, from UTXO set at the store address
   record: KvRecord;
   announcedAt: number;
 }
@@ -242,6 +244,8 @@ export async function rebuildDirectory(category: string, registryAddress: string
       name: String(record.d.name),
       category: String(record.d.category || category),
       pledgeSompi: pledge,
+      primaryLink: record.d.primaryLink ? String(record.d.primaryLink) : '',
+      configHash: record.d.configHash ? String(record.d.configHash) : '',
       record,
       announcedAt: blockTime,
     });
@@ -256,8 +260,11 @@ export async function rebuildDirectory(category: string, registryAddress: string
 
 /** Announce record for a registry address. Sign, then buildPayloadHex, then
  *  the sender sends dust to the registry address with this payload. */
-export function makeRegistryAnnounce(ownerPubkey: string, storeAddress: string, name: string, category: string): KvRecord {
-  return { k: 'registry', v: 1, o: ownerPubkey, t: Date.now(), d: { storeAddress, name, category } };
+export function makeRegistryAnnounce(ownerPubkey: string, storeAddress: string, name: string, category: string, extra?: { primaryLink?: string; configHash?: string }): KvRecord {
+  const d: any = { storeAddress, name, category };
+  if (extra?.primaryLink) d.primaryLink = extra.primaryLink;
+  if (extra?.configHash) d.configHash = extra.configHash;
+  return { k: 'registry', v: 1, o: ownerPubkey, t: Date.now(), d };
 }
 
 /** Content record for the store address itself (catalog, identity, board...). */
