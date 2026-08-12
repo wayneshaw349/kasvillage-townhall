@@ -705,7 +705,7 @@ export default function VillageMailbox() {
   // Filter by query
   const filteredData = useMemo(() => {
     const data = getCurrentData();
-    if (!query.trim()) return data;
+    if (!query.trim()) return []; // search-first: no auto-populated feed
     
     const q = query.toLowerCase();
     return data.filter((item: any) => {
@@ -845,6 +845,16 @@ export default function VillageMailbox() {
         {/* Content */}
         {error ? (
           <ErrorState error={error} onRetry={handleRetry} />
+        ) : !query.trim() ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: rs.s(32) }}>
+            <Search size={rs.s(48)} color={COLORS.amber500} />
+            <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.amber900, marginTop: rs.s(16), textAlign: 'center' }}>
+              Search the Village
+            </Text>
+            <Text style={{ fontSize: rs.font(12), color: COLORS.stone500, marginTop: rs.s(8), textAlign: 'center' }}>
+              Type a store, app, coupon, or topic above. Results come straight from the Kaspa L1 registry.
+            </Text>
+          </View>
         ) : loading && filteredData.length === 0 ? (
           <SkeletonList count={4} />
         ) : filteredData.length === 0 ? (
