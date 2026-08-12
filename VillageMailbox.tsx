@@ -56,6 +56,7 @@ import {
   fetchDApps, fetchStorefronts, fetchCoupons, fetchAcademics, fetchServices,
   initMailboxAPI, isOnline, subscribeToNetworkChanges,
 } from './mailbox_kaspa_api';
+import { GridGameEngine, validateGameDescriptor, KvGameDescriptor } from './game_schema';
 
 // ============================================================================
 // RESPONSIVE SCALER
@@ -597,6 +598,7 @@ export default function VillageMailbox() {
   // UI state
   const [section, setSection] = useState<Section>('dapps');
   const [storeView, setStoreView] = useState<{ entry: StorefrontEntry; config: any | null; loading: boolean } | null>(null);
+  const [gameView, setGameView] = useState<{ name: string; addr: string; hash: string; loading: boolean; game: KvGameDescriptor | null; error: string } | null>(null);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -740,6 +742,10 @@ export default function VillageMailbox() {
           }
         })();
       } else if (section === 'dapps') {
+        if ((item as any).gameHash) {
+          setGameView({ name: item.name, addr: item.arweaveTx, hash: (item as any).gameHash, loading: false, game: null, error: '' });
+          return;
+        }
         // DApps, games, websites — video demo + live URL
         const videoLink = item.videoUrl || '';
         const appLink = item.gameUrl || item.primaryLink || '';
@@ -897,6 +903,53 @@ export default function VillageMailbox() {
           />
         )}
       </View>
+
+      {/* Game generator - descriptor fetched from L1, hash verified, rendered on-device */}
+      <Modal visible={!!gameView} animationType="slide" transparent onRequestClose={() => setGameView(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(28,25,23,0.85)', justifyContent: 'center', padding: rs.s(20) }}>
+          <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(18), maxHeight: '88%' }}>
+            {gameView && (
+              <View>
+                <Text style={{ fontSize: rs.font(19), fontWeight: '900', color: COLORS.stone900, textAlign: 'center' }}>{gameView.name}</Text>
+                <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, textAlign: 'center', marginTop: 2, marginBottom: rs.s(12) }}>
+                  descriptor {gameView.hash.slice(0, 16)}... on Kaspa L1
+                </Text>
+                {gameView.game ? (
+                  <GridGameEngine game={gameView.game} />
+                ) : gameView.loading ? (
+                  <ActivityIndicator color={COLORS.indigo600} style={{ paddingVertical: rs.s(30) }} />
+                ) : (
+                  <View style={{ alignItems: 'center' }}>
+                    {gameView.error ? <Text style={{ fontSize: rs.font(11), color: COLORS.red500, textAlign: 'center', marginBottom: rs.s(10) }}>{gameView.error}</Text> : null}
+                    <TouchableOpacity onPress={() => {
+                      setGameView(g => g ? { ...g, loading: true, error: '' } : g);
+                      (async () => {
+                        try {
+                          const { fetchStoreConfig } = await import('./config_chunks');
+                          const { config, error } = await fetchStoreConfig(gameView.addr, gameView.hash, 'testnet-10');
+                          if (!config) { setGameView(g => g ? { ...g, loading: false, error: error || 'fetch failed' } : g); return; }
+                          const v = validateGameDescriptor(config);
+                          if (!v.ok || !v.game) { setGameView(g => g ? { ...g, loading: false, error: v.error || 'invalid descriptor' } : g); return; }
+                          console.log('[Game] generated:', v.game.name, v.game.board + 'x' + v.game.board);
+                          setGameView(g => g ? { ...g, loading: false, game: v.game! } : g);
+                        } catch (e: any) { setGameView(g => g ? { ...g, loading: false, error: String(e?.message || e) } : g); }
+                      })();
+                    }} style={{ backgroundColor: COLORS.indigo600, borderRadius: rs.s(12), paddingVertical: rs.s(14), paddingHorizontal: rs.s(36) }}>
+                      <Text style={{ color: '#fff', fontWeight: '900', fontSize: rs.font(15) }}>Generate Game</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, marginTop: rs.s(8), textAlign: 'center' }}>
+                      Fetches the descriptor from Kaspa L1, verifies its hash, and renders it locally.
+                    </Text>
+                  </View>
+                )}
+                <TouchableOpacity onPress={() => setGameView(null)} style={{ marginTop: rs.s(12), alignItems: 'center', paddingVertical: rs.s(8) }}>
+                  <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: COLORS.stone500 }}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Procedural storefront view - rendered from on-chain config, zero hosted images */}
       <Modal visible={!!storeView} animationType="slide" transparent onRequestClose={() => setStoreView(null)}>

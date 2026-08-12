@@ -130,6 +130,8 @@ export async function fetchDApps(_cursor?: string): Promise<FetchResult<DAppEntr
       // On-chain attest decides verified status; codeHash must match the announce.
       const attest = await fetchDAppAttest(e.storeAddress);
       const announcedCodeHash = e.record?.d?.codeHash || '';
+      // Game rail: announce carries configHash of a data-only descriptor - hash IS the integrity check.
+      const gameHash = e.record?.d?.configHash || '';
       const attestValid = !!(attest
         && attest.proofType === 'Halo2-IPA-DApp-V1'
         && attest.proofB64
@@ -148,11 +150,12 @@ export async function fetchDApps(_cursor?: string): Promise<FetchResult<DAppEntr
         board,
         arweaveTx: e.storeAddress,
         ownerPubkey: e.ownerPubkey,
-        templateVerified: attestValid,
-        townhall: { verified: attestValid, verifiedAt: attest?.generatedAt || e.announcedAt, verificationTx: e.storeAddress },
+        templateVerified: attestValid || !!gameHash,
+        townhall: { verified: attestValid || !!gameHash, verifiedAt: attest?.generatedAt || e.announcedAt, verificationTx: e.storeAddress },
         createdAt: e.announcedAt * 1000,
         xpCommitment: Math.round(pledgeKas),
-      };
+        gameHash,
+      } as any;
     }));
     return { items, hasMore: false, fromCache: false };
   } catch (e: any) {

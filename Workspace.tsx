@@ -1,4 +1,5 @@
 import { validateContentText } from './content_validator';
+import { validateGameDescriptor, TIC_TAC_TOE_JSON } from './game_schema';
 // ============================================================================
 // KASVILLAGE EXPO - WORKSPACE COMPONENT v2.1 (MERGED)
 // ============================================================================
@@ -3037,6 +3038,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   
   // Modals
   const [showQualityGate, setShowQualityGate] = useState(false);
+  const [gameJson, setGameJson] = useState('');
+  const [gamePublishing, setGamePublishing] = useState(false);
+  const [gameStage, setGameStage] = useState('');
   const [showAcademicPanel, setShowAcademicPanel] = useState(false);
   
 
@@ -4052,6 +4056,70 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               <ShieldCheck size={rs.s(16)} color={COLORS.white} />
               <Text style={wsStyles.publishBtnText}>SDK Compliance Check</Text>
             </TouchableOpacity>
+
+            {/* On-chain Game JSON publish - descriptor rail (data-only, no code) */}
+            <View style={{ backgroundColor: COLORS.indigo50, borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(12), borderWidth: 1, borderColor: COLORS.indigo200 }}>
+              <Text style={{ fontSize: rs.font(13), fontWeight: '900', color: COLORS.indigo900, marginBottom: rs.s(4) }}>Publish Game JSON (on-chain)</Text>
+              <Text style={{ fontSize: rs.font(10), color: COLORS.indigo700, marginBottom: rs.s(8) }}>
+                Data-only game descriptor. Buyers hit Generate Game and the app renders it from Kaspa L1 - no hosting, no code execution.
+              </Text>
+              <TextInput
+                style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.indigo300, borderRadius: rs.s(8), padding: rs.s(10), fontSize: rs.font(10), fontFamily: 'monospace', color: COLORS.stone700, minHeight: rs.s(110), textAlignVertical: 'top' }}
+                value={gameJson}
+                onChangeText={setGameJson}
+                placeholder='{"kind":"kv_game_v1","engine":"grid",...}'
+                placeholderTextColor={COLORS.stone400}
+                multiline
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <View style={{ flexDirection: 'row', gap: rs.s(8), marginTop: rs.s(8) }}>
+                <TouchableOpacity onPress={() => setGameJson(TIC_TAC_TOE_JSON)}
+                  style={{ flex: 1, backgroundColor: COLORS.stone100, borderRadius: rs.s(8), paddingVertical: rs.s(10), alignItems: 'center' }}>
+                  <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: COLORS.stone600 }}>Load Tic-Tac-Toe</Text>
+                </TouchableOpacity>
+                <TouchableOpacity disabled={gamePublishing} onPress={async () => {
+                  const v = validateGameDescriptor(gameJson);
+                  if (!v.ok || !v.game) { Alert.alert('Invalid Game JSON', v.error || 'validation failed'); return; }
+                  const _ok = await new Promise<boolean>((resolve) => {
+                    Alert.alert('Publish game cost', '5 KAS pledge (yours, staked)\n1 KAS announce (burned)\n~0.2 KAS descriptor chunk\n\nTotal: ~6.2 KAS + fees', [
+                      { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                      { text: 'Publish', onPress: () => resolve(true) },
+                    ]);
+                  });
+                  if (!_ok) return;
+                  setGamePublishing(true);
+                  try {
+                    const { publishContent, announceToRegistry } = require('./payload_publish');
+                    const { publishConfigChunks } = require('./config_chunks');
+                    const { _kvResolvePrivHex } = require('./proposal_share');
+                    const _priv = await _kvResolvePrivHex();
+                    const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
+                    if (!_priv || !userPubkey || !_addr) throw new Error('wallet keys unavailable');
+                    const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: 'testnet-10' as any };
+                    setGameStage('Anchoring pledge...');
+                    const _pub: any = await publishContent(_owner, 'dapp', { name: v.game.name, category: 'GameGrid' }, 1, 500_000_000n);
+                    if (!_pub || _pub.success === false) throw new Error('dapp publish failed: ' + (_pub && _pub.error));
+                    setGameStage('Publishing descriptor...');
+                    const _ck: any = await publishConfigChunks(_owner, _pub.storeAddress, v.game);
+                    if (!_ck.success) throw new Error('descriptor chunks failed: ' + _ck.error);
+                    setGameStage('Announcing...');
+                    const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, v.game.name, 'GameGrid', 'dapp', { configHash: _ck.hash });
+                    if (!_ann || _ann.success === false) console.warn('[Game] announce failed:', _ann && _ann.error);
+                    Alert.alert('Game Published!', v.game.name + ' is live on Kaspa L1.\nDescriptor hash: ' + _ck.hash.slice(0, 16) + '...');
+                    console.log('[Game] published - addr:', _pub.storeAddress, 'hash:', _ck.hash.slice(0, 16));
+                  } catch (e: any) {
+                    Alert.alert('Publish Failed', String(e?.message || e));
+                  }
+                  setGamePublishing(false);
+                  setTimeout(() => setGameStage(''), 4000);
+                }}
+                  style={{ flex: 1, backgroundColor: gamePublishing ? COLORS.stone300 : COLORS.indigo600, borderRadius: rs.s(8), paddingVertical: rs.s(10), alignItems: 'center' }}>
+                  {gamePublishing ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#fff' }}>Publish Game (~6.2 KAS)</Text>}
+                </TouchableOpacity>
+              </View>
+              {gameStage ? <Text style={{ fontSize: rs.font(10), color: COLORS.indigo700, textAlign: 'center', marginTop: rs.s(6) }}>{gameStage}</Text> : null}
+            </View>
             
             {/* Video Demo � the listing IS the marketing */}
             <View style={{ backgroundColor: '#fef3c7', borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(12), borderWidth: 1, borderColor: '#f59e0b' }}>
