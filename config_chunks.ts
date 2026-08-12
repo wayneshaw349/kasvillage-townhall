@@ -85,8 +85,10 @@ export async function fetchStoreConfig(
   network = 'testnet-10',
 ): Promise<{ config: any | null; error?: string }> {
   try {
-    const recs: any[] = await fetchRecords(storeAddress, network, 200);
-    const cfgRecs = recs.filter(r => (r as any).k === 'cfg' && r.d && r.d.h === expectedHash);
+    const wrapped: any[] = await fetchRecords(storeAddress, network, 200);
+    // fetchRecords returns { record, txid, blockTime } wrappers - unwrap to the KvRecord
+    const recs: any[] = wrapped.map(w => (w && w.record) ? w.record : w);
+    const cfgRecs = recs.filter(r => r && r.k === 'cfg' && r.d && r.d.h === expectedHash);
     if (cfgRecs.length === 0) return { config: null, error: 'no config chunks found' };
     const tot = cfgRecs[0].d.tot;
     // newest record per seq wins (config updates re-publish all chunks)

@@ -30,7 +30,7 @@ import {
   RefreshControl,
   Modal,
 } from 'react-native';
-import Svg, { Rect, Defs, Pattern, Line } from 'react-native-svg';
+import Svg, { Rect, Defs, Pattern, Line, G, Path, Text as SvgText } from 'react-native-svg';
 import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from 'react-native';
@@ -728,9 +728,11 @@ export default function VillageMailbox() {
         (async () => {
           try {
             const cfgHash = (item as any).configHash || '';
+            console.log('[Mailbox] modal open - cfgHash:', cfgHash ? cfgHash.slice(0, 16) : 'MISSING', 'addr:', item.arweaveTx.slice(0, 24));
             if (!cfgHash) { setStoreView(sv => sv ? { ...sv, loading: false } : sv); return; }
             const { fetchStoreConfig } = await import('./config_chunks');
-            const { config } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10');
+            const { config, error: _cfgErr } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10');
+            console.log('[Mailbox] cfg fetch result:', config ? 'OK brand=' + config.brandName : 'NULL err=' + _cfgErr);
             setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config, loading: false } : sv);
           } catch (e) {
             console.log('[Mailbox] store config fetch failed:', e);
@@ -903,8 +905,20 @@ export default function VillageMailbox() {
             {storeView && (() => {
               const cfg = storeView.config;
               const bn = cfg?.bannerStyle;
+              const recipe = cfg?.bannerRecipe;
+              const useGraffiti = cfg?.selectedFont?.id === 'graffiti' && recipe && recipe.text;
               const bg = bn && bn.bg && bn.bg !== 'crest' ? bn.bg : '#44403c';
               const fg = (bn && bn.text) || '#fff';
+              const fontId = cfg?.selectedFont?.id || 'clean';
+              const fontMap: any = {
+                clean:   { weight: '400', spacing: 0, transform: 'none' },
+                bold:    { weight: '900', spacing: 2, transform: 'uppercase' },
+                elegant: { weight: '300', spacing: 4, transform: 'capitalize' },
+                retro:   { weight: '800', spacing: 6, transform: 'uppercase' },
+                graffiti:{ weight: '900', spacing: 0, transform: 'uppercase' },
+              };
+              const fstyle = fontMap[fontId] || fontMap.clean;
+              const cols = Number(cfg?.selectedLayout?.id === 'grid-2' ? 2 : cfg?.selectedLayout?.id === 'grid-3' ? 3 : cfg?.selectedLayout?.id === 'masonry' ? 2 : 1);
               const swatch = (name: string) => {
                 let h = 0;
                 for (let i = 0; i < (name || '').length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
@@ -913,17 +927,72 @@ export default function VillageMailbox() {
               const items: any[] = cfg?.stash || [];
               const social: Record<string, string> = cfg?.socialLinks || {};
               const links = Object.entries(social).filter(([, v]) => v);
+              const now = Date.now();
+              const liveCoupons: any[] = (cfg?.coupons || []).filter((c: any) =>
+                (c.createdAt || 0) + (c.expiryDays || 30) * 86400000 > now && (c.usedCount || 0) < (c.maxUses || 1));
+              const logoRound = (cfg?.logoShape || 'round') === 'round';
+              const brandInitial = (cfg?.brandName || storeView.entry.storeName || '?').charAt(0).toUpperCase();
               return (
                 <View>
-                  <View style={{ backgroundColor: bg, padding: rs.s(22), alignItems: 'center' }}>
-                    <Text style={{ fontSize: rs.font(22), fontWeight: '900', color: fg }}>{cfg?.brandName || storeView.entry.storeName}</Text>
-                    {cfg?.storeDescription ? <Text style={{ fontSize: rs.font(11), color: fg, opacity: 0.85, marginTop: rs.s(4), textAlign: 'center' }} numberOfLines={2}>{cfg.storeDescription}</Text> : null}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(6), marginTop: rs.s(8) }}>
-                      <ShieldCheck size={rs.s(13)} color={fg} />
-                      <Text style={{ fontSize: rs.font(9), color: fg, opacity: 0.9 }}>Pledge-anchored on Kaspa L1</Text>
+                  {/* Banner: graffiti SVG when selected, else styled text */}
+                  {useGraffiti ? (
+                    <View style={{ backgroundColor: recipe.bgColor || '#fafaf9', paddingVertical: rs.s(8) }}>
+                      <Svg viewBox="0 0 360 120" style={{ width: '100%', height: rs.s(110) }}>
+                        <Defs>
+                          <Pattern id="mbBricks" patternUnits="userSpaceOnUse" width="20" height="10">
+                            <Rect width="20" height="10" fill={recipe.bgColor || '#fafaf9'} />
+                            <Line x1="0" y1="5" x2="20" y2="5" stroke="#d6d3d1" strokeWidth="0.5" />
+                            <Line x1="10" y1="0" x2="10" y2="5" stroke="#d6d3d1" strokeWidth="0.5" />
+                          </Pattern>
+                        </Defs>
+                        <Rect x="0" y="0" width="360" height="120" fill="url(#mbBricks)" />
+                        {recipe.decoStyle === 'stars' && (
+                          <G>
+                            <Path d="M30 15 L33 25 L43 25 L35 31 L38 41 L30 35 L22 41 L25 31 L17 25 L27 25 Z" fill={recipe.fillColor} opacity="0.3" />
+                            <Path d="M320 20 L322 26 L328 26 L323 30 L325 36 L320 32 L315 36 L317 30 L312 26 L318 26 Z" fill={recipe.fillColor} opacity="0.3" />
+                          </G>
+                        )}
+                        {recipe.decoStyle === 'arrows' && (
+                          <G>
+                            <Path d="M15 60 L30 50 L30 55 L50 55 L50 65 L30 65 L30 70 Z" fill={recipe.fillColor} opacity="0.2" />
+                            <Path d="M345 60 L330 50 L330 55 L310 55 L310 65 L330 65 L330 70 Z" fill={recipe.fillColor} opacity="0.2" />
+                          </G>
+                        )}
+                        {String(recipe.text || '').split('').map((ch: string, i: number) => {
+                          const total = String(recipe.text || '').length;
+                          const charW = Math.min(320 / Math.max(total, 1), 50);
+                          const startX = (360 - total * charW) / 2;
+                          const x = startX + i * charW + charW / 2;
+                          const y = recipe.style === 'wild' ? 75 + Math.sin(i * 0.8) * 8 : 78;
+                          const rot = recipe.style === 'wild' ? Math.sin(i * 1.2) * 10 : recipe.style === 'block' ? (i % 2 === 0 ? -3 : 3) : 0;
+                          const fsz = recipe.style === 'bubble' ? 48 : 44;
+                          const sw = recipe.style === 'bubble' ? 8 : 5;
+                          return (
+                            <G key={i} transform={'rotate(' + rot + ' ' + x + ' ' + y + ')'}>
+                              <SvgText x={x + 3} y={y + 3} fontSize={fsz} fontWeight="900" fill={recipe.shadowColor} opacity="0.5" textAnchor="middle">{ch}</SvgText>
+                              <SvgText x={x} y={y} fontSize={fsz} fontWeight="900" fill="none" stroke={recipe.outlineColor} strokeWidth={sw} textAnchor="middle">{ch}</SvgText>
+                              <SvgText x={x} y={y} fontSize={fsz} fontWeight="900" fill={recipe.fillColor} textAnchor="middle">{ch}</SvgText>
+                            </G>
+                          );
+                        })}
+                      </Svg>
                     </View>
-                  </View>
-                  <ScrollView style={{ maxHeight: rs.s(420) }} contentContainerStyle={{ padding: rs.s(16) }}>
+                  ) : (
+                    <View style={{ backgroundColor: bg, padding: rs.s(20), alignItems: 'center' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(10) }}>
+                        <View style={{ width: rs.s(38), height: rs.s(38), borderRadius: logoRound ? rs.s(19) : rs.s(9), backgroundColor: swatch(cfg?.brandName || storeView.entry.storeName), justifyContent: 'center', alignItems: 'center' }}>
+                          <Text style={{ fontSize: rs.font(16), fontWeight: '900', color: '#fff' }}>{brandInitial}</Text>
+                        </View>
+                        <Text style={{ fontSize: rs.font(21), fontWeight: fstyle.weight as any, letterSpacing: fstyle.spacing, textTransform: fstyle.transform as any, color: fg }}>{cfg?.brandName || storeView.entry.storeName}</Text>
+                      </View>
+                      {cfg?.storeDescription ? <Text style={{ fontSize: rs.font(11), color: fg, opacity: 0.85, marginTop: rs.s(6), textAlign: 'center' }} numberOfLines={2}>{cfg.storeDescription}</Text> : null}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(6), marginTop: rs.s(8) }}>
+                        <ShieldCheck size={rs.s(13)} color={fg} />
+                        <Text style={{ fontSize: rs.font(9), color: fg, opacity: 0.9 }}>Pledge-anchored on Kaspa L1</Text>
+                      </View>
+                    </View>
+                  )}
+                  <ScrollView style={{ maxHeight: rs.s(430) }} contentContainerStyle={{ padding: rs.s(14) }}>
                     {storeView.loading ? (
                       <ActivityIndicator color={COLORS.amber600} style={{ paddingVertical: rs.s(30) }} />
                     ) : !cfg ? (
@@ -932,26 +1001,46 @@ export default function VillageMailbox() {
                       </Text>
                     ) : (
                       <View>
-                        {items.length > 0 ? items.map((it: any) => (
-                          <TouchableOpacity key={it.id} onPress={() => { if (it.socialUrl) Linking.openURL(it.socialUrl.startsWith('http') ? it.socialUrl : 'https://' + it.socialUrl); }}
-                            style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(8), borderWidth: 1, borderColor: COLORS.stone200 }} activeOpacity={0.7}>
-                            <View style={{ width: rs.s(44), height: rs.s(44), borderRadius: rs.s(10), backgroundColor: swatch(it.name), justifyContent: 'center', alignItems: 'center', marginRight: rs.s(10) }}>
-                              <Text style={{ fontSize: rs.font(16), fontWeight: '900', color: '#fff' }}>{(it.name || '?').charAt(0).toUpperCase()}</Text>
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: COLORS.stone800 }} numberOfLines={1}>{it.name}</Text>
-                              {it.description ? <Text style={{ fontSize: rs.font(10), color: COLORS.stone500 }} numberOfLines={1}>{it.description}</Text> : null}
-                              <Text style={{ fontSize: rs.font(11), color: COLORS.amber700, marginTop: 2 }}>
-                                {it.kaspaPrice > 0 ? it.kaspaPrice + ' KAS' : it.dollarPrice > 0 ? '$' + Number(it.dollarPrice).toFixed(2) : 'Price TBD'}
-                              </Text>
-                            </View>
-                            <ArrowRight size={rs.s(16)} color={COLORS.stone400} />
-                          </TouchableOpacity>
-                        )) : (
+                        {/* Coupons */}
+                        {liveCoupons.length > 0 && (
+                          <View style={{ marginBottom: rs.s(10) }}>
+                            {liveCoupons.map((c: any) => (
+                              <TouchableOpacity key={c.id} onPress={() => { try { Clipboard.setStringAsync(c.code); Alert.alert('Coupon Copied!', c.code + ' - use at checkout'); } catch {} }}
+                                style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.amber100, borderRadius: rs.s(10), padding: rs.s(10), marginBottom: rs.s(6), borderWidth: 1, borderColor: COLORS.amber300, borderStyle: 'dashed' }}>
+                                <Ticket size={rs.s(16)} color={COLORS.amber700} />
+                                <Text style={{ flex: 1, fontSize: rs.font(13), fontWeight: '900', fontFamily: 'monospace', color: COLORS.amber900, marginLeft: rs.s(8) }}>{c.code}</Text>
+                                <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: COLORS.amber700 }}>
+                                  {c.discountPercent > 0 ? c.discountPercent + '% off' : c.discountKas + ' KAS off'}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        )}
+                        {/* Items - layout-aware grid */}
+                        {items.length > 0 ? (
+                          <View style={{ flexDirection: cols > 1 ? 'row' : 'column', flexWrap: 'wrap', gap: rs.s(8) }}>
+                            {items.map((it: any) => (
+                              <TouchableOpacity key={it.id} onPress={() => { if (it.socialUrl) Linking.openURL(it.socialUrl.startsWith('http') ? it.socialUrl : 'https://' + it.socialUrl); }}
+                                style={{ width: cols === 3 ? '31%' : cols === 2 ? '48%' : '100%', flexDirection: cols > 1 ? 'column' : 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: rs.s(12), padding: rs.s(10), borderWidth: 1, borderColor: COLORS.stone200 }} activeOpacity={0.7}>
+                                <View style={{ width: cols > 1 ? '100%' : rs.s(44), height: cols > 1 ? rs.s(64) : rs.s(44), borderRadius: rs.s(10), backgroundColor: swatch(it.name), justifyContent: 'center', alignItems: 'center', marginRight: cols > 1 ? 0 : rs.s(10), marginBottom: cols > 1 ? rs.s(6) : 0 }}>
+                                  <Text style={{ fontSize: rs.font(cols > 1 ? 22 : 16), fontWeight: '900', color: '#fff' }}>{(it.name || '?').charAt(0).toUpperCase()}</Text>
+                                </View>
+                                <View style={{ flex: cols > 1 ? undefined : 1, alignItems: cols > 1 ? 'center' : 'flex-start' }}>
+                                  <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.stone800, textAlign: cols > 1 ? 'center' : 'left' }} numberOfLines={1}>{it.name}</Text>
+                                  {it.description && cols === 1 ? <Text style={{ fontSize: rs.font(10), color: COLORS.stone500 }} numberOfLines={1}>{it.description}</Text> : null}
+                                  <Text style={{ fontSize: rs.font(11), color: COLORS.amber700, marginTop: 2 }}>
+                                    {it.kaspaPrice > 0 ? it.kaspaPrice + ' KAS' : it.dollarPrice > 0 ? '$' + Number(it.dollarPrice).toFixed(2) : 'Price TBD'}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        ) : (
                           <Text style={{ fontSize: rs.font(12), color: COLORS.stone400, textAlign: 'center', paddingVertical: rs.s(16) }}>No items listed yet</Text>
                         )}
+                        {/* Social links */}
                         {links.length > 0 && (
-                          <View style={{ marginTop: rs.s(8) }}>
+                          <View style={{ marginTop: rs.s(12) }}>
                             <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: COLORS.stone500, textTransform: 'uppercase', marginBottom: rs.s(6) }}>Visit</Text>
                             {links.map(([k, v]) => (
                               <TouchableOpacity key={k} onPress={() => Linking.openURL(String(v).startsWith('http') ? String(v) : 'https://' + v)}

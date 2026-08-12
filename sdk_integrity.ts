@@ -289,7 +289,8 @@ export async function verifyDAppOnChain(
   try {
     const { fetchRecords } = await import('./kaspa_payload');
     const { fetchStoreConfig } = await import('./config_chunks');
-    const recs: any[] = await fetchRecords(dappAddress, network, 100);
+    const _wrapped: any[] = await fetchRecords(dappAddress, network, 100);
+    const recs: any[] = _wrapped.map((w: any) => (w && w.record) ? w.record : w);
     const cfgRecs = recs.filter(r => (r as any).k === 'cfg' && r.d && typeof r.d.h === 'string');
     if (!cfgRecs.length) return { verified: false, reason: 'no on-chain attest found' };
     const byHash = new Map<string, any[]>();

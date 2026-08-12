@@ -94,7 +94,8 @@ export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<St
  *  Returns null when absent or malformed - listing shows unverified. */
 async function fetchDAppAttest(dappAddress: string): Promise<any | null> {
   try {
-    const recs: any[] = await (await import('./kaspa_payload')).fetchRecords(dappAddress, NET, 100);
+    const _wrapped: any[] = await (await import('./kaspa_payload')).fetchRecords(dappAddress, NET, 100);
+    const recs: any[] = _wrapped.map(w => (w && w.record) ? w.record : w);
     // attest rides the cfg chunk format; find the newest complete set
     const cfgRecs = recs.filter(r => (r as any).k === 'cfg' && r.d && typeof r.d.h === 'string');
     if (!cfgRecs.length) return null;
