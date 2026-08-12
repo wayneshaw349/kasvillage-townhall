@@ -28,6 +28,7 @@ import {
   Linking,
   FlatList,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import Svg, { Rect, Defs, Pattern, Line } from 'react-native-svg';
 import * as SecureStore from 'expo-secure-store';
@@ -595,6 +596,7 @@ export default function VillageMailbox() {
   
   // UI state
   const [section, setSection] = useState<Section>('dapps');
+  const [storeView, setStoreView] = useState<{ entry: StorefrontEntry; config: any | null; loading: boolean } | null>(null);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -721,8 +723,20 @@ export default function VillageMailbox() {
   const renderItem = ({ item, index }: { item: any; index: number }) => {
     const onPress = () => {
       // Route based on section type
-      if (section === 'storefronts' && item.primaryLink) {
-        Linking.openURL(item.primaryLink.startsWith('http') ? item.primaryLink : 'https://' + item.primaryLink);
+      if (section === 'storefronts') {
+        setStoreView({ entry: item, config: null, loading: true });
+        (async () => {
+          try {
+            const cfgHash = (item as any).configHash || '';
+            if (!cfgHash) { setStoreView(sv => sv ? { ...sv, loading: false } : sv); return; }
+            const { fetchStoreConfig } = await import('./config_chunks');
+            const { config } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10');
+            setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config, loading: false } : sv);
+          } catch (e) {
+            console.log('[Mailbox] store config fetch failed:', e);
+            setStoreView(sv => sv ? { ...sv, loading: false } : sv);
+          }
+        })();
       } else if (section === 'dapps') {
         // DApps, games, websites — video demo + live URL
         const videoLink = item.videoUrl || '';
@@ -881,6 +895,85 @@ export default function VillageMailbox() {
           />
         )}
       </View>
+
+      {/* Procedural storefront view - rendered from on-chain config, zero hosted images */}
+      <Modal visible={!!storeView} animationType="slide" transparent onRequestClose={() => setStoreView(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(28,25,23,0.85)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: COLORS.cardBg, borderTopLeftRadius: rs.s(24), borderTopRightRadius: rs.s(24), maxHeight: '88%', overflow: 'hidden' }}>
+            {storeView && (() => {
+              const cfg = storeView.config;
+              const bn = cfg?.bannerStyle;
+              const bg = bn && bn.bg && bn.bg !== 'crest' ? bn.bg : '#44403c';
+              const fg = (bn && bn.text) || '#fff';
+              const swatch = (name: string) => {
+                let h = 0;
+                for (let i = 0; i < (name || '').length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+                return 'hsl(' + (Math.abs(h) % 360) + ', 55%, 62%)';
+              };
+              const items: any[] = cfg?.stash || [];
+              const social: Record<string, string> = cfg?.socialLinks || {};
+              const links = Object.entries(social).filter(([, v]) => v);
+              return (
+                <View>
+                  <View style={{ backgroundColor: bg, padding: rs.s(22), alignItems: 'center' }}>
+                    <Text style={{ fontSize: rs.font(22), fontWeight: '900', color: fg }}>{cfg?.brandName || storeView.entry.storeName}</Text>
+                    {cfg?.storeDescription ? <Text style={{ fontSize: rs.font(11), color: fg, opacity: 0.85, marginTop: rs.s(4), textAlign: 'center' }} numberOfLines={2}>{cfg.storeDescription}</Text> : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(6), marginTop: rs.s(8) }}>
+                      <ShieldCheck size={rs.s(13)} color={fg} />
+                      <Text style={{ fontSize: rs.font(9), color: fg, opacity: 0.9 }}>Pledge-anchored on Kaspa L1</Text>
+                    </View>
+                  </View>
+                  <ScrollView style={{ maxHeight: rs.s(420) }} contentContainerStyle={{ padding: rs.s(16) }}>
+                    {storeView.loading ? (
+                      <ActivityIndicator color={COLORS.amber600} style={{ paddingVertical: rs.s(30) }} />
+                    ) : !cfg ? (
+                      <Text style={{ fontSize: rs.font(12), color: COLORS.stone500, textAlign: 'center', paddingVertical: rs.s(24) }}>
+                        Config not yet on-chain for this store. Seller may need to republish.
+                      </Text>
+                    ) : (
+                      <View>
+                        {items.length > 0 ? items.map((it: any) => (
+                          <TouchableOpacity key={it.id} onPress={() => { if (it.socialUrl) Linking.openURL(it.socialUrl.startsWith('http') ? it.socialUrl : 'https://' + it.socialUrl); }}
+                            style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(8), borderWidth: 1, borderColor: COLORS.stone200 }} activeOpacity={0.7}>
+                            <View style={{ width: rs.s(44), height: rs.s(44), borderRadius: rs.s(10), backgroundColor: swatch(it.name), justifyContent: 'center', alignItems: 'center', marginRight: rs.s(10) }}>
+                              <Text style={{ fontSize: rs.font(16), fontWeight: '900', color: '#fff' }}>{(it.name || '?').charAt(0).toUpperCase()}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: COLORS.stone800 }} numberOfLines={1}>{it.name}</Text>
+                              {it.description ? <Text style={{ fontSize: rs.font(10), color: COLORS.stone500 }} numberOfLines={1}>{it.description}</Text> : null}
+                              <Text style={{ fontSize: rs.font(11), color: COLORS.amber700, marginTop: 2 }}>
+                                {it.kaspaPrice > 0 ? it.kaspaPrice + ' KAS' : it.dollarPrice > 0 ? '$' + Number(it.dollarPrice).toFixed(2) : 'Price TBD'}
+                              </Text>
+                            </View>
+                            <ArrowRight size={rs.s(16)} color={COLORS.stone400} />
+                          </TouchableOpacity>
+                        )) : (
+                          <Text style={{ fontSize: rs.font(12), color: COLORS.stone400, textAlign: 'center', paddingVertical: rs.s(16) }}>No items listed yet</Text>
+                        )}
+                        {links.length > 0 && (
+                          <View style={{ marginTop: rs.s(8) }}>
+                            <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: COLORS.stone500, textTransform: 'uppercase', marginBottom: rs.s(6) }}>Visit</Text>
+                            {links.map(([k, v]) => (
+                              <TouchableOpacity key={k} onPress={() => Linking.openURL(String(v).startsWith('http') ? String(v) : 'https://' + v)}
+                                style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.amber50, borderRadius: rs.s(10), padding: rs.s(10), marginBottom: rs.s(6) }}>
+                                <Text style={{ flex: 1, fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.amber900, textTransform: 'capitalize' }}>{k}</Text>
+                                <ArrowRight size={rs.s(14)} color={COLORS.amber700} />
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </ScrollView>
+                  <TouchableOpacity onPress={() => setStoreView(null)} style={{ padding: rs.s(14), alignItems: 'center', borderTopWidth: 1, borderTopColor: COLORS.stone200 }}>
+                    <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: COLORS.stone600 }}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
+          </View>
+        </View>
+      </Modal>
     </PixelStoreBackground>
   );
 }
