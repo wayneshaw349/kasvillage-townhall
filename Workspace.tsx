@@ -3447,7 +3447,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           style={wsStyles.toolbar}
           contentContainerStyle={wsStyles.toolbarContent}
         >
-          {['brand', 'layout', 'fonts', 'items', 'coupons', 'dapps', 'academic', 'preview'].map(view => (
+          {['brand', 'layout', 'fonts', 'page', 'items', 'coupons', 'dapps', 'academic', 'preview'].map(view => (
             <TabButton
               key={view}
               label={view}
@@ -3587,7 +3587,68 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           </View>
         )}
         
-        {/* Layout Tab */}
+        {/* Page Tab - on-chain HTML */}
+          {activeView === 'page' && (
+            <SectionCard title="On-Chain Page">
+              <Text style={{ color: '#8B7355', fontSize: rs.font(11), marginBottom: rs.s(8), lineHeight: rs.font(16) }}>
+                Write a page in HTML. It publishes to Kaspa L1 as hash-pinned chunks and renders
+                in a sandbox — no external links, scripts, or network calls. Use kv://dm for a
+                contact link so buyers message you in-app.
+              </Text>
+              <TextInput
+                style={{
+                  backgroundColor: '#1a1a1a', color: '#d8d8d8', borderRadius: rs.s(6),
+                  padding: rs.s(10), fontSize: rs.font(11), minHeight: rs.s(220),
+                  textAlignVertical: 'top', fontFamily: 'monospace',
+                  borderWidth: 1, borderColor: '#333',
+                }}
+                multiline
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder={'<h1>My Shop</h1>\n<p>Handmade goods.</p>\n<a href="kv://dm">Message me</a>'}
+                placeholderTextColor="#555"
+                value={pageHtml}
+                onChangeText={(t) => { setPageHtml(t); setPageIssues([]); }}
+              />
+              {pageHtml.trim().length > 0 ? (() => {
+                try {
+                  const { estimateHtmlPublishCost, scanHtmlForPublish } = require('./html_chunks');
+                  const est = estimateHtmlPublishCost(pageHtml);
+                  const scan = scanHtmlForPublish(pageHtml);
+                  return (
+                    <View style={{ marginTop: rs.s(10) }}>
+                      <Text style={{ color: '#8B7355', fontSize: rs.font(10) }}>
+                        {est.chunks} chunk{est.chunks > 1 ? 's' : ''} · ~{est.kas.toFixed(1)} KAS · hash {est.hash.slice(0, 12)}
+                      </Text>
+                      {scan.ok ? (
+                        <Text style={{ color: '#49c07a', fontSize: rs.font(10), marginTop: rs.s(4) }}>
+                          Passes safety scan — ready to publish.
+                        </Text>
+                      ) : (
+                        <View style={{ marginTop: rs.s(6) }}>
+                          <Text style={{ color: '#c0392b', fontSize: rs.font(10), marginBottom: rs.s(3) }}>
+                            Blocked — fix before publishing:
+                          </Text>
+                          {scan.issues.slice(0, 8).map((iss: any, ix: number) => (
+                            <Text key={ix} style={{ color: '#c0392b', fontSize: rs.font(10) }}>
+                              • {iss.code}: {iss.detail}
+                            </Text>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  );
+                } catch (e) { return null; }
+              })() : null}
+              {pageIssues.length > 0 ? (
+                <Text style={{ color: '#c0392b', fontSize: rs.font(10), marginTop: rs.s(8) }}>
+                  Last publish skipped the page: {pageIssues.map((i) => i.code).join(', ')}
+                </Text>
+              ) : null}
+            </SectionCard>
+          )}
+
+          {/* Layout Tab */}
         {activeView === 'layout' && (
           <SectionCard title="Choose Your Layout">
             <Text style={wsStyles.layoutSubtitle}>
