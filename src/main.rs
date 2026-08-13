@@ -42,6 +42,7 @@ mod kaspa_relay;
 
 mod halo2_snark_module;
 mod townhall_verification_complete;
+mod canary_scanner;
 mod content_validator_sync;
 mod node_registry;
 
@@ -7756,6 +7757,8 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/code/register", web::post().to(register_signature_api))
         // Host Nodes (Arweave-backed)
         .route("/api/host-nodes", web::get().to(get_host_nodes))
+        .route("/api/canary/scan", web::post().to(canary_scanner::api_canary_scan))
+        .route("/api/canary/pubkey", web::get().to(canary_scanner::api_canary_pubkey))
         // FROST Agreement Relay
         .route("/api/agreement/propose", web::post().to(frost_propose))
         .route("/api/agreement/accept", web::post().to(frost_accept))
