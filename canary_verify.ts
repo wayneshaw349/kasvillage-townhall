@@ -18,7 +18,7 @@ const TOWNHALL_URL = __DEV__
   : 'https://kasvillage.app.runonflux.io';
 
 // ---- pin after Flux deploy (GET /api/canary/pubkey). Empty = TOFU with warn.
-export const PINNED_ATTEST_PUBKEY: string = '';
+export const PINNED_ATTEST_PUBKEY: string = '7480a21cc3f6cb6d98947202b2ae4081ea0d481d3e3619971969c224afb4fe42';
 
 export interface CanaryFinding {
   code: string;
