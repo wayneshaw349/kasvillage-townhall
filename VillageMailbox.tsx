@@ -14,6 +14,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import OnChainPageView from './OnChainPageView';
 import {
   View,
   Text,
@@ -1054,6 +1055,23 @@ export default function VillageMailbox() {
                       </Text>
                     ) : (
                       <View>
+                        {/* On-chain HTML page: hash-pinned, sandboxed, kv:// links only */}
+                        {cfg.pageHash ? (
+                          <View style={{ height: rs.s(360), marginBottom: rs.s(10), borderRadius: rs.s(8), overflow: 'hidden', borderWidth: 1, borderColor: COLORS.stone200 }}>
+                            <OnChainPageView
+                              storeAddress={storeView.entry.arweaveTx}
+                              pageHash={cfg.pageHash}
+                              network="testnet-10"
+                              ownerPubkey={(storeView.entry as any).owner || (cfg as any).ownerPubkey || ''}
+                              onDirectMessage={(pk: string) => {
+                                setStoreView(null);
+                                Alert.alert('Contact seller', 'Open a Neighbor Agreement with this seller to message them.');
+                                console.log('[Mailbox] kv://dm -> owner', String(pk).slice(0, 16));
+                              }}
+                              onProduct={(id: string) => console.log('[Mailbox] kv://product', id)}
+                            />
+                          </View>
+                        ) : null}
                         {/* Coupons */}
                         {liveCoupons.length > 0 && (
                           <View style={{ marginBottom: rs.s(10) }}>
