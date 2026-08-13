@@ -3035,6 +3035,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   // Publishing state
   const [isPublishing, setIsPublishing] = useState(false);
   const [pubStage, setPubStage] = useState('');
+  // On-chain HTML page (optional): published as hash-pinned chunks, rendered
+  // in a sandboxed WebView. kv:// links only - no external navigation.
+  const [pageHtml, setPageHtml] = useState('');
+  const [pageIssues, setPageIssues] = useState<any[]>([]);
   
   // Modals
   const [showQualityGate, setShowQualityGate] = useState(false);
@@ -3064,6 +3068,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         if (cfg.bannerStyle) setBannerStyle(cfg.bannerStyle);
         if (cfg.coupons) setCoupons(cfg.coupons);
         if (cfg.bannerRecipe) setBannerRecipe(cfg.bannerRecipe);
+        if (cfg.pageHtml) setPageHtml(cfg.pageHtml);
         console.log('[Workspace] Loaded config for', hostId);
       } catch (e) { console.warn('[Workspace] Config load failed:', e); }
     };
@@ -3079,6 +3084,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           bannerStyle, bannerRecipe, coupons, socialLinks, commChannels,
           selectedFont: { id: selectedFont.id, name: selectedFont.name },
           selectedLayout: { id: selectedLayout.id, name: selectedLayout.name },
+          pageHtml,
           stash,
           hostId, updatedAt: Date.now(),
         };
@@ -3086,7 +3092,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       } catch {}
     }, 1000); // debounce 1s
     return () => clearTimeout(timer);
-  }, [brandName, storeDescription, storeCategory, logoUrl, logoShape, bannerStyle, bannerRecipe, coupons, socialLinks, commChannels, selectedFont, selectedLayout, stash]);
+  }, [brandName, storeDescription, storeCategory, logoUrl, logoShape, bannerStyle, bannerRecipe, coupons, socialLinks, commChannels, selectedFont, selectedLayout, pageHtml, stash]);
 
   // Load avatar data on mount
   useEffect(() => {
@@ -3319,6 +3325,27 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       (storefrontConfig as any).storeAddress = _pub.storeAddress;
       (storefrontConfig as any).storeTxId = _pub.txId || '';
       (storefrontConfig as any).pledgeSompi = STORE_PLEDGE_SOMPI.toString();
+
+      // Step 2a2: on-chain HTML page (optional). Publish first so its hash can
+      // ride inside the storefront config the buyer already hash-verifies.
+      if (pageHtml && pageHtml.trim().length > 0) {
+        try {
+          const { publishHtmlChunks, scanHtmlForPublish, htmlToChunkData } = require('./html_chunks');
+          const _scan = scanHtmlForPublish(pageHtml);
+          if (!_scan.ok) {
+            setPageIssues(_scan.issues);
+            console.warn('[Workspace] page blocked by scan:', _scan.issues.map((i: any) => i.code).join(','));
+          } else {
+            setPageIssues([]);
+            const _ph = htmlToChunkData(pageHtml).hash;
+            (storefrontConfig as any).pageHash = _ph;
+            setPubStage('Publishing page...');
+            const _pk: any = await publishHtmlChunks(_owner, _pub.storeAddress, pageHtml, { skipScan: true });
+            if (_pk.success) console.log('[Workspace] page on-chain:', _pk.totalChunks, 'chunks, hash', _ph.slice(0, 16));
+            else console.warn('[Workspace] page chunks incomplete:', _pk.error);
+          }
+        } catch (e) { console.warn('[Workspace] page publish error (store still live):', e); }
+      }
 
       // Step 2b: full config on-chain in gzip chunks - buyers render from these.
       // Non-fatal: store is live either way; failure = "config pending".
