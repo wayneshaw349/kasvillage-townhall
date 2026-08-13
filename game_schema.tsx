@@ -12,7 +12,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 // ---------------------------------------------------------------------------
 export interface KvGameDescriptor {
   kind: 'kv_game_v1';
-  engine: 'grid';          // v1: only grid
+  engine: 'grid' | 'scene';          // v1: only grid
   name: string;            // display name (<= 40 chars)
   board: number;           // N (3-8)
   winLength: number;       // k-in-a-row to win (3-board)
@@ -32,6 +32,13 @@ export function validateGameDescriptor(raw: any): { ok: boolean; game?: KvGameDe
   try {
     const g = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (g.kind !== 'kv_game_v1') return { ok: false, error: 'kind must be kv_game_v1' };
+  // Scene descriptors validate structurally here; the engine's own validator
+  // (schema keys, node caps, permission whitelist) is the authoritative gate.
+  if ((g as any).engine === 'scene') {
+    if (!(g as any).meta || !(g as any).meta.id) return { ok: false, error: 'scene requires meta.id' };
+    if (!Array.isArray((g as any).nodes)) return { ok: false, error: 'scene requires nodes[]' };
+    return { ok: true, game: g };
+  }
     if (g.engine !== 'grid') return { ok: false, error: 'engine must be grid (v1)' };
     if (typeof g.name !== 'string' || !g.name.trim() || g.name.length > 40) return { ok: false, error: 'name: 1-40 chars' };
     if (!Number.isInteger(g.board) || g.board < 3 || g.board > 8) return { ok: false, error: 'board: integer 3-8' };

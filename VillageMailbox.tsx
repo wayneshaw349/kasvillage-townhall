@@ -15,6 +15,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import OnChainPageView from './OnChainPageView';
+import SceneGameEngine from './SceneGameEngine';
 import {
   View,
   Text,
@@ -916,7 +917,9 @@ export default function VillageMailbox() {
                   descriptor {gameView.hash.slice(0, 16)}... on Kaspa L1
                 </Text>
                 {gameView.game ? (
-                  <GridGameEngine game={gameView.game} />
+                  gameView.game.engine === 'scene'
+                        ? <SceneGameEngine game={gameView.game} />
+                        : <GridGameEngine game={gameView.game} />
                 ) : gameView.loading ? (
                   <ActivityIndicator color={COLORS.indigo600} style={{ paddingVertical: rs.s(30) }} />
                 ) : (
