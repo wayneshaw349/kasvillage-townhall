@@ -1,4 +1,3 @@
-import WalletFormationTest from './WalletFormationTest';
 // KaspaClientTest.tsx
 // Test screen for native KaspaClient (no WebView)
 
@@ -116,7 +115,6 @@ export function KaspaClientTest() {
 
   return (
     <View style={styles.container}>
-      <WalletFormationTest />
       <Text style={styles.title}>Kaspa Client Test</Text>
       <Text style={styles.subtitle}>Using @kcoin/kaspa-web3.js</Text>
 

@@ -66,7 +66,7 @@ import {
 } from './shared_types';
 
 import { townHall, TownHallClient } from './townhall_client';
-import { validateMnemonic } from './bip39_wallet';
+import { deriveWalletFromIdentityHash, validateMnemonic } from './bip39_wallet';
 import { generateStealthKeys, StealthKeys } from './stealth_watcher';
 
 // ============================================================================
@@ -399,6 +399,7 @@ async function signMessage(message: string): Promise<string> {
 // ============================================================================
 
 export async function createWallet(options?: {
+  identityHashHex?: string;
   skipAuth?: boolean;
   network?: 'mainnet' | 'testnet-10' | 'testnet-11';
 }): Promise<{
@@ -438,8 +439,17 @@ export async function createWallet(options?: {
       seed: Uint8Array;
     };
 
-    {
-      // Random entropy — brainwallet branch DELETED (SECURITY: avatar-derived keys were recomputable from published recipe)
+    if (false && options?.identityHashHex) { // SECURITY: brainwallet path disabled - all wallets use random entropy (Option A)
+      // DETERMINISTIC PATH (avatar-derived)
+      const derived = await deriveWalletFromIdentityHash(options!.identityHashHex!);
+      const seedBytes = sha256(hexToBytes(options!.identityHashHex!));
+      // Re-derive address with correct network prefix
+      const pubBytes = hexToBytes(derived.publicKeyHex);
+      const xOnly = pubBytes.slice(1);
+      const hrp = options?.network?.startsWith('testnet') ? 'kaspatest' : 'kaspa';
+      wallet = { ...derived, kaspaAddress: kaspaAddressFromXOnly(xOnly, hrp), seed: seedBytes };
+    } else {
+      // FALLBACK: random entropy
       const { entropyToMnemonic } = await import('./bip39_wallet'); const { mnemonicToSeedV2: mnemonicToSeed, deriveKaspaHDKeyV2: deriveKaspaHDKey } = await import('./bip39_v2');
       const randomEntropy = await Crypto.getRandomBytesAsync(16);
       const mnemonic = await entropyToMnemonic(randomEntropy);

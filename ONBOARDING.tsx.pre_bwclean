@@ -17,7 +17,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import { AlertTriangle, Check, ChevronRight, Clock, Key } from 'lucide-react-native';
-import { createWallet, getRegistrationData } from './wallet_registration_v2.js';
+import { createWallet } from './wallet_registration_v2.js';
 import { registerDevice } from './device_attestation';
 
 const DEVICE_ANCHOR_KEY = 'kv_device_anchor';
@@ -350,12 +350,11 @@ export const OnboardingScreen: React.FC<OnboardingProps> = ({ onComplete, onFail
         const storedAvatar = JSON.parse(storedAvatarStr);
         const identityHash = await generateIdentityHash(storedAvatar);
         setWalletCreating(true);
-        // SECURITY: avatar-derived recovery removed (brainwallet). Never overwrite an existing wallet.
-        const existing = await getRegistrationData();
+        const walletResult = await createWallet({ identityHashHex: identityHash });
         setWalletCreating(false);
-        if (!existing?.kaspaAddress) { setWalletError('No wallet on this device. Restore from your 12-word seed phrase or backup cards.'); setStep('failed'); return; }
-        setWalletPublicKey((existing as any)?.publicKey ?? '');
-        setWalletAddress(existing.kaspaAddress);
+        if (!walletResult.success) { setWalletError(walletResult.error ?? 'Recovery failed'); setStep('failed'); return; }
+        setWalletPublicKey(walletResult.publicKey ?? '');
+        setWalletAddress(walletResult.kaspaAddress ?? '');
         const storedHash = await SecureStore.getItemAsync('kv_identity_hash') ?? identityHash;
         setStep('complete');
         setTimeout(() => { onComplete({ identityHash: storedHash, avatar: storedAvatar, score: scoreRef.current }); }, 800);
@@ -367,7 +366,7 @@ export const OnboardingScreen: React.FC<OnboardingProps> = ({ onComplete, onFail
         await SecureStore.setItemAsync('kv_avatar_name', avatar.name || 'Villager');
         await SecureStore.setItemAsync('kv_avatar_data', JSON.stringify({ ...avatar, _version: AVATAR_DATA_VERSION }));
         setWalletCreating(true);
-        const walletResult = await createWallet({});
+        const walletResult = await createWallet({ identityHashHex: identityHash });
         setWalletCreating(false);
         if (!walletResult.success) { setWalletError(walletResult.error ?? 'Wallet creation failed'); setStep('failed'); return; }
         setWalletPublicKey(walletResult.publicKey ?? '');

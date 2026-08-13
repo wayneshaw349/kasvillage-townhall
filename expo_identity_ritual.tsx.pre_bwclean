@@ -9148,7 +9148,7 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
       }
       
       // Create new wallet from identity hash
-      const result = await createWallet({ network });
+      const result = await createWallet({ identityHashHex: recipe.recipeHash, network });
       
       if (!result.success || !result.kaspaAddress) {
         throw new Error(result.error || 'Wallet creation failed');

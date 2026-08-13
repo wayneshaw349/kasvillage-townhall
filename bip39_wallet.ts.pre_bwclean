@@ -630,7 +630,36 @@ export interface DerivedWallet {
  * SCHEMA-LOCKED: "KV_AVATAR_V3:" prefix means schema changes never
  *                silently derive a different key.
  */
-// deriveWalletFromIdentityHash REMOVED (SECURITY): avatar-derived brainwallet — key was recomputable from published avatar recipe. All wallets now use random entropy via createWallet.
+export async function deriveWalletFromIdentityHash(
+  identityHashHex: string
+): Promise<DerivedWallet> {
+  // 1. Use first 16 bytes (128 bits) of SHA256 hash as BIP39 entropy
+  const entropy = hexToBytes(identityHashHex.slice(0, 32)); // 32 hex chars = 16 bytes
+
+  // 2. Entropy → 12-word BIP39 mnemonic
+  const mnemonic = await entropyToMnemonic(entropy);
+
+  // 3. Mnemonic → 64-byte BIP39 seed (PBKDF2-HMAC-SHA512, 2048 iterations)
+  const seed = await mnemonicToSeed(mnemonic, '');
+
+  // 4. Seed → BIP44 HD key (m/44'/111111'/0'/0/0)
+  const hdKey = deriveKaspaHDKey(seed);
+
+  // 5. Private key → compressed public key
+  const pubKeyBytes = secp.getPublicKey(hdKey.privateKey, true); // 33 bytes compressed
+
+  // 6. Public key → Kaspa address (bech32m, x-only, Schnorr P2PK)
+  const xOnly = pubKeyBytes.slice(1); // 32-byte x-coordinate
+  const kaspaAddress = xOnlyToKaspaAddress(xOnly);
+
+  return {
+    mnemonic,
+    privateKeyHex: bytesToHex(hdKey.privateKey),
+    publicKeyHex:  bytesToHex(pubKeyBytes),
+    kaspaAddress,
+    entropy:       bytesToHex(entropy),
+  };
+}
 
 // ============================================================================
 // SECTION 8: KASPA BECH32 ADDRESS (x-only pubkey)

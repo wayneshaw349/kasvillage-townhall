@@ -1,4 +1,4 @@
-﻿// KaspaClientTest.tsx
+// KaspaClientTest.tsx
 // Test screen for native KaspaClient (no WebView)
 
 import React, { useState } from 'react';
@@ -36,9 +36,9 @@ export function KaspaClientTest() {
     log(`Connecting to ${network}...`);
     try {
       await connect(network);
-      log(`âœ“ Connected! Server: ${serverInfo?.serverVersion}`);
+      log(`✓ Connected! Server: ${serverInfo?.serverVersion}`);
     } catch (e: any) {
-      log(`âœ— Connect failed: ${e.message}`);
+      log(`✗ Connect failed: ${e.message}`);
     }
     setLoading(false);
   };
@@ -50,9 +50,9 @@ export function KaspaClientTest() {
     log(`Fetching balance for ${testAddr.slice(0, 25)}...`);
     try {
       const balKAS = await client.getBalanceKAS(testAddr);
-      log(`âœ“ Balance: ${parseFloat(balKAS).toFixed(8)} KAS`);
+      log(`✓ Balance: ${parseFloat(balKAS).toFixed(8)} KAS`);
     } catch (e: any) {
-      log(`âœ— Balance failed: ${e.message}`);
+      log(`✗ Balance failed: ${e.message}`);
     }
     setLoading(false);
   };
@@ -63,14 +63,14 @@ export function KaspaClientTest() {
     log(`Fetching UTXOs...`);
     try {
       const utxos = await client.getUtxos([testAddr]);
-      log(`âœ“ Found ${utxos.length} UTXOs`);
+      log(`✓ Found ${utxos.length} UTXOs`);
       if (utxos.length > 0) {
         const first = utxos[0];
         const amountKAS = Number(first.amount) / 1e8;
         log(`  First: ${amountKAS.toFixed(8)} KAS`);
       }
     } catch (e: any) {
-      log(`âœ— UTXOs failed: ${e.message}`);
+      log(`✗ UTXOs failed: ${e.message}`);
     }
     setLoading(false);
   };
@@ -80,11 +80,11 @@ export function KaspaClientTest() {
     log('Getting server info...');
     try {
       const info = await client.getServerInfo();
-      log(`âœ“ Server: ${info.serverVersion}`);
+      log(`✓ Server: ${info.serverVersion}`);
       log(`  Synced: ${info.isSynced}`);
       log(`  DAA Score: ${info.virtualDaaScore}`);
     } catch (e: any) {
-      log(`âœ— Server info failed: ${e.message}`);
+      log(`✗ Server info failed: ${e.message}`);
     }
     setLoading(false);
   };
@@ -94,9 +94,9 @@ export function KaspaClientTest() {
     log('Getting fee estimate...');
     try {
       const fee = await client.getFeeEstimate();
-      log(`âœ“ Fee: ${JSON.stringify(fee).slice(0, 80)}...`);
+      log(`✓ Fee: ${JSON.stringify(fee).slice(0, 80)}...`);
     } catch (e: any) {
-      log(`âœ— Fee failed: ${e.message}`);
+      log(`✗ Fee failed: ${e.message}`);
     }
     setLoading(false);
   };
@@ -105,9 +105,9 @@ export function KaspaClientTest() {
     log('Disconnecting...');
     try {
       await disconnect();
-      log('âœ“ Disconnected');
+      log('✓ Disconnected');
     } catch (e: any) {
-      log(`âœ— Disconnect failed: ${e.message}`);
+      log(`✗ Disconnect failed: ${e.message}`);
     }
   };
 
@@ -120,7 +120,7 @@ export function KaspaClientTest() {
 
       <View style={styles.status}>
         <Text style={styles.statusText}>
-          {isConnecting ? 'â³' : isConnected ? 'âœ…' : 'âŒ'} 
+          {isConnecting ? '⏳' : isConnected ? '✅' : '❌'} 
           {isConnected ? ` Connected to ${client.getNetwork()}` : ' Not connected'}
         </Text>
         {serverInfo && (
