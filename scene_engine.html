@@ -311,7 +311,11 @@ var FN = {
   },
   length: function (a) { return typeof a === "number" ? Math.abs(a) : vlen(a || v3()); },
   min: Math.min, max: Math.max, abs: Math.abs,
-  rand: function () { return rnd(); }
+  rand: function () { return rnd(); },
+  has: function (itemId) { return invCount(itemId); },
+  stat: function (base, name) { return derivedStat(base, name); },
+  level: function () { return playerLevel(); },
+  gold: function () { return gold(); }
 };
 function tokenize(s) {
   var out = [], i = 0;
@@ -324,6 +328,12 @@ function tokenize(s) {
       if (s.substr(i, ops[k].length) === ops[k]) { out.push({ t: "op", v: ops[k] }); i += ops[k].length; matched = true; break; }
     }
     if (matched) continue;
+    if (c === "'") {
+      var str = ""; i++;
+      while (i < s.length && s[i] !== "'") str += s[i++];
+      i++; // closing quote
+      out.push({ t: "str", v: str }); continue;
+    }
     if (/[0-9]/.test(c)) {
       var num = "";
       while (i < s.length && /[0-9.]/.test(s[i])) num += s[i++];
@@ -347,6 +357,7 @@ function parseExpr(toks) {
     var t = peek();
     if (!t) throw new Error("unexpected end");
     if (t.t === "num") { p++; depth--; return { k: "num", v: t.v }; }
+    if (t.t === "str") { p++; depth--; return { k: "str", v: t.v }; }
     if (t.v === "!") { p++; var e = primary(); depth--; return { k: "not", a: e }; }
     if (t.v === "-") { p++; var e2 = primary(); depth--; return { k: "neg", a: e2 }; }
     if (t.v === "(") { p++; var e3 = expr(); eat(")"); depth--; return e3; }
@@ -408,6 +419,7 @@ function resolvePath(path, ctx) {
 function evalExpr(node, ctx) {
   switch (node.k) {
     case "num": return node.v;
+    case "str": return node.v;
     case "neg": return -evalExpr(node.a, ctx);
     case "not": return !evalExpr(node.a, ctx);
     case "path": var r = resolvePath(node.p, ctx); return r === undefined ? 0 : r;
@@ -546,6 +558,9 @@ function walkNodes(list, parent) {
     nodes[n.id] = n;
 
     if (n.type === "Spawner") { expandSpawner(n); }
+    if (n.type === "Backdrop") { n.id = n.id || "bg"; scene._backdrop = n; }
+    if (n.type === "Walkmesh") { scene._walkmesh = n.polygons || []; }
+    if (n.type === "Tilemap") { scene._tilemap = n; }
     if (n.mesh) n._geo = buildMesh(n.mesh, (scene.resources.meshes || {})[n.mesh] || { type: "box" });
     if (n.id === "terrain" || (n.collision === "mesh" && n._geo && n._geo.heightFn)) terrainMesh = n;
     if ((n.tags || []).indexOf("player") >= 0) playerId = n.id;
@@ -608,10 +623,18 @@ function updateActor(n, dt) {
       var fx = Math.sin(ang), fz = Math.cos(ang);
       var dx = (fx * INPUT.move.y + fz * INPUT.move.x) * sp * dt;
       var dz = (fz * INPUT.move.y - fx * INPUT.move.x) * sp * dt;
-      t.pos[0] += dx; t.pos[2] += dz;
+      var nx = t.pos[0] + dx, nz2 = t.pos[2] + dz;
+      var tm2 = scene._tilemap;
+      var blocked = tm2 ? tilemapBlocked(tm2, nx, nz2) : !walkmeshAllows(nx, nz2);
+      // axis-separated slide: blocked diagonals still let you skim the wall
+      if (!blocked) { t.pos[0] = nx; t.pos[2] = nz2; }
+      else {
+        if (!(tm2 ? tilemapBlocked(tm2, nx, t.pos[2]) : !walkmeshAllows(nx, t.pos[2]))) t.pos[0] = nx;
+        else if (!(tm2 ? tilemapBlocked(tm2, t.pos[0], nz2) : !walkmeshAllows(t.pos[0], nz2))) t.pos[2] = nz2;
+      }
       t.rot[1] = Math.atan2(dx, dz) / DEG;
     }
-    t.pos[1] = terrainHeight(t.pos[0], t.pos[2]);
+    t.pos[1] = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
   }
 
   if (ctl && ctl.type === "railPath") {
@@ -753,7 +776,224 @@ function runAction(self, a) {
     case "setState": world.flags[a.args ? a.args[0] : "f"] = a.args ? a.args[1] : true; break;
     case "commit": bridgeCommit(); break;
     case "play": break;
+    case "startDialogue": startDialogue(a.args ? a.args[0] : ""); break;
+    case "openShop": openShop(a.args ? a.args[0] : ""); break;
+    case "giveItem": invAdd(a.args ? a.args[0] : "", a.args ? (a.args[1] || 1) : 1); break;
+    case "takeItem": invRemove(a.args ? a.args[0] : "", a.args ? (a.args[1] || 1) : 1); break;
+    case "giveGold": world.flags.gold = (world.flags.gold || 0) + (a.amount || 0); break;
+    case "giveXp": world.flags.xp = (world.flags.xp || 0) + (a.amount || 0); break;
   }
+}
+
+// ---------------------------------------------------------------------------
+// RPG SYSTEMS  -- dialogue trees, item/stat tables, shops, encounters.
+// All pure tables: the scene declares data, these systems execute it.
+// ---------------------------------------------------------------------------
+
+// ---- inventory & derived stats -------------------------------------------
+var INV = { items: {}, equipped: {} };
+
+function itemDef(id) { return ((scene.tables || {}).items || {})[id] || {}; }
+function invAdd(id, n) { INV.items[id] = (INV.items[id] || 0) + (n || 1); }
+function invRemove(id, n) {
+  INV.items[id] = Math.max(0, (INV.items[id] || 0) - (n || 1));
+  if (!INV.items[id]) delete INV.items[id];
+}
+function invCount(id) { return INV.items[id] || 0; }
+function equip(slot, id) { if (invCount(id) > 0) INV.equipped[slot] = id; }
+function derivedStat(base, stat) {
+  var total = base || 0;
+  Object.keys(INV.equipped).forEach(function (slot) {
+    total += itemDef(INV.equipped[slot])[stat] || 0;
+  });
+  return total;
+}
+function playerLevel() {
+  var curve = (scene.tables || {}).xpCurve || [];
+  var xp = world.flags.xp || 0, lvl = 1;
+  for (var i = 0; i < curve.length; i++) { if (xp >= curve[i]) lvl = i + 2; else break; }
+  return lvl;
+}
+
+// ---- dialogue -------------------------------------------------------------
+// A dialogue OWNS input while open: movement and combat freeze underneath.
+var DLG = null;
+
+function dialogueOpen() { return !!DLG; }
+function startDialogue(treeId) {
+  var tree = (scene.dialogues || {})[treeId];
+  if (!tree || !tree.nodes) return;
+  DLG = { tree: tree, nodeId: tree.start || Object.keys(tree.nodes)[0] };
+  renderDialogue();
+}
+function dlgNode() { return DLG && DLG.tree.nodes[DLG.nodeId]; }
+function visibleChoices(node) {
+  return (node.choices || []).filter(function (c) {
+    return !c.when || evalExpr(compileExpr(c.when), exprCtx(null));
+  });
+}
+function applyDlgEffects(obj) {
+  if (obj.set) world.flags[obj.set[0]] = obj.set.length > 1 ? obj.set[1] : true;
+  (obj.actions || []).forEach(function (a) { runAction(null, a); });
+}
+function advanceDialogue(choiceIdx) {
+  var node = dlgNode();
+  if (!node) { DLG = null; hideDialogue(); return; }
+  var next = null;
+  var ch = visibleChoices(node);
+  if (ch.length > 0) {
+    var pick = ch[Math.max(0, Math.min(ch.length - 1, choiceIdx || 0))];
+    applyDlgEffects(pick);
+    next = pick.to || null;
+  } else {
+    applyDlgEffects(node);
+    next = node.to || null;
+  }
+  if (next && DLG.tree.nodes[next]) { DLG.nodeId = next; renderDialogue(); }
+  else { DLG = null; hideDialogue(); }
+}
+
+var dlgEl = null;
+function renderDialogue() {
+  var node = dlgNode();
+  if (!node) return hideDialogue();
+  if (!dlgEl) {
+    dlgEl = document.createElement("div");
+    dlgEl.style.cssText = "position:absolute;left:8px;right:8px;bottom:8px;" +
+      "background:rgba(12,16,24,.92);border:1px solid #3f5c6b;border-radius:6px;" +
+      "padding:10px 12px;color:#e8e2d0;font-size:13px;line-height:1.45;pointer-events:auto";
+    hud.appendChild(dlgEl);
+  }
+  var htmlStr = "";
+  if (node.speaker) htmlStr += '<div style="color:#c9b48a;font-size:11px;margin-bottom:3px">' + node.speaker + '</div>';
+  htmlStr += '<div>' + String(node.text || "") + '</div>';
+  var ch = visibleChoices(node);
+  if (ch.length) {
+    htmlStr += '<div style="margin-top:8px">';
+    ch.forEach(function (c, i) {
+      htmlStr += '<div data-i="' + i + '" style="padding:5px 8px;margin-top:3px;background:#1b2430;' +
+        'border-radius:4px;cursor:pointer">&#9656; ' + c.label + '</div>';
+    });
+    htmlStr += '</div>';
+  } else {
+    htmlStr += '<div style="margin-top:6px;color:#8a8a8a;font-size:11px">tap to continue</div>';
+  }
+  dlgEl.innerHTML = htmlStr;
+  dlgEl.onclick = function (e) {
+    var idx = e.target && e.target.getAttribute ? e.target.getAttribute("data-i") : null;
+    advanceDialogue(idx === null ? 0 : parseInt(idx, 10));
+  };
+  dlgEl.style.display = "block";
+}
+function hideDialogue() { if (dlgEl) dlgEl.style.display = "none"; }
+
+// ---- shop -----------------------------------------------------------------
+var SHOP = null, shopEl = null;
+function openShop(shopId) {
+  var def = (scene.shops || {})[shopId];
+  if (!def) return;
+  SHOP = { id: shopId, def: def };
+  renderShop();
+}
+function gold() { return world.flags.gold || 0; }
+function renderShop() {
+  if (!SHOP) return;
+  if (!shopEl) {
+    shopEl = document.createElement("div");
+    shopEl.style.cssText = "position:absolute;left:8px;right:8px;top:8px;bottom:8px;" +
+      "background:rgba(12,16,24,.95);border:1px solid #3f5c6b;border-radius:6px;" +
+      "padding:12px;color:#e8e2d0;font-size:13px;overflow:auto;pointer-events:auto";
+    hud.appendChild(shopEl);
+  }
+  var d = SHOP.def, htmlStr = '<div style="color:#c9b48a;font-weight:600">' + (d.name || "Shop") +
+    '</div><div style="font-size:11px;margin:4px 0 8px;color:#8a8a8a">Gold: ' + gold() + '</div>';
+  (d.sells || []).forEach(function (id) {
+    var it = itemDef(id);
+    htmlStr += '<div data-buy="' + id + '" style="display:flex;justify-content:space-between;' +
+      'padding:6px 8px;margin-top:4px;background:#1b2430;border-radius:4px;cursor:pointer">' +
+      '<span>' + (it.name || id) + ' <span style="color:#8a8a8a;font-size:11px">x' + invCount(id) + '</span></span>' +
+      '<span style="color:#c9b48a">' + (it.price || 0) + 'g</span></div>';
+  });
+  htmlStr += '<div data-close="1" style="margin-top:10px;text-align:center;padding:7px;' +
+    'background:#3f5c6b;border-radius:4px;cursor:pointer">Leave</div>';
+  shopEl.innerHTML = htmlStr;
+  shopEl.style.display = "block";
+  shopEl.onclick = function (e) {
+    var t = e.target.closest ? e.target.closest("[data-buy],[data-close]") : e.target;
+    if (!t) return;
+    if (t.getAttribute("data-close")) { SHOP = null; shopEl.style.display = "none"; return; }
+    var id = t.getAttribute("data-buy");
+    if (id) {
+      var price = itemDef(id).price || 0;
+      if (gold() >= price) { world.flags.gold = gold() - price; invAdd(id, 1); }
+      renderShop();
+    }
+  };
+}
+
+// ---- encounters -----------------------------------------------------------
+var ENC = { steps: 0, threshold: 0, zone: null, rng: null };
+function updateEncounters(dt) {
+  var pl = nodes[playerId];
+  if (!pl || dialogueOpen() || SHOP) return;
+  var zone = null;
+  Object.keys(nodes).forEach(function (id) {
+    var n = nodes[id];
+    if (n.type === "Area3D" && n.encounterZone && n._in) zone = n.encounterZone;
+  });
+  if (!zone) { ENC.zone = null; return; }
+  if (ENC.zone !== zone) {
+    ENC.zone = zone; ENC.steps = 0;
+    ENC.rng = srandFor("enc:" + zone);
+    var def = (scene.encounters || {})[zone] || {};
+    ENC.threshold = (def.stepsMin || 6) + ENC.rng() * ((def.stepsMax || 14) - (def.stepsMin || 6));
+  }
+  if (INPUT.move.length > 0.1) ENC.steps += dt * 3;
+  if (ENC.steps >= ENC.threshold) {
+    ENC.steps = 0;
+    var d2 = (scene.encounters || {})[zone] || {};
+    ENC.threshold = (d2.stepsMin || 6) + ENC.rng() * 8;
+    spawnEncounter(zone);
+  }
+}
+function spawnEncounter(zone) {
+  var def = (scene.encounters || {})[zone];
+  if (!def || !def.spawn || !def.spawn.length) return;
+  var total = 0;
+  def.spawn.forEach(function (sp) { total += sp.weight || 1; });
+  var roll = ENC.rng() * total, pick = def.spawn[0];
+  for (var i = 0; i < def.spawn.length; i++) {
+    roll -= def.spawn[i].weight || 1;
+    if (roll <= 0) { pick = def.spawn[i]; break; }
+  }
+  var pl = nodes[playerId];
+  var ang = ENC.rng() * Math.PI * 2, r = 4 + ENC.rng() * 3;
+  var foe = {
+    id: "enc_" + Math.floor(world.time * 1000),
+    type: "Actor", mesh: pick.mesh, material: pick.material,
+    tags: ["enemy", "encounter"],
+    transform: { pos: [pl.worldPos.x + Math.cos(ang) * r, 0, pl.worldPos.z + Math.sin(ang) * r] },
+    stats: pick.stats || { hp: 10, speed: 2.5, attack: 3 }
+  };
+  foe.stateMachine = pick.stateMachine || {
+    initial: "chase",
+    states: {
+      chase: { behavior: { type: "seek", target: playerId, speed: foe.stats.speed || 2.5 },
+               transitions: [{ to: "strike", when: "distance(self, player) < 2" }] },
+      strike: { onEnter: [{ action: "damage", target: playerId, amount: foe.stats.attack || 3 }],
+                transitions: [{ to: "chase", when: "self.hp > 0" }] },
+      dead: { onEnter: [{ action: "despawn", target: "self", delay: 1 }] }
+    },
+    anyState: [{ to: "dead", when: "self.hp <= 0" }]
+  };
+  if (foe.mesh) foe._geo = buildMesh(foe.mesh, (scene.resources.meshes || {})[foe.mesh] || { type: "box" });
+  foe.hp = foe.stats.hp; foe.maxHp = foe.stats.hp;
+  foe.worldPos = v3(foe.transform.pos[0], 0, foe.transform.pos[2]);
+  nodes[foe.id] = foe;
+  scene.nodes.push(foe);
+  enterState(foe, foe.stateMachine.initial);
+  actors.push(foe);
+  console.log("[Encounter]", zone, "->", foe.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -850,6 +1090,16 @@ function collectNode(n, parentM) {
   if (n._dead) return;
   var m = n._world || matMul(parentM, nodeMatrix(n));
 
+  if (n.type === "Billboard" && n.visible !== false) {
+    // A 2D sprite standing in 3D space (Xenogears, Doom). Drawn as a camera-
+    // facing quad from a procedural sprite recipe, depth-sorted with the rest.
+    var bp = project(n.worldPos);
+    if (bp) {
+      var sz = (n.spriteSize || 2) * fovScale / bp.z;
+      drawList.push({ billboard: true, x: bp.x, y: bp.y, w: sz * (n.aspect || 0.7), h: sz,
+        z: bp.z, col: n.color || "#c9b48a", shape: n.shape || "figure" });
+    }
+  }
   if (n._geo && n.visible !== false) {
     var mat = (scene.resources.materials || {})[n.material] || {};
     var tex = mat.texture ? makeTexture(mat.texture, (scene.resources.textures || {})[mat.texture] || {}) : null;
@@ -880,6 +1130,136 @@ function collectNode(n, parentM) {
 
 var LIGHT = vnorm(v3(-0.4, 0.8, -0.3));
 
+// ---------------------------------------------------------------------------
+// BACKDROP  -- the FF7 / Chrono Cross / Oddworld trick: a 2D painted scene
+// behind 3D actors, with walkmesh polygons defining where feet may go. The
+// backdrop here is procedural (recipe + seed), never a shipped image.
+// ---------------------------------------------------------------------------
+var backdropCache = {};
+function makeBackdrop(name, spec) {
+  if (backdropCache[name]) return backdropCache[name];
+  var c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  var g = c.getContext("2d");
+  var rng = srandFor("bg:" + name);
+  var pal = spec.palette || ["#1b2430", "#3f5c6b", "#7a9a8b", "#c9b48a"];
+
+  // sky gradient
+  var grad = g.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, pal[0]); grad.addColorStop(1, pal[1] || pal[0]);
+  g.fillStyle = grad; g.fillRect(0, 0, W, H);
+
+  // layered silhouette hills, back to front
+  var layers = spec.layers || 3;
+  for (var L = 0; L < layers; L++) {
+    var base = H * (0.35 + 0.18 * L);
+    var amp = 18 + L * 10;
+    var col = pal[Math.min(pal.length - 1, 1 + L)];
+    g.fillStyle = col;
+    g.beginPath();
+    g.moveTo(0, H);
+    var nz = noise2(rng);
+    for (var x = 0; x <= W; x += 4) {
+      g.lineTo(x, base + (nz(x * 0.02, L * 7) - 0.5) * amp);
+    }
+    g.lineTo(W, H); g.closePath(); g.fill();
+  }
+
+  // simple structures if requested (rects with roofs, windows)
+  if (spec.buildings) {
+    var n = spec.buildings, groundY = H * 0.78;
+    for (var b = 0; b < n; b++) {
+      var bw = 24 + rng() * 30, bh = 30 + rng() * 44;
+      var bx = rng() * (W - bw);
+      g.fillStyle = pal[pal.length - 1];
+      g.fillRect(bx, groundY - bh, bw, bh);
+      g.fillStyle = pal[0];
+      for (var wy = groundY - bh + 6; wy < groundY - 8; wy += 12) {
+        for (var wx = bx + 4; wx < bx + bw - 6; wx += 10) {
+          if (rng() > 0.4) g.fillRect(wx, wy, 4, 6);
+        }
+      }
+    }
+  }
+
+  // ordered dither pass keeps the palette-era grain
+  if (spec.dither !== false) {
+    g.globalAlpha = 0.06;
+    for (var dy = 0; dy < H; dy += 2) for (var dx = (dy % 4 === 0 ? 0 : 1); dx < W; dx += 2) {
+      g.fillStyle = "#000"; g.fillRect(dx, dy, 1, 1);
+    }
+    g.globalAlpha = 1;
+  }
+  backdropCache[name] = c;
+  return c;
+}
+
+// point-in-polygon for walkmesh containment (xz plane)
+function inPoly(px, pz, poly) {
+  var inside = false;
+  for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    var xi = poly[i][0], zi = poly[i][1], xj = poly[j][0], zj = poly[j][1];
+    if (((zi > pz) !== (zj > pz)) && (px < (xj - xi) * (pz - zi) / (zj - zi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function walkmeshAllows(x, z) {
+  var wm = scene._walkmesh;
+  if (!wm) return true;
+  for (var i = 0; i < wm.length; i++) if (inPoly(x, z, wm[i])) return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// TILEMAP  -- 2D grid worlds (Suikoden, Legend of Mana). Rendered orthographic
+// straight to screen; the 3D pass is skipped when a Tilemap is the stage.
+// ---------------------------------------------------------------------------
+function renderTilemap(n) {
+  var ts = n.tileSize || 16;
+  var map = n.map || [];
+  var defs = n.tiles || {};
+  var pl = nodes[playerId];
+  var camX = pl ? pl.transform.pos[0] * ts - W / 2 : 0;
+  var camY = pl ? pl.transform.pos[2] * ts - H / 2 : 0;
+  var rows = map.length;
+  for (var r = 0; r < rows; r++) {
+    var row = map[r];
+    for (var cidx = 0; cidx < row.length; cidx++) {
+      var ch = row[cidx];
+      var def = defs[ch] || {};
+      var x = cidx * ts - camX, y = r * ts - camY;
+      if (x + ts < 0 || x > W || y + ts < 0 || y > H) continue;
+      ctx.fillStyle = def.color || "#222";
+      ctx.fillRect(x, y, ts, ts);
+      if (def.deco === "dots") {
+        ctx.fillStyle = def.decoColor || "#000";
+        ctx.fillRect(x + ts * 0.3, y + ts * 0.3, 2, 2);
+        ctx.fillRect(x + ts * 0.7, y + ts * 0.6, 2, 2);
+      } else if (def.deco === "cross") {
+        ctx.fillStyle = def.decoColor || "#000";
+        ctx.fillRect(x + ts / 2 - 1, y + 2, 2, ts - 4);
+        ctx.fillRect(x + 2, y + ts / 2 - 1, ts - 4, 2);
+      }
+    }
+  }
+  // actors as sprites on the map
+  Object.keys(nodes).forEach(function (id) {
+    var a = nodes[id];
+    if (!a.tags || a._dead) return;
+    var x = a.transform.pos[0] * ts - camX, y = a.transform.pos[2] * ts - camY;
+    ctx.fillStyle = a.spriteColor || ((a.tags || []).indexOf("player") >= 0 ? "#e8e2d0" : "#a3564f");
+    ctx.fillRect(x - ts * 0.35, y - ts * 0.7, ts * 0.7, ts * 0.7);
+    ctx.fillRect(x - ts * 0.2, y - ts * 1.05, ts * 0.4, ts * 0.4);
+  });
+}
+function tilemapBlocked(n, x, z) {
+  var map = n.map || [], defs = n.tiles || {};
+  var r = Math.floor(z), c = Math.floor(x);
+  if (r < 0 || r >= map.length || c < 0 || c >= map[r].length) return true;
+  var def = defs[map[r][c]] || {};
+  return !!def.solid;
+}
+
 function drawTexTri(t) {
   var p = t.p, img = t.tex, tw = img.width, th = img.height;
   var tl = t.tiling || [1, 1];
@@ -903,10 +1283,40 @@ function drawTexTri(t) {
   ctx.restore();
 }
 
+function drawBillboard(t) {
+  ctx.fillStyle = t.col;
+  if (t.shape === "figure") {
+    // head + torso blob: reads as a person at any size
+    ctx.fillRect(t.x - t.w / 2, t.y - t.h * 0.55, t.w, t.h * 0.55);
+    var hw = t.w * 0.55;
+    ctx.fillRect(t.x - hw / 2, t.y - t.h * 0.95, hw, t.h * 0.4);
+  } else if (t.shape === "orb") {
+    ctx.beginPath(); ctx.arc(t.x, t.y - t.h / 2, t.w / 2, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.fillRect(t.x - t.w / 2, t.y - t.h, t.w, t.h);
+  }
+}
+
 function renderFrame() {
   var r = scene.render || {};
-  ctx.fillStyle = (r.fog && r.fog.color) || "#101820";
-  ctx.fillRect(0, 0, W, H);
+
+  // Tilemap stage short-circuits the 3D pipeline entirely.
+  var tm = scene._tilemap;
+  if (tm) {
+    ctx.fillStyle = tm.bg || "#0c0c10";
+    ctx.fillRect(0, 0, W, H);
+    renderTilemap(tm);
+    return;
+  }
+
+  // Backdrop stage paints the scene behind the 3D pass.
+  var bd = scene._backdrop;
+  if (bd) {
+    ctx.drawImage(makeBackdrop(bd.id, bd), 0, 0);
+  } else {
+    ctx.fillStyle = (r.fog && r.fog.color) || "#101820";
+    ctx.fillRect(0, 0, W, H);
+  }
 
   drawList.length = 0;
   (scene.nodes || []).forEach(function (n) {
@@ -917,7 +1327,9 @@ function renderFrame() {
 
   var affine = r.affineTextures !== false;
   for (var i = 0; i < drawList.length; i++) {
-    var t = drawList[i], p = t.p;
+    var t = drawList[i];
+    if (t.billboard) { drawBillboard(t); continue; }
+    var p = t.p;
     if (t.tex && affine) {
       drawTexTri(t);
       // flat-shade overlay: darkening pass keeps the era's banded look
@@ -1102,6 +1514,7 @@ function applySavedState(state) {
     if (!tgt || parts.length < 2) {
       if (parts[0] === "score") world.score = state[k];
       else if (parts[0] === "flags") world.flags = state[k] || {};
+      else if (parts[0] === "inventory") INV = state[k] || { items: {}, equipped: {} };
       return;
     }
     var val = state[k];
@@ -1114,6 +1527,8 @@ function bridgeCommit() {
   var keys2 = (scene.persistence && scene.persistence.saveKeys) || [];
   var state = {};
   keys2.forEach(function (k) {
+    if (k === "inventory") { state[k] = INV; return; }
+    if (k === "flags") { state[k] = world.flags; return; }
     var v = resolvePath(k.split("."), exprCtx(null));
     if (v && v.x !== undefined) v = [v.x, v.y, v.z];
     state[k] = v;
@@ -1175,9 +1590,15 @@ function loadScene(json) {
   var v = validate(scene);
   if (v) return fail("scene rejected: " + v);
 
-  nodes = {}; actors = []; meshCache = {}; texCache = {};
+  nodes = {}; actors = []; meshCache = {}; texCache = {}; backdropCache = {};
+  scene._backdrop = null; scene._walkmesh = null; scene._tilemap = null;
   playerId = null; camera = null; terrainMesh = null;
   world = { alert: false, flags: {}, score: 0, time: 0 };
+  INV = { items: {}, equipped: {} };
+  DLG = null; SHOP = null;
+  if (dlgEl) dlgEl.style.display = "none";
+  if (shopEl) shopEl.style.display = "none";
+  ENC = { steps: 0, threshold: 0, zone: null, rng: null };
   rnd = mulberry(hashStr(scene.meta.seed || "kv"));
 
   scene.resources = scene.resources || {};
@@ -1214,7 +1635,10 @@ function loop(t) {
   edgeFlush();
 
   updateTransforms(scene.nodes, matIdent());
-  actors.forEach(function (a) { if (!a._dead) updateActor(a, dt); });
+  if (!dialogueOpen() && !SHOP) {
+    actors.forEach(function (a) { if (!a._dead) updateActor(a, dt); });
+  }
+  updateEncounters(dt);
   updateTransforms(scene.nodes, matIdent());
   buildView();
   updateAreas();
