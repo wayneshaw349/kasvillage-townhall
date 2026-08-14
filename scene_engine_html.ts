@@ -651,6 +651,7 @@ function walkNodes(list, parent) {
     if ((n.tags || []).indexOf("player") >= 0) playerId = n.id;
     if (n.type === "Camera3D") camera = n;
     if (n.type === "AnimationPlayer") { ANIMS.push(n); if (n.autoplay) animPlay(n, n.autoplay); }
+    if (n.physics) physRegister(n);
     if (n.stateMachine) {
       n._state = n.stateMachine.initial;
       n._stateT = 0;
@@ -970,6 +971,9 @@ function runAction(self, a) {
     case "setState": world.flags[a.args ? a.args[0] : "f"] = a.args ? a.args[1] : true; break;
     case "commit": bridgeCommit(); break;
     case "play": if (target && target.clips) animPlay(target, a.args ? a.args[0] : ""); break;
+    case "impulse": if (target && a.args) physImpulse(target, a.args[0] || 0, a.args[1] || 0, a.args[2] || 0); break;
+    case "setVelocity": if (target && a.args) physSetVel(target, a.args[0] || 0, a.args[1] || 0, a.args[2] || 0); break;
+    case "wake": if (target && target._pb) pbWake(target._pb); break;
     case "stop": if (target && target.clips) animStop(target); break;
     case "tween": if (target && a.args) startTween(target, a.args[0], a.args[1] || 0, a.args[2] || 0.5, a.args[3]); break;
     case "startDialogue": startDialogue(a.args ? a.args[0] : ""); break;
@@ -1631,6 +1635,267 @@ function renderMenu() {
 // ---------------------------------------------------------------------------
 
 // ---- occluders: MeshInstances with collision block sight lines -------------
+// ---------------------------------------------------------------------------
+// PHYSICS (v6) -- Bullet-style rigid bodies. Fixed 60Hz substeps decoupled
+// from render dt so simulation is deterministic; sequential impulse solver
+// with Baumgarte positional correction; uniform-grid broadphase; bodies sleep.
+// Declared per node:  physics: { body:"dynamic"|"static"|"kinematic",
+//   shape:"sphere"|"box"|"capsule", radius, half:[x,y,z], height,
+//   mass, restitution, friction, gravityScale }
+// ---------------------------------------------------------------------------
+var BODIES = [];
+var PHYS = { gravity: -20, fixedDt: 1 / 60, accum: 0, maxSteps: 5, iterations: 6,
+             sleepVel: 0.08, sleepTime: 0.5, slop: 0.01, baumgarte: 0.2, cell: 2.0 };
+
+function physRegister(n) {
+  var p = n.physics || {};
+  n._pb = {
+    node: n,
+    kind: p.body || "dynamic",
+    shape: p.shape || "sphere",
+    r: p.radius != null ? p.radius : 0.4,
+    half: p.half || [0.5, 0.5, 0.5],
+    h: p.height != null ? p.height : 1.6,
+    mass: (p.body === "static" || p.body === "kinematic") ? 0 : (p.mass != null ? p.mass : 1),
+    rest: p.restitution != null ? p.restitution : 0.2,
+    fric: p.friction != null ? p.friction : 0.5,
+    gs: p.gravityScale != null ? p.gravityScale : 1,
+    vel: { x: 0, y: 0, z: 0 },
+    sleep: 0, asleep: false
+  };
+  n._pb.invMass = n._pb.mass > 0 ? 1 / n._pb.mass : 0;
+  BODIES.push(n._pb);
+}
+
+function pbPos(b) {
+  var t = b.node.transform || (b.node.transform = {});
+  t.pos = t.pos || [0, 0, 0];
+  return t.pos;
+}
+function pbWake(b) { b.asleep = false; b.sleep = 0; }
+function physImpulse(n, x, y, z) {
+  var b = n._pb; if (!b || b.invMass === 0) return;
+  b.vel.x += x * b.invMass; b.vel.y += y * b.invMass; b.vel.z += z * b.invMass;
+  pbWake(b);
+}
+function physSetVel(n, x, y, z) {
+  var b = n._pb; if (!b) return;
+  b.vel.x = x; b.vel.y = y; b.vel.z = z; pbWake(b);
+}
+
+// --- shape radius helpers (broadphase bound) -------------------------------
+function pbBound(b) {
+  if (b.shape === "box") return Math.sqrt(b.half[0]*b.half[0] + b.half[1]*b.half[1] + b.half[2]*b.half[2]);
+  if (b.shape === "capsule") return b.r + b.h * 0.5;
+  return b.r;
+}
+
+// --- narrowphase: returns { nx, ny, nz, depth } or null ---------------------
+// Sphere/capsule treated as swept spheres on the Y axis; box uses closest-point.
+function pbContact(a, b) {
+  var pa = pbPos(a), pb = pbPos(b);
+  var ax = pa[0], ay = pa[1], az = pa[2];
+  var bx = pb[0], by = pb[1], bz = pb[2];
+
+  if (a.shape === "box" || b.shape === "box") {
+    var boxB = (b.shape === "box") ? b : a;
+    var sph  = (b.shape === "box") ? a : b;
+    var bp = pbPos(boxB), sp = pbPos(sph);
+    var hx = boxB.half[0], hy = boxB.half[1], hz = boxB.half[2];
+    var cx = Math.max(bp[0] - hx, Math.min(sp[0], bp[0] + hx));
+    var cy = Math.max(bp[1] - hy, Math.min(sp[1], bp[1] + hy));
+    var cz = Math.max(bp[2] - hz, Math.min(sp[2], bp[2] + hz));
+    var dx = sp[0] - cx, dy = sp[1] - cy, dz = sp[2] - cz;
+    var d2 = dx*dx + dy*dy + dz*dz;
+    var sr = sph.shape === "capsule" ? sph.r : sph.r;
+    if (d2 > sr * sr) return null;
+    var d = Math.sqrt(d2);
+    if (d < 1e-6) { dx = 0; dy = 1; dz = 0; d = 1; }
+    var n = { nx: dx / d, ny: dy / d, nz: dz / d, depth: sr - d };
+    if (boxB === b) return n;
+    return { nx: -n.nx, ny: -n.ny, nz: -n.nz, depth: n.depth };
+  }
+
+  // sphere/capsule vs sphere/capsule: clamp Y onto each segment
+  var ah = a.shape === "capsule" ? a.h * 0.5 : 0;
+  var bh = b.shape === "capsule" ? b.h * 0.5 : 0;
+  var ayc = Math.max(ay - ah, Math.min(by, ay + ah));
+  var byc = Math.max(by - bh, Math.min(ayc, by + bh));
+  var dx2 = bx - ax, dy2 = byc - ayc, dz2 = bz - az;
+  var rr = a.r + b.r;
+  var dd = dx2*dx2 + dy2*dy2 + dz2*dz2;
+  if (dd > rr * rr) return null;
+  var dl = Math.sqrt(dd);
+  if (dl < 1e-6) { dx2 = 0; dy2 = 1; dz2 = 0; dl = 1; }
+  return { nx: dx2 / dl, ny: dy2 / dl, nz: dz2 / dl, depth: rr - dl };
+}
+
+// --- broadphase: uniform grid on xz ----------------------------------------
+function pbPairs() {
+  var grid = {}, pairs = [], i, j;
+  for (i = 0; i < BODIES.length; i++) {
+    var b = BODIES[i];
+    if (b.node._dead) continue;
+    var p = pbPos(b), rad = pbBound(b);
+    var x0 = Math.floor((p[0] - rad) / PHYS.cell), x1 = Math.floor((p[0] + rad) / PHYS.cell);
+    var z0 = Math.floor((p[2] - rad) / PHYS.cell), z1 = Math.floor((p[2] + rad) / PHYS.cell);
+    for (var gx = x0; gx <= x1; gx++) for (var gz = z0; gz <= z1; gz++) {
+      var k = gx + ":" + gz;
+      (grid[k] = grid[k] || []).push(i);
+    }
+  }
+  var seen = {};
+  for (var key in grid) {
+    var cell = grid[key];
+    for (i = 0; i < cell.length; i++) for (j = i + 1; j < cell.length; j++) {
+      var A = BODIES[cell[i]], B = BODIES[cell[j]];
+      if (A.invMass === 0 && B.invMass === 0) continue;
+      if (A.asleep && B.asleep) continue;
+      var pk = cell[i] < cell[j] ? cell[i] + "_" + cell[j] : cell[j] + "_" + cell[i];
+      if (seen[pk]) continue;
+      seen[pk] = 1;
+      pairs.push([A, B]);
+    }
+  }
+  return pairs;
+}
+
+// --- one fixed step --------------------------------------------------------
+function physStep(h) {
+  var i, b;
+  // integrate velocity
+  for (i = 0; i < BODIES.length; i++) {
+    b = BODIES[i];
+    if (b.invMass === 0 || b.asleep || b.node._dead) continue;
+    b.vel.y += PHYS.gravity * b.gs * h;
+  }
+  // integrate position
+  for (i = 0; i < BODIES.length; i++) {
+    b = BODIES[i];
+    if (b.invMass === 0 || b.asleep || b.node._dead) continue;
+    var p = pbPos(b);
+    p[0] += b.vel.x * h; p[1] += b.vel.y * h; p[2] += b.vel.z * h;
+  }
+  // ground / terrain plane (cheap static floor everything rests on)
+  for (i = 0; i < BODIES.length; i++) {
+    b = BODIES[i];
+    if (b.invMass === 0 || b.asleep || b.node._dead) continue;
+    var pp = pbPos(b);
+    var floor = terrainHeight(pp[0], pp[2]);
+    var foot = b.shape === "box" ? b.half[1] : (b.shape === "capsule" ? b.h * 0.5 + b.r : b.r);
+    if (pp[1] - foot < floor) {
+      pp[1] = floor + foot;
+      if (b.vel.y < 0) {
+        b.vel.y = -b.vel.y * b.rest;
+        if (Math.abs(b.vel.y) < 0.4) b.vel.y = 0;
+        b.vel.x *= (1 - b.fric * 0.35);
+        b.vel.z *= (1 - b.fric * 0.35);
+      }
+    }
+  }
+  // contacts
+  var pairs = pbPairs(), contacts = [];
+  for (i = 0; i < pairs.length; i++) {
+    var c = pbContact(pairs[i][0], pairs[i][1]);
+    if (c) { c.a = pairs[i][0]; c.b = pairs[i][1]; contacts.push(c); }
+  }
+  // sequential impulses
+  for (var it = 0; it < PHYS.iterations; it++) {
+    for (i = 0; i < contacts.length; i++) {
+      var ct = contacts[i], A = ct.a, B = ct.b;
+      var im = A.invMass + B.invMass;
+      if (im === 0) continue;
+      var rvx = B.vel.x - A.vel.x, rvy = B.vel.y - A.vel.y, rvz = B.vel.z - A.vel.z;
+      var vn = rvx * ct.nx + rvy * ct.ny + rvz * ct.nz;
+      if (vn > 0) continue;
+      var e = Math.min(A.rest, B.rest);
+      var jn = -(1 + e) * vn / im;
+      A.vel.x -= jn * ct.nx * A.invMass; A.vel.y -= jn * ct.ny * A.invMass; A.vel.z -= jn * ct.nz * A.invMass;
+      B.vel.x += jn * ct.nx * B.invMass; B.vel.y += jn * ct.ny * B.invMass; B.vel.z += jn * ct.nz * B.invMass;
+      // friction along the tangent of relative motion
+      rvx = B.vel.x - A.vel.x; rvy = B.vel.y - A.vel.y; rvz = B.vel.z - A.vel.z;
+      vn = rvx * ct.nx + rvy * ct.ny + rvz * ct.nz;
+      var tx = rvx - vn * ct.nx, ty = rvy - vn * ct.ny, tz = rvz - vn * ct.nz;
+      var tl = Math.sqrt(tx*tx + ty*ty + tz*tz);
+      if (tl > 1e-6) {
+        tx /= tl; ty /= tl; tz /= tl;
+        var mu = Math.sqrt(A.fric * B.fric);
+        var jt = -tl / im;
+        var maxJt = Math.abs(jn) * mu;
+        if (jt < -maxJt) jt = -maxJt; else if (jt > maxJt) jt = maxJt;
+        A.vel.x -= jt * tx * A.invMass; A.vel.y -= jt * ty * A.invMass; A.vel.z -= jt * tz * A.invMass;
+        B.vel.x += jt * tx * B.invMass; B.vel.y += jt * ty * B.invMass; B.vel.z += jt * tz * B.invMass;
+      }
+    }
+  }
+  // positional correction (Baumgarte) + collision signals
+  for (i = 0; i < contacts.length; i++) {
+    var q = contacts[i], Aa = q.a, Bb = q.b;
+    var imm = Aa.invMass + Bb.invMass;
+    if (imm === 0) continue;
+    var corr = Math.max(q.depth - PHYS.slop, 0) / imm * PHYS.baumgarte;
+    var ap = pbPos(Aa), bp2 = pbPos(Bb);
+    ap[0] -= corr * q.nx * Aa.invMass; ap[1] -= corr * q.ny * Aa.invMass; ap[2] -= corr * q.nz * Aa.invMass;
+    bp2[0] += corr * q.nx * Bb.invMass; bp2[1] += corr * q.ny * Bb.invMass; bp2[2] += corr * q.nz * Bb.invMass;
+    pbWake(Aa); pbWake(Bb);
+    physCollideSignal(Aa.node, Bb.node);
+    physCollideSignal(Bb.node, Aa.node);
+  }
+  // sleeping
+  for (i = 0; i < BODIES.length; i++) {
+    b = BODIES[i];
+    if (b.invMass === 0 || b.node._dead) continue;
+    var sp2 = Math.sqrt(b.vel.x*b.vel.x + b.vel.y*b.vel.y + b.vel.z*b.vel.z);
+    if (sp2 < PHYS.sleepVel) {
+      b.sleep += h;
+      if (b.sleep > PHYS.sleepTime) { b.asleep = true; b.vel.x = b.vel.y = b.vel.z = 0; }
+    } else { b.sleep = 0; b.asleep = false; }
+  }
+}
+
+function physCollideSignal(n, other) {
+  if (!n.signals) return;
+  for (var i = 0; i < n.signals.length; i++) {
+    var s = n.signals[i];
+    if (s.signal !== "body_collided") continue;
+    if (s.filter && (!other.tags || other.tags.indexOf(s.filter) < 0)) continue;
+    runAction(n, s);
+  }
+}
+
+function updatePhysics(dt) {
+  if (!BODIES.length) return;
+  PHYS.accum += dt;
+  var steps = 0;
+  while (PHYS.accum >= PHYS.fixedDt && steps < PHYS.maxSteps) {
+    physStep(PHYS.fixedDt);
+    PHYS.accum -= PHYS.fixedDt;
+    steps++;
+  }
+  if (steps === PHYS.maxSteps) PHYS.accum = 0; // drop the backlog after a stall
+}
+
+// raycast(origin, dir, maxDist) -> { node, dist, point } | null
+// Shares the xz-occluder philosophy of segmentBlocked but returns the hit.
+function raycast(o, d, maxDist) {
+  var best = null;
+  var dl = Math.sqrt(d.x*d.x + d.y*d.y + d.z*d.z) || 1;
+  var ux = d.x/dl, uy = d.y/dl, uz = d.z/dl;
+  for (var i = 0; i < BODIES.length; i++) {
+    var b = BODIES[i];
+    if (b.node._dead) continue;
+    var p = pbPos(b), rad = pbBound(b);
+    var ex = p[0]-o.x, ey = p[1]-o.y, ez = p[2]-o.z;
+    var proj = ex*ux + ey*uy + ez*uz;
+    if (proj < 0 || proj > maxDist) continue;
+    var cx = o.x + ux*proj, cy = o.y + uy*proj, cz = o.z + uz*proj;
+    var dx = p[0]-cx, dy = p[1]-cy, dz = p[2]-cz;
+    if (dx*dx + dy*dy + dz*dz > rad*rad) continue;
+    if (!best || proj < best.dist) best = { node: b.node, dist: proj, point: { x: cx, y: cy, z: cz } };
+  }
+  return best;
+}
+
 function segmentBlocked(a, b) {
   // 2D (xz) segment vs circle test against every collidable node. Coarse but
   // period-correct: PS1 stealth games did exactly this.
@@ -2449,6 +2714,7 @@ function loadScene(json) {
 
   nodes = {}; actors = []; meshCache = {}; texCache = {}; backdropCache = {};
   scene._backdrop = null; scene._walkmesh = null; scene._tilemap = null;
+  BODIES = []; PHYS.accum = 0;
   playerId = null; camera = null; terrainMesh = null;
   world = { alert: false, flags: {}, score: 0, time: 0 };
   INV = { items: {}, equipped: {} };
@@ -2496,6 +2762,7 @@ function loop(t) {
   pollKeys();
   edgeFlush();
 
+  updatePhysics(dt);
   updateAnims(dt);
   updateTransforms(scene.nodes, matIdent());
   if (!dialogueOpen() && !SHOP && !battleOpen() && !MENU) {
