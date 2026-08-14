@@ -650,6 +650,7 @@ function walkNodes(list, parent) {
     if (n.id === "terrain" || (n.collision === "mesh" && n._geo && n._geo.heightFn)) terrainMesh = n;
     if ((n.tags || []).indexOf("player") >= 0) playerId = n.id;
     if (n.type === "Camera3D") camera = n;
+    if (n.type === "AnimationPlayer") { ANIMS.push(n); if (n.autoplay) animPlay(n, n.autoplay); }
     if (n.stateMachine) {
       n._state = n.stateMachine.initial;
       n._stateT = 0;
@@ -872,6 +873,85 @@ function updateAnimation(n, dt) {
 
 // The complete verb set. Adding a verb requires an engine change -- that
 // boundary is what keeps published scenes incapable of surprising anyone.
+// --- ANIMATION (v5.5): AnimationPlayer node + one-shot tweens.
+// AnimationPlayer: { type:"AnimationPlayer", target:"nodeId",
+//   clips:{ name:{ loop:bool, tracks:[{ path:"transform.pos.1", ease:"outCubic",
+//   keys:[[t,val],...] }] } }, autoplay:"name" }
+// Actions: play(clip), stop, tween(path,to,dur,ease).
+var ANIMS = [], TWEENS = [];
+var EASES = {
+  linear: function (t) { return t; },
+  inQuad: function (t) { return t * t; },
+  outQuad: function (t) { return t * (2 - t); },
+  inOutQuad: function (t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; },
+  inCubic: function (t) { return t * t * t; },
+  outCubic: function (t) { var u = t - 1; return u * u * u + 1; },
+  outElastic: function (t) { if (t === 0 || t === 1) return t; return Math.pow(2, -10 * t) * Math.sin((t - 0.075) * (2 * Math.PI) / 0.3) + 1; },
+  outBounce: function (t) { if (t < 1 / 2.75) return 7.5625 * t * t; if (t < 2 / 2.75) { t -= 1.5 / 2.75; return 7.5625 * t * t + .75; } if (t < 2.5 / 2.75) { t -= 2.25 / 2.75; return 7.5625 * t * t + .9375; } t -= 2.625 / 2.75; return 7.5625 * t * t + .984375; }
+};
+function animResolve(node, path) {
+  var ps = path.split("."); var o = node;
+  for (var i = 0; i < ps.length - 1; i++) {
+    if (o[ps[i]] == null) o[ps[i]] = {};
+    o = o[ps[i]];
+  }
+  return { o: o, k: ps[ps.length - 1] };
+}
+function sampleTrack(keys, t, ease) {
+  if (!keys.length) return 0;
+  if (t <= keys[0][0]) return keys[0][1];
+  var last = keys[keys.length - 1];
+  if (t >= last[0]) return last[1];
+  for (var i = 0; i < keys.length - 1; i++) {
+    var a = keys[i], b = keys[i + 1];
+    if (t >= a[0] && t <= b[0]) {
+      var u = (t - a[0]) / ((b[0] - a[0]) || 1e-9);
+      u = (EASES[ease] || EASES.linear)(u);
+      return a[1] + (b[1] - a[1]) * u;
+    }
+  }
+  return last[1];
+}
+function clipLength(clip) {
+  var m = 0;
+  (clip.tracks || []).forEach(function (tr) {
+    (tr.keys || []).forEach(function (k) { if (k[0] > m) m = k[0]; });
+  });
+  return m;
+}
+function animPlay(n, clipName) { if (!(n.clips || {})[clipName]) return; n._clip = clipName; n._t = 0; n._playing = true; }
+function animStop(n) { n._playing = false; }
+function startTween(node, path, to, dur, ease) {
+  var r = animResolve(node, path);
+  var from = typeof r.o[r.k] === "number" ? r.o[r.k] : 0;
+  TWEENS.push({ ref: r, from: from, to: to, dur: dur || 0.5, ease: ease || "outQuad", t: 0 });
+}
+function updateAnims(dt) {
+  ANIMS.forEach(function (n) {
+    if (!n._playing) return;
+    var clip = (n.clips || {})[n._clip];
+    if (!clip) { n._playing = false; return; }
+    var len = clipLength(clip) || 0.0001;
+    n._t += dt;
+    var t = n._t;
+    if (t >= len) { if (clip.loop) { n._t = t = t % len; } else { t = len; n._playing = false; } }
+    var target = nodes[n.target] || n._parent;
+    if (!target) return;
+    (clip.tracks || []).forEach(function (tr) {
+      var r = animResolve(target, tr.path);
+      r.o[r.k] = sampleTrack(tr.keys || [], t, tr.ease);
+    });
+  });
+  for (var i = TWEENS.length - 1; i >= 0; i--) {
+    var tw = TWEENS[i];
+    tw.t += dt;
+    var u = Math.min(1, tw.t / tw.dur);
+    var e = (EASES[tw.ease] || EASES.linear)(u);
+    tw.ref.o[tw.ref.k] = tw.from + (tw.to - tw.from) * e;
+    if (u >= 1) TWEENS.splice(i, 1);
+  }
+}
+
 function runAction(self, a) {
   var target = a.target === "self" ? self : nodes[a.target];
   switch (a.action) {
@@ -889,7 +969,9 @@ function runAction(self, a) {
     case "addScore": world.score += (a.amount || 0); break;
     case "setState": world.flags[a.args ? a.args[0] : "f"] = a.args ? a.args[1] : true; break;
     case "commit": bridgeCommit(); break;
-    case "play": break;
+    case "play": if (target && target.clips) animPlay(target, a.args ? a.args[0] : ""); break;
+    case "stop": if (target && target.clips) animStop(target); break;
+    case "tween": if (target && a.args) startTween(target, a.args[0], a.args[1] || 0, a.args[2] || 0.5, a.args[3]); break;
     case "startDialogue": startDialogue(a.args ? a.args[0] : ""); break;
     case "openShop": openShop(a.args ? a.args[0] : ""); break;
     case "giveItem": invAdd(a.args ? a.args[0] : "", a.args ? (a.args[1] || 1) : 1); break;
@@ -2414,6 +2496,7 @@ function loop(t) {
   pollKeys();
   edgeFlush();
 
+  updateAnims(dt);
   updateTransforms(scene.nodes, matIdent());
   if (!dialogueOpen() && !SHOP && !battleOpen() && !MENU) {
     actors.forEach(function (a) { if (!a._dead) updateActor(a, dt); });
