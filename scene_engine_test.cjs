@@ -130,6 +130,7 @@ function pump(frames, dt) {
   vm.runInContext(
     "(function(n,h){for(var i=0;i<n;i++){" +
     "world.time+=h;" +
+    "if(typeof updatePoseClips==='function')updatePoseClips(h);" +
     "if(typeof updateAlarms==='function')updateAlarms(h);" +
     "if(typeof updatePhysics==='function')updatePhysics(h);" +
     "if(typeof updateAnims==='function')updateAnims(h);" +
@@ -439,6 +440,130 @@ section("regression: state machines, gait, tween");
 
   ok("gait bob does not accumulate on idle actors",
      Math.abs(call("nodes['door'].transform.pos[1]") - 3) < 0.01);
+})();
+
+// ---------------------------------------------------------------------------
+// 8. RIG v8a: bone hierarchy, three axes, pose clips, animation events
+// ---------------------------------------------------------------------------
+section("rig: bone hierarchy and three-axis rotation");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "rig", title: "rig", seed: "r8" },
+    render: BASE_RENDER,
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "body", tags: ["player"], transform: { pos: [0, 0, 0] } }
+    ],
+    resources: { meshes: { body: { type: "silhouette", generator: "humanoid" } }, materials: {} }
+  });
+
+  const g = call("nodes['hero']._geo");
+  ok("humanoid mesh is rigged", call("nodes['hero']._geo.rigged") === true);
+  ok("parts exist", call("Object.keys(nodes['hero']._geo.parts).length") >= 6,
+     call("Object.keys(nodes['hero']._geo.parts).join(',')"));
+  ok("armL parents to torso", call("nodes['hero']._geo.parts['armL'].parent") === "torso");
+  ok("head parents to torso", call("nodes['hero']._geo.parts['head'].parent") === "torso");
+  ok("legL has no parent (leaf at root)", call("nodes['hero']._geo.parts['legL'].parent") === undefined);
+
+  // A vertex on the head, deformed with ONLY torso rotated: chain must carry it.
+  const chained = call(
+    "(function(){var g=nodes['hero']._geo;var hp=g.parts['head'].pivot;" +
+    "var p=v3(hp.x, hp.y+0.2, hp.z);" +
+    "var out=deformVert(p,g,'head',{torso:{rx:90}});" +
+    "return [out.x.toFixed(3),out.y.toFixed(3),out.z.toFixed(3)].join(',');})()");
+  const unchained = call(
+    "(function(){var g=nodes['hero']._geo;var hp=g.parts['head'].pivot;" +
+    "var p=v3(hp.x, hp.y+0.2, hp.z);" +
+    "var out=deformVert(p,g,'legL',{torso:{rx:90}});" +
+    "return [out.x.toFixed(3),out.y.toFixed(3),out.z.toFixed(3)].join(',');})()");
+  ok("torso rotation carries a head vertex", chained !== unchained,
+     "head=" + chained + " legL=" + unchained);
+
+  // Z rotation must move X, proving the axis is not the old X-only path.
+  const zrot = call(
+    "(function(){var g=nodes['hero']._geo;var pv=g.parts['armR'].pivot;" +
+    "var p=v3(pv.x, pv.y-0.5, pv.z);" +
+    "var out=rotAboutAxes(p,pv,{rx:0,ry:0,rz:90});" +
+    "return Math.abs(out.x-p.x)>0.1;})()");
+  ok("rz rotation displaces X", zrot === true);
+
+  const yrot = call(
+    "(function(){var g=nodes['hero']._geo;var pv=g.parts['armR'].pivot;" +
+    "var p=v3(pv.x+0.5, pv.y, pv.z);" +
+    "var out=rotAboutAxes(p,pv,{rx:0,ry:90,rz:0});" +
+    "return Math.abs(out.z-p.z)>0.1;})()");
+  ok("ry rotation displaces Z", yrot === true);
+
+  const scalar = call(
+    "(function(){var pv=v3(0,1,0);var p=v3(0,0.5,0);" +
+    "var a=rotAboutAxes(p,pv,poseAngles(45));var b=rotAboutX(p,pv,45);" +
+    "return Math.abs(a.y-b.y)<0.001 && Math.abs(a.z-b.z)<0.001;})()");
+  ok("scalar pose value still means X-only (backwards compatible)", scalar === true);
+})();
+
+section("rig: pose clips, blending, events");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "rig2", title: "rig2", seed: "r9" },
+    render: BASE_RENDER,
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "body", tags: ["player"], transform: { pos: [0, 0, 0] },
+        stats: { hp: 100, maxHp: 100 } },
+      { id: "dummy", type: "Actor", mesh: "body", tags: ["enemy"], transform: { pos: [2, 0, 0] },
+        stats: { hp: 50, maxHp: 50 } }
+    ],
+    resources: {
+      meshes: { body: { type: "silhouette", generator: "humanoid" } }, materials: {},
+      poses: {
+        swing: { dur: 0.6, tracks: { armR: [[0, { rz: 0 }], [0.3, { rz: -120 }], [0.6, { rz: 20 }]] },
+                 events: [{ at: 0.3, do: { action: "damage", to: "dummy", amount: 7 } }] },
+        spin: { dur: 0.4, loop: true, tracks: { torso: [[0, { ry: 0 }], [0.4, { ry: 360 }]] },
+                events: [{ at: 0.2, do: { action: "addScore", amount: 1 } }] }
+      }
+    }
+  });
+
+  ok("no pose active initially", call("nodes['hero']._pose") == null);
+
+  call("playPose(nodes['hero'],'swing')");
+  ok("playPose sets clip state", call("nodes['hero']._pose.id") === "swing");
+
+  pump(9); // 0.15s -> midway to the -120 key
+  const mid = call("(function(){var p=blendedPose(nodes['hero']);return p&&p.armR?poseAngles(p.armR).rz:null;})()");
+  ok("clip interpolates between keys", mid != null && mid < -20 && mid > -120, "rz=" + mid);
+  ok("event has not fired yet", call("nodes['dummy'].hp") === 50, call("nodes['dummy'].hp"));
+
+  pump(12); // ~0.35s -> past the 0.3 event
+  ok("event fired at its time", call("nodes['dummy'].hp") === 43, call("nodes['dummy'].hp"));
+
+  pump(30); // past dur 0.6
+  ok("non-looping clip clears itself", call("nodes['hero']._pose") == null);
+  ok("event fired exactly once", call("nodes['dummy'].hp") === 43, call("nodes['dummy'].hp"));
+
+  // looping clip: events refire each cycle
+  call("world.score = 0; playPose(nodes['hero'],'spin');");
+  pump(60); // 1.0s over a 0.4s loop -> 2 full cycles plus part of a third
+  const spins = G("world.score");
+  ok("looping clip refires events per cycle", spins >= 2 && spins <= 3, "fires=" + spins);
+  ok("looping clip stays active", call("nodes['hero']._pose") != null);
+
+  call("nodes['hero']._pose = null;");
+})();
+
+section("rig: clip blends over gait, unclipped bones keep walking");
+(function () {
+  // Give the actor gait motion, then play a clip that only touches armR.
+  call("nodes['hero']._gaitAmt = 1; nodes['hero']._gaitPhase = 1.2;");
+  const baseGait = call("(function(){var p=gaitPose(nodes['hero']);return p?p.legL:null;})()");
+  ok("gait pose produces leg swing", baseGait != null && Math.abs(baseGait) > 0.1, "legL=" + baseGait);
+
+  call("playPose(nodes['hero'],'swing');");
+  pump(6);
+  const blended = call("blendedPose(nodes['hero'])");
+  const legNow = call("(function(){var p=blendedPose(nodes['hero']);return p?poseAngles(p.legL).rx:null;})()");
+  const armNow = call("(function(){var p=blendedPose(nodes['hero']);return p&&p.armR?poseAngles(p.armR).rz:null;})()");
+  ok("unclipped bone keeps its gait value", legNow != null && Math.abs(legNow) > 0.1, "legL=" + legNow);
+  ok("clipped bone follows the clip", armNow != null && armNow < 0, "armR rz=" + armNow);
+  call("nodes['hero']._pose = null; nodes['hero']._gaitAmt = 0;");
 })();
 
 // ---------------------------------------------------------------------------

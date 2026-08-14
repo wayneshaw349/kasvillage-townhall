@@ -72,6 +72,7 @@ function pump(frames, dt, per) {
   for (let f = 0; f < frames; f++) {
     vm.runInContext(
       "world.time+=" + dt + ";" +
+      "if(typeof updatePoseClips==='function')updatePoseClips(" + dt + ");" +
       "if(typeof updateAlarms==='function')updateAlarms(" + dt + ");" +
       "if(typeof updatePhysics==='function')updatePhysics(" + dt + ");" +
       "if(typeof updateAnims==='function')updateAnims(" + dt + ");" +

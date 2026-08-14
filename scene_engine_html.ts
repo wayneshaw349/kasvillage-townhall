@@ -2497,10 +2497,12 @@ function deformVert(p, g, partName, pose) {
 
 // ---- pose clips ----------------------------------------------------------
 function poseDef(id) { return ((scene.resources || {}).poses || {})[id] || null; }
+var POSED = [];
 function playPose(n, id) {
   var def = poseDef(id);
   if (!def) return;
   n._pose = { id: id, t: 0, fired: {} };
+  if (POSED.indexOf(n) < 0) POSED.push(n);
 }
 function samplePoseTrack(keys, t) {
   if (!keys || !keys.length) return null;
@@ -2521,9 +2523,9 @@ function samplePoseTrack(keys, t) {
   return last[1];
 }
 function updatePoseClips(dt) {
-  for (var i = 0; i < actors.length; i++) {
-    var n = actors[i];
-    if (!n._pose) continue;
+  for (var i = POSED.length - 1; i >= 0; i--) {
+    var n = POSED[i];
+    if (!n._pose) { POSED.splice(i, 1); continue; }
     var def = poseDef(n._pose.id);
     if (!def) { n._pose = null; continue; }
     n._pose.t += dt;
@@ -3055,7 +3057,7 @@ function loadScene(json) {
   scene._backdrop = null; scene._walkmesh = null; scene._tilemap = null;
   BODIES = []; PHYS.accum = 0;
   ALARMS = [];
-  actors.forEach(function (a) { a._pose = null; });
+  POSED.forEach(function (a) { a._pose = null; }); POSED = [];
   playerId = null; camera = null; terrainMesh = null;
   world = { alert: false, flags: {}, score: 0, time: 0 };
   INV = { items: {}, equipped: {} };
