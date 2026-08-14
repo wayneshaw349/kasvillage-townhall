@@ -617,10 +617,62 @@ function pfSetPath(obj, path, val) {
   }
   o[ps[ps.length - 1]] = val;
 }
+// --- GAMEPLAY TAGS (v6.5): hierarchical, dot-separated. A node tagged
+// "enemy.undead.boss" matches the filters "enemy", "enemy.undead" and the
+// exact string. Flat tags keep working unchanged.
+function tagMatch(node, filter) {
+  if (!filter) return true;
+  var tags = node && node.tags;
+  if (!tags || !tags.length) return false;
+  for (var i = 0; i < tags.length; i++) {
+    var t = tags[i];
+    if (t === filter) return true;
+    if (t.length > filter.length && t.charAt(filter.length) === "." && t.indexOf(filter) === 0) return true;
+  }
+  return false;
+}
+function tagAny(node, filters) {
+  for (var i = 0; i < filters.length; i++) if (tagMatch(node, filters[i])) return true;
+  return false;
+}
+
+// --- ALARMS (v6.5): per-node timers. node.alarms = [{ after, repeat, do:{...} }]
+var ALARMS = [];
+function alarmRegister(n) {
+  (n.alarms || []).forEach(function (al, i) {
+    ALARMS.push({ node: n, def: al, t: 0, id: n.id + "#" + i, done: false });
+  });
+}
+function updateAlarms(dt) {
+  for (var i = 0; i < ALARMS.length; i++) {
+    var a = ALARMS[i];
+    if (a.done || a.node._dead) continue;
+    a.t += dt;
+    var period = a.def.after || 1;
+    if (a.t >= period) {
+      a.t -= period;
+      var act = a.def.do || {};
+      runAction(a.node, { action: act.action, target: act.to || "self", args: act.args, amount: act.amount });
+      if (!a.def.repeat) a.done = true;
+    }
+  }
+}
+
 function applyPrefab(n) {
   var def = (scene.prefabs || {})[n.instance];
   if (!def) { console.warn("prefab not found: " + n.instance); delete n.instance; return; }
   if (def.instance) { console.warn("prefab may not instance a prefab: " + n.instance); delete n.instance; return; }
+  // Unity-style variants: a prefab may `extends` another prefab. Single
+  // level of inheritance; self-reference and missing bases are ignored.
+  if (def.extends && def.extends !== n.instance) {
+    var basePf = (scene.prefabs || {})[def.extends];
+    if (basePf && !basePf.extends) {
+      var merged = pfClone(basePf);
+      var own = pfClone(def);
+      for (var mk in own) { if (mk !== "extends") merged[mk] = own[mk]; }
+      def = merged;
+    }
+  }
   var base = pfClone(def);
   for (var k in base) { if (!(k in n)) n[k] = base[k]; }
   if (base.transform && n.transform && n.transform !== base.transform) {
@@ -647,6 +699,7 @@ function walkNodes(list, parent) {
     if (n.type === "Camera3D") camera = n;
     if (n.type === "AnimationPlayer") { ANIMS.push(n); if (n.autoplay) animPlay(n, n.autoplay); }
     if (n.physics) physRegister(n);
+    if (n.alarms) alarmRegister(n);
     if (n.stateMachine) {
       n._state = n.stateMachine.initial;
       n._stateT = 0;
@@ -1853,7 +1906,7 @@ function physCollideSignal(n, other) {
   for (var i = 0; i < n.signals.length; i++) {
     var s = n.signals[i];
     if (s.signal !== "body_collided") continue;
-    if (s.filter && (!other.tags || other.tags.indexOf(s.filter) < 0)) continue;
+    if (s.filter && !tagMatch(other, s.filter)) continue;
     runAction(n, s);
   }
 }
@@ -1898,7 +1951,7 @@ function segmentBlocked(a, b) {
   for (var i = 0; i < ids.length; i++) {
     var n = nodes[ids[i]];
     if (!n.collision || n.collision === "mesh" || n._dead) continue; // terrain never occludes
-    if (n.tags && (n.tags.indexOf("player") >= 0 || n.tags.indexOf("enemy") >= 0)) continue;
+    if (tagAny(n, ["player", "enemy"])) continue;
     var r = n.occluderRadius || 1.2;
     var cx = n.worldPos.x, cz = n.worldPos.z;
     var dx = b.x - a.x, dz = b.z - a.z;
@@ -1994,13 +2047,13 @@ function updateProjectiles(dt) {
     for (var k = 0; k < ids.length; k++) {
       var n = nodes[ids[k]];
       if (!n.tags || n._dead || n.id === pr.owner) continue;
-      if (n.tags.indexOf("player") < 0 && n.tags.indexOf("enemy") < 0 && n.tags.indexOf("npc") < 0) continue;
+      if (!tagAny(n, ["player", "enemy", "npc"])) continue;
       var dx = n.worldPos.x - pr.pos.x, dz = n.worldPos.z - pr.pos.z;
       if (dx * dx + dz * dz < 0.55 && pr.pos.y > n.worldPos.y - 0.2 && pr.pos.y < n.worldPos.y + 2.2) { hit = n; break; }
     }
     if (hit) {
       hit.hp = Math.max(0, (hit.hp || 0) - pr.damage);
-      if (hit.tags.indexOf("enemy") >= 0) raiseAlert(8);
+      if (tagMatch(hit, "enemy")) raiseAlert(8);
       PROJECTILES.splice(i, 1);
       continue;
     }
@@ -2026,7 +2079,7 @@ function lockCandidates() {
   if (!pl) return [];
   return Object.keys(nodes).filter(function (id) {
     var n = nodes[id];
-    return n.tags && n.tags.indexOf("enemy") >= 0 && !n._dead && (n.hp || 0) > 0 &&
+    return tagMatch(n, "enemy") && !n._dead && (n.hp || 0) > 0 &&
       dist(n.worldPos, pl.worldPos) < (pl.lockRange || 16);
   }).sort(function (a, b) {
     return dist(nodes[a].worldPos, pl.worldPos) - dist(nodes[b].worldPos, pl.worldPos);
@@ -2088,10 +2141,10 @@ function updateAreas() {
     var inside = dist(n.worldPos, pl.worldPos) < r;
     if (inside && !n._in) {
       n._in = true;
-      n.signals.forEach(function (s) { if (s.signal === "body_entered") runAction(n, { action: s.action, target: s.to, args: s.args }); });
+      n.signals.forEach(function (s) { if (s.signal === "body_entered" && tagMatch(pl, s.filter)) runAction(n, { action: s.action, target: s.to, args: s.args, amount: s.amount }); });
     } else if (!inside && n._in) {
       n._in = false;
-      n.signals.forEach(function (s) { if (s.signal === "body_exited") runAction(n, { action: s.action, target: s.to, args: s.args }); });
+      n.signals.forEach(function (s) { if (s.signal === "body_exited" && tagMatch(pl, s.filter)) runAction(n, { action: s.action, target: s.to, args: s.args, amount: s.amount }); });
     }
   });
 }
@@ -2710,6 +2763,7 @@ function loadScene(json) {
   nodes = {}; actors = []; meshCache = {}; texCache = {}; backdropCache = {};
   scene._backdrop = null; scene._walkmesh = null; scene._tilemap = null;
   BODIES = []; PHYS.accum = 0;
+  ALARMS = [];
   playerId = null; camera = null; terrainMesh = null;
   world = { alert: false, flags: {}, score: 0, time: 0 };
   INV = { items: {}, equipped: {} };
@@ -2757,6 +2811,7 @@ function loop(t) {
   pollKeys();
   edgeFlush();
 
+  updateAlarms(dt);
   updatePhysics(dt);
   updateAnims(dt);
   updateTransforms(scene.nodes, matIdent());
