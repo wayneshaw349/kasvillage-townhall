@@ -610,8 +610,34 @@ function edgeFlush() {
 // ---------------------------------------------------------------------------
 var playerId = null, terrainMesh = null;
 
+// --- PREFABS (v5): Godot-style instancing. scene.prefabs = { name: nodeDef }.
+// A node { instance: "name", ... } deep-clones the prefab; the node's own
+// fields win; overrides = { "dot.path": value } applied last. No nesting.
+function pfClone(o) { return JSON.parse(JSON.stringify(o)); }
+function pfSetPath(obj, path, val) {
+  var ps = path.split("."); var o = obj;
+  for (var i = 0; i < ps.length - 1; i++) {
+    if (typeof o[ps[i]] !== "object" || o[ps[i]] === null) o[ps[i]] = {};
+    o = o[ps[i]];
+  }
+  o[ps[ps.length - 1]] = val;
+}
+function applyPrefab(n) {
+  var def = (scene.prefabs || {})[n.instance];
+  if (!def) { console.warn("prefab not found: " + n.instance); delete n.instance; return; }
+  if (def.instance) { console.warn("prefab may not instance a prefab: " + n.instance); delete n.instance; return; }
+  var base = pfClone(def);
+  for (var k in base) { if (!(k in n)) n[k] = base[k]; }
+  if (base.transform && n.transform && n.transform !== base.transform) {
+    for (var tk in base.transform) { if (!(tk in n.transform)) n.transform[tk] = base.transform[tk]; }
+  }
+  if (n.overrides) { for (var p in n.overrides) pfSetPath(n, p, n.overrides[p]); delete n.overrides; }
+  delete n.instance;
+}
+
 function walkNodes(list, parent) {
   (list || []).forEach(function (n) {
+    if (n.instance) applyPrefab(n);
     n._parent = parent || null;
     n.worldPos = v3();
     nodes[n.id] = n;
@@ -650,12 +676,21 @@ function expandSpawner(n) {
   }
   n.children = n.children || [];
   out.forEach(function (p, idx) {
-    n.children.push({
-      id: n.id + "_" + idx, type: "MeshInstance", mesh: n.mesh, material: n.material,
-      transform: { pos: p, rot: [0, pl.faceCenter ? (Math.atan2(-p[0], -p[2]) / DEG) : rng() * 360, 0] }
-    });
+    var rotY = pl.faceCenter ? (Math.atan2(-p[0], -p[2]) / DEG) : rng() * 360;
+    if (n.instance) {
+      n.children.push({
+        id: n.id + "_" + idx, instance: n.instance,
+        transform: { pos: p, rot: [0, rotY, 0] }
+      });
+    } else {
+      n.children.push({
+        id: n.id + "_" + idx, type: "MeshInstance", mesh: n.mesh, material: n.material,
+        transform: { pos: p, rot: [0, rotY, 0] }
+      });
+    }
   });
   n.mesh = null;
+  delete n.instance; // spawner itself is not an instance
 }
 
 function terrainHeight(x, z) {
