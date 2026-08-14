@@ -705,6 +705,7 @@ function walkNodes(list, parent) {
     if (n.type === "AnimationPlayer") { ANIMS.push(n); if (n.autoplay) animPlay(n, n.autoplay); }
     if (n.physics) physRegister(n);
     if (n.alarms) alarmRegister(n);
+    if (n.bt && !n.stateMachine) { n._bt = {}; actors.push(n); }
     if (n.stateMachine) {
       n._state = n.stateMachine.initial;
       n._stateT = 0;
@@ -814,6 +815,7 @@ function updateActor(n, dt) {
   }
 
   if (n.stateMachine) updateStateMachine(n, dt);
+  if (n.bt) updateBT(n, dt);
   if (n.animations && n._anim) updateAnimation(n, dt);
   if (n._geo && n._geo.rigged) {
     // Bob is recomputed fresh each frame. Accumulating into a persistent
@@ -849,6 +851,122 @@ function samplePath(path, u) {
     dd -= segs[i].d;
   }
   return { x: pts[0][0], y: pts[0][1], z: pts[0][2], yaw: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// BEHAVIOR TREES (v7) -- Unreal-style composable AI. A node declares either a
+// stateMachine or a bt, never both. Statuses: 0 = FAILURE, 1 = SUCCESS,
+// 2 = RUNNING. Running state is remembered per tree path so wait/cooldown
+// survive across frames.
+//
+//   bt: { selector: [
+//     { sequence: [ { cond: 'canSee(self, player)' },
+//                   { task: { type: 'seek', target: 'player', speed: 5 } } ] },
+//     { task: { type: 'patrol', path: 'route', speed: 2 } } ] }
+//
+// Leaves:  cond (expression), task (runBehavior), do (runAction), wait,
+//          setBlackboard. Decorators: invert, cooldown, repeat, succeed.
+// ---------------------------------------------------------------------------
+var BT_FAIL = 0, BT_OK = 1, BT_RUN = 2;
+
+function btState(n, key) {
+  n._bt = n._bt || {};
+  return (n._bt[key] = n._bt[key] || {});
+}
+
+function btTick(n, node, dt, key) {
+  if (!node) return BT_FAIL;
+  var i, st, res;
+
+  // ---- composites ----
+  if (node.selector) {
+    st = btState(n, key);
+    for (i = 0; i < node.selector.length; i++) {
+      res = btTick(n, node.selector[i], dt, key + '.s' + i);
+      if (res === BT_RUN) { st.running = i; return BT_RUN; }
+      if (res === BT_OK) { st.running = -1; return BT_OK; }
+    }
+    st.running = -1;
+    return BT_FAIL;
+  }
+  if (node.sequence) {
+    st = btState(n, key);
+    var start = (st.running != null && st.running >= 0) ? st.running : 0;
+    for (i = start; i < node.sequence.length; i++) {
+      res = btTick(n, node.sequence[i], dt, key + '.q' + i);
+      if (res === BT_RUN) { st.running = i; return BT_RUN; }
+      if (res === BT_FAIL) { st.running = -1; return BT_FAIL; }
+    }
+    st.running = -1;
+    return BT_OK;
+  }
+  if (node.parallel) {
+    var okCount = 0, anyRun = false;
+    for (i = 0; i < node.parallel.length; i++) {
+      res = btTick(n, node.parallel[i], dt, key + '.p' + i);
+      if (res === BT_OK) okCount++;
+      else if (res === BT_RUN) anyRun = true;
+    }
+    var need = node.requireAll === false ? 1 : node.parallel.length;
+    if (okCount >= need) return BT_OK;
+    return anyRun ? BT_RUN : BT_FAIL;
+  }
+
+  // ---- decorators ----
+  if (node.invert) {
+    res = btTick(n, node.invert, dt, key + '.i');
+    if (res === BT_RUN) return BT_RUN;
+    return res === BT_OK ? BT_FAIL : BT_OK;
+  }
+  if (node.succeed) {
+    res = btTick(n, node.succeed, dt, key + '.y');
+    return res === BT_RUN ? BT_RUN : BT_OK;
+  }
+  if (node.repeat) {
+    btTick(n, node.repeat, dt, key + '.r');
+    return BT_RUN;
+  }
+  if (node.cooldown != null) {
+    st = btState(n, key);
+    st.cd = (st.cd || 0) - dt;
+    if (st.cd > 0) return BT_FAIL;
+    res = btTick(n, node.child, dt, key + '.c');
+    if (res === BT_OK) st.cd = node.cooldown;
+    return res;
+  }
+
+  // ---- leaves ----
+  if (node.cond) {
+    return evalExpr(compileExpr(node.cond), exprCtx(n)) ? BT_OK : BT_FAIL;
+  }
+  if (node.wait != null) {
+    st = btState(n, key);
+    st.t = (st.t || 0) + dt;
+    if (st.t >= node.wait) { st.t = 0; return BT_OK; }
+    return BT_RUN;
+  }
+  if (node.task) {
+    runBehavior(n, node.task, dt);
+    // A task runs until its until-expression passes; without one it is a
+    // single-frame action that keeps the branch alive.
+    if (node.until) return evalExpr(compileExpr(node.until), exprCtx(n)) ? BT_OK : BT_RUN;
+    return node.once ? BT_OK : BT_RUN;
+  }
+  if (node.do) {
+    runAction(n, { action: node.do.action, target: node.do.to || 'self',
+                   args: node.do.args, amount: node.do.amount });
+    return BT_OK;
+  }
+  if (node.setBlackboard) {
+    n.blackboard = n.blackboard || {};
+    n.blackboard[node.setBlackboard.key] = node.setBlackboard.value;
+    return BT_OK;
+  }
+  return BT_FAIL;
+}
+
+function updateBT(n, dt) {
+  n._btStatus = btTick(n, n.bt, dt, 'root');
 }
 
 function updateStateMachine(n, dt) {
