@@ -334,10 +334,16 @@ function buildMesh(name, spec) {
     makeLimb("legR",  0.16 * sc, 1.00 * sc, 0.11, 1.00 * sc);
     g.parts["torso"] = { pivot: v3(0, 1.0 * sc, 0) };
     g.parts["head"] = { pivot: v3(0, 1.68 * sc, 0) };
+    // Bone hierarchy (Godot Skeleton3D shape): rotating torso carries the
+    // arms and head; limbs stay leaves. Parents are resolved by name.
+    g.parts["armL"].parent = "torso";
+    g.parts["armR"].parent = "torso";
+    g.parts["head"].parent = "torso";
     if (beast) {
       if (round) partLathe("horn", 0, 2.05 * sc, 0.1 * sc, [[0.06,0],[0.01,0.35]]);
       else partBox("horn", 0, 2.2 * sc, 0.1 * sc, 0.12, 0.35, 0.12);
     }
+    if (g.parts["horn"]) g.parts["horn"].parent = "head";
     g.rigged = true;
     } else {
     g = buildMesh("_fallback", { type: "box", size: [1, 1, 1] });
@@ -886,8 +892,9 @@ function btTick(n, node, dt, key) {
   }
   if (node.sequence) {
     st = btState(n, key);
-    var start = (st.running != null && st.running >= 0) ? st.running : 0;
-    for (i = start; i < node.sequence.length; i++) {
+    // Reactive: restart at child 0 every tick so guard conditions are
+    // re-evaluated. Leaf state (wait, cooldown) persists via its own keys.
+    for (i = 0; i < node.sequence.length; i++) {
       res = btTick(n, node.sequence[i], dt, key + '.q' + i);
       if (res === BT_RUN) { st.running = i; return BT_RUN; }
       if (res === BT_FAIL) { st.running = -1; return BT_FAIL; }
@@ -923,10 +930,9 @@ function btTick(n, node, dt, key) {
   }
   if (node.cooldown != null) {
     st = btState(n, key);
-    st.cd = (st.cd || 0) - dt;
-    if (st.cd > 0) return BT_FAIL;
+    if (st.readyAt != null && world.time < st.readyAt) return BT_FAIL;
     res = btTick(n, node.child, dt, key + '.c');
-    if (res === BT_OK) st.cd = node.cooldown;
+    if (res === BT_OK) st.readyAt = world.time + node.cooldown;
     return res;
   }
 
@@ -1140,6 +1146,8 @@ function runAction(self, a) {
     case "impulse": if (target && a.args) physImpulse(target, a.args[0] || 0, a.args[1] || 0, a.args[2] || 0); break;
     case "setVelocity": if (target && a.args) physSetVel(target, a.args[0] || 0, a.args[1] || 0, a.args[2] || 0); break;
     case "wake": if (target && target._pb) pbWake(target._pb); break;
+    case "playPose": if (target && a.args) playPose(target, a.args[0]); break;
+    case "stopPose": if (target) target._pose = null; break;
     case "stop": if (target && target.clips) animStop(target); break;
     case "tween": if (target && a.args) startTween(target, a.args[0], a.args[1] || 0, a.args[2] || 0.5, a.args[3]); break;
     case "startDialogue": startDialogue(a.args ? a.args[0] : ""); break;
@@ -1810,8 +1818,9 @@ function renderMenu() {
 //   mass, restitution, friction, gravityScale }
 // ---------------------------------------------------------------------------
 var BODIES = [];
-var PHYS = { gravity: -20, fixedDt: 1 / 60, accum: 0, maxSteps: 5, iterations: 6,
-             sleepVel: 0.08, sleepTime: 0.5, slop: 0.01, baumgarte: 0.2, cell: 2.0 };
+var PHYS = { gravity: -20, fixedDt: 1 / 60, accum: 0, maxSteps: 5, iterations: 12,
+             sleepVel: 0.08, sleepTime: 0.5, slop: 0.01, baumgarte: 0.5, cell: 2.0 };
+var PB_GROUND = { invMass: 0, vel: { x: 0, y: 0, z: 0 }, rest: 0, fric: 0.9, node: {} };
 
 function physRegister(n) {
   var p = n.physics || {};
@@ -1858,11 +1867,28 @@ function pbBound(b) {
 
 // --- narrowphase: returns { nx, ny, nz, depth } or null ---------------------
 // Sphere/capsule treated as swept spheres on the Y axis; box uses closest-point.
+// Axis-aligned box vs box: overlap on all three axes, separate along the
+// axis of least penetration. Boxes do not rotate in this solver, which is
+// period-correct and keeps the contact cheap.
+function pbBoxBox(a, b) {
+  var pa = pbPos(a), pb = pbPos(b);
+  var dx = pb[0] - pa[0], ox = (a.half[0] + b.half[0]) - Math.abs(dx);
+  if (ox <= 0) return null;
+  var dy = pb[1] - pa[1], oy = (a.half[1] + b.half[1]) - Math.abs(dy);
+  if (oy <= 0) return null;
+  var dz = pb[2] - pa[2], oz = (a.half[2] + b.half[2]) - Math.abs(dz);
+  if (oz <= 0) return null;
+  if (oy <= ox && oy <= oz) return { nx: 0, ny: dy < 0 ? -1 : 1, nz: 0, depth: oy };
+  if (ox <= oz) return { nx: dx < 0 ? -1 : 1, ny: 0, nz: 0, depth: ox };
+  return { nx: 0, ny: 0, nz: dz < 0 ? -1 : 1, depth: oz };
+}
+
 function pbContact(a, b) {
   var pa = pbPos(a), pb = pbPos(b);
   var ax = pa[0], ay = pa[1], az = pa[2];
   var bx = pb[0], by = pb[1], bz = pb[2];
 
+  if (a.shape === "box" && b.shape === "box") return pbBoxBox(a, b);
   if (a.shape === "box" || b.shape === "box") {
     var boxB = (b.shape === "box") ? b : a;
     var sph  = (b.shape === "box") ? a : b;
@@ -1927,45 +1953,44 @@ function pbPairs() {
 }
 
 // --- one fixed step --------------------------------------------------------
+function physContacts() {
+  var contacts = [], i, b;
+  var pairs = pbPairs();
+  for (i = 0; i < pairs.length; i++) {
+    var c = pbContact(pairs[i][0], pairs[i][1]);
+    if (c) { c.a = pairs[i][0]; c.b = pairs[i][1]; contacts.push(c); }
+  }
+  // The floor is a static contact so the solver, not a clamp, carries
+  // resting weight. Included at touch distance (small negative depth) so the
+  // velocity solve catches bodies the moment they land.
+  for (i = 0; i < BODIES.length; i++) {
+    b = BODIES[i];
+    if (b.invMass === 0 || b.asleep || b.node._dead) continue;
+    var gp = pbPos(b);
+    var gfloor = terrainHeight(gp[0], gp[2]);
+    var gfoot = b.shape === "box" ? b.half[1] : (b.shape === "capsule" ? b.h * 0.5 + b.r : b.r);
+    var gd = (gfloor + gfoot) - gp[1];
+    if (gd > -0.02) contacts.push({ a: PB_GROUND, b: b, nx: 0, ny: 1, nz: 0, depth: Math.max(gd, 0) });
+  }
+  contacts.sort(function (u, v) {
+    var uy = Math.min(u.a.invMass === 0 ? -1e9 : pbPos(u.a)[1], u.b.invMass === 0 ? -1e9 : pbPos(u.b)[1]);
+    var vy = Math.min(v.a.invMass === 0 ? -1e9 : pbPos(v.a)[1], v.b.invMass === 0 ? -1e9 : pbPos(v.b)[1]);
+    return uy - vy;
+  });
+  return contacts;
+}
+
 function physStep(h) {
   var i, b;
-  // integrate velocity
+  // 1. gravity
   for (i = 0; i < BODIES.length; i++) {
     b = BODIES[i];
     if (b.invMass === 0 || b.asleep || b.node._dead) continue;
     b.vel.y += PHYS.gravity * b.gs * h;
   }
-  // integrate position
-  for (i = 0; i < BODIES.length; i++) {
-    b = BODIES[i];
-    if (b.invMass === 0 || b.asleep || b.node._dead) continue;
-    var p = pbPos(b);
-    p[0] += b.vel.x * h; p[1] += b.vel.y * h; p[2] += b.vel.z * h;
-  }
-  // ground / terrain plane (cheap static floor everything rests on)
-  for (i = 0; i < BODIES.length; i++) {
-    b = BODIES[i];
-    if (b.invMass === 0 || b.asleep || b.node._dead) continue;
-    var pp = pbPos(b);
-    var floor = terrainHeight(pp[0], pp[2]);
-    var foot = b.shape === "box" ? b.half[1] : (b.shape === "capsule" ? b.h * 0.5 + b.r : b.r);
-    if (pp[1] - foot < floor) {
-      pp[1] = floor + foot;
-      if (b.vel.y < 0) {
-        b.vel.y = -b.vel.y * b.rest;
-        if (Math.abs(b.vel.y) < 0.4) b.vel.y = 0;
-        b.vel.x *= (1 - b.fric * 0.35);
-        b.vel.z *= (1 - b.fric * 0.35);
-      }
-    }
-  }
-  // contacts
-  var pairs = pbPairs(), contacts = [];
-  for (i = 0; i < pairs.length; i++) {
-    var c = pbContact(pairs[i][0], pairs[i][1]);
-    if (c) { c.a = pairs[i][0]; c.b = pairs[i][1]; contacts.push(c); }
-  }
-  // sequential impulses
+  // 2. contacts at current positions
+  var contacts = physContacts();
+  // 3. velocity solve BEFORE integrating, so resting bodies never sink
   for (var it = 0; it < PHYS.iterations; it++) {
     for (i = 0; i < contacts.length; i++) {
       var ct = contacts[i], A = ct.a, B = ct.b;
@@ -1975,14 +2000,14 @@ function physStep(h) {
       var vn = rvx * ct.nx + rvy * ct.ny + rvz * ct.nz;
       if (vn > 0) continue;
       var e = Math.min(A.rest, B.rest);
+      if (vn > -1.0) e = 0; // slow contact: absorb, never micro-bounce
       var jn = -(1 + e) * vn / im;
       A.vel.x -= jn * ct.nx * A.invMass; A.vel.y -= jn * ct.ny * A.invMass; A.vel.z -= jn * ct.nz * A.invMass;
       B.vel.x += jn * ct.nx * B.invMass; B.vel.y += jn * ct.ny * B.invMass; B.vel.z += jn * ct.nz * B.invMass;
-      // friction along the tangent of relative motion
       rvx = B.vel.x - A.vel.x; rvy = B.vel.y - A.vel.y; rvz = B.vel.z - A.vel.z;
       vn = rvx * ct.nx + rvy * ct.ny + rvz * ct.nz;
       var tx = rvx - vn * ct.nx, ty = rvy - vn * ct.ny, tz = rvz - vn * ct.nz;
-      var tl = Math.sqrt(tx*tx + ty*ty + tz*tz);
+      var tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
       if (tl > 1e-6) {
         tx /= tl; ty /= tl; tz /= tl;
         var mu = Math.sqrt(A.fric * B.fric);
@@ -1994,24 +2019,63 @@ function physStep(h) {
       }
     }
   }
-  // positional correction (Baumgarte) + collision signals
+  // shock propagation: contacts are sorted bottom-up, so one pass with the
+  // lower body frozen removes the residual the iterative solver leaves in
+  // tall stacks. Upper body normal velocity is lifted to the lower one.
   for (i = 0; i < contacts.length; i++) {
-    var q = contacts[i], Aa = q.a, Bb = q.b;
-    var imm = Aa.invMass + Bb.invMass;
-    if (imm === 0) continue;
-    var corr = Math.max(q.depth - PHYS.slop, 0) / imm * PHYS.baumgarte;
-    var ap = pbPos(Aa), bp2 = pbPos(Bb);
-    ap[0] -= corr * q.nx * Aa.invMass; ap[1] -= corr * q.ny * Aa.invMass; ap[2] -= corr * q.nz * Aa.invMass;
-    bp2[0] += corr * q.nx * Bb.invMass; bp2[1] += corr * q.ny * Bb.invMass; bp2[2] += corr * q.nz * Bb.invMass;
-    pbWake(Aa); pbWake(Bb);
-    physCollideSignal(Aa.node, Bb.node);
-    physCollideSignal(Bb.node, Aa.node);
+    var sc = contacts[i];
+    var la, ua; // lower, upper
+    if (sc.a.invMass === 0) { la = sc.a; ua = sc.b; }
+    else if (sc.b.invMass === 0) { la = sc.b; ua = sc.a; }
+    else if (pbPos(sc.a)[1] <= pbPos(sc.b)[1]) { la = sc.a; ua = sc.b; }
+    else { la = sc.b; ua = sc.a; }
+    if (ua.invMass === 0) continue;
+    // normal pointing lower -> upper
+    var sx = sc.nx, sy = sc.ny, sz = sc.nz;
+    if (ua === sc.a) { sx = -sx; sy = -sy; sz = -sz; }
+    var vnU = ua.vel.x * sx + ua.vel.y * sy + ua.vel.z * sz;
+    var vnL = la.vel.x * sx + la.vel.y * sy + la.vel.z * sz;
+    if (vnU < vnL) {
+      var dl = vnL - vnU;
+      ua.vel.x += sx * dl; ua.vel.y += sy * dl; ua.vel.z += sz * dl;
+    }
   }
-  // sleeping
+  // 4. integrate positions with solved velocities
+  for (i = 0; i < BODIES.length; i++) {
+    b = BODIES[i];
+    if (b.invMass === 0 || b.asleep || b.node._dead) continue;
+    var p = pbPos(b);
+    p[0] += b.vel.x * h; p[1] += b.vel.y * h; p[2] += b.vel.z * h;
+  }
+  // 5. positional passes: recompute contacts and relax residual overlap.
+  // Impact wake + collision signals fire on the first pass only.
+  for (var pc = 0; pc < 3; pc++) {
+    contacts = physContacts();
+    var moved = false;
+    for (i = 0; i < contacts.length; i++) {
+      var q = contacts[i], Aa = q.a, Bb = q.b;
+      var imm = Aa.invMass + Bb.invMass;
+      if (imm === 0) continue;
+      if (pc === 0) {
+        var wx = Bb.vel.x - Aa.vel.x, wy = Bb.vel.y - Aa.vel.y, wz = Bb.vel.z - Aa.vel.z;
+        var wn = wx * q.nx + wy * q.ny + wz * q.nz;
+        if (wn < -0.5) { pbWake(Aa); pbWake(Bb); }
+        if (q.depth > 0) { physCollideSignal(Aa.node, Bb.node); physCollideSignal(Bb.node, Aa.node); }
+      }
+      var corr = Math.max(q.depth - PHYS.slop, 0) / imm * PHYS.baumgarte;
+      if (corr <= 0) continue;
+      moved = true;
+      var ap = Aa.invMass > 0 ? pbPos(Aa) : null, bp2 = Bb.invMass > 0 ? pbPos(Bb) : null;
+      if (ap) { ap[0] -= corr * q.nx * Aa.invMass; ap[1] -= corr * q.ny * Aa.invMass; ap[2] -= corr * q.nz * Aa.invMass; }
+      if (bp2) { bp2[0] += corr * q.nx * Bb.invMass; bp2[1] += corr * q.ny * Bb.invMass; bp2[2] += corr * q.nz * Bb.invMass; }
+    }
+    if (!moved) break;
+  }
+  // 6. sleeping
   for (i = 0; i < BODIES.length; i++) {
     b = BODIES[i];
     if (b.invMass === 0 || b.node._dead) continue;
-    var sp2 = Math.sqrt(b.vel.x*b.vel.x + b.vel.y*b.vel.y + b.vel.z*b.vel.z);
+    var sp2 = Math.sqrt(b.vel.x * b.vel.x + b.vel.y * b.vel.y + b.vel.z * b.vel.z);
     if (sp2 < PHYS.sleepVel) {
       b.sleep += h;
       if (b.sleep > PHYS.sleepTime) { b.asleep = true; b.vel.x = b.vel.y = b.vel.z = 0; }
@@ -2356,17 +2420,14 @@ function collectNode(n, parentM) {
     var col = mat.color || "#9a9a9a";
     var g = n._geo;
     var pose = null;
-    if (g.rigged) pose = gaitPose(n);
+    if (g.rigged) pose = blendedPose(n);
     for (var f = 0; f < g.faces.length; f++) {
       var face = g.faces[f];
       var pv0 = g.verts[face.i[0]], pv1 = g.verts[face.i[1]], pv2 = g.verts[face.i[2]];
-      if (pose && face.part && pose[face.part]) {
-        var pp = g.parts[face.part] ? g.parts[face.part].pivot : null;
-        if (pp) {
-          pv0 = rotAboutX(pv0, pp, pose[face.part]);
-          pv1 = rotAboutX(pv1, pp, pose[face.part]);
-          pv2 = rotAboutX(pv2, pp, pose[face.part]);
-        }
+      if (pose && face.part && g.parts[face.part]) {
+        pv0 = deformVert(pv0, g, face.part, pose);
+        pv1 = deformVert(pv1, g, face.part, pose);
+        pv2 = deformVert(pv2, g, face.part, pose);
       }
       var w0 = matApply(m, pv0);
       var w1 = matApply(m, pv1);
@@ -2396,6 +2457,113 @@ var LIGHT = vnorm(v3(-0.4, 0.8, -0.3));
 // bob. This is how the era did it: no animation data, just tuned sines. Scenes
 // override feel with actor.gait = { stride, swing, armSwing, bob }.
 // ---------------------------------------------------------------------------
+// Three-axis bone rotation about a pivot. Order Z, Y, X - matching the
+// engine transform convention. Accepts a scalar (X only, the original form)
+// or { rx, ry, rz }.
+function poseAngles(v) {
+  if (v == null) return null;
+  if (typeof v === "number") return { rx: v, ry: 0, rz: 0 };
+  return { rx: v.rx || 0, ry: v.ry || 0, rz: v.rz || 0 };
+}
+function rotAboutAxes(p, pivot, a) {
+  var x = p.x - pivot.x, y = p.y - pivot.y, z = p.z - pivot.z, c, s, nx, ny, nz;
+  if (a.rz) { c = Math.cos(a.rz * DEG); s = Math.sin(a.rz * DEG);
+    nx = x * c - y * s; ny = x * s + y * c; x = nx; y = ny; }
+  if (a.ry) { c = Math.cos(a.ry * DEG); s = Math.sin(a.ry * DEG);
+    nx = x * c + z * s; nz = -x * s + z * c; x = nx; z = nz; }
+  if (a.rx) { c = Math.cos(a.rx * DEG); s = Math.sin(a.rx * DEG);
+    ny = y * c - z * s; nz = y * s + z * c; y = ny; z = nz; }
+  return v3(pivot.x + x, pivot.y + y, pivot.z + z);
+}
+// Walks a bone up its parent chain, applying each ancestor's rotation about
+// that ancestor's pivot. Depth is capped so malformed data cannot loop.
+function deformVert(p, g, partName, pose) {
+  var name = partName, depth = 0, out = p;
+  while (name && depth < 8) {
+    var part = g.parts[name];
+    if (!part) break;
+    var a = poseAngles(pose[name]);
+    if (a && (a.rx || a.ry || a.rz)) out = rotAboutAxes(out, part.pivot, a);
+    name = part.parent;
+    depth++;
+  }
+  return out;
+}
+
+// ---- pose clips ----------------------------------------------------------
+function poseDef(id) { return ((scene.resources || {}).poses || {})[id] || null; }
+function playPose(n, id) {
+  var def = poseDef(id);
+  if (!def) return;
+  n._pose = { id: id, t: 0, fired: {} };
+}
+function samplePoseTrack(keys, t) {
+  if (!keys || !keys.length) return null;
+  if (t <= keys[0][0]) return keys[0][1];
+  var last = keys[keys.length - 1];
+  if (t >= last[0]) return last[1];
+  for (var i = 0; i < keys.length - 1; i++) {
+    var ka = keys[i], kb = keys[i + 1];
+    if (t >= ka[0] && t <= kb[0]) {
+      var u = (t - ka[0]) / ((kb[0] - ka[0]) || 1e-9);
+      var A = poseAngles(ka[1]) || { rx: 0, ry: 0, rz: 0 };
+      var B = poseAngles(kb[1]) || { rx: 0, ry: 0, rz: 0 };
+      return { rx: A.rx + (B.rx - A.rx) * u,
+               ry: A.ry + (B.ry - A.ry) * u,
+               rz: A.rz + (B.rz - A.rz) * u };
+    }
+  }
+  return last[1];
+}
+function updatePoseClips(dt) {
+  for (var i = 0; i < actors.length; i++) {
+    var n = actors[i];
+    if (!n._pose) continue;
+    var def = poseDef(n._pose.id);
+    if (!def) { n._pose = null; continue; }
+    n._pose.t += dt;
+    var dur = def.dur || 1;
+    // events fire once per playthrough, at their normalised time
+    var evs = def.events || [];
+    for (var e = 0; e < evs.length; e++) {
+      if (n._pose.fired[e]) continue;
+      if (n._pose.t >= (evs[e].at || 0)) {
+        n._pose.fired[e] = 1;
+        var act = evs[e].do || {};
+        runAction(n, { action: act.action, target: act.to || "self",
+                       args: act.args, amount: act.amount });
+      }
+    }
+    if (n._pose.t >= dur) {
+      if (def.loop) { n._pose.t = n._pose.t % dur; n._pose.fired = {}; }
+      else n._pose = null;
+    }
+  }
+}
+// Blends the active pose clip over the gait pose. Clip bones win at full
+// weight, untouched bones keep walking - an upper-body swing while the legs
+// still stride.
+function blendedPose(n) {
+  var base = gaitPose(n);
+  if (!n._pose) return base;
+  var def = poseDef(n._pose.id);
+  if (!def) return base;
+  var out = {};
+  if (base) for (var k in base) out[k] = base[k];
+  var w = def.weight != null ? def.weight : 1;
+  var tracks = def.tracks || {};
+  for (var bone in tracks) {
+    var val = samplePoseTrack(tracks[bone], n._pose.t);
+    if (val == null) continue;
+    var target = poseAngles(val);
+    var cur = poseAngles(out[bone]) || { rx: 0, ry: 0, rz: 0 };
+    out[bone] = { rx: cur.rx + (target.rx - cur.rx) * w,
+                  ry: cur.ry + (target.ry - cur.ry) * w,
+                  rz: cur.rz + (target.rz - cur.rz) * w };
+  }
+  return out;
+}
+
 function rotAboutX(p, pivot, deg) {
   var c = Math.cos(deg * DEG), sn = Math.sin(deg * DEG);
   var y = p.y - pivot.y, z = p.z - pivot.z;
@@ -2882,6 +3050,7 @@ function loadScene(json) {
   scene._backdrop = null; scene._walkmesh = null; scene._tilemap = null;
   BODIES = []; PHYS.accum = 0;
   ALARMS = [];
+  actors.forEach(function (a) { a._pose = null; });
   playerId = null; camera = null; terrainMesh = null;
   world = { alert: false, flags: {}, score: 0, time: 0 };
   INV = { items: {}, equipped: {} };
@@ -2929,6 +3098,7 @@ function loop(t) {
   pollKeys();
   edgeFlush();
 
+  updatePoseClips(dt);
   updateAlarms(dt);
   updatePhysics(dt);
   updateAnims(dt);
