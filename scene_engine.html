@@ -365,7 +365,9 @@ var FN = {
   has: function (itemId) { return invCount(itemId); },
   stat: function (base, name) { return derivedStat(base, name); },
   level: function () { return playerLevel(); },
-  gold: function () { return gold(); }
+  gold: function () { return gold(); },
+  canSee: function (a, b) { return canSee(a, b); },
+  heard: function (a) { return heardBy(a); }
 };
 function tokenize(s) {
   var out = [], i = 0;
@@ -856,6 +858,8 @@ function runAction(self, a) {
     case "giveXp": world.flags.xp = (world.flags.xp || 0) + (a.amount || 0); break;
     case "startBattle": startBattle(a.args ? a.args[0] : ""); break;
     case "openMenu": openMenu(); break;
+    case "raiseAlert": raiseAlert(a.amount || 10); break;
+    case "noise": if (self && self.worldPos) emitStimulus(self.worldPos, a.amount || 8, "scripted"); break;
   }
 }
 
@@ -1501,6 +1505,195 @@ function renderMenu() {
 }
 
 // ---------------------------------------------------------------------------
+// v4: SHOOTER + STEALTH SET  -- projectiles, lock-on, vision cones, stimuli.
+// ---------------------------------------------------------------------------
+
+// ---- occluders: MeshInstances with collision block sight lines -------------
+function segmentBlocked(a, b) {
+  // 2D (xz) segment vs circle test against every collidable node. Coarse but
+  // period-correct: PS1 stealth games did exactly this.
+  var ids = Object.keys(nodes);
+  for (var i = 0; i < ids.length; i++) {
+    var n = nodes[ids[i]];
+    if (!n.collision || n.collision === "mesh" || n._dead) continue; // terrain never occludes
+    if (n.tags && (n.tags.indexOf("player") >= 0 || n.tags.indexOf("enemy") >= 0)) continue;
+    var r = n.occluderRadius || 1.2;
+    var cx = n.worldPos.x, cz = n.worldPos.z;
+    var dx = b.x - a.x, dz = b.z - a.z;
+    var len2 = dx * dx + dz * dz;
+    if (len2 < 0.0001) continue;
+    var t = ((cx - a.x) * dx + (cz - a.z) * dz) / len2;
+    t = Math.max(0, Math.min(1, t));
+    var px = a.x + dx * t, pz = a.z + dz * t;
+    var dd = (px - cx) * (px - cx) + (pz - cz) * (pz - cz);
+    if (dd < r * r) return true;
+  }
+  return false;
+}
+
+// canSee(a, b): inside a's vision cone AND unoccluded.
+// a.vision = { range: 12, fovDeg: 90 } (defaults). Facing = a.transform.rot[1].
+function canSee(a, b) {
+  if (!a || !b || !a.worldPos || !b.worldPos) return false;
+  var range = (a.vision && a.vision.range) || 12;
+  var fov = ((a.vision && a.vision.fovDeg) || 90) / 2;
+  var dx = b.worldPos.x - a.worldPos.x, dz = b.worldPos.z - a.worldPos.z;
+  var d = Math.sqrt(dx * dx + dz * dz);
+  if (d > range) return false;
+  var facing = ((a.transform && a.transform.rot && a.transform.rot[1]) || 0);
+  var angTo = Math.atan2(dx, dz) / DEG;
+  var diff = ((angTo - facing) % 360 + 540) % 360 - 180;
+  if (Math.abs(diff) > fov) return false;
+  return !segmentBlocked(a.worldPos, b.worldPos);
+}
+
+// ---- stimulus events -------------------------------------------------------
+// emitStimulus drops a timed event; heard(self) is true when a stimulus is
+// within the listener's hearing range. Running players emit automatically.
+var STIMULI = [];
+function emitStimulus(pos, radius, kind) {
+  STIMULI.push({ pos: v3(pos.x, pos.y, pos.z), radius: radius || 8, kind: kind || "noise", ttl: 1.0 });
+}
+function heardBy(n) {
+  if (!n || !n.worldPos) return false;
+  for (var i = 0; i < STIMULI.length; i++) {
+    if (dist(STIMULI[i].pos, n.worldPos) <= STIMULI[i].radius) return true;
+  }
+  return false;
+}
+function updateStimuli(dt) {
+  for (var i = STIMULI.length - 1; i >= 0; i--) {
+    STIMULI[i].ttl -= dt;
+    if (STIMULI[i].ttl <= 0) STIMULI.splice(i, 1);
+  }
+  // sprinting player makes noise (moving at full stick)
+  var pl = nodes[playerId];
+  if (pl && INPUT.move.length > 0.85 && Math.floor(world.time * 4) !== Math.floor((world.time - dt) * 4)) {
+    emitStimulus(pl.worldPos, (pl.noiseRadius || 7), "footsteps");
+  }
+}
+
+// ---- world alert cascade ---------------------------------------------------
+// One guard spotting the player raises world.alert for alertSeconds; every
+// guard's state machine can read it. This is the MGS "!" moment as data.
+function raiseAlert(seconds) {
+  world.alert = true;
+  world._alertT = Math.max(world._alertT || 0, seconds || 10);
+}
+function updateAlert(dt) {
+  if (world._alertT > 0) {
+    world._alertT -= dt;
+    if (world._alertT <= 0) { world.alert = false; world._alertT = 0; }
+  }
+}
+
+// ---- projectiles -----------------------------------------------------------
+// Spawned by {action:"shoot", target:...} or from behaviors. Straight-line,
+// speed in units/sec, hits the first actor whose capsule it enters.
+var PROJECTILES = [];
+function shoot(from, dir, opts) {
+  opts = opts || {};
+  PROJECTILES.push({
+    pos: v3(from.x, from.y + 1.2, from.z),
+    vel: vmul(vnorm(dir), opts.speed || 22),
+    damage: opts.damage || 5,
+    owner: opts.owner || null,
+    ttl: opts.ttl || 2.5,
+    color: opts.color || "#e8e2d0"
+  });
+}
+function updateProjectiles(dt) {
+  for (var i = PROJECTILES.length - 1; i >= 0; i--) {
+    var pr = PROJECTILES[i];
+    pr.ttl -= dt;
+    pr.pos = vadd(pr.pos, vmul(pr.vel, dt));
+    var hit = null;
+    var ids = Object.keys(nodes);
+    for (var k = 0; k < ids.length; k++) {
+      var n = nodes[ids[k]];
+      if (!n.tags || n._dead || n.id === pr.owner) continue;
+      if (n.tags.indexOf("player") < 0 && n.tags.indexOf("enemy") < 0 && n.tags.indexOf("npc") < 0) continue;
+      var dx = n.worldPos.x - pr.pos.x, dz = n.worldPos.z - pr.pos.z;
+      if (dx * dx + dz * dz < 0.55 && pr.pos.y > n.worldPos.y - 0.2 && pr.pos.y < n.worldPos.y + 2.2) { hit = n; break; }
+    }
+    if (hit) {
+      hit.hp = Math.max(0, (hit.hp || 0) - pr.damage);
+      if (hit.tags.indexOf("enemy") >= 0) raiseAlert(8);
+      PROJECTILES.splice(i, 1);
+      continue;
+    }
+    if (pr.ttl <= 0 || segmentBlocked(vsub(pr.pos, vmul(pr.vel, dt)), pr.pos)) PROJECTILES.splice(i, 1);
+  }
+}
+function renderProjectiles() {
+  for (var i = 0; i < PROJECTILES.length; i++) {
+    var p = project(PROJECTILES[i].pos);
+    if (!p) continue;
+    var r = Math.max(1, 2.5 * fovScale / p.z / 40);
+    ctx.fillStyle = PROJECTILES[i].color;
+    ctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
+  }
+}
+
+// ---- lock-on ---------------------------------------------------------------
+// Syphon Filter targeting: attack button fires at the locked enemy; a
+// dedicated action cycles targets by angular closeness to the camera.
+var LOCK = { target: null };
+function lockCandidates() {
+  var pl = nodes[playerId];
+  if (!pl) return [];
+  return Object.keys(nodes).filter(function (id) {
+    var n = nodes[id];
+    return n.tags && n.tags.indexOf("enemy") >= 0 && !n._dead && (n.hp || 0) > 0 &&
+      dist(n.worldPos, pl.worldPos) < (pl.lockRange || 16);
+  }).sort(function (a, b) {
+    return dist(nodes[a].worldPos, pl.worldPos) - dist(nodes[b].worldPos, pl.worldPos);
+  });
+}
+function cycleLock() {
+  var cand = lockCandidates();
+  if (!cand.length) { LOCK.target = null; return; }
+  var idx = cand.indexOf(LOCK.target);
+  LOCK.target = cand[(idx + 1) % cand.length];
+}
+function updateLock() {
+  if (LOCK.target) {
+    var t = nodes[LOCK.target];
+    if (!t || t._dead || (t.hp || 0) <= 0 ||
+        dist(t.worldPos, (nodes[playerId] || {}).worldPos || v3()) > 20) LOCK.target = null;
+  }
+  // player shooting: attack edge + shooter profile fires at lock (or facing)
+  var pl = nodes[playerId];
+  if (pl && pl.shooter && INPUT.attack.pressed) {
+    var dir;
+    if (LOCK.target && nodes[LOCK.target]) {
+      dir = vsub(nodes[LOCK.target].worldPos, pl.worldPos); dir.y = 0;
+    } else {
+      var ya = ((pl.transform.rot && pl.transform.rot[1]) || 0) * DEG;
+      dir = v3(Math.sin(ya), 0, Math.cos(ya));
+    }
+    shoot(pl.worldPos, dir, {
+      damage: derivedStat((pl.shooter.damage || 4), "atk"),
+      speed: pl.shooter.speed || 24,
+      owner: pl.id
+    });
+    emitStimulus(pl.worldPos, 12, "gunshot");
+  }
+  if (INPUT.interact.pressed && pl && pl.shooter) cycleLock();
+}
+function renderLockMarker() {
+  if (!LOCK.target || !nodes[LOCK.target]) return;
+  var t = nodes[LOCK.target];
+  var p = project(vadd(t.worldPos, v3(0, 2.4, 0)));
+  if (!p) return;
+  ctx.strokeStyle = "#c9b48a";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y + 4); ctx.lineTo(p.x - 4, p.y - 3); ctx.lineTo(p.x + 4, p.y - 3);
+  ctx.closePath(); ctx.stroke();
+}
+
+// ---------------------------------------------------------------------------
 // TRIGGERS  (Area3D)
 // ---------------------------------------------------------------------------
 function updateAreas() {
@@ -1895,6 +2088,8 @@ function renderFrame() {
       }
     }
   }
+  renderProjectiles();
+  renderLockMarker();
 }
 
 // ---------------------------------------------------------------------------
@@ -2140,6 +2335,8 @@ function loadScene(json) {
   if (shopEl) shopEl.style.display = "none";
   ENC = { steps: 0, threshold: 0, zone: null, rng: null };
   BATTLE = null; MENU = null;
+  STIMULI = []; PROJECTILES = []; LOCK = { target: null };
+  world._alertT = 0;
   if (battleEl) battleEl.style.display = "none";
   if (menuEl) menuEl.style.display = "none";
   rnd = mulberry(hashStr(scene.meta.seed || "kv"));
@@ -2183,6 +2380,12 @@ function loop(t) {
   }
   updateAtb(dt);
   if (!battleOpen() && !MENU) updateEncounters(dt);
+  if (!dialogueOpen() && !SHOP && !battleOpen() && !MENU) {
+    updateStimuli(dt);
+    updateAlert(dt);
+    updateProjectiles(dt);
+    updateLock();
+  }
   updateTransforms(scene.nodes, matIdent());
   buildView();
   updateAreas();
