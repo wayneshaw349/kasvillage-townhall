@@ -662,7 +662,7 @@ function applyPrefab(n) {
   var def = (scene.prefabs || {})[n.instance];
   if (!def) { console.warn("prefab not found: " + n.instance); delete n.instance; return; }
   if (def.instance) { console.warn("prefab may not instance a prefab: " + n.instance); delete n.instance; return; }
-  // Unity-style variants: a prefab may `extends` another prefab. Single
+  // Unity-style variants: a prefab may extend another prefab. Single
   // level of inheritance; self-reference and missing bases are ignored.
   if (def.extends && def.extends !== n.instance) {
     var basePf = (scene.prefabs || {})[def.extends];
