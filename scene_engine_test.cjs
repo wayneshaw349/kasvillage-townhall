@@ -127,16 +127,19 @@ if (typeof G("loadScene") !== "function") {
 // Drive N fixed-dt frames through the engine's own systems.
 function pump(frames, dt) {
   dt = dt || 1 / 60;
+  // Calls the engine's own stepSystems so the harness can never drift from the
+  // real loop. Falls back to the legacy inline list on older engine builds.
   vm.runInContext(
     "(function(n,h){for(var i=0;i<n;i++){" +
     "world.time+=h;" +
+    "if(typeof stepSystems==='function'){stepSystems(h);}else{" +
     "if(typeof updateRagdolls==='function')updateRagdolls();" +
     "if(typeof updatePoseClips==='function')updatePoseClips(h);" +
     "if(typeof updateAlarms==='function')updateAlarms(h);" +
     "if(typeof updatePhysics==='function')updatePhysics(h);" +
     "if(typeof updateAnims==='function')updateAnims(h);" +
     "updateTransforms(scene.nodes, matIdent());" +
-    "actors.forEach(function(a){if(!a._dead)updateActor(a,h);});" +
+    "actors.forEach(function(a){if(!a._dead)updateActor(a,h);});}" +
     "if(typeof updateAreas==='function')updateAreas();" +
     "}})(" + frames + "," + dt + ")", ctx);
 }

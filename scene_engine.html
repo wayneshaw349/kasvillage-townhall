@@ -3375,18 +3375,10 @@ function fail(msg) {
   post({ kv: "error", message: msg });
 }
 
-function loop(t) {
-  if (!running) return;
-  // Clamp both ends: negative deltas (clock skew, tab restore) would otherwise
-  // run the whole simulation backwards, and long stalls would tunnel actors.
-  var dt = Math.max(0, Math.min(0.05, (t - lastT) / 1000));
-  lastT = t;
-  world.time += dt;
-
-  INPUT.move.x = 0; INPUT.move.y = 0; INPUT.move.length = 0;
-  pollKeys();
-  edgeFlush();
-
+// Every per-frame simulation system, in order. loop() and the headless test
+// harness both call this, so a new system cannot be live in the engine but
+// missing from the regression suite.
+function stepSystems(dt) {
   updateRagdolls();
   updatePoseClips(dt);
   updateAlarms(dt);
@@ -3405,6 +3397,21 @@ function loop(t) {
     updateLock();
   }
   updateTransforms(scene.nodes, matIdent());
+}
+
+function loop(t) {
+  if (!running) return;
+  // Clamp both ends: negative deltas (clock skew, tab restore) would otherwise
+  // run the whole simulation backwards, and long stalls would tunnel actors.
+  var dt = Math.max(0, Math.min(0.05, (t - lastT) / 1000));
+  lastT = t;
+  world.time += dt;
+
+  INPUT.move.x = 0; INPUT.move.y = 0; INPUT.move.length = 0;
+  pollKeys();
+  edgeFlush();
+
+  stepSystems(dt);
   buildView();
   updateAreas();
   renderFrame();
