@@ -981,6 +981,10 @@ function updateActor(n, dt) {
     n._gaitPhase = (n._gaitPhase || 0) + moved * (gait.stride ? (Math.PI / gait.stride) : 3.4);
     n._gaitAmt = Math.min(1, (n._gaitAmt || 0) + (moved > 0.001 ? dt * 8 : -dt * 6));
     if (n._gaitAmt < 0) n._gaitAmt = 0;
+    var stepN = Math.floor((n._gaitPhase || 0) / Math.PI);
+    if (n._stepN !== undefined && stepN !== n._stepN && (n._gaitAmt || 0) > 0.5)
+      playSound((gait.stepSound) || "__step", { x: t.pos[0], z: t.pos[2] });
+    n._stepN = stepN;
     n._moveSpeed = dt > 0 ? moved / dt : 0;
     n._lastPos = t.pos.slice();
   }
@@ -1027,10 +1031,10 @@ function updateActor(n, dt) {
     }
     var gy = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
     n._vy = (n._vy || 0);
-    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) { n._vy = ctl.jumpVelocity || 7; n._addPose = { id: "__jump", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); }
+    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) { n._vy = ctl.jumpVelocity || 7; n._addPose = { id: "__jump", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); playSound("__jump", { x: t.pos[0], z: t.pos[2] }); }
     n._vy -= (ctl.gravity || 18) * dt;
     n._airY = Math.max(0, (n._airY || 0) + n._vy * dt);
-    if (n._airY === 0 && n._vy < 0) { n._vy = 0; if (n._wasAir) { n._addPose = { id: "__land", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); } }
+    if (n._airY === 0 && n._vy < 0) { n._vy = 0; if (n._wasAir) { n._addPose = { id: "__land", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); playSound("__land", { x: t.pos[0], z: t.pos[2] }); } }
     n._wasAir = n._airY > 0.01;
     t.pos[1] = gy + n._airY;
   }
@@ -1361,9 +1365,10 @@ function updateAnims(dt) {
   }
 }
 
-function gotoRoom(id) { scene._room = id; }
+function gotoRoom(id) { scene._room = id; if (scene.rooms && scene.rooms.defs && scene.rooms.defs[id]) setSoundscape(scene.rooms.defs[id].soundscape); }
 function runAction(self, a) {
   if (a && a.action === "gotoRoom") { gotoRoom((a.args && a.args[0]) || a.target); return; }
+  if (a && a.action === "playSound") { playSound((a.args && a.args[0]) || a.target, self && self.worldPos); return; }
   var target = a.target === "self" ? self : nodes[a.target];
   switch (a.action) {
     case "damage": if (target) { target.hp = Math.max(0, (target.hp || 0) - (a.amount || 0)); } break;
@@ -2945,6 +2950,93 @@ function deformVert(p, g, partName, pose) {
 }
 
 // ---- pose clips ----------------------------------------------------------
+// ---- AUDIO (procedural WebAudio; FMOD event model, PS1 synthesis) ----
+var AC = null, AMASTER = null, ASCAPE = null, AUDIO_ON = false;
+function audioInit() {
+  if (AC) return;
+  var Ctor = (typeof window !== "undefined") && (window.AudioContext || window.webkitAudioContext);
+  if (!Ctor) return;
+  AC = new Ctor();
+  var comp = AC.createDynamicsCompressor();
+  AMASTER = AC.createGain(); AMASTER.gain.value = 0.8;
+  AMASTER.connect(comp); comp.connect(AC.destination);
+  AUDIO_ON = true;
+}
+function audioUnlock() {
+  audioInit();
+  if (AC && AC.state === "suspended") AC.resume();
+  if (AUDIO_ON && typeof scene !== "undefined" && scene && scene.rooms && scene.rooms.defs && scene.rooms.defs[scene._room])
+    setSoundscape(scene.rooms.defs[scene._room].soundscape);
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("touchstart", audioUnlock);
+  document.addEventListener("mousedown", audioUnlock);
+  document.addEventListener("keydown", audioUnlock);
+}
+var BUILTIN_SOUNDS = {
+  __hit:   { type: "tone", wave: "square", freq: 160, sweep: -90, dur: 0.09, vol: 0.5 },
+  __block: { type: "tone", wave: "square", freq: 90, sweep: -30, dur: 0.06, vol: 0.35 },
+  __step:  { type: "noise", filter: 600, dur: 0.05, vol: 0.16 },
+  __jump:  { type: "tone", wave: "sine", freq: 220, sweep: 170, dur: 0.12, vol: 0.3 },
+  __land:  { type: "noise", filter: 300, dur: 0.09, vol: 0.35 },
+  __thud:  { type: "tone", wave: "sine", freq: 70, sweep: -35, dur: 0.18, vol: 0.5 }
+};
+function soundDef(id) { return ((scene.resources || {}).sounds || {})[id] || BUILTIN_SOUNDS[id] || null; }
+function playSound(id, at) {
+  if (!AUDIO_ON) return;
+  var d = soundDef(id);
+  if (!d) return;
+  var vol = d.vol != null ? d.vol : 0.5;
+  if (at && nodes[playerId] && nodes[playerId].worldPos) {
+    var ref = nodes[playerId].worldPos;
+    var adx = (at.x || 0) - ref.x, adz = (at.z || 0) - ref.z;
+    vol *= Math.max(0.05, 1 - Math.sqrt(adx * adx + adz * adz) / 30);
+  }
+  var t0 = AC.currentTime;
+  var g = AC.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + (d.dur || 0.1));
+  g.connect(AMASTER);
+  if (d.type === "noise") {
+    var alen = Math.ceil(AC.sampleRate * (d.dur || 0.1));
+    var abuf = AC.createBuffer(1, alen, AC.sampleRate);
+    var ach = abuf.getChannelData(0);
+    for (var ai = 0; ai < alen; ai++) ach[ai] = Math.random() * 2 - 1;
+    var asrc = AC.createBufferSource(); asrc.buffer = abuf;
+    if (d.filter) {
+      var af = AC.createBiquadFilter(); af.type = "lowpass"; af.frequency.value = d.filter;
+      asrc.connect(af); af.connect(g);
+    } else asrc.connect(g);
+    asrc.start(t0); asrc.stop(t0 + (d.dur || 0.1));
+  } else {
+    var ao = AC.createOscillator();
+    ao.type = d.wave || "sine";
+    ao.frequency.setValueAtTime(d.freq || 220, t0);
+    if (d.sweep) ao.frequency.linearRampToValueAtTime(Math.max(20, (d.freq || 220) + d.sweep), t0 + (d.dur || 0.1));
+    ao.connect(g); ao.start(t0); ao.stop(t0 + (d.dur || 0.1) + 0.02);
+  }
+}
+function setSoundscape(spec) {
+  if (!AUDIO_ON) return;
+  if (ASCAPE) {
+    ASCAPE.g.gain.linearRampToValueAtTime(0.0001, AC.currentTime + 1);
+    ASCAPE.src.stop(AC.currentTime + 1.1);
+    ASCAPE = null;
+  }
+  if (!spec) return;
+  var slen = AC.sampleRate * 2;
+  var sbuf = AC.createBuffer(1, slen, AC.sampleRate);
+  var sch = sbuf.getChannelData(0);
+  for (var si = 0; si < slen; si++) sch[si] = Math.random() * 2 - 1;
+  var ssrc = AC.createBufferSource(); ssrc.buffer = sbuf; ssrc.loop = true;
+  var sf = AC.createBiquadFilter(); sf.type = "lowpass"; sf.frequency.value = spec.filter || 400;
+  var sg = AC.createGain(); sg.gain.value = 0.0001;
+  sg.gain.linearRampToValueAtTime(spec.vol != null ? spec.vol : 0.12, AC.currentTime + 1.5);
+  ssrc.connect(sf); sf.connect(sg); sg.connect(AMASTER);
+  ssrc.start();
+  ASCAPE = { src: ssrc, g: sg };
+}
+
 var BUILTIN_POSES = {
   __jump: { dur: 0.5, loop: false, tracks: {
     legL: [[0, 0], [0.15, { rx: -45 }], [0.4, { rx: -45 }], [0.5, 0]],
@@ -3103,6 +3195,7 @@ function updatePoseClips(dt) {
           htg.transform.pos[0] += Math.sin(hya) * hpb * 0.1;
           htg.transform.pos[2] += Math.cos(hya) * hpb * 0.1;
           htg._lastHit = { by: n.id, level: hb.level || "mid", t: world.time };
+          playSound(hb.sound || "__hit", { x: hbx, z: hbz });
           htg._addPose = { id: (hb.stagger || (hb.damage != null ? hb.damage : 5) >= 8) ? "__stumble" : "__flinch", t: 0 };
           if (POSED.indexOf(htg) < 0) POSED.push(htg);
           var himp = hb.launch != null ? hb.launch : 5;
@@ -3300,6 +3393,7 @@ function startRagdoll(n, impulse) {
       rag.hinges.push({ inner: rag.bones[HJ[i][0]].body, mid: rag.bones[HJ[i][1]].body, outer: rag.bones[HJ[i][2]].body });
   }
   n._rag = rag;
+  playSound("__thud", { x: n.transform.pos[0], z: n.transform.pos[2] });
   RAGDOLLS.push(rag);
   // the actor stops acting: no controller, no AI, no clips
   n._pose = null; n._addPose = null; n._treePose = null;
