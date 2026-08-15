@@ -118,7 +118,9 @@ function calculateTransactionMass(
   const scriptMass = outputCount * P2PK_SCRIPT_SIZE * MASS_PER_SCRIPT_PUB_KEY_BYTE;
   const sigOpMass = inputCount * MASS_PER_SIG_OP; // 1 sig op per input
   
-  return baseMass + scriptMass + sigOpMass;
+  // Toccata fee basis: the transient-mass component (2 * tx bytes) joins
+  // the max - it dominates for payload-carrying (KVP1) transactions.
+  return Math.max(baseMass + scriptMass + sigOpMass, 2 * txSize);
 }
 
 /**
@@ -126,12 +128,12 @@ function calculateTransactionMass(
  */
 function parseFeeEstimate(raw: any): FeeEstimate {
   // Handle different response formats from SDK
-  const priority = raw.priorityBucket || raw.priority_bucket || { feerate: 1, estimated_seconds: 1 };
+  const priority = raw.priorityBucket || raw.priority_bucket || { feerate: 100, estimated_seconds: 1 };
   const normal = raw.normalBuckets || raw.normal_buckets || [];
   const low = raw.lowBuckets || raw.low_buckets || [];
   
   const parseBucket = (b: any): FeerateBucket => ({
-    feeRate: Number(b.feerate ?? b.feeRate ?? 1),
+    feeRate: Number(b.feerate ?? b.feeRate ?? 100),
     estimatedSeconds: Number(b.estimated_seconds ?? b.estimatedSeconds ?? 60),
   });
   
@@ -158,7 +160,7 @@ function getFeeRateForPriority(
         return estimate.normalBuckets[0].feeRate;
       }
       // Fallback: average of priority and low
-      const lowRate = estimate.lowBuckets[0]?.feeRate ?? 1;
+      const lowRate = estimate.lowBuckets[0]?.feeRate ?? 100;
       return (estimate.priorityBucket.feeRate + lowRate) / 2;
     case 'low':
       if (estimate.lowBuckets.length > 0) {
@@ -166,7 +168,7 @@ function getFeeRateForPriority(
       }
       return 100; // Toccata minimum: 100 sompi/gram
     default:
-      return 1;
+      return 100; // Toccata minimum: 100 sompi/gram
   }
 }
 
@@ -502,13 +504,16 @@ export class KaspaClient {
     const mass = calculateTransactionMass(inputCount, outputCount, payloadBytes);
     
     // Get appropriate fee rate based on priority
-    const feeRate = getFeeRateForPriority(estimate, priority);
+    // Toccata: never trust a rate below the 100 sompi/gram standard floor,
+    // even from a live estimator.
+    const feeRate = Math.max(getFeeRateForPriority(estimate, priority), 100);
     
     // Calculate fee: fee = feeRate * mass (both in sompi/gram * grams = sompi)
     const feeSompi = BigInt(Math.ceil(feeRate * mass));
     
-    // Ensure minimum relay fee
-    const minFeeSompi = BigInt(mass); // 1 sompi/gram minimum
+    // Ensure the Toccata minimum standard fee: 100 sompi/gram over the fee
+    // mass (which already includes the 2 * tx bytes transient floor).
+    const minFeeSompi = BigInt(mass) * 100n;
     const finalFeeSompi = feeSompi > minFeeSompi ? feeSompi : minFeeSompi;
     
     return {

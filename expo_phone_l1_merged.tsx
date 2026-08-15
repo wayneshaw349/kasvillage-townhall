@@ -736,11 +736,11 @@ class KaspaL1Client {
     try {
       const data = await this.fetchWithFallback<any>('/info/fee-estimate');
       return {
-        priorityFeerate: data.priorityBucket?.feerate ?? 2.0,
-        normalFeerate: data.normalBuckets?.[0]?.feerate ?? 1.0,
+        priorityFeerate: data.priorityBucket?.feerate ?? 100,
+        normalFeerate: data.normalBuckets?.[0]?.feerate ?? 100,
       };
     } catch {
-      return { priorityFeerate: 2.0, normalFeerate: 1.0 };
+      return { priorityFeerate: 100, normalFeerate: 100 }; // Toccata floor
     }
   }
 }
