@@ -517,8 +517,207 @@ var INPUT = {
   attack: { pressed: false, held: false }
 };
 var keys = {};
+// ---------------------------------------------------------------------------
+// DEV CONSOLE (v11) -- id-Tech style. Only exists when scene.meta.debug is
+// true; otherwise no DOM, no listeners, no way in.
+// ---------------------------------------------------------------------------
+var CON = { open: false, el: null, logEl: null, inEl: null, lines: [], enabled: false };
+var CON_KEY = String.fromCharCode(96); // backquote
+
+// tunable roots: the only objects cvar may reach
+function conRoots() {
+  var r = { world: world };
+  if (typeof PHYS !== "undefined") r.phys = PHYS;
+  return r;
+}
+
+function conLog(msg, cls) {
+  CON.lines.push({ t: String(msg), c: cls || "" });
+  if (CON.lines.length > 200) CON.lines.shift();
+  if (CON.logEl) {
+    var d = document.createElement("div");
+    d.textContent = String(msg);
+    if (cls === "err") d.style.color = "#f88";
+    else if (cls === "warn") d.style.color = "#fc6";
+    else if (cls === "in") d.style.color = "#8cf";
+    CON.logEl.appendChild(d);
+    while (CON.logEl.children.length > 200) CON.logEl.removeChild(CON.logEl.children[0]);
+    CON.logEl.scrollTop = 99999;
+  }
+}
+
+function conBuild() {
+  if (CON.el) return;
+  var el = document.createElement("div");
+  el.style.position = "absolute"; el.style.left = "0"; el.style.top = "0";
+  el.style.right = "0"; el.style.height = "55%";
+  el.style.background = "rgba(10,12,16,0.92)"; el.style.color = "#cfd8c2";
+  el.style.font = "11px monospace"; el.style.zIndex = "99";
+  el.style.display = "none"; el.style.pointerEvents = "auto";
+  el.style.borderBottom = "1px solid #4a5a44";
+  var log = document.createElement("div");
+  log.style.position = "absolute"; log.style.left = "8px"; log.style.right = "8px";
+  log.style.top = "4px"; log.style.bottom = "30px"; log.style.overflow = "auto";
+  log.style.whiteSpace = "pre-wrap";
+  var inp = document.createElement("input");
+  inp.type = "text";
+  inp.style.position = "absolute"; inp.style.left = "8px"; inp.style.right = "8px";
+  inp.style.bottom = "4px"; inp.style.height = "20px";
+  inp.style.background = "#1a2018"; inp.style.color = "#cfd8c2";
+  inp.style.border = "1px solid #4a5a44"; inp.style.font = "11px monospace";
+  inp.addEventListener("keydown", function (e) {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      var cmd = inp.value.trim();
+      inp.value = "";
+      if (cmd) { conLog("> " + cmd, "in"); conExec(cmd); }
+    }
+    if (e.key === CON_KEY || e.key === "Escape") conToggle();
+  });
+  el.appendChild(log); el.appendChild(inp);
+  document.body.appendChild(el);
+  CON.el = el; CON.logEl = log; CON.inEl = inp;
+  // replay buffered lines captured before the DOM existed
+  var buf = CON.lines.slice(); CON.lines = [];
+  for (var i = 0; i < buf.length; i++) conLog(buf[i].t, buf[i].c);
+}
+
+function conToggle() {
+  if (!CON.enabled) return;
+  conBuild();
+  CON.open = !CON.open;
+  CON.el.style.display = CON.open ? "block" : "none";
+  if (CON.open && CON.inEl) CON.inEl.focus();
+  // release any held game input so the player does not run off while typing
+  INPUT.move.x = 0; INPUT.move.y = 0; INPUT.move.length = 0;
+}
+
+function conResolve(path) {
+  var ps = path.split(".");
+  var roots = conRoots();
+  var o = roots[ps[0]];
+  if (!o) return null;
+  for (var i = 1; i < ps.length - 1; i++) {
+    o = o[ps[i]];
+    if (o == null || typeof o !== "object") return null;
+  }
+  return { o: o, k: ps[ps.length - 1] };
+}
+
+function conExec(line) {
+  try {
+    var a = line.split(/\s+/);
+    var cmd = a[0].toLowerCase();
+    if (cmd === "help") {
+      conLog("cvar [path] [val] | spawn m x y z | tp id x y z | hp id n | pose id clip [add]");
+      conLog("ragdoll id [x y z] | battle id | give item [n] | gold n | xp n | bake | stats | scene | clear");
+    } else if (cmd === "clear") {
+      CON.lines = [];
+      if (CON.logEl) CON.logEl.innerHTML = "";
+    } else if (cmd === "cvar") {
+      if (a.length === 1) {
+        var roots = conRoots();
+        for (var rk in roots) {
+          for (var vk in roots[rk]) {
+            var v = roots[rk][vk];
+            if (typeof v === "number") conLog(rk + "." + vk + " = " + v);
+          }
+        }
+      } else {
+        var ref = conResolve(a[1]);
+        if (!ref || ref.o[ref.k] === undefined) { conLog("unknown cvar: " + a[1], "err"); return; }
+        if (a.length === 2) { conLog(a[1] + " = " + ref.o[ref.k]); return; }
+        var num = parseFloat(a[2]);
+        ref.o[ref.k] = isNaN(num) ? a[2] : num;
+        conLog(a[1] + " = " + ref.o[ref.k]);
+      }
+    } else if (cmd === "spawn") {
+      var name = a[1];
+      var nn = { id: name + "_" + Math.floor(rnd() * 100000),
+                 transform: { pos: [parseFloat(a[2]) || 0, parseFloat(a[3]) || 0, parseFloat(a[4]) || 0] } };
+      if ((scene.prefabs || {})[name]) nn.instance = name;
+      else { nn.type = "MeshInstance"; nn.mesh = name; }
+      scene.nodes.push(nn);
+      walkNodes([nn], null);
+      conLog("spawned " + nn.id);
+    } else if (cmd === "tp") {
+      var tn = nodes[a[1]];
+      if (!tn) { conLog("no node: " + a[1], "err"); return; }
+      tn.transform.pos = [parseFloat(a[2]) || 0, parseFloat(a[3]) || 0, parseFloat(a[4]) || 0];
+      conLog(a[1] + " -> " + tn.transform.pos.join(","));
+    } else if (cmd === "hp") {
+      var hn = nodes[a[1]];
+      if (!hn) { conLog("no node: " + a[1], "err"); return; }
+      hn.hp = parseFloat(a[2]) || 0;
+      conLog(a[1] + " hp = " + hn.hp);
+    } else if (cmd === "pose") {
+      var pn = nodes[a[1]];
+      if (!pn) { conLog("no node: " + a[1], "err"); return; }
+      if (a[3] === "add") playPoseAdditive(pn, a[2]); else playPose(pn, a[2]);
+      conLog("pose " + a[2] + " on " + a[1]);
+    } else if (cmd === "ragdoll") {
+      var rn = nodes[a[1]];
+      if (!rn) { conLog("no node: " + a[1], "err"); return; }
+      startRagdoll(rn, a.length > 2 ? { x: parseFloat(a[2]) || 0, y: parseFloat(a[3]) || 0, z: parseFloat(a[4]) || 0 } : null);
+      conLog("ragdolled " + a[1]);
+    } else if (cmd === "battle") {
+      startBattle(a[1]);
+    } else if (cmd === "give") {
+      invAdd(a[1], parseInt(a[2], 10) || 1);
+      conLog("gave " + (a[2] || 1) + "x " + a[1]);
+    } else if (cmd === "gold") {
+      world.flags.gold = (world.flags.gold || 0) + (parseInt(a[1], 10) || 0);
+      conLog("gold = " + world.flags.gold);
+    } else if (cmd === "xp") {
+      world.flags.xp = (world.flags.xp || 0) + (parseInt(a[1], 10) || 0);
+      conLog("xp = " + world.flags.xp + " (level " + playerLevel() + ")");
+    } else if (cmd === "bake") {
+      Object.keys(nodes).forEach(function (id) { nodes[id]._bake = null; });
+      if (scene.lighting) { bakeLighting(); conLog("re-baked"); }
+      else conLog("scene has no lighting block", "warn");
+    } else if (cmd === "stats") {
+      var awake = 0;
+      for (var bi = 0; bi < BODIES.length; bi++) if (!BODIES[bi].asleep) awake++;
+      conLog("nodes=" + Object.keys(nodes).length + " actors=" + actors.length +
+             " bodies=" + BODIES.length + " awake=" + awake +
+             " ragdolls=" + RAGDOLLS.length + " projectiles=" + PROJECTILES.length);
+    } else if (cmd === "scene") {
+      Object.keys(nodes).forEach(function (id) {
+        var n = nodes[id];
+        conLog(id + " [" + (n.type || "?") + "]" + (n.hp != null ? " hp=" + n.hp : "") + (n._dead ? " DEAD" : ""));
+      });
+    } else {
+      conLog("unknown command: " + cmd + " (try help)", "err");
+    }
+  } catch (e) {
+    conLog("error: " + e.message, "err");
+  }
+}
+
+function conHookLogs() {
+  var oL = console.log, oW = console.warn, oE = console.error;
+  console.log = function () { oL.apply(console, arguments); conLog(Array.prototype.join.call(arguments, " ")); };
+  console.warn = function () { oW.apply(console, arguments); conLog(Array.prototype.join.call(arguments, " "), "warn"); };
+  console.error = function () { oE.apply(console, arguments); conLog(Array.prototype.join.call(arguments, " "), "err"); };
+}
+
+function conSetup() {
+  CON.enabled = !!(scene && scene.meta && scene.meta.debug === true);
+  if (!CON.enabled) { if (CON.el) { CON.el.style.display = "none"; CON.open = false; } return; }
+  conHookLogs();
+  // three-finger tap toggles on touch devices
+  window.addEventListener("touchstart", function (e) {
+    if (e.touches && e.touches.length === 3) { conToggle(); e.preventDefault(); }
+  }, { passive: false });
+  conLog("console ready - type help");
+}
+
 function setupInput() {
-  window.addEventListener("keydown", function (e) { keys[e.key.toLowerCase()] = true; });
+  window.addEventListener("keydown", function (e) {
+    if (CON.enabled && e.key === CON_KEY) { conToggle(); e.preventDefault(); return; }
+    if (CON.open) return; // console swallows game keys while open
+    keys[e.key.toLowerCase()] = true;
+  });
   window.addEventListener("keyup", function (e) { keys[e.key.toLowerCase()] = false; });
 
   pad.innerHTML =
@@ -3557,6 +3756,7 @@ function loadScene(json) {
   // world matrices must exist before baking: vertices are lit in world space
   updateTransforms(scene.nodes, matIdent());
   if (scene.lighting) bakeLighting();
+  conSetup();
   post({ kv: "ready", id: scene.meta.id, permissions: scene.permissions || [] });
   running = true;
   lastT = performance.now();

@@ -876,5 +876,57 @@ section("lighting: determinism, AO, and opt-out");
 })();
 
 // ---------------------------------------------------------------------------
+// 12. DEV CONSOLE v11
+// ---------------------------------------------------------------------------
+section("console: gated by debug flag, commands work");
+(function () {
+  // no debug flag -> console disabled
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "nocon", title: "n", seed: "c0" },
+    render: BASE_RENDER,
+    nodes: [{ id: "hero", type: "Actor", mesh: "cube", tags: ["player"], transform: { pos: [0, 0, 0] } }],
+    resources: { meshes: { cube: { type: "box" } }, materials: {} }
+  });
+  ok("console disabled without debug flag", G("CON.enabled") === false);
+  call("conToggle();");
+  ok("toggle is a no-op when disabled", G("CON.open") === false);
+
+  // debug scene -> enabled
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "con", title: "c", seed: "c1", debug: true },
+    render: BASE_RENDER,
+    prefabs: { gob: { type: "Actor", mesh: "cube", tags: ["enemy"], stats: { hp: 15, maxHp: 15 } } },
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "cube", tags: ["player"], transform: { pos: [0, 0, 0] }, stats: { hp: 100, maxHp: 100 } }
+    ],
+    resources: { meshes: { cube: { type: "box" } }, materials: {} }
+  });
+  ok("console enabled with debug:true", G("CON.enabled") === true);
+
+  call("conExec('cvar phys.gravity -5');");
+  ok("cvar sets a physics value", call("PHYS.gravity") === -5, call("PHYS.gravity"));
+  call("conExec('cvar phys.gravity -20');");
+
+  call("conExec('spawn gob 4 0 2');");
+  const spawned = call("Object.keys(nodes).filter(function(k){return k.indexOf('gob_')===0;}).length");
+  ok("spawn instantiates a prefab", spawned === 1, "count=" + spawned);
+  const gobId = call("Object.keys(nodes).filter(function(k){return k.indexOf('gob_')===0;})[0]");
+  ok("spawned prefab resolved (has stats)", call("nodes['" + gobId + "'].hp") === 15);
+
+  call("conExec('tp hero 7 0 3');");
+  ok("tp moves a node", call("nodes['hero'].transform.pos[0]") === 7);
+
+  call("conExec('hp hero 42');");
+  ok("hp sets health", call("nodes['hero'].hp") === 42);
+
+  call("conExec('gold 250');");
+  ok("gold grants currency", G("world.flags.gold") === 250);
+
+  const before = G("CON.lines.length");
+  call("conExec('definitelynotacommand');");
+  ok("unknown command logs an error, does not throw", G("CON.lines.length") > before);
+})();
+
+// ---------------------------------------------------------------------------
 console.log("\n" + (fail === 0 ? "ALL GREEN" : "FAILURES") + "  pass=" + pass + " fail=" + fail);
 process.exit(fail === 0 ? 0 : 1);
