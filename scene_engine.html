@@ -1364,6 +1364,12 @@ function gotoRoom(id) { scene._room = id; if (scene.rooms && scene.rooms.defs &&
 function runAction(self, a) {
   if (a && a.action === "gotoRoom") { gotoRoom((a.args && a.args[0]) || a.target); return; }
   if (a && a.action === "playSound") { playSound((a.args && a.args[0]) || a.target, self && self.worldPos); return; }
+  if (a && a.action === "explode") {
+    var xt = (a.target && nodes[a.target]) || self;
+    if (xt && xt.transform) explode(xt.transform.pos[0], xt.transform.pos[1], xt.transform.pos[2],
+      a.args && a.args[0], a.args && a.args[1], a.args && a.args[2]);
+    return;
+  }
   var target = a.target === "self" ? self : nodes[a.target];
   switch (a.action) {
     case "damage": if (target) { target.hp = Math.max(0, (target.hp || 0) - (a.amount || 0)); } break;
@@ -2969,18 +2975,36 @@ if (typeof document !== "undefined") {
   document.addEventListener("keydown", audioUnlock);
 }
 var BUILTIN_SOUNDS = {
-  __hit:   { type: "tone", wave: "square", freq: 160, sweep: -90, dur: 0.09, vol: 0.5 },
+  __hit:   { layers: [
+    { type: "noise", filter: 1800, dur: 0.05, vol: 0.55, drive: 4 },
+    { type: "tone", wave: "square", freq: 260, sweep: -200, dur: 0.1, vol: 0.5, drive: 3 },
+    { type: "tone", wave: "sine", freq: 60, sweep: -25, dur: 0.16, vol: 0.7 }
+  ] },
+  __kick:  { layers: [
+    { type: "noise", filter: 1200, dur: 0.08, vol: 0.7, drive: 6 },
+    { type: "tone", wave: "square", freq: 180, sweep: -160, dur: 0.14, vol: 0.6, drive: 5 },
+    { type: "tone", wave: "sine", freq: 48, sweep: -20, dur: 0.24, vol: 0.9 }
+  ] },
   __block: { type: "tone", wave: "square", freq: 90, sweep: -30, dur: 0.06, vol: 0.35 },
   __step:  { type: "noise", filter: 600, dur: 0.05, vol: 0.16 },
   __jump:  { type: "tone", wave: "sine", freq: 220, sweep: 170, dur: 0.12, vol: 0.3 },
   __land:  { type: "noise", filter: 300, dur: 0.09, vol: 0.35 },
-  __thud:  { type: "tone", wave: "sine", freq: 70, sweep: -35, dur: 0.18, vol: 0.5 }
+  __thud:  { type: "tone", wave: "sine", freq: 70, sweep: -35, dur: 0.18, vol: 0.5 },
+  __boom:  { type: "noise", filter: 220, dur: 0.5, vol: 0.85 }
 };
 function soundDef(id) { return ((scene.resources || {}).sounds || {})[id] || BUILTIN_SOUNDS[id] || null; }
 function playSound(id, at) {
   if (!AUDIO_ON) return;
   var d = soundDef(id);
   if (!d) return;
+  if (d.layers) {
+    for (var li = 0; li < d.layers.length; li++) playSoundDef(d.layers[li], at);
+    return;
+  }
+  playSoundDef(d, at);
+}
+function playSoundDef(d, at) {
+  if (!AUDIO_ON || !d) return;
   var vol = d.vol != null ? d.vol : 0.5;
   if (at && nodes[playerId] && nodes[playerId].worldPos) {
     var ref = nodes[playerId].worldPos;
@@ -2991,7 +3015,17 @@ function playSound(id, at) {
   var g = AC.createGain();
   g.gain.setValueAtTime(vol, t0);
   g.gain.exponentialRampToValueAtTime(0.001, t0 + (d.dur || 0.1));
-  g.connect(AMASTER);
+  var dest = g;
+  if (d.drive) {
+    var ws = AC.createWaveShaper();
+    var wc = new Float32Array(256);
+    for (var wi = 0; wi < 256; wi++) {
+      var wx = wi / 128 - 1;
+      wc[wi] = Math.tanh(wx * d.drive);
+    }
+    ws.curve = wc;
+    g.connect(ws); ws.connect(AMASTER);
+  } else g.connect(AMASTER);
   if (d.type === "noise") {
     var alen = Math.ceil(AC.sampleRate * (d.dur || 0.1));
     var abuf = AC.createBuffer(1, alen, AC.sampleRate);
@@ -3030,6 +3064,88 @@ function setSoundscape(spec) {
   ssrc.connect(sf); sf.connect(sg); sg.connect(AMASTER);
   ssrc.start();
   ASCAPE = { src: ssrc, g: sg };
+}
+
+// ---- EXPLOSIONS ----
+var EXPLOSIONS = [];
+var DEBRIS = [];
+function explode(ex, ey, ez, radius, force, damage) {
+  radius = radius || 4; force = force || 9; damage = damage != null ? damage : 12;
+  EXPLOSIONS.push({ x: ex, y: ey, z: ez, t: world.time, r: radius });
+  playSound("__boom", { x: ex, z: ez });
+  var keys = Object.keys(nodes), ki, tn;
+  for (ki = 0; ki < keys.length; ki++) {
+    tn = nodes[keys[ki]];
+    if (!tn.transform || tn._dead) continue;
+    var edx = tn.transform.pos[0] - ex, edz = tn.transform.pos[2] - ez;
+    var ed = Math.sqrt(edx * edx + edz * edz);
+    if (ed > radius || ed < 1e-6) continue;
+    var fall = 1 - ed / radius;
+    if (tn.stats) {
+      tn.hp = Math.max(0, (tn.hp || 0) - Math.round(damage * fall));
+      tn._addPose = { id: "__stumble", t: 0 };
+      if (POSED.indexOf(tn) < 0) POSED.push(tn);
+      tn._deathImpulse = { x: edx / ed * force * fall, y: 3 * fall, z: edz / ed * force * fall };
+    }
+  }
+  for (var bi = 0; bi < BODIES.length; bi++) {
+    var bb = BODIES[bi];
+    if (bb.invMass === 0) continue;
+    var bp = bb.node.transform.pos;
+    var bdx = bp[0] - ex, bdz = bp[2] - ez;
+    var bd = Math.sqrt(bdx * bdx + bdz * bdz);
+    if (bd > radius || bd < 1e-6) continue;
+    var bf = force * (1 - bd / radius);
+    bb.vel.x += bdx / bd * bf; bb.vel.y += bf * 0.5; bb.vel.z += bdz / bd * bf;
+    bb.asleep = false; bb.sleep = 0;
+  }
+  for (var di = 0; di < 6; di++) {
+    var ang = (di / 6) * Math.PI * 2 + Math.random() * 0.6;
+    var dbody = {
+      node: { id: "boom:" + world.time + ":" + di, _dead: false,
+              transform: { pos: [ex + Math.cos(ang) * 0.3, ey + 0.4, ez + Math.sin(ang) * 0.3] } },
+      kind: "dynamic", shape: "sphere", r: 0.09, half: [0.09, 0.09, 0.09], h: 0.2,
+      mass: 0.4, invMass: 2.5, rest: 0.3, fric: 0.7, gs: 1,
+      vel: { x: Math.cos(ang) * force * 0.7, y: 3 + Math.random() * 3, z: Math.sin(ang) * force * 0.7 },
+      sleep: 0, asleep: false
+    };
+    BODIES.push(dbody);
+    DEBRIS.push({ body: dbody, dies: world.time + 3 });
+  }
+}
+function updateExplosions() {
+  for (var xi = EXPLOSIONS.length - 1; xi >= 0; xi--)
+    if (world.time - EXPLOSIONS[xi].t > 0.45) EXPLOSIONS.splice(xi, 1);
+  for (var qi = DEBRIS.length - 1; qi >= 0; qi--) {
+    if (world.time > DEBRIS[qi].dies) {
+      var qb = BODIES.indexOf(DEBRIS[qi].body);
+      if (qb >= 0) BODIES.splice(qb, 1);
+      DEBRIS.splice(qi, 1);
+    }
+  }
+}
+function renderExplosions() {
+  for (var xi = 0; xi < EXPLOSIONS.length; xi++) {
+    var ex = EXPLOSIONS[xi];
+    var pp = project({ x: ex.x, y: ex.y + 0.5, z: ex.z });
+    if (!pp) continue;
+    var age = (world.time - ex.t) / 0.45;
+    var rad = (0.3 + age * ex.r) * fovScale / pp.z;
+    ctx.globalAlpha = Math.max(0, 0.8 * (1 - age));
+    ctx.strokeStyle = age < 0.3 ? "#fff4c0" : "#ff9a3c";
+    ctx.lineWidth = Math.max(1, 6 * (1 - age));
+    ctx.beginPath(); ctx.arc(pp.x, pp.y, rad, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  }
+  for (var qi = 0; qi < DEBRIS.length; qi++) {
+    var dp = project({ x: DEBRIS[qi].body.node.transform.pos[0],
+                       y: DEBRIS[qi].body.node.transform.pos[1],
+                       z: DEBRIS[qi].body.node.transform.pos[2] });
+    if (!dp) continue;
+    var ds = Math.max(1.5, 5 * fovScale / dp.z * 0.02);
+    ctx.fillStyle = "#4a4038";
+    ctx.fillRect(dp.x - ds / 2, dp.y - ds / 2, ds, ds);
+  }
 }
 
 var BUILTIN_POSES = {
@@ -3190,7 +3306,7 @@ function updatePoseClips(dt) {
           htg.transform.pos[0] += Math.sin(hya) * hpb * 0.1;
           htg.transform.pos[2] += Math.cos(hya) * hpb * 0.1;
           htg._lastHit = { by: n.id, level: hb.level || "mid", t: world.time };
-          playSound(hb.sound || "__hit", { x: hbx, z: hbz });
+          playSound(hb.sound || ((hb.damage != null ? hb.damage : 5) >= 8 ? "__kick" : "__hit"), { x: hbx, z: hbz });
           htg._addPose = { id: (hb.stagger || (hb.damage != null ? hb.damage : 5) >= 8) ? "__stumble" : "__flinch", t: 0 };
           if (POSED.indexOf(htg) < 0) POSED.push(htg);
           var himp = hb.launch != null ? hb.launch : 5;
@@ -3484,6 +3600,7 @@ function updateRagdolls() {
       startRagdoll(n, n._deathImpulse);
     }
   }
+  updateExplosions();
   if (!RAGDOLLS.length) return;
   // settle: once every bone is slow for a while, sleep the whole rag and
   // stop solving its links -- the hub bone (torso) can never sleep otherwise
@@ -3878,6 +3995,7 @@ function renderFrame() {
   }
   renderProjectiles();
   renderLockMarker();
+  renderExplosions();
   if (r.post && r.post.enabled) drawPostFX(r.post);
 }
 
