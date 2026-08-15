@@ -1,0 +1,115 @@
+{
+  "engine": "scene",
+  "meta": { "id": "reed_hollow", "title": "Reed Hollow", "seed": "reedhollow1" },
+  "permissions": ["identity"],
+
+  "tables": {
+    "items": {
+      "rustblade": { "name": "Rust Blade", "kind": "weapon", "atk": 3, "price": 25 },
+      "tonic": { "name": "Marsh Tonic", "kind": "use", "heal": 15, "price": 8 },
+      "charm": { "name": "Reed Charm", "kind": "trinket", "def": 2, "price": 40 }
+    },
+    "xpCurve": [50, 140, 300, 600]
+  },
+
+  "dialogues": {
+    "keeper": {
+      "start": "greet",
+      "nodes": {
+        "greet": {
+          "speaker": "Keeper Ash",
+          "text": "Wolves in the reeds again. The village will pay for pelts.",
+          "choices": [
+            { "label": "I'll hunt them", "to": "hired", "set": ["hunt_accepted", true] },
+            { "label": "What do you sell?", "to": "wares" },
+            { "label": "Just passing through", "to": null }
+          ]
+        },
+        "hired": {
+          "speaker": "Keeper Ash",
+          "text": "Take this blade. Come back alive.",
+          "actions": [
+            { "action": "giveItem", "args": ["rustblade", 1] },
+            { "action": "giveGold", "amount": 20 }
+          ]
+        },
+        "done": {
+          "speaker": "Keeper Ash",
+          "text": "The reeds are quiet. You have the village's thanks.",
+          "actions": [ { "action": "giveXp", "amount": 60 } ]
+        },
+        "wares": {
+          "text": "The stall creaks open.",
+          "actions": [ { "action": "openShop", "args": ["stall"] } ]
+        }
+      }
+    }
+  },
+
+  "shops": {
+    "stall": { "name": "Hollow Stall", "sells": ["tonic", "charm", "rustblade"] }
+  },
+
+  "encounters": {
+    "reeds": {
+      "stepsMin": 4, "stepsMax": 9,
+      "spawn": [
+        { "stats": { "hp": 9, "speed": 3.2, "attack": 3 }, "weight": 3 },
+        { "stats": { "hp": 16, "speed": 2.6, "attack": 5 }, "weight": 1 }
+      ]
+    }
+  },
+
+  "nodes": [
+    {
+      "id": "map", "type": "Tilemap", "tileSize": 18, "bg": "#0b1210",
+      "tiles": {
+        "#": { "color": "#2c3a33", "solid": true },
+        ".": { "color": "#5c7a5e" },
+        ",": { "color": "#4f6b52", "deco": "dots", "decoColor": "#3a523d" },
+        "~": { "color": "#3c6470", "solid": true },
+        "=": { "color": "#8a7a5e" },
+        "+": { "color": "#6b5b45", "deco": "cross", "decoColor": "#4a3f30" }
+      },
+      "map": [
+        "######################",
+        "#,,,,....==....,,,,,,#",
+        "#,,..#..==..#....,,,,#",
+        "#....#..==..#........#",
+        "#~~..+..==......~~~~,#",
+        "#~~.....==......~~~~,#",
+        "#,,.....==..,,,......#",
+        "#,,,,...==,,,,,,,....#",
+        "######################"
+      ]
+    },
+    {
+      "id": "player", "type": "Actor", "tags": ["player"],
+      "transform": { "pos": [10, 0, 6] },
+      "stats": { "hp": 40, "maxHp": 40, "speed": 4.2 },
+      "controller": { "type": "thirdPerson" }
+    },
+    {
+      "id": "keeper_npc", "type": "Actor", "tags": ["npc"],
+      "spriteColor": "#c9b48a",
+      "transform": { "pos": [5, 0, 4] }
+    },
+    {
+      "id": "keeper_area", "type": "Area3D",
+      "transform": { "pos": [5, 0, 4] }, "shape": { "radius": 1.6 },
+      "signals": [
+        { "signal": "body_entered", "filter": "player", "to": "talk_prompt", "action": "show", "args": ["Keeper Ash waits. Tap the box to talk."] },
+        { "signal": "body_entered", "filter": "player", "to": "self", "action": "startDialogue", "args": ["keeper"] },
+        { "signal": "body_exited", "filter": "player", "to": "talk_prompt", "action": "hide" }
+      ]
+    },
+    {
+      "id": "reed_zone", "type": "Area3D",
+      "transform": { "pos": [17, 0, 5] }, "shape": { "radius": 3.5 },
+      "encounterZone": "reeds", "signals": []
+    }
+  ],
+
+  "hudNodes_doc": "HUD uses the same CanvasLayer pattern as v1.",
+  "persistence": { "saveKeys": ["flags", "inventory", "player.hp"], "gameId": "reed_hollow" }
+}

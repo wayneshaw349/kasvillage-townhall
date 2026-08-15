@@ -1,0 +1,248 @@
+{
+  "$schema": "kv_scene_v1",
+  "kind": "kv_game_v1",
+  "engine": "scene",
+  "engineVersion": 1,
+
+  "_doc": {
+    "purpose": "Declarative scene-tree game format. The runtime implements the KasVillageL2 lifecycle (init/update/render/onInput/getState/setState) once; every game is data. No developer code ships, so the SDK Compliance Gate validates against this schema instead of scanning JavaScript.",
+    "sdk": "Runtime calls kasvillage.connect() on load and kasvillage.commitState() on save nodes. Author JSON never touches the SDK directly.",
+    "capabilities": "No network, no DOM, no eval, no timers. Randomness comes only from the seeded PRNG. Expressions are a closed grammar with no calls or loops.",
+    "budget": "Target under 12 KB minified so a scene fits in ~8 payload chunks (~1.6 KAS)."
+  },
+
+  "meta": {
+    "id": "village_square_demo",
+    "title": "Village Square",
+    "author": "",
+    "seed": "agr_7d42aac9",
+    "renderMode": "ps1",
+    "targetFps": 30
+  },
+
+  "render": {
+    "_doc": "PS1 look is achieved by constraint, not post-processing: fixed-point vertex snapping, affine texture mapping, no z-buffer (painter's sort), low internal resolution scaled up.",
+    "internalWidth": 320,
+    "internalHeight": 240,
+    "vertexSnap": 8,
+    "affineTextures": true,
+    "depthSort": "painter",
+    "fog": { "enabled": true, "color": "#1b2430", "near": 12, "far": 40 },
+    "palette": ["#1b2430", "#3f5c6b", "#7a9a8b", "#c9b48a", "#a3564f", "#e8e2d0"],
+    "dither": true
+  },
+
+  "input": {
+    "_doc": "Named actions map to keys, touch zones, or virtual stick axes. Nodes reference action names, never raw key codes.",
+    "actions": {
+      "move": { "type": "axis2", "keys": { "up": "W", "down": "S", "left": "A", "right": "D" }, "touch": "leftStick" },
+      "look": { "type": "axis2", "touch": "rightStick" },
+      "interact": { "type": "button", "keys": ["E"], "touch": "buttonA" },
+      "attack": { "type": "button", "keys": ["Space"], "touch": "buttonB" }
+    }
+  },
+
+  "resources": {
+    "_doc": "Everything is a recipe, never a binary asset. Meshes are generated at load from parameters; textures are procedural patterns seeded from meta.seed.",
+    "meshes": {
+      "ground": { "type": "plane", "size": [64, 64], "subdiv": 8, "heightNoise": { "amp": 0.6, "scale": 0.08 } },
+      "well": { "type": "lathe", "profile": [[0.0, 0.0], [1.2, 0.0], [1.2, 1.4], [1.0, 1.4], [1.0, 0.2], [0.0, 0.2]], "segments": 10 },
+      "hut": { "type": "extrude", "polygon": [[-2, -2], [2, -2], [2, 2], [-2, 2]], "height": 2.6, "cap": "pyramid", "capHeight": 1.4 },
+      "villager": { "type": "silhouette", "generator": "humanoid", "race": "human", "lod": 1 },
+      "beast": { "type": "silhouette", "generator": "beast", "race": "troll", "lod": 2 }
+    },
+    "textures": {
+      "grass": { "type": "noise", "kind": "value", "scale": 24, "colors": ["#3f5c6b", "#7a9a8b"], "size": 64 },
+      "stone": { "type": "brick", "rows": 6, "cols": 4, "mortar": 1, "colors": ["#c9b48a", "#8a7a5e"], "size": 64 },
+      "thatch": { "type": "stripe", "angle": 45, "width": 3, "colors": ["#c9b48a", "#a3564f"], "size": 32 }
+    },
+    "materials": {
+      "m_grass": { "texture": "grass", "shading": "flat", "tiling": [8, 8] },
+      "m_stone": { "texture": "stone", "shading": "flat" },
+      "m_thatch": { "texture": "thatch", "shading": "flat" },
+      "m_skin": { "color": "#c9b48a", "shading": "flat" }
+    }
+  },
+
+  "nodes": [
+    {
+      "id": "world",
+      "type": "Node3D",
+      "transform": { "pos": [0, 0, 0], "rot": [0, 0, 0], "scale": [1, 1, 1] },
+      "children": [
+
+        {
+          "id": "terrain",
+          "type": "MeshInstance",
+          "mesh": "ground",
+          "material": "m_grass",
+          "transform": { "pos": [0, 0, 0] },
+          "collision": "mesh"
+        },
+
+        {
+          "id": "sun",
+          "type": "Light",
+          "lightType": "directional",
+          "color": "#e8e2d0",
+          "energy": 1.0,
+          "transform": { "rot": [-45, 30, 0] }
+        },
+
+        {
+          "id": "well",
+          "type": "MeshInstance",
+          "mesh": "well",
+          "material": "m_stone",
+          "transform": { "pos": [0, 0, 0] },
+          "collision": "cylinder",
+          "children": [
+            {
+              "id": "well_area",
+              "type": "Area3D",
+              "shape": { "type": "sphere", "radius": 3 },
+              "signals": [
+                { "signal": "body_entered", "filter": "player", "to": "hud_prompt", "action": "show", "args": ["Press E to draw water"] },
+                { "signal": "body_exited", "filter": "player", "to": "hud_prompt", "action": "hide" }
+              ]
+            }
+          ]
+        },
+
+        {
+          "id": "huts",
+          "type": "Spawner",
+          "_doc": "Seeded placement. Every client derives identical positions from meta.seed, so no coordinates ship on-chain.",
+          "mesh": "hut",
+          "material": "m_thatch",
+          "count": 7,
+          "placement": { "mode": "poissonRing", "innerRadius": 8, "outerRadius": 26, "minSpacing": 5, "alignTo": "terrain", "faceCenter": true }
+        },
+
+        {
+          "id": "player",
+          "type": "Actor",
+          "mesh": "villager",
+          "material": "m_skin",
+          "transform": { "pos": [0, 0, 6] },
+          "collision": "capsule",
+          "tags": ["player"],
+          "stats": { "hp": 100, "maxHp": 100, "speed": 4.5, "attack": 12 },
+          "controller": {
+            "type": "thirdPerson",
+            "moveAction": "move",
+            "lookAction": "look",
+            "gravity": 18,
+            "jumpVelocity": 0
+          },
+          "children": [
+            {
+              "id": "cam",
+              "type": "Camera3D",
+              "transform": { "pos": [0, 3.2, -6], "rot": [-12, 0, 0] },
+              "fov": 55,
+              "follow": { "target": "player", "damping": 0.15 },
+              "current": true
+            }
+          ],
+          "animations": {
+            "idle": { "loop": true, "length": 1.6, "tracks": [ { "path": "self.rot.y", "keys": [[0, 0], [0.8, 2], [1.6, 0]] } ] },
+            "walk": { "loop": true, "length": 0.7, "tracks": [ { "path": "self.pos.y", "keys": [[0, 0], [0.35, 0.12], [0.7, 0]] } ] },
+            "attack": { "loop": false, "length": 0.5, "tracks": [ { "path": "self.rot.x", "keys": [[0, 0], [0.15, -25], [0.5, 0]] } ] }
+          },
+          "stateMachine": {
+            "initial": "idle",
+            "states": {
+              "idle":   { "animation": "idle",   "transitions": [ { "to": "walk", "when": "input.move.length > 0.1" }, { "to": "attack", "when": "input.attack.pressed" } ] },
+              "walk":   { "animation": "walk",   "transitions": [ { "to": "idle", "when": "input.move.length <= 0.1" }, { "to": "attack", "when": "input.attack.pressed" } ] },
+              "attack": { "animation": "attack", "transitions": [ { "to": "idle", "when": "animation.finished" } ] }
+            }
+          }
+        },
+
+        {
+          "id": "beast",
+          "type": "Actor",
+          "mesh": "beast",
+          "material": "m_skin",
+          "transform": { "pos": [14, 0, 14] },
+          "collision": "capsule",
+          "tags": ["enemy"],
+          "stats": { "hp": 60, "maxHp": 60, "speed": 3.0, "attack": 8 },
+          "stateMachine": {
+            "initial": "patrol",
+            "states": {
+              "patrol": {
+                "animation": "idle",
+                "behavior": { "type": "patrol", "path": "beast_path", "speed": 3.0 },
+                "transitions": [ { "to": "chase", "when": "distance(self, player) < 12" } ]
+              },
+              "chase": {
+                "animation": "walk",
+                "behavior": { "type": "seek", "target": "player", "speed": 4.0 },
+                "transitions": [
+                  { "to": "strike", "when": "distance(self, player) < 2.5" },
+                  { "to": "patrol", "when": "distance(self, player) > 18" }
+                ]
+              },
+              "strike": {
+                "animation": "attack",
+                "onEnter": [ { "action": "damage", "target": "player", "amount": 8 } ],
+                "transitions": [ { "to": "chase", "when": "animation.finished" } ]
+              },
+              "dead": { "animation": "idle", "onEnter": [ { "action": "despawn", "target": "self", "delay": 2 } ] }
+            },
+            "anyState": [ { "to": "dead", "when": "self.hp <= 0" } ]
+          }
+        },
+
+        {
+          "id": "beast_path",
+          "type": "Path3D",
+          "points": [[14, 0, 14], [20, 0, 8], [16, 0, -4], [10, 0, 6]],
+          "closed": true
+        }
+      ]
+    },
+
+    {
+      "id": "hud",
+      "type": "CanvasLayer",
+      "children": [
+        { "id": "hp_bar", "type": "ProgressBar", "anchor": "topLeft", "pos": [12, 12], "size": [120, 10], "bind": "player.hp", "max": "player.maxHp", "color": "#a3564f" },
+        { "id": "hud_prompt", "type": "Label", "anchor": "bottomCenter", "pos": [0, -32], "text": "", "visible": false, "size": 12 }
+      ]
+    }
+  ],
+
+  "expressions": {
+    "_doc": "Closed grammar. Operands: node stats, input actions, animation flags, literals. Operators: + - * / < > <= >= == != && || !. Functions: distance(a,b), length(v), rand(). No loops, no assignment, no member calls. Anything outside this grammar fails schema validation before publish.",
+    "allowedFunctions": ["distance", "length", "min", "max", "abs", "rand"],
+    "maxDepth": 8
+  },
+
+  "actions": {
+    "_doc": "The complete verb set a scene may invoke. Adding a verb requires a runtime change, which is the boundary that keeps this safe.",
+    "allowed": [
+      "show", "hide", "setText", "play", "stop", "damage", "heal",
+      "despawn", "spawn", "move", "teleport", "setState", "addScore",
+      "playSound", "transitionTo", "commit"
+    ]
+  },
+
+  "persistence": {
+    "_doc": "Maps to the SDK's getState/setState/commitState. Only listed paths are saved; everything else is derived from seed and therefore free.",
+    "saveKeys": ["player.pos", "player.hp", "score", "flags"],
+    "commitOn": ["sceneExit", "checkpoint"],
+    "gameId": "village_square_demo"
+  },
+
+  "compliance": {
+    "_doc": "What the SDK gate checks. Schema validation replaces JavaScript pattern scanning entirely.",
+    "requires": ["meta.id", "meta.seed", "nodes", "engine", "engineVersion"],
+    "forbids": ["script", "eval", "url", "endpoint", "fetch", "html"],
+    "maxNodes": 512,
+    "maxMeshes": 64,
+    "maxBytes": 16384
+  }
+}
