@@ -1,21 +1,23 @@
-// make_fight_showcase.cjs — writes showcase_fight.html
-// Hero vs dummy (hp 30, ragdoll). Buttons: punch/kick carry combat frame data.
-// Status line shows dummy hp + combat phase. dur field fixed (was duration).
+// make_fight_showcase2.cjs — writes showcase_fight2.html
+// Buttons: punchR / punchL / kickR / kickL (L = auto-mirrored _m). Mash them —
+// queueAttack buffers during a swing and chains on recovery. Dummy staggers on
+// kicks (dmg 8), flinches on punches, launches on the kill.
 const fs = require("fs");
 const engine = fs.readFileSync("scene_engine.html", "utf8");
 const q = String.fromCharCode(39);
+const CHAIN = ["punch", "punch_m", "kick", "kick_m"];
 const scene = {
   kind: "kv_game_v1", engine: "scene",
-  meta: { id: "fight", title: "fight", seed: "f1" },
+  meta: { id: "fight2", title: "fight2", seed: "f2" },
   render: { vertexSnap: 0 },
   nodes: [
     { id: "cam", type: "Camera3D", mode: "fixed", fov: 40, transform: { pos: [1, 1.8, 10] } },
     { id: "hero", type: "Actor", mesh: "body", tags: ["player"],
       transform: { pos: [0, 0, 0], rot: [0, 90, 0] } },
     { id: "dummy", type: "Actor", mesh: "gob", tags: ["enemy"],
-      transform: { pos: [1.1, 0, 0], rot: [0, -90, 0] },
-      stats: { hp: 30, maxHp: 30 },
-      ragdoll: { enabled: true }, headLook: { target: 'hero' } }
+      transform: { pos: [1.2, 0, 0], rot: [0, -90, 0] },
+      stats: { hp: 40, maxHp: 40 },
+      ragdoll: { enabled: true }, headLook: { target: "hero" } }
   ],
   resources: {
     meshes: {
@@ -25,7 +27,7 @@ const scene = {
     materials: {},
     poses: {
       punch: { dur: 0.45, loop: false,
-        combat: { phases: { active: 0.12, recovery: 0.18 },
+        combat: { phases: { active: 0.12, recovery: 0.18 }, cancelInto: CHAIN,
                   hitbox: { forward: 0.95, height: 1.3, r: 0.45, damage: 5, filter: "enemy", level: "high", pushback: 3 } },
         tracks: {
           armR:  [[0, 0], [0.12, { rx: 35, ry: 10 }], [0.15, { rx: -95 }], [0.28, { rx: -95 }], [0.45, 0]],
@@ -33,8 +35,8 @@ const scene = {
           torso: [[0, 0], [0.12, { ry: 25 }], [0.15, { ry: -35 }], [0.28, { ry: -35 }], [0.45, 0]]
         } },
       kick: { dur: 0.55, loop: false,
-        combat: { phases: { active: 0.16, recovery: 0.26 },
-                  hitbox: { forward: 1.25, height: 1.0, r: 0.5, damage: 8, filter: "enemy", level: "mid", pushback: 5 } },
+        combat: { phases: { active: 0.16, recovery: 0.26 }, cancelInto: CHAIN,
+                  hitbox: { forward: 1.25, height: 1.0, r: 0.5, damage: 8, filter: "enemy", level: "mid", pushback: 5, launch: 6 } },
         tracks: {
           legR:  [[0, 0], [0.16, { rx: 40 }], [0.20, { rx: -100 }], [0.34, { rx: -100 }], [0.55, 0]],
           shinR: [[0, 0], [0.16, { rx: 100 }], [0.20, { rx: -5 }], [0.34, { rx: -5 }], [0.55, 0]],
@@ -46,25 +48,24 @@ const scene = {
 };
 const inject = [
   "",
-  "// ---- injected fight showcase ----",
+  "// ---- injected fight showcase v2 ----",
   "try {",
   "  loadScene(" + JSON.stringify(JSON.stringify(scene)) + ");",
   "  var __bar = document.createElement(" + q + "div" + q + ");",
   "  __bar.style.cssText = " + q + "position:fixed;bottom:8px;left:8px;z-index:9999;font-family:monospace" + q + ";",
   "  var __status = document.createElement(" + q + "div" + q + ");",
   "  __status.style.cssText = " + q + "color:#0f0;background:#000;padding:4px;margin-bottom:4px" + q + ";",
-  "  __status.textContent = " + q + "ready" + q + ";",
   "  __bar.appendChild(__status);",
   "  setInterval(function () {",
   "    var d = nodes[" + q + "dummy" + q + "], h = nodes[" + q + "hero" + q + "];",
-  "    if (d && h) __status.textContent = " + q + "dummy hp=" + q + " + (d.hp != null ? d.hp : " + q + "?" + q + ") +",
-  "      (d._rag ? " + q + " RAGDOLLED" + q + " : " + q + "" + q + ") + " + q + "  phase=" + q + " + (h._combatPhase || " + q + "-" + q + ");",
-  "  }, 100);",
-  "  [" + q + "punch" + q + "," + q + "kick" + q + "].forEach(function (mv) {",
+  "    if (d && h) __status.textContent = " + q + "hp=" + q + " + d.hp + (d._rag ? " + q + " RAG" + q + " : " + q + "" + q + ") +",
+  "      " + q + " phase=" + q + " + (h._combatPhase || " + q + "-" + q + ") + " + q + " buffered=" + q + " + (h._nextAttack || " + q + "-" + q + ");",
+  "  }, 80);",
+  "  [[" + q + "punchR" + q + "," + q + "punch" + q + "],[" + q + "punchL" + q + "," + q + "punch_m" + q + "],[" + q + "kickR" + q + "," + q + "kick" + q + "],[" + q + "kickL" + q + "," + q + "kick_m" + q + "]].forEach(function (mv) {",
   "    var b = document.createElement(" + q + "button" + q + ");",
-  "    b.textContent = mv;",
-  "    b.style.cssText = " + q + "margin-right:4px;padding:10px 16px;font-size:15px" + q + ";",
-  "    b.onclick = function () { playPose(nodes[" + q + "hero" + q + "], mv); };",
+  "    b.textContent = mv[0];",
+  "    b.style.cssText = " + q + "margin-right:4px;padding:10px 14px;font-size:15px" + q + ";",
+  "    b.onclick = function () { queueAttack(nodes[" + q + "hero" + q + "], mv[1]); };",
   "    __bar.appendChild(b);",
   "  });",
   "  document.body.appendChild(__bar);",
@@ -79,5 +80,5 @@ const inject = [
 const marker = "</script>";
 const idx = engine.lastIndexOf(marker);
 if (idx < 0) { console.error("ABORT: no </scr" + "ipt>"); process.exit(1); }
-fs.writeFileSync("showcase_fight.html", engine.slice(0, idx) + inject + engine.slice(idx));
-console.log("OK showcase_fight.html — punch x6 or kick x4 should ragdoll the dummy");
+fs.writeFileSync("showcase_fight2.html", engine.slice(0, idx) + inject + engine.slice(idx));
+console.log("OK showcase_fight2.html — mash the 4 buttons: chains + alternating limbs");

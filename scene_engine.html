@@ -2920,7 +2920,15 @@ function deformVert(p, g, partName, pose) {
 }
 
 // ---- pose clips ----------------------------------------------------------
-function poseDef(id) { return ((scene.resources || {}).poses || {})[id] || null; }
+var BUILTIN_POSES = {
+  __flinch: { dur: 0.25, loop: false, tracks: {
+    head:  [[0, 0], [0.05, { rx: -28 }], [0.25, 0]],
+    torso: [[0, 0], [0.05, { rx: -14 }], [0.25, 0]],
+    armL:  [[0, 0], [0.06, { rx: -35 }], [0.25, 0]],
+    armR:  [[0, 0], [0.06, { rx: -35 }], [0.25, 0]]
+  } }
+};
+function poseDef(id) { return ((scene.resources || {}).poses || {})[id] || BUILTIN_POSES[id] || null; }
 var POSED = [];
 function playPose(n, id) {
   var def = poseDef(id);
@@ -2987,9 +2995,10 @@ function updatePoseClips(dt) {
         var hbx = n.transform.pos[0] + Math.sin(hya) * (hb.forward != null ? hb.forward : 1.2);
         var hbz = n.transform.pos[2] + Math.cos(hya) * (hb.forward != null ? hb.forward : 1.2);
         var hby = n.transform.pos[1] + (hb.height != null ? hb.height : 1.2);
-        var hbr = hb.r != null ? hb.r : 0.9;
-        for (var hti = 0; hti < actors.length; hti++) {
-          var htg = actors[hti];
+        var hbr = hb.r != null ? hb.r : 0.5;
+        var hkeys = Object.keys(nodes);
+        for (var hti = 0; hti < hkeys.length; hti++) {
+          var htg = nodes[hkeys[hti]];
           if (htg === n || htg._dead || htg._ragStop || !htg.transform) continue;
           if (hb.filter && !tagMatch(htg, hb.filter)) continue;
           var hdx = htg.transform.pos[0] - hbx;
@@ -3003,6 +3012,10 @@ function updatePoseClips(dt) {
           htg.transform.pos[0] += Math.sin(hya) * hpb * 0.1;
           htg.transform.pos[2] += Math.cos(hya) * hpb * 0.1;
           htg._lastHit = { by: n.id, level: hb.level || "mid", t: world.time };
+          htg._addPose = { id: "__flinch", t: 0 };
+          if (POSED.indexOf(htg) < 0) POSED.push(htg);
+          var himp = hb.launch != null ? hb.launch : 5;
+          htg._deathImpulse = { x: Math.sin(hya) * himp, y: 2.5, z: Math.cos(hya) * himp };
           break;
         }
       }
