@@ -1026,10 +1026,11 @@ function updateActor(n, dt) {
     }
     var gy = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
     n._vy = (n._vy || 0);
-    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) n._vy = ctl.jumpVelocity || 7;
+    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) { n._vy = ctl.jumpVelocity || 7; n._addPose = { id: "__jump", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); }
     n._vy -= (ctl.gravity || 18) * dt;
     n._airY = Math.max(0, (n._airY || 0) + n._vy * dt);
-    if (n._airY === 0 && n._vy < 0) n._vy = 0;
+    if (n._airY === 0 && n._vy < 0) { n._vy = 0; if (n._wasAir) { n._addPose = { id: "__land", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); } }
+    n._wasAir = n._airY > 0.01;
     t.pos[1] = gy + n._airY;
   }
 
@@ -2926,6 +2927,28 @@ function deformVert(p, g, partName, pose) {
 
 // ---- pose clips ----------------------------------------------------------
 var BUILTIN_POSES = {
+  __jump: { dur: 0.5, loop: false, tracks: {
+    legL: [[0, 0], [0.15, { rx: -45 }], [0.4, { rx: -45 }], [0.5, 0]],
+    legR: [[0, 0], [0.15, { rx: -45 }], [0.4, { rx: -45 }], [0.5, 0]],
+    shinL: [[0, 0], [0.15, { rx: 70 }], [0.4, { rx: 70 }], [0.5, 0]],
+    shinR: [[0, 0], [0.15, { rx: 70 }], [0.4, { rx: 70 }], [0.5, 0]],
+    armL: [[0, 0], [0.15, { rx: -140, rz: 15 }], [0.5, 0]],
+    armR: [[0, 0], [0.15, { rx: -140, rz: -15 }], [0.5, 0]]
+  } },
+  __land: { dur: 0.25, loop: false, tracks: {
+    torso: [[0, 0], [0.06, { rx: 18 }], [0.25, 0]],
+    legL: [[0, 0], [0.06, { rx: -35 }], [0.25, 0]],
+    legR: [[0, 0], [0.06, { rx: -35 }], [0.25, 0]],
+    shinL: [[0, 0], [0.06, { rx: 55 }], [0.25, 0]],
+    shinR: [[0, 0], [0.06, { rx: 55 }], [0.25, 0]]
+  } },
+  __stumble: { dur: 0.45, loop: false, tracks: {
+    torso: [[0, 0], [0.08, { rx: 22, ry: 8 }], [0.3, { rx: 14 }], [0.45, 0]],
+    head:  [[0, 0], [0.08, { rx: -30 }], [0.45, 0]],
+    legL:  [[0, 0], [0.12, { rx: -25 }], [0.45, 0]],
+    armL:  [[0, 0], [0.1, { rx: -60, rz: 20 }], [0.45, 0]],
+    armR:  [[0, 0], [0.1, { rx: -60, rz: -20 }], [0.45, 0]]
+  } },
   __flinch: { dur: 0.25, loop: false, tracks: {
     head:  [[0, 0], [0.05, { rx: -28 }], [0.25, 0]],
     torso: [[0, 0], [0.05, { rx: -14 }], [0.25, 0]],
@@ -2933,13 +2956,48 @@ var BUILTIN_POSES = {
     armR:  [[0, 0], [0.06, { rx: -35 }], [0.25, 0]]
   } }
 };
-function poseDef(id) { return ((scene.resources || {}).poses || {})[id] || BUILTIN_POSES[id] || null; }
+function mirrorBoneName(bn) {
+  var c = bn.slice(-1);
+  if (c === "L") return bn.slice(0, -1) + "R";
+  if (c === "R") return bn.slice(0, -1) + "L";
+  return bn;
+}
+function mirrorPoseDef(def) {
+  var out = { dur: def.dur, loop: def.loop, weight: def.weight, combat: def.combat, events: def.events, tracks: {} }, bn;
+  for (bn in (def.tracks || {})) {
+    var mk = [], keys = def.tracks[bn];
+    for (var mi = 0; mi < keys.length; mi++) {
+      var mv = keys[mi][1];
+      mk.push([keys[mi][0], typeof mv === "number" ? mv :
+        { rx: mv.rx || 0, ry: -(mv.ry || 0), rz: -(mv.rz || 0) }]);
+    }
+    out.tracks[mirrorBoneName(bn)] = mk;
+  }
+  return out;
+}
+function poseDef(id) {
+  var d = ((scene.resources || {}).poses || {})[id] || BUILTIN_POSES[id] || null;
+  if (!d && id.length > 2 && id.slice(-2) === "_m") {
+    var mc = scene._mc = scene._mc || {};
+    if (mc[id]) return mc[id];
+    var base = poseDef(id.slice(0, -2));
+    if (base) return (mc[id] = mirrorPoseDef(base));
+  }
+  return d;
+}
 var POSED = [];
 function playPose(n, id) {
   var def = poseDef(id);
   if (!def) return;
   n._pose = { id: id, t: 0, fired: {} };
   if (POSED.indexOf(n) < 0) POSED.push(n);
+}
+function queueAttack(n, id) {
+  if (!poseDef(id)) return;
+  if (!n._pose) { playPose(n, id); return; }
+  var qd = poseDef(n._pose.id);
+  var qci = qd && qd.combat && qd.combat.cancelInto;
+  if (qci && qci.indexOf(id) >= 0) n._nextAttack = id;
 }
 function samplePoseTrack(keys, t) {
   if (!keys || !keys.length) return null;
@@ -2994,6 +3052,11 @@ function updatePoseClips(dt) {
       var ct = n._pose.t, cdur = def.dur || 1;
       n._combatPhase = ct < (cph.active || 0) ? "startup" :
                        (ct < (cph.recovery || cdur) ? "active" : "recovery");
+      if (n._nextAttack && n._combatPhase === "recovery") {
+        var nxa = n._nextAttack; n._nextAttack = null;
+        playPose(n, nxa);
+        continue;
+      }
       if (n._combatPhase === "active" && !n._pose.fired.__hit) {
         var hb = cbt.hitbox || {};
         var hya = (n.transform.rot[1] || 0) * DEG;
@@ -3006,6 +3069,10 @@ function updatePoseClips(dt) {
           var htg = nodes[hkeys[hti]];
           if (htg === n || htg._dead || htg._ragStop || !htg.transform) continue;
           if (hb.filter && !tagMatch(htg, hb.filter)) continue;
+          if (htg._pose && htg._combatPhase === "active") {
+            var hdd = poseDef(htg._pose.id);
+            if (hdd && hdd.combat && hdd.combat.dodge) continue;
+          }
           var hdx = htg.transform.pos[0] - hbx;
           var hdz = htg.transform.pos[2] - hbz;
           var hdy = (htg.transform.pos[1] + 1.0) - hby;
@@ -3017,7 +3084,7 @@ function updatePoseClips(dt) {
           htg.transform.pos[0] += Math.sin(hya) * hpb * 0.1;
           htg.transform.pos[2] += Math.cos(hya) * hpb * 0.1;
           htg._lastHit = { by: n.id, level: hb.level || "mid", t: world.time };
-          htg._addPose = { id: "__flinch", t: 0 };
+          htg._addPose = { id: (hb.stagger || (hb.damage != null ? hb.damage : 5) >= 8) ? "__stumble" : "__flinch", t: 0 };
           if (POSED.indexOf(htg) < 0) POSED.push(htg);
           var himp = hb.launch != null ? hb.launch : 5;
           htg._deathImpulse = { x: Math.sin(hya) * himp, y: 2.5, z: Math.cos(hya) * himp };
@@ -3204,6 +3271,9 @@ function startRagdoll(n, impulse) {
     b.linkParent = pn;
   }
   rag.age = 0;
+  if (rag.bones) { /* placeholder, pb built after bones exist */ }
+  rag.pb = (rag.bones.head && rag.bones.foreL && rag.bones.foreR) ?
+    { head: rag.bones.head.body, foreL: rag.bones.foreL.body, foreR: rag.bones.foreR.body } : null;
   rag.hinges = [];
   var HJ = [["torso","armL","foreL"],["torso","armR","foreR"],["torso","legL","shinL"],["torso","legR","shinR"]];
   for (i = 0; i < HJ.length; i++) {
@@ -3251,6 +3321,11 @@ function solveRagdollHinges() {
   for (var r = 0; r < RAGDOLLS.length; r++) {
     var rag = RAGDOLLS[r];
     if (rag.settled || !rag.hinges || (rag.age || 0) > 2.5) continue;
+    if (rag.pb && (rag.age || 0) < 0.6) {
+      var php = rag.pb.head.node.transform.pos, pfl = rag.pb.foreL.node.transform.pos, pfr = rag.pb.foreR.node.transform.pos;
+      pfl[0] += (php[0] - pfl[0]) * 0.02; pfl[1] += (php[1] - pfl[1]) * 0.02; pfl[2] += (php[2] - pfl[2]) * 0.02;
+      pfr[0] += (php[0] - pfr[0]) * 0.02; pfr[1] += (php[1] - pfr[1]) * 0.02; pfr[2] += (php[2] - pfr[2]) * 0.02;
+    }
     for (var i = 0; i < rag.hinges.length; i++) {
       var hg = rag.hinges[i];
       var ip = hg.inner.node.transform.pos, mp = hg.mid.node.transform.pos, op = hg.outer.node.transform.pos;
@@ -3357,7 +3432,23 @@ function updateRagdolls() {
 
 function blendedPose(n) {
   var p = blendedPoseCore(n);
-  if (n._rag || (!n._lookYaw && !n._lookPitch)) return p;
+  if (n._rag) {
+    var ga = n._rag.age || 0;
+    if (n._lastLiving && ga < 0.4 && p) {
+      var gw = ga / 0.4, gout = {}, gk;
+      for (gk in p) {
+        var gA = poseAngles(n._lastLiving[gk]) || { rx: 0, ry: 0, rz: 0 };
+        var gB = poseAngles(p[gk]) || { rx: 0, ry: 0, rz: 0 };
+        gout[gk] = { rx: gA.rx + (gB.rx - gA.rx) * gw,
+                     ry: gA.ry + (gB.ry - gA.ry) * gw,
+                     rz: gA.rz + (gB.rz - gA.rz) * gw };
+      }
+      return gout;
+    }
+    return p;
+  }
+  n._lastLiving = p;
+  if (!n._lookYaw && !n._lookPitch) return p;
   var out = {}, k;
   if (p) for (k in p) out[k] = p[k];
   var lh = poseAngles(out.head) || { rx: 0, ry: 0, rz: 0 };

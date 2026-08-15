@@ -1021,11 +1021,10 @@ function updateActor(n, dt) {
     }
     var gy = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
     n._vy = (n._vy || 0);
-    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) { n._vy = ctl.jumpVelocity || 7; n._addPose = { id: "__jump", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); }
+    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) n._vy = ctl.jumpVelocity || 7;
     n._vy -= (ctl.gravity || 18) * dt;
     n._airY = Math.max(0, (n._airY || 0) + n._vy * dt);
-    if (n._airY === 0 && n._vy < 0) { n._vy = 0; if (n._wasAir) { n._addPose = { id: "__land", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); } }
-    n._wasAir = n._airY > 0.01;
+    if (n._airY === 0 && n._vy < 0) n._vy = 0;
     t.pos[1] = gy + n._airY;
   }
 
@@ -2922,21 +2921,6 @@ function deformVert(p, g, partName, pose) {
 
 // ---- pose clips ----------------------------------------------------------
 var BUILTIN_POSES = {
-  __jump: { dur: 0.5, loop: false, tracks: {
-    legL: [[0, 0], [0.15, { rx: -45 }], [0.4, { rx: -45 }], [0.5, 0]],
-    legR: [[0, 0], [0.15, { rx: -45 }], [0.4, { rx: -45 }], [0.5, 0]],
-    shinL: [[0, 0], [0.15, { rx: 70 }], [0.4, { rx: 70 }], [0.5, 0]],
-    shinR: [[0, 0], [0.15, { rx: 70 }], [0.4, { rx: 70 }], [0.5, 0]],
-    armL: [[0, 0], [0.15, { rx: -140, rz: 15 }], [0.5, 0]],
-    armR: [[0, 0], [0.15, { rx: -140, rz: -15 }], [0.5, 0]]
-  } },
-  __land: { dur: 0.25, loop: false, tracks: {
-    torso: [[0, 0], [0.06, { rx: 18 }], [0.25, 0]],
-    legL: [[0, 0], [0.06, { rx: -35 }], [0.25, 0]],
-    legR: [[0, 0], [0.06, { rx: -35 }], [0.25, 0]],
-    shinL: [[0, 0], [0.06, { rx: 55 }], [0.25, 0]],
-    shinR: [[0, 0], [0.06, { rx: 55 }], [0.25, 0]]
-  } },
   __stumble: { dur: 0.45, loop: false, tracks: {
     torso: [[0, 0], [0.08, { rx: 22, ry: 8 }], [0.3, { rx: 14 }], [0.45, 0]],
     head:  [[0, 0], [0.08, { rx: -30 }], [0.45, 0]],
@@ -3064,10 +3048,6 @@ function updatePoseClips(dt) {
           var htg = nodes[hkeys[hti]];
           if (htg === n || htg._dead || htg._ragStop || !htg.transform) continue;
           if (hb.filter && !tagMatch(htg, hb.filter)) continue;
-          if (htg._pose && htg._combatPhase === "active") {
-            var hdd = poseDef(htg._pose.id);
-            if (hdd && hdd.combat && hdd.combat.dodge) continue;
-          }
           var hdx = htg.transform.pos[0] - hbx;
           var hdz = htg.transform.pos[2] - hbz;
           var hdy = (htg.transform.pos[1] + 1.0) - hby;
@@ -4092,4 +4072,32 @@ document.addEventListener("message", function (e) {
 });
 
 if (window.__KV_SCENE__) loadScene(window.__KV_SCENE__);
+
+// ---- injected fight showcase v2 ----
+try {
+  loadScene("{\"kind\":\"kv_game_v1\",\"engine\":\"scene\",\"meta\":{\"id\":\"fight2\",\"title\":\"fight2\",\"seed\":\"f2\"},\"render\":{\"vertexSnap\":0},\"nodes\":[{\"id\":\"cam\",\"type\":\"Camera3D\",\"mode\":\"fixed\",\"fov\":40,\"transform\":{\"pos\":[1,1.8,10]}},{\"id\":\"hero\",\"type\":\"Actor\",\"mesh\":\"body\",\"tags\":[\"player\"],\"transform\":{\"pos\":[0,0,0],\"rot\":[0,90,0]}},{\"id\":\"dummy\",\"type\":\"Actor\",\"mesh\":\"gob\",\"tags\":[\"enemy\"],\"transform\":{\"pos\":[1.2,0,0],\"rot\":[0,-90,0]},\"stats\":{\"hp\":40,\"maxHp\":40},\"ragdoll\":{\"enabled\":true},\"headLook\":{\"target\":\"hero\"}}],\"resources\":{\"meshes\":{\"body\":{\"type\":\"silhouette\",\"generator\":\"humanoid\"},\"gob\":{\"type\":\"silhouette\",\"generator\":\"humanoid\",\"beast\":true}},\"materials\":{},\"poses\":{\"punch\":{\"dur\":0.45,\"loop\":false,\"combat\":{\"phases\":{\"active\":0.12,\"recovery\":0.18},\"cancelInto\":[\"punch\",\"punch_m\",\"kick\",\"kick_m\"],\"hitbox\":{\"forward\":0.95,\"height\":1.3,\"r\":0.45,\"damage\":5,\"filter\":\"enemy\",\"level\":\"high\",\"pushback\":3}},\"tracks\":{\"armR\":[[0,0],[0.12,{\"rx\":35,\"ry\":10}],[0.15,{\"rx\":-95}],[0.28,{\"rx\":-95}],[0.45,0]],\"foreR\":[[0,0],[0.12,{\"rx\":-100}],[0.15,{\"rx\":0}],[0.28,{\"rx\":0}],[0.45,0]],\"torso\":[[0,0],[0.12,{\"ry\":25}],[0.15,{\"ry\":-35}],[0.28,{\"ry\":-35}],[0.45,0]]}},\"kick\":{\"dur\":0.55,\"loop\":false,\"combat\":{\"phases\":{\"active\":0.16,\"recovery\":0.26},\"cancelInto\":[\"punch\",\"punch_m\",\"kick\",\"kick_m\"],\"hitbox\":{\"forward\":1.25,\"height\":1,\"r\":0.5,\"damage\":8,\"filter\":\"enemy\",\"level\":\"mid\",\"pushback\":5,\"launch\":6}},\"tracks\":{\"legR\":[[0,0],[0.16,{\"rx\":40}],[0.2,{\"rx\":-100}],[0.34,{\"rx\":-100}],[0.55,0]],\"shinR\":[[0,0],[0.16,{\"rx\":100}],[0.2,{\"rx\":-5}],[0.34,{\"rx\":-5}],[0.55,0]],\"torso\":[[0,0],[0.2,{\"rx\":14,\"ry\":12}],[0.55,0]],\"armL\":[[0,0],[0.2,{\"rx\":-55}],[0.55,0]]}}}}}");
+  var __bar = document.createElement('div');
+  __bar.style.cssText = 'position:fixed;bottom:8px;left:8px;z-index:9999;font-family:monospace';
+  var __status = document.createElement('div');
+  __status.style.cssText = 'color:#0f0;background:#000;padding:4px;margin-bottom:4px';
+  __bar.appendChild(__status);
+  setInterval(function () {
+    var d = nodes['dummy'], h = nodes['hero'];
+    if (d && h) __status.textContent = 'hp=' + d.hp + (d._rag ? ' RAG' : '') +
+      ' phase=' + (h._combatPhase || '-') + ' buffered=' + (h._nextAttack || '-');
+  }, 80);
+  [['punchR','punch'],['punchL','punch_m'],['kickR','kick'],['kickL','kick_m']].forEach(function (mv) {
+    var b = document.createElement('button');
+    b.textContent = mv[0];
+    b.style.cssText = 'margin-right:4px;padding:10px 14px;font-size:15px';
+    b.onclick = function () { queueAttack(nodes['hero'], mv[1]); };
+    __bar.appendChild(b);
+  });
+  document.body.appendChild(__bar);
+} catch (e) {
+  var __err = document.createElement('div');
+  __err.style.cssText = 'position:fixed;top:8px;left:8px;color:#f00;background:#000;padding:6px;z-index:9999';
+  __err.textContent = 'INJECT ERROR: ' + e.message;
+  document.body.appendChild(__err);
+}
 </script>
