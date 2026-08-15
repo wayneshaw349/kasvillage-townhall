@@ -3886,3 +3886,8 @@ document.addEventListener("message", function (e) {
 
 if (window.__KV_SCENE__) loadScene(window.__KV_SCENE__);
 </script>
+
+<script>
+loadScene("{\"kind\":\"kv_game_v1\",\"engine\":\"scene\",\"meta\":{\"id\":\"kneeshow2\",\"title\":\"knee showcase side\",\"seed\":\"k2\"},\"render\":{\"vertexSnap\":0},\"nodes\":[{\"id\":\"cam\",\"type\":\"Camera3D\",\"mode\":\"fixed\",\"fov\":45,\"transform\":{\"pos\":[0,2.2,13]}},{\"id\":\"hero\",\"type\":\"Actor\",\"mesh\":\"body\",\"tags\":[\"player\"],\"transform\":{\"pos\":[0,0,0]}},{\"id\":\"route\",\"type\":\"Path3D\",\"closed\":true,\"points\":[[-5,0,0],[5,0,0]]},{\"id\":\"walker\",\"type\":\"Actor\",\"mesh\":\"body\",\"tags\":[\"npc\"],\"transform\":{\"pos\":[-5,0,0]},\"stateMachine\":{\"initial\":\"walk\",\"states\":{\"walk\":{\"behavior\":{\"type\":\"patrol\",\"path\":\"route\",\"speed\":2}}}}},{\"id\":\"goblin\",\"type\":\"Actor\",\"mesh\":\"gob\",\"tags\":[\"enemy\"],\"transform\":{\"pos\":[0,0,-2]},\"stats\":{\"hp\":10,\"maxHp\":10},\"ragdoll\":{\"enabled\":true},\"stateMachine\":{\"initial\":\"walk\",\"states\":{\"walk\":{\"behavior\":{\"type\":\"patrol\",\"path\":\"route\",\"speed\":3}}}}}],\"resources\":{\"meshes\":{\"body\":{\"type\":\"silhouette\",\"generator\":\"humanoid\"},\"gob\":{\"type\":\"silhouette\",\"generator\":\"humanoid\",\"beast\":true}},\"materials\":{}}}");
+setTimeout(function(){ if (window.nodes && nodes['goblin']) { nodes['goblin'].hp = 0; } }, 6000);
+</script>

@@ -328,15 +328,19 @@ function buildMesh(name, spec) {
     if (round) partLathe("head", 0, 1.68 * sc, 0, [[0.01,0],[0.15,0.06],[0.17,0.2],[0.13,0.34],[0.01,0.4]]);
     else partBox("head", 0, 1.9 * sc, 0, 0.4, 0.4, 0.4);
     // limbs: tapered cylinders, pivot recorded at the joint
-    function makeLimb(name, px, py, thick, len) {
-      if (round) partLathe(name, px, py, 0, [[thick,0],[thick*0.85,-len*0.5],[thick*0.6,-len]]);
-      else partBox(name, px, py - len/2*sc, 0, thick*2.2, len, thick*2.2);
+    function makeLimb(name, lower, px, py, thick, len) {
+      const half = len * 0.5;
+      if (round) partLathe(name, px, py, 0, [[thick,0],[thick*0.85,-half]]);
+      else partBox(name, px, py - half/2*sc, 0, thick*2.2, half, thick*2.2);
       g.parts[name] = { pivot: v3(px, py, 0) };
+      if (round) partLathe(lower, px, py - half, 0, [[thick*0.85,0],[thick*0.6,-half]]);
+      else partBox(lower, px, py - half - half/2*sc, 0, thick*2.0, half, thick*2.0);
+      g.parts[lower] = { pivot: v3(px, py - half, 0), parent: name };
     }
-    makeLimb("armL", -0.40 * sc, 1.52 * sc, 0.09, 0.72 * sc);
-    makeLimb("armR",  0.40 * sc, 1.52 * sc, 0.09, 0.72 * sc);
-    makeLimb("legL", -0.16 * sc, 1.00 * sc, 0.11, 1.00 * sc);
-    makeLimb("legR",  0.16 * sc, 1.00 * sc, 0.11, 1.00 * sc);
+    makeLimb("armL", "foreL", -0.40 * sc, 1.52 * sc, 0.09, 0.72 * sc);
+    makeLimb("armR", "foreR",  0.40 * sc, 1.52 * sc, 0.09, 0.72 * sc);
+    makeLimb("legL", "shinL", -0.16 * sc, 1.00 * sc, 0.11, 1.00 * sc);
+    makeLimb("legR", "shinR",  0.16 * sc, 1.00 * sc, 0.11, 1.00 * sc);
     g.parts["torso"] = { pivot: v3(0, 1.0 * sc, 0) };
     g.parts["head"] = { pivot: v3(0, 1.68 * sc, 0) };
     // Bone hierarchy (Godot Skeleton3D shape): rotating torso carries the
@@ -3090,7 +3094,7 @@ function playPoseAdditive(n, id) {
 // RAGDOLL (v9) -- bones driven by the rigid body solver instead of clips.
 // ---------------------------------------------------------------------------
 var RAGDOLLS = [];
-var RAG_BONES = ["torso", "head", "armL", "armR", "legL", "legR"];
+var RAG_BONES = ["torso", "head", "armL", "armR", "legL", "legR", "foreL", "foreR", "shinL", "shinR"];
 
 function startRagdoll(n, impulse) {
   if (n._rag || !n._geo || !n._geo.parts) return;
@@ -3107,8 +3111,8 @@ function startRagdoll(n, impulse) {
     var wp = matApply(m, part.pivot);
     var body = {
       node: { id: n.id + ":" + name, _dead: false, transform: { pos: [wp.x, wp.y, wp.z] } },
-      kind: "dynamic", shape: "sphere", r: cfg.boneRadius || 0.18,
-      half: [0.18, 0.18, 0.18], h: 0.3,
+      kind: "dynamic", shape: "sphere", r: cfg.boneRadius || 0.11,
+      half: [0.11, 0.11, 0.11], h: 0.3,
       mass: cfg.mass || 1, rest: cfg.bounce != null ? cfg.bounce : 0.1,
       fric: 0.8, gs: 1,
       vel: { x: seedVel.x + imp.x, y: seedVel.y + imp.y, z: seedVel.z + imp.z },
@@ -3142,6 +3146,7 @@ function startRagdoll(n, impulse) {
 // look connected, not be rigid.
 function solveRagdollLinks() {
   for (var r = 0; r < RAGDOLLS.length; r++) {
+    if (RAGDOLLS[r].settled) continue;
     var links = RAGDOLLS[r].links;
     for (var it = 0; it < 4; it++) {
       for (var i = 0; i < links.length; i++) {
@@ -3194,6 +3199,43 @@ function updateRagdolls() {
     }
   }
   if (!RAGDOLLS.length) return;
+  // settle: once every bone is slow for a while, sleep the whole rag and
+  // stop solving its links -- the hub bone (torso) can never sleep otherwise
+  for (var sr = 0; sr < RAGDOLLS.length; sr++) {
+    var rg = RAGDOLLS[sr];
+    if (rg.settled) {
+      var woke = false, wk;
+      for (wk in rg.bones) if (!rg.bones[wk].body.asleep) { woke = true; break; }
+      if (woke) { rg.settled = false; rg.calm = 0; rg.snap = null; rg.still = false; }
+      continue;
+    }
+    rg.calm = (rg.calm || 0) + 1;
+    if (rg.calm >= 45) {
+      rg.calm = 0;
+      var dk, sp;
+      if (rg.snap) {
+        var maxd = 0;
+        for (dk in rg.bones) {
+          sp = rg.bones[dk].body.node.transform.pos;
+          var qq = rg.snap[dk] || sp;
+          var ddx = sp[0] - qq[0], ddy = sp[1] - qq[1], ddz = sp[2] - qq[2];
+          maxd = Math.max(maxd, ddx * ddx + ddy * ddy + ddz * ddz);
+        }
+        rg.still = maxd < 0.0009;
+      }
+      rg.snap = {};
+      for (dk in rg.bones) { sp = rg.bones[dk].body.node.transform.pos; rg.snap[dk] = [sp[0], sp[1], sp[2]]; }
+    }
+    if (rg.still) {
+      var sk;
+      for (sk in rg.bones) {
+        var sb = rg.bones[sk].body;
+        sb.asleep = true; sb.sleep = PHYS.sleepTime + 1;
+        sb.vel.x = sb.vel.y = sb.vel.z = 0;
+      }
+      rg.settled = true; rg.still = false;
+    }
+  }
   solveRagdollLinks();
   // the body node follows its torso bone so the mesh travels with the corpse
   for (var r = 0; r < RAGDOLLS.length; r++) {
@@ -3260,8 +3302,12 @@ function gaitPose(n) {
   var swing = (gait.swing !== undefined ? gait.swing : 32) * amt;
   var arm = (gait.armSwing !== undefined ? gait.armSwing : 22) * amt;
   var sA = Math.sin(ph), sB = Math.sin(ph + Math.PI);
+  var GAIT_KNEE = (gait.knee !== undefined ? gait.knee : 48) * amt;
+  var GAIT_ELBOW = (gait.elbow !== undefined ? gait.elbow : 14) * amt;
   return {
     legL: sA * swing, legR: sB * swing,
+    shinL: Math.max(0, sA) * GAIT_KNEE, shinR: Math.max(0, sB) * GAIT_KNEE,
+    foreL: -Math.abs(sB) * GAIT_ELBOW, foreR: -Math.abs(sA) * GAIT_ELBOW,
     armL: sB * arm,  armR: sA * arm,
     torso: Math.abs(Math.sin(ph * 2)) * 2 * amt
   };

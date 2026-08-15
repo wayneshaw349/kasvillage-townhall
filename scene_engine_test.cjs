@@ -717,7 +717,7 @@ section("ragdoll: triggers on death, bones fall and stay linked");
   call("nodes['victim'].hp = 0;");
   pump(2);
   ok("death starts a ragdoll", call("nodes['victim']._rag") != null);
-  ok("one body per bone spawned", G("BODIES.length") - bodiesBefore === 6,
+  ok("one body per bone spawned", G("BODIES.length") - bodiesBefore === 10,
      "delta=" + (G("BODIES.length") - bodiesBefore));
   ok("actor is not marked dead (corpse stays visible)", call("nodes['victim']._dead") !== true);
 
@@ -776,7 +776,7 @@ section("ragdoll: manual trigger with impulse, actor stops acting");
   const zAfter = call("nodes['mook']._rag.bones['torso'].body.node.transform.pos[2]");
   ok("death impulse carried the corpse", zAfter > zBefore, "z " + zBefore.toFixed(2) + " -> " + zAfter.toFixed(2));
 
-  pump(180);
+  pump(360);
   const asleep = call(
     "(function(){var rag=nodes['mook']._rag,n=0,t=0;for(var k in rag.bones){t++;if(rag.bones[k].body.asleep)n++;}" +
     "return n+'/'+t;})()");
@@ -925,6 +925,45 @@ section("console: gated by debug flag, commands work");
   const before = G("CON.lines.length");
   call("conExec('definitelynotacommand');");
   ok("unknown command logs an error, does not throw", G("CON.lines.length") > before);
+})();
+
+// ---------------------------------------------------------------------------
+// 13. KNEES v8c.1
+// ---------------------------------------------------------------------------
+section("knees: limb split, chain, gait flexion");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "knee", title: "k", seed: "k1" },
+    render: BASE_RENDER,
+    nodes: [{ id: "hero", type: "Actor", mesh: "body", tags: ["player"], transform: { pos: [0, 0, 0] } }],
+    resources: { meshes: { body: { type: "silhouette", generator: "humanoid" } }, materials: {} }
+  });
+  ok("shinL exists with knee pivot", call("nodes['hero']._geo.parts['shinL']") != null);
+  ok("shinL parents to legL", call("nodes['hero']._geo.parts['shinL'].parent") === "legL");
+  ok("foreR parents to armR", call("nodes['hero']._geo.parts['foreR'].parent") === "armR");
+  const kneeBelow = call(
+    "(function(){var p=nodes['hero']._geo.parts;return p['shinL'].pivot.y < p['legL'].pivot.y;})()");
+  ok("knee pivot sits below the hip", kneeBelow === true);
+
+  // rotating the thigh alone must carry a shin vertex (chain)
+  const carried = call(
+    "(function(){var g=nodes['hero']._geo;var kp=g.parts['shinL'].pivot;" +
+    "var p=v3(kp.x, kp.y-0.2, kp.z);" +
+    "var a=deformVert(p,g,'shinL',{legL:{rx:60}});" +
+    "var b=deformVert(p,g,'shinL',{});" +
+    "return Math.abs(a.z-b.z)>0.05||Math.abs(a.y-b.y)>0.05;})()");
+  ok("thigh rotation carries shin vertices", carried === true);
+
+  // walking gait flexes the knees; idle does not
+  call("nodes['hero']._gaitAmt = 1; nodes['hero']._gaitPhase = 0.6;");
+  const kneesMoving = call(
+    "(function(){var mx=0;for(var i=0;i<20;i++){nodes['hero']._gaitPhase+=0.3;" +
+    "var p=gaitPose(nodes['hero']);mx=Math.max(mx,Math.abs(poseAngles(p.shinL).rx));}return mx;})()");
+  ok("gait drives knee flexion", kneesMoving > 15, "maxKnee=" + kneesMoving);
+  call("nodes['hero']._gaitAmt = 0;");
+  const idleKnee = call(
+    "(function(){var p=gaitPose(nodes['hero']);return p&&p.shinL?Math.abs(poseAngles(p.shinL).rx):0;})()");
+  ok("idle knees stay straight", idleKnee < 1, "knee=" + idleKnee);
 })();
 
 // ---------------------------------------------------------------------------

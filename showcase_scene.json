@@ -1,0 +1,137 @@
+{
+  "kind": "kv_game_v1",
+  "engine": "scene",
+  "meta": { "id": "showcase_v11", "title": "KasVillage Engine Showcase", "seed": "show1", "debug": true },
+  "render": { "cameraMode": "follow" },
+
+  "lighting": {
+    "ambient": "#26303e",
+    "ambientIntensity": 0.35,
+    "ao": { "samples": 10, "radius": 2.5, "strength": 0.8 },
+    "shadows": true,
+    "bakeBudgetMs": 200,
+    "lights": [
+      { "type": "directional", "dir": [-0.5, -0.8, 0.3], "color": "#ffe8c0", "intensity": 0.9 },
+      { "type": "point", "pos": [8, 2.5, -6], "color": "#ff8844", "intensity": 2.4, "range": 11 },
+      { "type": "spot", "pos": [-8, 7, 6], "dir": [0.2, -1, -0.1], "angle": 45, "color": "#aaccff", "intensity": 2.0, "range": 16 }
+    ]
+  },
+
+  "prefabs": {
+    "goblin": {
+      "type": "Actor", "mesh": "goblin_body", "tags": ["enemy.goblin"],
+      "stats": { "hp": 15, "maxHp": 15, "speed": 3 },
+      "ragdoll": { "enabled": true, "mass": 1, "bounce": 0.15 },
+      "vision": { "range": 10, "fovDeg": 150 },
+      "animTree": { "param": "speed", "clips": [["gob_idle", 0], ["gob_walk", 2], ["gob_run", 5]] },
+      "bt": {
+        "selector": [
+          { "sequence": [
+              { "cond": "canSee(self, player)" },
+              { "task": { "type": "seek", "target": "player", "speed": 4.5 },
+                "until": "distance(self, player) < 1.8" },
+              { "cooldown": 1.4, "child": { "do": { "action": "playPose", "to": "self", "args": ["gob_swing"] } } }
+            ] },
+          { "sequence": [
+              { "invert": { "cond": "canSee(self, player)" } },
+              { "task": { "type": "patrol", "path": "gob_route", "speed": 2 } }
+            ] }
+        ]
+      }
+    },
+    "goblin_boss": {
+      "extends": "goblin",
+      "tags": ["enemy.goblin.boss"],
+      "stats": { "hp": 45, "maxHp": 45, "speed": 2.5 },
+      "ragdoll": { "enabled": true, "mass": 2.5, "bounce": 0.05 }
+    }
+  },
+
+  "nodes": [
+    { "id": "player", "type": "Actor", "mesh": "hero_body", "tags": ["player"],
+      "transform": { "pos": [0, 0, 12] },
+      "stats": { "hp": 100, "maxHp": 100, "speed": 5 },
+      "controller": { "type": "thirdPerson" } },
+
+    { "id": "ground", "type": "MeshInstance", "mesh": "floor",
+      "transform": { "pos": [0, 0, 0] } },
+
+    { "id": "wall_n", "type": "MeshInstance", "mesh": "long_wall",
+      "transform": { "pos": [0, 0, -14] }, "occluderRadius": 2.0 },
+    { "id": "pillar_e", "type": "MeshInstance", "mesh": "pillar",
+      "transform": { "pos": [10, 0, -2] }, "occluderRadius": 1.2 },
+    { "id": "pillar_w", "type": "MeshInstance", "mesh": "pillar",
+      "transform": { "pos": [-10, 0, -2] }, "occluderRadius": 1.2 },
+
+    { "id": "torch", "type": "MeshInstance", "mesh": "brazier",
+      "transform": { "pos": [8, 0, -6] },
+      "alarms": [ { "after": 4, "repeat": true, "do": { "action": "noise", "amount": 6 } } ] },
+
+    { "id": "crate_stack_1", "type": "MeshInstance", "mesh": "crate",
+      "transform": { "pos": [-6, 0.5, 2] },
+      "physics": { "body": "dynamic", "shape": "box", "half": [0.5, 0.5, 0.5], "mass": 1.2, "restitution": 0.1, "friction": 0.75 } },
+    { "id": "crate_stack_2", "type": "MeshInstance", "mesh": "crate",
+      "transform": { "pos": [-6, 1.6, 2] },
+      "physics": { "body": "dynamic", "shape": "box", "half": [0.5, 0.5, 0.5], "mass": 1.0, "restitution": 0.1, "friction": 0.75 } },
+    { "id": "crate_stack_3", "type": "MeshInstance", "mesh": "crate",
+      "transform": { "pos": [-6.1, 2.7, 2.05] },
+      "physics": { "body": "dynamic", "shape": "box", "half": [0.5, 0.5, 0.5], "mass": 0.8, "restitution": 0.15, "friction": 0.7 } },
+    { "id": "ball", "type": "MeshInstance", "mesh": "boulder",
+      "transform": { "pos": [-3, 3, 4] },
+      "physics": { "body": "dynamic", "shape": "sphere", "radius": 0.55, "mass": 2, "restitution": 0.5, "friction": 0.4 } },
+
+    { "id": "gob_route", "type": "Path3D", "closed": true,
+      "points": [[4, 0, -4], [8, 0, 0], [4, 0, 4], [0, 0, 0]] },
+
+    { "id": "g1", "instance": "goblin", "transform": { "pos": [4, 0, -4] } },
+    { "id": "g2", "instance": "goblin", "transform": { "pos": [8, 0, 0] },
+      "overrides": { "stats.hp": 10 } },
+    { "id": "boss", "instance": "goblin_boss", "transform": { "pos": [-4, 0, -8] } },
+
+    { "id": "score_gate", "type": "Area3D",
+      "transform": { "pos": [0, 0, -10] }, "shape": { "radius": 2.5 },
+      "signals": [
+        { "signal": "body_entered", "filter": "player", "to": "self", "action": "addScore", "amount": 25 },
+        { "signal": "body_entered", "filter": "player", "to": "gate_label", "action": "show", "args": ["The braziers whisper: three-finger tap opens the console"] }
+      ] },
+
+    { "id": "hud", "type": "CanvasLayer", "children": [
+      { "id": "gate_label", "type": "Label", "visible": false,
+        "anchor": "top", "offset": [0, 40], "text": "" }
+    ] }
+  ],
+
+  "resources": {
+    "meshes": {
+      "floor":      { "type": "plane", "size": [44, 36], "subdiv": 4 },
+      "long_wall":  { "type": "box", "size": [26, 3, 1] },
+      "pillar":     { "type": "box", "size": [1.4, 5, 1.4] },
+      "brazier":    { "type": "box", "size": [0.8, 1.2, 0.8] },
+      "crate":      { "type": "box", "size": [1, 1, 1] },
+      "boulder":    { "type": "sphere", "radius": 0.55 },
+      "hero_body":  { "type": "silhouette", "generator": "humanoid" },
+      "goblin_body": { "type": "silhouette", "generator": "humanoid", "scale": 0.8 }
+    },
+    "materials": {},
+    "poses": {
+      "gob_idle": { "dur": 1.2, "loop": true, "tracks": {
+        "torso": [[0, { "rx": 0 }], [0.6, { "rx": 3 }], [1.2, { "rx": 0 }]] } },
+      "gob_walk": { "dur": 0.9, "loop": true, "tracks": {
+        "legL": [[0, { "rx": -22 }], [0.45, { "rx": 22 }], [0.9, { "rx": -22 }]],
+        "legR": [[0, { "rx": 22 }], [0.45, { "rx": -22 }], [0.9, { "rx": 22 }]],
+        "armL": [[0, { "rx": 15 }], [0.45, { "rx": -15 }], [0.9, { "rx": 15 }]],
+        "armR": [[0, { "rx": -15 }], [0.45, { "rx": 15 }], [0.9, { "rx": -15 }]] } },
+      "gob_run": { "dur": 0.5, "loop": true, "tracks": {
+        "legL": [[0, { "rx": -55 }], [0.25, { "rx": 55 }], [0.5, { "rx": -55 }]],
+        "legR": [[0, { "rx": 55 }], [0.25, { "rx": -55 }], [0.5, { "rx": 55 }]],
+        "armL": [[0, { "rx": 40 }], [0.25, { "rx": -40 }], [0.5, { "rx": 40 }]],
+        "armR": [[0, { "rx": -40 }], [0.25, { "rx": 40 }], [0.5, { "rx": -40 }]],
+        "torso": [[0, { "rx": 8 }], [0.5, { "rx": 8 }]] } },
+      "gob_swing": { "dur": 0.6, "weight": 1, "tracks": {
+        "armR": [[0, { "rz": 0 }], [0.25, { "rz": -130 }], [0.4, { "rz": 30 }], [0.6, { "rz": 0 }]],
+        "torso": [[0, { "ry": 0 }], [0.25, { "ry": -20 }], [0.45, { "ry": 15 }], [0.6, { "ry": 0 }]] },
+        "events": [ { "at": 0.38, "do": { "action": "damage", "to": "player", "amount": 6 } },
+                    { "at": 0.38, "do": { "action": "noise", "amount": 4 } } ] }
+    }
+  }
+}

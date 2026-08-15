@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>KasVillage Engine Showcase</title>
+<style>html,body{margin:0;height:100%;background:#111}iframe{border:0;width:100%;height:100%}</style>
+</head>
+<body>
+<iframe id="eng" src="scene_engine.html"></iframe>
+<script>
+// Loads showcase_scene.json into the engine iframe the same way the wallet
+// WebView does: a postMessage with kv:"load". Serve over http (not file://)
+// so fetch works:   npx serve .    or    python -m http.server
+var frame = document.getElementById("eng");
+frame.addEventListener("load", function () {
+  fetch("showcase_scene.json")
+    .then(function (r) { return r.text(); })
+    .then(function (json) {
+      frame.contentWindow.postMessage(JSON.stringify({ kv: "load", scene: json }), "*");
+    })
+    .catch(function (e) { document.title = "load failed: " + e.message; });
+});
+window.addEventListener("message", function (e) {
+  try { console.log("[engine]", e.data); } catch (_) {}
+});
+</script>
+</body>
+</html>
