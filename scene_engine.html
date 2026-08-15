@@ -3005,6 +3005,23 @@ function playSound(id, at) {
 }
 function playSoundDef(d, at) {
   if (!AUDIO_ON || !d) return;
+  if (d.type === "seq") {
+    var st = AC.currentTime, sv = d.vol != null ? d.vol : 0.4;
+    for (var ni = 0; ni < (d.notes || []).length; ni++) {
+      var nf = d.notes[ni][0], nd = d.notes[ni][1] || 0.12;
+      if (nf > 0) {
+        var no = AC.createOscillator(), ng = AC.createGain();
+        no.type = d.wave || "square";
+        no.frequency.setValueAtTime(nf, st);
+        ng.gain.setValueAtTime(sv, st);
+        ng.gain.exponentialRampToValueAtTime(0.001, st + nd);
+        no.connect(ng); ng.connect(AMASTER);
+        no.start(st); no.stop(st + nd + 0.02);
+      }
+      st += nd;
+    }
+    return;
+  }
   var vol = d.vol != null ? d.vol : 0.5;
   if (at && nodes[playerId] && nodes[playerId].worldPos) {
     var ref = nodes[playerId].worldPos;
@@ -3064,6 +3081,95 @@ function setSoundscape(spec) {
   ssrc.connect(sf); sf.connect(sg); sg.connect(AMASTER);
   ssrc.start();
   ASCAPE = { src: ssrc, g: sg };
+}
+
+// ---- DICE / CARDS / FRAME HOOKS ----
+var FRAME_HOOKS = [];
+var DICE = [];
+function rollDice(count, faces, wx, wz, cb) {
+  var vals = [];
+  for (var di = 0; di < count; di++) vals.push(1 + Math.floor(rnd() * faces));
+  DICE.push({ wx: wx, wz: wz, faces: faces, vals: vals, t0: world.time, cb: cb, fired: false });
+  playSound("__step");
+  return vals;
+}
+function drawPips(sx, sy, s, v) {
+  ctx.fillStyle = "#fdfaf2";
+  ctx.fillRect(sx - s / 2, sy - s / 2, s, s);
+  ctx.strokeStyle = "#2c2c2c"; ctx.lineWidth = 2;
+  ctx.strokeRect(sx - s / 2, sy - s / 2, s, s);
+  ctx.fillStyle = "#1c1c1c";
+  var o = s * 0.24, r = Math.max(2, s * 0.09);
+  var P = { 1: [[0, 0]], 2: [[-o, -o], [o, o]], 3: [[-o, -o], [0, 0], [o, o]],
+            4: [[-o, -o], [o, -o], [-o, o], [o, o]],
+            5: [[-o, -o], [o, -o], [0, 0], [-o, o], [o, o]],
+            6: [[-o, -o], [o, -o], [-o, 0], [o, 0], [-o, o], [o, o]] };
+  var pts = P[v] || P[1];
+  for (var pi = 0; pi < pts.length; pi++) {
+    ctx.beginPath(); ctx.arc(sx + pts[pi][0], sy + pts[pi][1], r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+function renderDice() {
+  for (var xi = DICE.length - 1; xi >= 0; xi--) {
+    var dd = DICE[xi];
+    var age = world.time - dd.t0;
+    if (age > 3) { DICE.splice(xi, 1); continue; }
+    var pp = project({ x: dd.wx, y: 0.4, z: dd.wz });
+    if (!pp) continue;
+    var ds = Math.max(18, 40 * fovScale / pp.z * 0.02);
+    for (var vi = 0; vi < dd.vals.length; vi++) {
+      var jx = (vi - (dd.vals.length - 1) / 2) * ds * 1.3;
+      var tumbling = age < 0.7;
+      var show = tumbling ? 1 + Math.floor(rndVisual() * dd.faces) : dd.vals[vi];
+      var wob = tumbling ? Math.sin(age * 40 + vi) * ds * 0.15 : 0;
+      drawPips(pp.x + jx + wob, pp.y - ds * (tumbling ? 0.5 + Math.abs(Math.sin(age * 12)) : 0.5), ds, show);
+    }
+    if (!dd.fired && age >= 0.7) { dd.fired = true; playSound("__land"); if (dd.cb) dd.cb(dd.vals); }
+  }
+}
+var _rvSeed = 12345;
+function rndVisual() { _rvSeed = (_rvSeed * 1103515245 + 12345) & 0x7fffffff; return _rvSeed / 0x7fffffff; }
+var CARD_RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+var CARD_SUITS = ["\u2660", "\u2665", "\u2666", "\u2663"];
+function newDeck(seedStr) {
+  var dk = [], drng = mulberry(hashStr(seedStr || (scene.meta && scene.meta.seed) || "kv"));
+  for (var s2 = 0; s2 < 4; s2++) for (var r2 = 0; r2 < 13; r2++) dk.push({ r: CARD_RANKS[r2], s: s2 });
+  for (var i2 = dk.length - 1; i2 > 0; i2--) {
+    var j2 = Math.floor(drng() * (i2 + 1));
+    var tmp = dk[i2]; dk[i2] = dk[j2]; dk[j2] = tmp;
+  }
+  return dk;
+}
+function drawCard(sx, sy, w, card, faceUp) {
+  var h2 = w * 1.45, rr = w * 0.08;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(sx + rr, sy);
+  ctx.arcTo(sx + w, sy, sx + w, sy + h2, rr);
+  ctx.arcTo(sx + w, sy + h2, sx, sy + h2, rr);
+  ctx.arcTo(sx, sy + h2, sx, sy, rr);
+  ctx.arcTo(sx, sy, sx + w, sy, rr);
+  ctx.closePath();
+  if (!faceUp) {
+    ctx.fillStyle = "#7a2f2f"; ctx.fill();
+    ctx.strokeStyle = "#e8ddd0"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = "rgba(232,221,208,0.35)";
+    for (var bi = 1; bi < 5; bi++) {
+      ctx.beginPath(); ctx.moveTo(sx + 3, sy + bi * h2 / 5); ctx.lineTo(sx + w - 3, sy + bi * h2 / 5); ctx.stroke();
+    }
+    ctx.restore(); return;
+  }
+  ctx.fillStyle = "#fdfaf2"; ctx.fill();
+  ctx.strokeStyle = "#2c2c2c"; ctx.lineWidth = 2; ctx.stroke();
+  var red = card.s === 1 || card.s === 2;
+  ctx.fillStyle = red ? "#c0392b" : "#1c1c1c";
+  ctx.font = "bold " + Math.round(w * 0.34) + "px monospace";
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillText(card.r, sx + w * 0.08, sy + h2 * 0.05);
+  ctx.font = Math.round(w * 0.5) + "px monospace";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(CARD_SUITS[card.s], sx + w / 2, sy + h2 * 0.58);
+  ctx.restore();
 }
 
 // ---- EXPLOSIONS ----
@@ -3996,6 +4102,8 @@ function renderFrame() {
   renderProjectiles();
   renderLockMarker();
   renderExplosions();
+  renderDice();
+  for (var fh = 0; fh < FRAME_HOOKS.length; fh++) { try { FRAME_HOOKS[fh](ctx); } catch (e) {} }
   if (r.post && r.post.enabled) drawPostFX(r.post);
 }
 
