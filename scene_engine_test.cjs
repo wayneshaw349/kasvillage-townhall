@@ -130,6 +130,7 @@ function pump(frames, dt) {
   vm.runInContext(
     "(function(n,h){for(var i=0;i<n;i++){" +
     "world.time+=h;" +
+    "if(typeof updateRagdolls==='function')updateRagdolls();" +
     "if(typeof updatePoseClips==='function')updatePoseClips(h);" +
     "if(typeof updateAlarms==='function')updateAlarms(h);" +
     "if(typeof updatePhysics==='function')updatePhysics(h);" +
@@ -681,6 +682,102 @@ section("anim: root motion drives position");
   const pz = call("nodes['hero'].transform.pos[2]");
   ok("root motion respects actor yaw", near(px, 3, 0.3) && Math.abs(pz) < 0.3,
      "x=" + px.toFixed(2) + " z=" + pz.toFixed(2));
+})();
+
+// ---------------------------------------------------------------------------
+// 10. RAGDOLL v9
+// ---------------------------------------------------------------------------
+section("ragdoll: triggers on death, bones fall and stay linked");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "rag", title: "rag", seed: "r9" },
+    render: BASE_RENDER,
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "body", tags: ["player"], transform: { pos: [0, 0, 0] } },
+      { id: "route", type: "Path3D", closed: false, points: [[6, 0, 0], [12, 0, 0]] },
+      { id: "victim", type: "Actor", mesh: "body", tags: ["enemy"],
+        transform: { pos: [6, 4, 0], rot: [0, 0, 0] },
+        stats: { hp: 10, maxHp: 10 },
+        ragdoll: { enabled: true, mass: 1 },
+        stateMachine: { initial: "walk", states: {
+          walk: { behavior: { type: "patrol", path: "route", speed: 2 } } } } }
+    ],
+    resources: { meshes: { body: { type: "silhouette", generator: "humanoid" } }, materials: {} }
+  });
+
+  pump(10);
+  ok("alive actor is not ragdolled", call("nodes['victim']._rag") == null);
+  const movedAlive = call("nodes['victim'].transform.pos[0]") > 6;
+  ok("alive actor still follows its behaviour", movedAlive === true);
+
+  const bodiesBefore = G("BODIES.length");
+  call("nodes['victim'].hp = 0;");
+  pump(2);
+  ok("death starts a ragdoll", call("nodes['victim']._rag") != null);
+  ok("one body per bone spawned", G("BODIES.length") - bodiesBefore === 6,
+     "delta=" + (G("BODIES.length") - bodiesBefore));
+  ok("actor is not marked dead (corpse stays visible)", call("nodes['victim']._dead") !== true);
+
+  const yStart = call("nodes['victim']._rag.bones['torso'].body.node.transform.pos[1]");
+  pump(120);
+  const yEnd = call("nodes['victim']._rag.bones['torso'].body.node.transform.pos[1]");
+  ok("ragdoll falls under gravity", yEnd < yStart, "y " + yStart.toFixed(2) + " -> " + yEnd.toFixed(2));
+  ok("ragdoll comes to rest on the ground", yEnd > 0, "y=" + yEnd.toFixed(2));
+
+  // links hold: every bone stays near its rest distance from its parent
+  const maxStretch = call(
+    "(function(){var rag=nodes['victim']._rag,worst=0;" +
+    "for(var i=0;i<rag.links.length;i++){var L=rag.links[i];" +
+    "var a=L.a.node.transform.pos,b=L.b.node.transform.pos;" +
+    "var dx=b[0]-a[0],dy=b[1]-a[1],dz=b[2]-a[2];" +
+    "var d=Math.sqrt(dx*dx+dy*dy+dz*dz);" +
+    "worst=Math.max(worst,Math.abs(d-L.rest));}return worst;})()");
+  ok("bone links hold near rest length", maxStretch < 0.35, "worst stretch=" + maxStretch.toFixed(3));
+
+  const pose = call("blendedPose(nodes['victim'])");
+  ok("ragdoll pose overrides animation", pose != null && Object.keys(pose).length > 0,
+     pose ? Object.keys(pose).join(",") : "null");
+
+  const posMoved = call("nodes['victim'].transform.pos[1]") < 4;
+  ok("mesh node follows the torso bone", posMoved === true,
+     "y=" + call("nodes['victim'].transform.pos[1]"));
+})();
+
+section("ragdoll: manual trigger with impulse, actor stops acting");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "rag2", title: "rag2", seed: "r10" },
+    render: BASE_RENDER,
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "body", tags: ["player"], transform: { pos: [0, 0, 0] } },
+      { id: "route", type: "Path3D", closed: false, points: [[3, 0, 0], [20, 0, 0]] },
+      { id: "mook", type: "Actor", mesh: "body", tags: ["enemy"],
+        transform: { pos: [3, 0, 0] }, stats: { hp: 20, maxHp: 20 },
+        ragdoll: { enabled: true },
+        stateMachine: { initial: "walk", states: {
+          walk: { behavior: { type: "patrol", path: "route", speed: 3 } } } } }
+    ],
+    resources: { meshes: { body: { type: "silhouette", generator: "humanoid" } }, materials: {} }
+  });
+
+  pump(20);
+  const xBefore = call("nodes['mook'].transform.pos[0]");
+  ok("mook was walking", xBefore > 3);
+
+  call("runAction(nodes['mook'], { action:'ragdoll', target:'mook', args:[0, 6, 4] });");
+  ok("manual ragdoll action fires", call("nodes['mook']._rag") != null);
+  ok("actor stops acting once ragdolled", call("nodes['mook']._ragStop") === true);
+
+  const zBefore = call("nodes['mook']._rag.bones['torso'].body.node.transform.pos[2]");
+  pump(20);
+  const zAfter = call("nodes['mook']._rag.bones['torso'].body.node.transform.pos[2]");
+  ok("death impulse carried the corpse", zAfter > zBefore, "z " + zBefore.toFixed(2) + " -> " + zAfter.toFixed(2));
+
+  pump(180);
+  const asleep = call(
+    "(function(){var rag=nodes['mook']._rag,n=0,t=0;for(var k in rag.bones){t++;if(rag.bones[k].body.asleep)n++;}" +
+    "return n+'/'+t;})()");
+  ok("corpse settles and sleeps", asleep.split("/")[0] === asleep.split("/")[1], "asleep=" + asleep);
 })();
 
 // ---------------------------------------------------------------------------

@@ -761,6 +761,7 @@ function terrainHeight(x, z) {
 var camYaw = 0, camPitch = -10;
 
 function updateActor(n, dt) {
+  if (n._ragStop) return; // ragdolled: the solver owns this actor
   var t = n.transform = n.transform || {};
   // gait phase: driven by how far the actor actually moved this frame, so the
   // stride matches ground speed and stops instantly when the actor stops.
@@ -1154,6 +1155,10 @@ function runAction(self, a) {
       }
       break;
     case "stopPose": if (target) target._pose = null; break;
+    case "ragdoll":
+      if (target) startRagdoll(target, a.args ?
+        { x: a.args[0] || 0, y: a.args[1] || 0, z: a.args[2] || 0 } : null);
+      break;
     case "stop": if (target && target.clips) animStop(target); break;
     case "tween": if (target && a.args) startTween(target, a.args[0], a.args[1] || 0, a.args[2] || 0.5, a.args[3]); break;
     case "startDialogue": startDialogue(a.args ? a.args[0] : ""); break;
@@ -2686,7 +2691,131 @@ function playPoseAdditive(n, id) {
   if (POSED.indexOf(n) < 0) POSED.push(n);
 }
 
+// ---------------------------------------------------------------------------
+// RAGDOLL (v9) -- bones driven by the rigid body solver instead of clips.
+// ---------------------------------------------------------------------------
+var RAGDOLLS = [];
+var RAG_BONES = ["torso", "head", "armL", "armR", "legL", "legR"];
+
+function startRagdoll(n, impulse) {
+  if (n._rag || !n._geo || !n._geo.parts) return;
+  var cfg = n.ragdoll || {};
+  var g = n._geo, m = n._world || matIdent();
+  var rag = { node: n, bones: {}, links: [] };
+  var seedVel = n._pb ? { x: n._pb.vel.x, y: n._pb.vel.y, z: n._pb.vel.z } : { x: 0, y: 0, z: 0 };
+  var imp = impulse || { x: 0, y: 0, z: 0 };
+  var i, name;
+  for (i = 0; i < RAG_BONES.length; i++) {
+    name = RAG_BONES[i];
+    var part = g.parts[name];
+    if (!part) continue;
+    var wp = matApply(m, part.pivot);
+    var body = {
+      node: { id: n.id + ":" + name, _dead: false, transform: { pos: [wp.x, wp.y, wp.z] } },
+      kind: "dynamic", shape: "sphere", r: cfg.boneRadius || 0.18,
+      half: [0.18, 0.18, 0.18], h: 0.3,
+      mass: cfg.mass || 1, rest: cfg.bounce != null ? cfg.bounce : 0.1,
+      fric: 0.8, gs: 1,
+      vel: { x: seedVel.x + imp.x, y: seedVel.y + imp.y, z: seedVel.z + imp.z },
+      sleep: 0, asleep: false
+    };
+    body.invMass = body.mass > 0 ? 1 / body.mass : 0;
+    BODIES.push(body);
+    rag.bones[name] = { body: body, local: part.pivot, parent: part.parent || null };
+  }
+  // distance links: bone to its parent bone, at the rest separation
+  for (name in rag.bones) {
+    var b = rag.bones[name];
+    var pn = b.parent && rag.bones[b.parent] ? b.parent : (name === "torso" ? null : "torso");
+    if (!pn || !rag.bones[pn]) continue;
+    var pa = b.local, pb = rag.bones[pn].local;
+    var dx = pa.x - pb.x, dy = pa.y - pb.y, dz = pa.z - pb.z;
+    rag.links.push({ a: rag.bones[pn].body, b: b.body,
+                     rest: Math.sqrt(dx * dx + dy * dy + dz * dz) });
+    b.restDir = { x: dx, y: dy, z: dz };
+    b.linkParent = pn;
+  }
+  n._rag = rag;
+  RAGDOLLS.push(rag);
+  // the actor stops acting: no controller, no AI, no clips
+  n._pose = null; n._addPose = null; n._treePose = null;
+  n._ragStop = true;
+}
+
+// Positional distance constraints, solved after the physics step so bone
+// bodies stay the rest length apart. Few iterations: a corpse only needs to
+// look connected, not be rigid.
+function solveRagdollLinks() {
+  for (var r = 0; r < RAGDOLLS.length; r++) {
+    var links = RAGDOLLS[r].links;
+    for (var it = 0; it < 4; it++) {
+      for (var i = 0; i < links.length; i++) {
+        var L = links[i], pa = L.a.node.transform.pos, pb = L.b.node.transform.pos;
+        var dx = pb[0] - pa[0], dy = pb[1] - pa[1], dz = pb[2] - pa[2];
+        var d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (d < 1e-6) continue;
+        var diff = (d - L.rest) / d * 0.5;
+        var cx = dx * diff, cy = dy * diff, cz = dz * diff;
+        var ima = L.a.invMass, imb = L.b.invMass, tot = ima + imb;
+        if (tot === 0) continue;
+        pa[0] += cx * (ima / tot) * 2; pa[1] += cy * (ima / tot) * 2; pa[2] += cz * (ima / tot) * 2;
+        pb[0] -= cx * (imb / tot) * 2; pb[1] -= cy * (imb / tot) * 2; pb[2] -= cz * (imb / tot) * 2;
+      }
+    }
+  }
+}
+
+// Derives bone angles from where the simulation put each bone relative to
+// its parent. Approximate decomposition - a flopping corpse does not need
+// an exact solve, and the PS1 look forgives it.
+function ragdollPose(n) {
+  var rag = n._rag;
+  if (!rag) return null;
+  var out = {}, name;
+  for (name in rag.bones) {
+    var b = rag.bones[name];
+    if (!b.linkParent || !b.restDir) continue;
+    var pp = rag.bones[b.linkParent].body.node.transform.pos;
+    var bp = b.body.node.transform.pos;
+    var dx = bp[0] - pp[0], dy = bp[1] - pp[1], dz = bp[2] - pp[2];
+    var len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 1e-6) continue;
+    var r0 = b.restDir;
+    var rl = Math.sqrt(r0.x * r0.x + r0.y * r0.y + r0.z * r0.z) || 1;
+    var a0 = Math.atan2(r0.x, -r0.y), a1 = Math.atan2(dx, -dy);
+    var e0 = Math.atan2(-r0.z, rl), e1 = Math.atan2(-dz, len);
+    out[name] = { rx: (e1 - e0) / DEG, ry: 0, rz: (a1 - a0) / DEG };
+  }
+  return out;
+}
+
+function updateRagdolls() {
+  // trigger: hp exhausted on an actor that opted in
+  for (var i = 0; i < actors.length; i++) {
+    var n = actors[i];
+    if (!n._rag && n.ragdoll && n.ragdoll.enabled !== false &&
+        n.stats && (n.hp || 0) <= 0) {
+      startRagdoll(n, n._deathImpulse);
+    }
+  }
+  if (!RAGDOLLS.length) return;
+  solveRagdollLinks();
+  // the body node follows its torso bone so the mesh travels with the corpse
+  for (var r = 0; r < RAGDOLLS.length; r++) {
+    var rag = RAGDOLLS[r];
+    var torso = rag.bones["torso"];
+    if (!torso || !rag.node.transform) continue;
+    var tp = torso.body.node.transform.pos;
+    var lp = torso.local;
+    rag.node.transform.pos[0] = tp[0] - lp.x;
+    rag.node.transform.pos[1] = tp[1] - lp.y;
+    rag.node.transform.pos[2] = tp[2] - lp.z;
+  }
+}
+
 function blendedPose(n) {
+  // A ragdolled actor is driven by the solver: no gait, clips or blending.
+  if (n._rag) return ragdollPose(n);
   // Layer 0: blend tree if declared, otherwise the procedural gait.
   var base = n._treePose || gaitPose(n);
   if (!n._pose && !n._addPose) return base;
@@ -3210,6 +3339,7 @@ function loadScene(json) {
   BODIES = []; PHYS.accum = 0;
   ALARMS = [];
   POSED.forEach(function (a) { a._pose = null; }); POSED = [];
+  RAGDOLLS = [];
   playerId = null; camera = null; terrainMesh = null;
   world = { alert: false, flags: {}, score: 0, time: 0 };
   INV = { items: {}, equipped: {} };
@@ -3257,6 +3387,7 @@ function loop(t) {
   pollKeys();
   edgeFlush();
 
+  updateRagdolls();
   updatePoseClips(dt);
   updateAlarms(dt);
   updatePhysics(dt);
