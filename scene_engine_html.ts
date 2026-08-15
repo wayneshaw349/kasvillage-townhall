@@ -776,6 +776,7 @@ function updateActor(n, dt) {
     n._gaitPhase = (n._gaitPhase || 0) + moved * (gait.stride ? (Math.PI / gait.stride) : 3.4);
     n._gaitAmt = Math.min(1, (n._gaitAmt || 0) + (moved > 0.001 ? dt * 8 : -dt * 6));
     if (n._gaitAmt < 0) n._gaitAmt = 0;
+    n._moveSpeed = dt > 0 ? moved / dt : 0;
     n._lastPos = t.pos.slice();
   }
   t.pos = t.pos || [0, 0, 0];
@@ -1151,7 +1152,12 @@ function runAction(self, a) {
     case "impulse": if (target && a.args) physImpulse(target, a.args[0] || 0, a.args[1] || 0, a.args[2] || 0); break;
     case "setVelocity": if (target && a.args) physSetVel(target, a.args[0] || 0, a.args[1] || 0, a.args[2] || 0); break;
     case "wake": if (target && target._pb) pbWake(target._pb); break;
-    case "playPose": if (target && a.args) playPose(target, a.args[0]); break;
+    case "playPose":
+      if (target && a.args) {
+        if (a.args[1] === "additive") playPoseAdditive(target, a.args[0]);
+        else playPose(target, a.args[0]);
+      }
+      break;
     case "stopPose": if (target) target._pose = null; break;
     case "stop": if (target && target.clips) animStop(target); break;
     case "tween": if (target && a.args) startTween(target, a.args[0], a.args[1] || 0, a.args[2] || 0.5, a.args[3]); break;
@@ -2523,13 +2529,34 @@ function samplePoseTrack(keys, t) {
   return last[1];
 }
 function updatePoseClips(dt) {
+  // blend trees run for every rigged actor that declares one
+  for (var a = 0; a < actors.length; a++) {
+    var an = actors[a];
+    if (an.animTree && !an._dead) an._treePose = blendTreePose(an, dt);
+  }
+  // additive layer advances independently of the main clip
+  for (var q = POSED.length - 1; q >= 0; q--) {
+    var pn = POSED[q];
+    if (!pn._addPose) continue;
+    var adef = poseDef(pn._addPose.id);
+    if (!adef) { pn._addPose = null; continue; }
+    pn._addPose.t += dt;
+    var adur = adef.dur || 1;
+    if (pn._addPose.t >= adur) {
+      if (adef.loop) pn._addPose.t = pn._addPose.t % adur;
+      else pn._addPose = null;
+    }
+  }
+  // main clip layer
   for (var i = POSED.length - 1; i >= 0; i--) {
     var n = POSED[i];
-    if (!n._pose) { POSED.splice(i, 1); continue; }
+    if (!n._pose) { if (!n._addPose) POSED.splice(i, 1); continue; }
     var def = poseDef(n._pose.id);
     if (!def) { n._pose = null; continue; }
+    var prevT = n._pose.t;
     n._pose.t += dt;
     var dur = def.dur || 1;
+    if (def.tracks && def.tracks.root && n.transform) applyRootMotion(n, def, prevT, n._pose.t);
     // events fire once per playthrough, at their normalised time
     var evs = def.events || [];
     for (var e = 0; e < evs.length; e++) {
@@ -2550,9 +2577,125 @@ function updatePoseClips(dt) {
 // Blends the active pose clip over the gait pose. Clip bones win at full
 // weight, untouched bones keep walking - an upper-body swing while the legs
 // still stride.
+// Samples every bone track of a clip at time t into a plain bone->angles map.
+function sampleClipPose(def, t) {
+  var out = {}, tracks = def.tracks || {};
+  for (var bone in tracks) {
+    if (bone === "root") continue;
+    var v = samplePoseTrack(tracks[bone], t);
+    if (v != null) out[bone] = poseAngles(v);
+  }
+  return out;
+}
+// Linear blend of two bone->angles maps. Bones present in only one side
+// fade from zero, so a clip that omits a bone leaves it to the layer below.
+function lerpPose(A, B, w) {
+  var out = {}, bone;
+  for (bone in A) {
+    var a = A[bone], b = B[bone] || { rx: 0, ry: 0, rz: 0 };
+    out[bone] = { rx: a.rx + (b.rx - a.rx) * w,
+                  ry: a.ry + (b.ry - a.ry) * w,
+                  rz: a.rz + (b.rz - a.rz) * w };
+  }
+  for (bone in B) {
+    if (out[bone]) continue;
+    var b2 = B[bone];
+    out[bone] = { rx: b2.rx * w, ry: b2.ry * w, rz: b2.rz * w };
+  }
+  return out;
+}
+function addPose(base, extra, w) {
+  var out = {}, bone;
+  for (bone in base) out[bone] = { rx: base[bone].rx, ry: base[bone].ry, rz: base[bone].rz };
+  for (bone in extra) {
+    var e = extra[bone], c = out[bone] || { rx: 0, ry: 0, rz: 0 };
+    out[bone] = { rx: c.rx + e.rx * w, ry: c.ry + e.ry * w, rz: c.rz + e.rz * w };
+  }
+  return out;
+}
+
+// ---- blend tree ----------------------------------------------------------
+// Clips in a blend tree share one normalised phase so limbs stay in step
+// across the blend. _treePhase advances by the current clip duration.
+function treeValue(n, param) {
+  if (param === "speed") return n._moveSpeed || 0;
+  if (n.blackboard && n.blackboard[param] != null) return n.blackboard[param];
+  var st = n.stats || {};
+  return st[param] || 0;
+}
+function blendTreePose(n, dt) {
+  var tree = n.animTree;
+  if (!tree || !tree.clips || !tree.clips.length) return null;
+  var val = treeValue(n, tree.param || "speed");
+  var clips = tree.clips;
+  var loI = 0, hiI = 0, i;
+  for (i = 0; i < clips.length; i++) {
+    if (clips[i][1] <= val) loI = i;
+    if (clips[i][1] >= val) { hiI = i; break; }
+    hiI = i;
+  }
+  var lo = clips[loI], hi = clips[hiI];
+  var w = (hi[1] === lo[1]) ? 0 : (val - lo[1]) / (hi[1] - lo[1]);
+  if (w < 0) w = 0; else if (w > 1) w = 1;
+  var dLo = poseDef(lo[0]), dHi = poseDef(hi[0]);
+  if (!dLo && !dHi) return null;
+  // shared phase: advance by the blended duration, wrap to 0..1
+  var durLo = (dLo && dLo.dur) || 1, durHi = (dHi && dHi.dur) || 1;
+  var dur = durLo + (durHi - durLo) * w;
+  n._treePhase = ((n._treePhase || 0) + (dt / (dur || 1))) % 1;
+  var pLo = dLo ? sampleClipPose(dLo, n._treePhase * durLo) : {};
+  var pHi = dHi ? sampleClipPose(dHi, n._treePhase * durHi) : {};
+  return lerpPose(pLo, pHi, w);
+}
+
+// ---- root motion ---------------------------------------------------------
+// A clip may carry a track named root: [[t,{x,y,z}],...]. The per-frame
+// delta is rotated into world space by the actor yaw and applied to pos.
+function applyRootMotion(n, def, prevT, nowT) {
+  var tr = (def.tracks || {}).root;
+  if (!tr) return;
+  var a = samplePoseTrack3(tr, prevT), b = samplePoseTrack3(tr, nowT);
+  if (!a || !b) return;
+  var dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  if (!dx && !dy && !dz) return;
+  var t = n.transform;
+  var yaw = ((t.rot && t.rot[1]) || 0) * DEG;
+  var c = Math.cos(yaw), s = Math.sin(yaw);
+  t.pos[0] += dx * c + dz * s;
+  t.pos[1] += dy;
+  t.pos[2] += -dx * s + dz * c;
+}
+// Vector variant of samplePoseTrack for root tracks.
+function samplePoseTrack3(keys, t) {
+  if (!keys || !keys.length) return null;
+  function V(o) { o = o || {}; return { x: o.x || 0, y: o.y || 0, z: o.z || 0 }; }
+  if (t <= keys[0][0]) return V(keys[0][1]);
+  var last = keys[keys.length - 1];
+  if (t >= last[0]) return V(last[1]);
+  for (var i = 0; i < keys.length - 1; i++) {
+    var ka = keys[i], kb = keys[i + 1];
+    if (t >= ka[0] && t <= kb[0]) {
+      var u = (t - ka[0]) / ((kb[0] - ka[0]) || 1e-9);
+      var A = V(ka[1]), B = V(kb[1]);
+      return { x: A.x + (B.x - A.x) * u, y: A.y + (B.y - A.y) * u, z: A.z + (B.z - A.z) * u };
+    }
+  }
+  return V(last[1]);
+}
+
+// ---- additive layer ------------------------------------------------------
+function playPoseAdditive(n, id) {
+  var def = poseDef(id);
+  if (!def) return;
+  n._addPose = { id: id, t: 0, fired: {} };
+  if (POSED.indexOf(n) < 0) POSED.push(n);
+}
+
 function blendedPose(n) {
-  var base = gaitPose(n);
-  if (!n._pose) return base;
+  // Layer 0: blend tree if declared, otherwise the procedural gait.
+  var base = n._treePose || gaitPose(n);
+  if (!n._pose && !n._addPose) return base;
+  if (!n._pose) return n._addPose ? addPose(basePose(base), additiveAngles(n), 1) : base;
   var def = poseDef(n._pose.id);
   if (!def) return base;
   var out = {};
@@ -2568,7 +2711,21 @@ function blendedPose(n) {
                   ry: cur.ry + (target.ry - cur.ry) * w,
                   rz: cur.rz + (target.rz - cur.rz) * w };
   }
+  if (n._addPose) out = addPose(basePose(out), additiveAngles(n), 1);
   return out;
+}
+// Normalises a pose map (which may hold scalars from gaitPose) to angle
+// objects so additive layers can be summed against it.
+function basePose(p) {
+  var out = {};
+  for (var k in (p || {})) out[k] = poseAngles(p[k]) || { rx: 0, ry: 0, rz: 0 };
+  return out;
+}
+function additiveAngles(n) {
+  if (!n._addPose) return {};
+  var def = poseDef(n._addPose.id);
+  if (!def) return {};
+  return sampleClipPose(def, n._addPose.t);
 }
 
 function rotAboutX(p, pivot, deg) {

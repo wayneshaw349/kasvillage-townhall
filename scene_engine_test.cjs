@@ -567,5 +567,122 @@ section("rig: clip blends over gait, unclipped bones keep walking");
 })();
 
 // ---------------------------------------------------------------------------
+// 9. ANIM v8b: blend trees, additive layers, root motion
+// ---------------------------------------------------------------------------
+section("anim: blend tree by speed");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "tree", title: "t", seed: "t8b" },
+    render: BASE_RENDER,
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "body", tags: ["player"], transform: { pos: [0, 0, 0] } },
+      { id: "route", type: "Path3D", closed: false, points: [[0, 0, 0], [30, 0, 0]] },
+      { id: "runner", type: "Actor", mesh: "body", tags: ["npc"], transform: { pos: [0, 0, 4] },
+        animTree: { param: "speed", clips: [["idle", 0], ["walk", 2], ["run", 6]] },
+        stateMachine: { initial: "go", states: {
+          go: { behavior: { type: "patrol", path: "route", speed: 4 } } } } }
+    ],
+    resources: {
+      meshes: { body: { type: "silhouette", generator: "humanoid" } }, materials: {},
+      poses: {
+        idle: { dur: 1, loop: true, tracks: { legL: [[0, { rx: 0 }], [1, { rx: 0 }]] } },
+        walk: { dur: 1, loop: true, tracks: { legL: [[0, { rx: -20 }], [0.5, { rx: 20 }], [1, { rx: -20 }]] } },
+        run:  { dur: 0.6, loop: true, tracks: { legL: [[0, { rx: -60 }], [0.3, { rx: 60 }], [0.6, { rx: -60 }]] } }
+      }
+    }
+  });
+
+  pump(30);
+  const spd = call("nodes['runner']._moveSpeed");
+  ok("measured ground speed tracks the behaviour", spd > 3 && spd < 5, "speed=" + spd);
+
+  const tp = call("nodes['runner']._treePose");
+  ok("blend tree produced a pose", tp != null && tp.legL != null);
+
+  const amp = call(
+    "(function(){var mx=0;for(var i=0;i<60;i++){updatePoseClips(1/60);" +
+    "var p=nodes['runner']._treePose;if(p&&p.legL)mx=Math.max(mx,Math.abs(p.legL.rx));}return mx;})()");
+  ok("blended amplitude sits between walk and run", amp > 20 && amp < 60, "maxRx=" + amp);
+
+  const phaseAdvances = call(
+    "(function(){var a=nodes['runner']._treePhase;updatePoseClips(1/60);" +
+    "return nodes['runner']._treePhase !== a;})()");
+  ok("shared tree phase advances", phaseAdvances === true);
+
+  // stationary actor blends to idle
+  call("nodes['runner']._moveSpeed = 0;");
+  const idleAmp = call(
+    "(function(){var mx=0;for(var i=0;i<60;i++){updatePoseClips(1/60);" +
+    "var p=nodes['runner']._treePose;if(p&&p.legL)mx=Math.max(mx,Math.abs(p.legL.rx));}return mx;})()");
+  ok("zero speed blends to idle (no swing)", idleAmp < 1, "maxRx=" + idleAmp);
+})();
+
+section("anim: additive layer stacks on the base");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "add", title: "a", seed: "a8b" },
+    render: BASE_RENDER,
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "body", tags: ["player"], transform: { pos: [0, 0, 0] } }
+    ],
+    resources: {
+      meshes: { body: { type: "silhouette", generator: "humanoid" } }, materials: {},
+      poses: {
+        swing: { dur: 1, tracks: { armR: [[0, { rz: -40 }], [1, { rz: -40 }]] } },
+        lean:  { dur: 1, additive: true, tracks: { armR: [[0, { rz: -10 }], [1, { rz: -10 }]] } }
+      }
+    }
+  });
+
+  call("playPose(nodes['hero'],'swing');");
+  pump(6);
+  const baseOnly = call("(function(){var p=blendedPose(nodes['hero']);return poseAngles(p.armR).rz;})()");
+  ok("base clip applies", near(baseOnly, -40, 1), "rz=" + baseOnly);
+
+  call("playPoseAdditive(nodes['hero'],'lean');");
+  pump(6);
+  const stacked = call("(function(){var p=blendedPose(nodes['hero']);return poseAngles(p.armR).rz;})()");
+  ok("additive adds to the base rather than replacing", near(stacked, -50, 1.5), "rz=" + stacked);
+
+  const other = call("(function(){var p=blendedPose(nodes['hero']);return p.legL?poseAngles(p.legL).rz:0;})()");
+  ok("additive leaves untouched bones alone", Math.abs(other) < 0.001, "legL rz=" + other);
+
+  pump(90); // past dur -> additive expires
+  ok("non-looping additive clears", call("nodes['hero']._addPose") == null);
+})();
+
+section("anim: root motion drives position");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "root", title: "r", seed: "r8b" },
+    render: BASE_RENDER,
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "body", tags: ["player"],
+        transform: { pos: [0, 0, 0], rot: [0, 0, 0] } }
+    ],
+    resources: {
+      meshes: { body: { type: "silhouette", generator: "humanoid" } }, materials: {},
+      poses: {
+        lunge: { dur: 0.5, tracks: { root: [[0, { z: 0 }], [0.5, { z: 3 }]] } }
+      }
+    }
+  });
+
+  const z0 = call("nodes['hero'].transform.pos[2]");
+  call("playPose(nodes['hero'],'lunge');");
+  pump(35); // past dur
+  const z1 = call("nodes['hero'].transform.pos[2]");
+  ok("root track moved the actor forward", near(z1 - z0, 3, 0.2), "dz=" + (z1 - z0).toFixed(3));
+
+  // facing rotates the motion into world space
+  call("nodes['hero'].transform.pos=[0,0,0];nodes['hero'].transform.rot=[0,90,0];playPose(nodes['hero'],'lunge');");
+  pump(35);
+  const px = call("nodes['hero'].transform.pos[0]");
+  const pz = call("nodes['hero'].transform.pos[2]");
+  ok("root motion respects actor yaw", near(px, 3, 0.3) && Math.abs(pz) < 0.3,
+     "x=" + px.toFixed(2) + " z=" + pz.toFixed(2));
+})();
+
+// ---------------------------------------------------------------------------
 console.log("\n" + (fail === 0 ? "ALL GREEN" : "FAILURES") + "  pass=" + pass + " fail=" + fail);
 process.exit(fail === 0 ? 0 : 1);
