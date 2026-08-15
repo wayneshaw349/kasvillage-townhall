@@ -1,0 +1,83 @@
+// make_fight_showcase.cjs — writes showcase_fight.html
+// Hero vs dummy (hp 30, ragdoll). Buttons: punch/kick carry combat frame data.
+// Status line shows dummy hp + combat phase. dur field fixed (was duration).
+const fs = require("fs");
+const engine = fs.readFileSync("scene_engine.html", "utf8");
+const q = String.fromCharCode(39);
+const scene = {
+  kind: "kv_game_v1", engine: "scene",
+  meta: { id: "fight", title: "fight", seed: "f1" },
+  render: { vertexSnap: 0 },
+  nodes: [
+    { id: "cam", type: "Camera3D", mode: "fixed", fov: 40, transform: { pos: [1, 1.8, 10] } },
+    { id: "hero", type: "Actor", mesh: "body", tags: ["player"],
+      transform: { pos: [0, 0, 0], rot: [0, 90, 0] } },
+    { id: "dummy", type: "Actor", mesh: "gob", tags: ["enemy"],
+      transform: { pos: [1.6, 0, 0], rot: [0, -90, 0] },
+      stats: { hp: 30, maxHp: 30 },
+      ragdoll: { enabled: true } }
+  ],
+  resources: {
+    meshes: {
+      body: { type: "silhouette", generator: "humanoid" },
+      gob: { type: "silhouette", generator: "humanoid", beast: true }
+    },
+    materials: {},
+    poses: {
+      punch: { dur: 0.45, loop: false,
+        combat: { phases: { active: 0.12, recovery: 0.18 },
+                  hitbox: { forward: 1.3, height: 1.3, r: 1.0, damage: 5, filter: "enemy", level: "high", pushback: 3 } },
+        tracks: {
+          armR:  [[0, 0], [0.12, { rx: 35, ry: 10 }], [0.15, { rx: -95 }], [0.28, { rx: -95 }], [0.45, 0]],
+          foreR: [[0, 0], [0.12, { rx: -100 }], [0.15, { rx: 0 }], [0.28, { rx: 0 }], [0.45, 0]],
+          torso: [[0, 0], [0.12, { ry: 25 }], [0.15, { ry: -35 }], [0.28, { ry: -35 }], [0.45, 0]]
+        } },
+      kick: { dur: 0.55, loop: false,
+        combat: { phases: { active: 0.16, recovery: 0.26 },
+                  hitbox: { forward: 1.6, height: 1.0, r: 1.1, damage: 8, filter: "enemy", level: "mid", pushback: 5 } },
+        tracks: {
+          legR:  [[0, 0], [0.16, { rx: 40 }], [0.20, { rx: -100 }], [0.34, { rx: -100 }], [0.55, 0]],
+          shinR: [[0, 0], [0.16, { rx: 100 }], [0.20, { rx: -5 }], [0.34, { rx: -5 }], [0.55, 0]],
+          torso: [[0, 0], [0.20, { rx: 14, ry: 12 }], [0.55, 0]],
+          armL:  [[0, 0], [0.20, { rx: -55 }], [0.55, 0]]
+        } }
+    }
+  }
+};
+const inject = [
+  "",
+  "// ---- injected fight showcase ----",
+  "try {",
+  "  loadScene(" + JSON.stringify(JSON.stringify(scene)) + ");",
+  "  var __bar = document.createElement(" + q + "div" + q + ");",
+  "  __bar.style.cssText = " + q + "position:fixed;bottom:8px;left:8px;z-index:9999;font-family:monospace" + q + ";",
+  "  var __status = document.createElement(" + q + "div" + q + ");",
+  "  __status.style.cssText = " + q + "color:#0f0;background:#000;padding:4px;margin-bottom:4px" + q + ";",
+  "  __status.textContent = " + q + "ready" + q + ";",
+  "  __bar.appendChild(__status);",
+  "  setInterval(function () {",
+  "    var d = nodes[" + q + "dummy" + q + "], h = nodes[" + q + "hero" + q + "];",
+  "    if (d && h) __status.textContent = " + q + "dummy hp=" + q + " + (d.hp != null ? d.hp : " + q + "?" + q + ") +",
+  "      (d._rag ? " + q + " RAGDOLLED" + q + " : " + q + "" + q + ") + " + q + "  phase=" + q + " + (h._combatPhase || " + q + "-" + q + ");",
+  "  }, 100);",
+  "  [" + q + "punch" + q + "," + q + "kick" + q + "].forEach(function (mv) {",
+  "    var b = document.createElement(" + q + "button" + q + ");",
+  "    b.textContent = mv;",
+  "    b.style.cssText = " + q + "margin-right:4px;padding:10px 16px;font-size:15px" + q + ";",
+  "    b.onclick = function () { playPose(nodes[" + q + "hero" + q + "], mv); };",
+  "    __bar.appendChild(b);",
+  "  });",
+  "  document.body.appendChild(__bar);",
+  "} catch (e) {",
+  "  var __err = document.createElement(" + q + "div" + q + ");",
+  "  __err.style.cssText = " + q + "position:fixed;top:8px;left:8px;color:#f00;background:#000;padding:6px;z-index:9999" + q + ";",
+  "  __err.textContent = " + q + "INJECT ERROR: " + q + " + e.message;",
+  "  document.body.appendChild(__err);",
+  "}",
+  ""
+].join("\n");
+const marker = "</script>";
+const idx = engine.lastIndexOf(marker);
+if (idx < 0) { console.error("ABORT: no </scr" + "ipt>"); process.exit(1); }
+fs.writeFileSync("showcase_fight.html", engine.slice(0, idx) + inject + engine.slice(idx));
+console.log("OK showcase_fight.html — punch x6 or kick x4 should ragdoll the dummy");

@@ -980,6 +980,24 @@ function updateActor(n, dt) {
   }
   t.pos = t.pos || [0, 0, 0];
   t.rot = t.rot || [0, 0, 0];
+  if (n.headLook && n._geo && n._geo.rigged) {
+    var lkT = n.headLook.target === "player" ? nodes[playerId] : nodes[n.headLook.target];
+    var lkDes = 0, lkDesP = 0;
+    if (lkT && lkT.transform && lkT !== n) {
+      var ldx = lkT.transform.pos[0] - t.pos[0], ldz = lkT.transform.pos[2] - t.pos[2];
+      var lrel = Math.atan2(ldx, ldz) / DEG - (t.rot[1] || 0);
+      while (lrel > 180) lrel -= 360; while (lrel < -180) lrel += 360;
+      var lmy = n.headLook.maxYaw != null ? n.headLook.maxYaw : 70;
+      lkDes = Math.max(-lmy, Math.min(lmy, lrel));
+      var ldy = (lkT.transform.pos[1] + 1.5) - (t.pos[1] + 1.6);
+      var ldist = Math.sqrt(ldx * ldx + ldz * ldz) || 1;
+      var lmp = n.headLook.maxPitch != null ? n.headLook.maxPitch : 25;
+      lkDesP = Math.max(-lmp, Math.min(lmp, Math.atan2(-ldy, ldist) / DEG));
+    }
+    var lsp = Math.min(1, dt * (n.headLook.speed || 6));
+    n._lookYaw = (n._lookYaw || 0) + (lkDes - (n._lookYaw || 0)) * lsp;
+    n._lookPitch = (n._lookPitch || 0) + (lkDesP - (n._lookPitch || 0)) * lsp;
+  }
   var ctl = n.controller;
 
   if (ctl && ctl.type === "thirdPerson") {
@@ -1001,7 +1019,13 @@ function updateActor(n, dt) {
       }
       t.rot[1] = Math.atan2(dx, dz) / DEG;
     }
-    t.pos[1] = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
+    var gy = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
+    n._vy = (n._vy || 0);
+    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) n._vy = ctl.jumpVelocity || 7;
+    n._vy -= (ctl.gravity || 18) * dt;
+    n._airY = Math.max(0, (n._airY || 0) + n._vy * dt);
+    if (n._airY === 0 && n._vy < 0) n._vy = 0;
+    t.pos[1] = gy + n._airY;
   }
 
   if (ctl && ctl.type === "railPath") {
@@ -2947,10 +2971,42 @@ function updatePoseClips(dt) {
     if (!n._pose) { if (!n._addPose) POSED.splice(i, 1); continue; }
     var def = poseDef(n._pose.id);
     if (!def) { n._pose = null; continue; }
+    if (n._hitstop && n._hitstop > 0) { n._hitstop -= dt; if (n._hitstop > 0) continue; n._hitstop = 0; }
     var prevT = n._pose.t;
     n._pose.t += dt;
     var dur = def.dur || 1;
     if (def.tracks && def.tracks.root && n.transform) applyRootMotion(n, def, prevT, n._pose.t);
+    if (def.combat && n._pose && n.transform) {
+      var cbt = def.combat, cph = cbt.phases || {};
+      var ct = n._pose.t, cdur = def.dur || 1;
+      n._combatPhase = ct < (cph.active || 0) ? "startup" :
+                       (ct < (cph.recovery || cdur) ? "active" : "recovery");
+      if (n._combatPhase === "active" && !n._pose.fired.__hit) {
+        var hb = cbt.hitbox || {};
+        var hya = (n.transform.rot[1] || 0) * DEG;
+        var hbx = n.transform.pos[0] + Math.sin(hya) * (hb.forward != null ? hb.forward : 1.2);
+        var hbz = n.transform.pos[2] + Math.cos(hya) * (hb.forward != null ? hb.forward : 1.2);
+        var hby = n.transform.pos[1] + (hb.height != null ? hb.height : 1.2);
+        var hbr = hb.r != null ? hb.r : 0.9;
+        for (var hti = 0; hti < actors.length; hti++) {
+          var htg = actors[hti];
+          if (htg === n || htg._dead || htg._ragStop || !htg.transform) continue;
+          if (hb.filter && !tagMatch(htg, hb.filter)) continue;
+          var hdx = htg.transform.pos[0] - hbx;
+          var hdz = htg.transform.pos[2] - hbz;
+          var hdy = (htg.transform.pos[1] + 1.0) - hby;
+          if (hdx * hdx + hdy * hdy + hdz * hdz > hbr * hbr) continue;
+          n._pose.fired.__hit = 1;
+          if (htg.stats) htg.hp = Math.max(0, (htg.hp || 0) - (hb.damage != null ? hb.damage : 5));
+          n._hitstop = 0.1; htg._hitstop = 0.1;
+          var hpb = hb.pushback != null ? hb.pushback : 3;
+          htg.transform.pos[0] += Math.sin(hya) * hpb * 0.1;
+          htg.transform.pos[2] += Math.cos(hya) * hpb * 0.1;
+          htg._lastHit = { by: n.id, level: hb.level || "mid", t: world.time };
+          break;
+        }
+      }
+    }
     // events fire once per playthrough, at their normalised time
     var evs = def.events || [];
     for (var e = 0; e < evs.length; e++) {
@@ -3129,6 +3185,13 @@ function startRagdoll(n, impulse) {
     b.restDir = { x: dx, y: dy, z: dz };
     b.linkParent = pn;
   }
+  rag.age = 0;
+  rag.hinges = [];
+  var HJ = [["torso","armL","foreL"],["torso","armR","foreR"],["torso","legL","shinL"],["torso","legR","shinR"]];
+  for (i = 0; i < HJ.length; i++) {
+    if (rag.bones[HJ[i][0]] && rag.bones[HJ[i][1]] && rag.bones[HJ[i][2]])
+      rag.hinges.push({ inner: rag.bones[HJ[i][0]].body, mid: rag.bones[HJ[i][1]].body, outer: rag.bones[HJ[i][2]].body });
+  }
   n._rag = rag;
   RAGDOLLS.push(rag);
   // the actor stops acting: no controller, no AI, no clips
@@ -3163,6 +3226,33 @@ function solveRagdollLinks() {
 // Derives bone angles from where the simulation put each bone relative to
 // its parent. Approximate decomposition - a flopping corpse does not need
 // an exact solve, and the PS1 look forgives it.
+// Fold limit: elbows/knees cannot fold past ~120 degrees. Point-mass bones
+// have no orientation, so this is a relative-segment clamp: cheap, and it
+// stops limbs collapsing onto themselves.
+function solveRagdollHinges() {
+  for (var r = 0; r < RAGDOLLS.length; r++) {
+    var rag = RAGDOLLS[r];
+    if (rag.settled || !rag.hinges || (rag.age || 0) > 2.5) continue;
+    for (var i = 0; i < rag.hinges.length; i++) {
+      var hg = rag.hinges[i];
+      var ip = hg.inner.node.transform.pos, mp = hg.mid.node.transform.pos, op = hg.outer.node.transform.pos;
+      var v1x = mp[0] - ip[0], v1y = mp[1] - ip[1], v1z = mp[2] - ip[2];
+      var v2x = op[0] - mp[0], v2y = op[1] - mp[1], v2z = op[2] - mp[2];
+      var l1 = Math.sqrt(v1x * v1x + v1y * v1y + v1z * v1z) || 1;
+      var l2 = Math.sqrt(v2x * v2x + v2y * v2y + v2z * v2z) || 1;
+      var fdot = (v1x * v2x + v1y * v2y + v1z * v2z) / (l1 * l2);
+      if (fdot < -0.5) {
+        var hcx = (mp[0] + v1x / l1 * l2 - op[0]) * 0.3;
+        var hcy = (mp[1] + v1y / l1 * l2 - op[1]) * 0.3;
+        var hcz = (mp[2] + v1z / l1 * l2 - op[2]) * 0.3;
+        var hcl = Math.sqrt(hcx * hcx + hcy * hcy + hcz * hcz);
+        if (hcl > 0.02) { hcx *= 0.02 / hcl; hcy *= 0.02 / hcl; hcz *= 0.02 / hcl; }
+        op[0] += hcx; op[1] += hcy; op[2] += hcz;
+      }
+    }
+  }
+}
+
 function ragdollPose(n) {
   var rag = n._rag;
   if (!rag) return null;
@@ -3198,6 +3288,7 @@ function updateRagdolls() {
   // stop solving its links -- the hub bone (torso) can never sleep otherwise
   for (var sr = 0; sr < RAGDOLLS.length; sr++) {
     var rg = RAGDOLLS[sr];
+    rg.age = (rg.age || 0) + 1 / 60;
     if (rg.settled) {
       var woke = false, wk;
       for (wk in rg.bones) if (!rg.bones[wk].body.asleep) { woke = true; break; }
@@ -3221,7 +3312,7 @@ function updateRagdolls() {
       rg.snap = {};
       for (dk in rg.bones) { sp = rg.bones[dk].body.node.transform.pos; rg.snap[dk] = [sp[0], sp[1], sp[2]]; }
     }
-    if (rg.still) {
+    if (rg.still || (rg.age || 0) > 4) {
       var sk;
       for (sk in rg.bones) {
         var sb = rg.bones[sk].body;
@@ -3232,6 +3323,7 @@ function updateRagdolls() {
     }
   }
   solveRagdollLinks();
+  solveRagdollHinges();
   // the body node follows its torso bone so the mesh travels with the corpse
   for (var r = 0; r < RAGDOLLS.length; r++) {
     var rag = RAGDOLLS[r];
@@ -3246,6 +3338,17 @@ function updateRagdolls() {
 }
 
 function blendedPose(n) {
+  var p = blendedPoseCore(n);
+  if (n._rag || (!n._lookYaw && !n._lookPitch)) return p;
+  var out = {}, k;
+  if (p) for (k in p) out[k] = p[k];
+  var lh = poseAngles(out.head) || { rx: 0, ry: 0, rz: 0 };
+  out.head = { rx: lh.rx + (n._lookPitch || 0), ry: lh.ry + (n._lookYaw || 0) * 0.7, rz: lh.rz };
+  var lt = poseAngles(out.torso) || { rx: 0, ry: 0, rz: 0 };
+  out.torso = { rx: lt.rx, ry: lt.ry + (n._lookYaw || 0) * 0.3, rz: lt.rz };
+  return out;
+}
+function blendedPoseCore(n) {
   // A ragdolled actor is driven by the solver: no gait, clips or blending.
   if (n._rag) return ragdollPose(n);
   // Layer 0: blend tree if declared, otherwise the procedural gait.
@@ -3298,11 +3401,11 @@ function gaitPose(n) {
   var arm = (gait.armSwing !== undefined ? gait.armSwing : 22) * amt;
   var sA = Math.sin(ph), sB = Math.sin(ph + Math.PI);
   var GAIT_KNEE = (gait.knee !== undefined ? gait.knee : 48) * amt;
-  var GAIT_ELBOW = (gait.elbow !== undefined ? gait.elbow : 14) * amt;
+  var GAIT_ELBOW = (gait.elbow !== undefined ? gait.elbow : 24) * amt;
   return {
     legL: sA * swing, legR: sB * swing,
     shinL: Math.max(0, sA) * GAIT_KNEE, shinR: Math.max(0, sB) * GAIT_KNEE,
-    foreL: -Math.abs(sB) * GAIT_ELBOW, foreR: -Math.abs(sA) * GAIT_ELBOW,
+    foreL: -(0.25 + 0.75 * Math.max(0, sB)) * GAIT_ELBOW, foreR: -(0.25 + 0.75 * Math.max(0, sA)) * GAIT_ELBOW,
     armL: sB * arm,  armR: sA * arm,
     torso: Math.abs(Math.sin(ph * 2)) * 2 * amt
   };
