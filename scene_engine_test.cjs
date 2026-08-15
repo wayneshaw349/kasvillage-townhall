@@ -784,5 +784,97 @@ section("ragdoll: manual trigger with impulse, actor stops acting");
 })();
 
 // ---------------------------------------------------------------------------
+// 11. BAKED LIGHTING v10
+// ---------------------------------------------------------------------------
+section("lighting: bake produces per-vertex irradiance");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "lit", title: "lit", seed: "L1" },
+    render: BASE_RENDER,
+    lighting: {
+      ambient: "#202830", ambientIntensity: 0.3,
+      ao: { samples: 8, radius: 2.5, strength: 0.8 },
+      shadows: true,
+      lights: [
+        { type: "directional", dir: [0, -1, 0], color: "#ffffff", intensity: 1.0 },
+        { type: "point", pos: [6, 2, 0], color: "#ff0000", intensity: 2.0, range: 10 }
+      ]
+    },
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "body", tags: ["player"], transform: { pos: [0, 0, 20] } },
+      { id: "floor", type: "MeshInstance", mesh: "ground", transform: { pos: [0, 0, 0] } },
+      { id: "lit_wall", type: "MeshInstance", mesh: "cube", transform: { pos: [6, 0, 0] } },
+      { id: "dark_wall", type: "MeshInstance", mesh: "cube", transform: { pos: [-20, 0, 0] } }
+    ],
+    resources: {
+      meshes: {
+        ground: { type: "plane", size: [40, 40], subdiv: 2 },
+        cube: { type: "box", size: [1, 1, 1] },
+        body: { type: "silhouette", generator: "humanoid" }
+      },
+      materials: {}
+    }
+  });
+
+  ok("bake ran on load", G("BAKE.done") === true);
+  ok("occluders collected", G("BAKE.occluders.length") > 0, "n=" + G("BAKE.occluders.length"));
+
+  const floorBake = call("nodes['floor']._bake");
+  ok("floor has per-vertex bake data", floorBake != null && floorBake.length > 0,
+     floorBake ? "verts=" + floorBake.length : "null");
+
+  const litSum = call(
+    "(function(){var b=nodes['lit_wall']._bake;var s=0;" +
+    "for(var i=0;i<b.length;i++)s+=b[i].r+b[i].g+b[i].b;return s/b.length;})()");
+  ok("lit geometry receives energy", litSum > 0.1, "avg=" + litSum.toFixed(3));
+
+  const redness = call(
+    "(function(){var b=nodes['lit_wall']._bake;var r=0,bl=0;" +
+    "for(var i=0;i<b.length;i++){r+=b[i].r;bl+=b[i].b;}return r/(bl||1e-6);})()");
+  ok("nearby red lamp tints the surface", redness > 1.2, "r/b=" + redness.toFixed(2));
+
+  const farSum = call(
+    "(function(){var b=nodes['dark_wall']._bake;var s=0;" +
+    "for(var i=0;i<b.length;i++)s+=b[i].r+b[i].g+b[i].b;return s/b.length;})()");
+  ok("geometry outside lamp range is dimmer", farSum < litSum, "far=" + farSum.toFixed(3) + " lit=" + litSum.toFixed(3));
+
+  ok("actors are not baked by default", call("nodes['hero']._bake") == null);
+})();
+
+section("lighting: determinism, AO, and opt-out");
+(function () {
+  const first = call(
+    "(function(){var b=nodes['lit_wall']._bake;return b.map(function(v){return v.r.toFixed(4);}).join(',');})()");
+  call("Object.keys(nodes).forEach(function(id){ nodes[id]._bake = null; });");
+  call("bakeLighting();");
+  const second = call(
+    "(function(){var b=nodes['lit_wall']._bake;return b.map(function(v){return v.r.toFixed(4);}).join(',');})()");
+  ok("bake is deterministic for a given seed", first === second);
+
+  const aoOpen = call("bakeAO(0, 8, 0, 0, 1, 0, { samples: 8, radius: 2.5, strength: 0.8 }, null, srandFor('t'))");
+  ok("open sky is unoccluded", aoOpen > 0.9, "ao=" + aoOpen.toFixed(3));
+
+  // a point wedged among occluders should darken
+  const aoClosed = call(
+    "(function(){BAKE.occluders=[{x:0,y:0.5,z:0,r:1.5,id:'a'},{x:1,y:0.5,z:0,r:1.5,id:'b'}," +
+    "{x:-1,y:0.5,z:0,r:1.5,id:'c'},{x:0,y:0.5,z:1,r:1.5,id:'d'},{x:0,y:0.5,z:-1,r:1.5,id:'e'}];" +
+    "return bakeAO(0,0.2,0,0,1,0,{samples:16,radius:3,strength:0.8},null,srandFor('t2'));})()");
+  ok("enclosed point is occluded", aoClosed < aoOpen, "closed=" + aoClosed.toFixed(3) + " open=" + aoOpen.toFixed(3));
+
+  // no lighting block: nothing baked, old path intact
+  load({
+    kind: "kv_game_v1", engine: "scene", meta: { id: "unlit", title: "u", seed: "U1" },
+    render: BASE_RENDER,
+    nodes: [
+      { id: "hero", type: "Actor", mesh: "cube", tags: ["player"], transform: { pos: [0, 0, 0] } },
+      { id: "block", type: "MeshInstance", mesh: "cube", transform: { pos: [3, 0, 0] } }
+    ],
+    resources: { meshes: { cube: { type: "box", size: [1, 1, 1] } }, materials: {} }
+  });
+  ok("scenes without a lighting block are not baked", call("nodes['block']._bake") == null);
+  ok("bake state cleared between scenes", G("BAKE.done") === false);
+})();
+
+// ---------------------------------------------------------------------------
 console.log("\n" + (fail === 0 ? "ALL GREEN" : "FAILURES") + "  pass=" + pass + " fail=" + fail);
 process.exit(fail === 0 ? 0 : 1);
