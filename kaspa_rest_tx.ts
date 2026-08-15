@@ -47,6 +47,12 @@ const MASS_PER_SCRIPT_PUB_KEY_BYTE = 10n;
 const MASS_PER_SIG_OP = 1000n;
 const MAXIMUM_STANDARD_TX_MASS = 100_000n;
 const MINIMUM_RELAY_TX_FEE = 1000n; // sompi per 1000 grams
+// Toccata (activated 2026-06-30, live on TN10): minimum standard fee is
+// 100 sompi * max(compute grams, 2 * tx bytes). Mempool policy, enforced on
+// RPC submission and (post-activation) P2P relay. MINIMUM_RELAY_TX_FEE above
+// stays at the pre-fork value because the dust rule derives from it and
+// Toccata does not change dust policy.
+const MIN_STANDARD_FEE_RATE = 100n; // sompi per gram
 const HASH_SIZE = 32;
 const SUBNETWORK_ID_SIZE = 20;
 
@@ -241,10 +247,11 @@ async function fetchFeeEstimate(network: KaspaNetwork): Promise<bigint> {
       const data = await resp.json();
       // Returns priority buckets — use normal priority
       const normalFee = data?.normalBuckets?.[0]?.feerate || data?.priorityBucket?.feerate || 1;
-      return BigInt(Math.ceil(normalFee));
+      const est = BigInt(Math.ceil(normalFee));
+      return est > MIN_STANDARD_FEE_RATE ? est : MIN_STANDARD_FEE_RATE;
     }
   } catch {}
-  return 1n; // Default: 1 sompi/gram
+  return MIN_STANDARD_FEE_RATE; // offline fallback: Toccata floor, never 1 sompi/gram
 }
 
 // ============================================================================
@@ -495,9 +502,14 @@ export async function sendKaspaViaRest(params: {
         return { success: false, error: `Transaction too large: mass ${totalMass} exceeds limit ${MAXIMUM_STANDARD_TX_MASS}` };
       }
       
-      // Calculate fee from mass
-      const feeRate = await fetchFeeEstimate(network);
-      const newFee = calculateMinFee(totalMass) * (feeRate > 1n ? feeRate : 1n);
+      // Calculate fee from mass. Toccata fee basis: the transient-mass term
+      // (2 * tx bytes) can exceed both compute and storage mass for
+      // payload-carrying transactions, so it joins the max.
+      const feeTxBytes = estimateTxSize(selectedUtxos.length, outputScripts.map(s => s.length), sigScriptLen, payloadBytes.length);
+      const transientMass = 2n * feeTxBytes;
+      const feeMass = totalMass > transientMass ? totalMass : transientMass;
+      const feeRate = await fetchFeeEstimate(network); // already floored at MIN_STANDARD_FEE_RATE
+      const newFee = feeMass * feeRate;
       
       if (newFee <= fee) break; // Fee is sufficient
       fee = newFee; // Recalculate with higher fee
