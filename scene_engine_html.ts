@@ -416,6 +416,26 @@ function buildMesh(name, spec) {
       else partBox("horn", 0, 2.2 * sc, 0.1 * sc, 0.12, 0.35, 0.12);
     }
     if (g.parts["horn"]) g.parts["horn"].parent = "head";
+    // vertex joint weights: distance from the part pivot -> blend toward parent
+    (function () {
+      g.vw = {};
+      var span = 0.34 * sc;
+      for (var fi = 0; fi < g.faces.length; fi++) {
+        var fc = g.faces[fi];
+        if (!fc.part) continue;
+        var pt = g.parts[fc.part];
+        if (!pt || !pt.parent) continue;
+        for (var vi = 0; vi < 3; vi++) {
+          var idx2 = fc.i[vi];
+          if (g.vw[idx2] != null) continue;
+          var vv = g.verts[idx2];
+          var ddx = vv.x - pt.pivot.x, ddy = vv.y - pt.pivot.y, ddz = vv.z - pt.pivot.z;
+          var dd2 = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+          var w2 = 1 - Math.min(1, dd2 / span);
+          g.vw[idx2] = w2 * w2 * 0.5;
+        }
+      }
+    })();
     g.rigged = true;
     } else {
     g = buildMesh("_fallback", { type: "box", size: [1, 1, 1] });
@@ -2761,6 +2781,7 @@ function collectNode(n, parentM) {
     for (var f = 0; f < g.faces.length; f++) {
       var face = g.faces[f];
       var pv0 = g.verts[face.i[0]], pv1 = g.verts[face.i[1]], pv2 = g.verts[face.i[2]];
+      if (g.vw && pv0.__vi == null) { pv0.__vi = face.i[0]; pv1.__vi = face.i[1]; pv2.__vi = face.i[2]; }
       if (pose && face.part && g.parts[face.part]) {
         pv0 = deformVert(pv0, g, face.part, pose);
         pv1 = deformVert(pv1, g, face.part, pose);
@@ -3016,6 +3037,23 @@ function rotAboutAxes(p, pivot, a) {
 // Walks a bone up its parent chain, applying each ancestor's rotation about
 // that ancestor's pivot. Depth is capped so malformed data cannot loop.
 function deformVert(p, g, partName, pose) {
+  var vwt = 0;
+  if (g.vw && p.__vi != null) vwt = g.vw[p.__vi] || 0;
+  if (vwt > 0.02) {
+    var jb = (scene.render && scene.render.jointBlend != null) ? scene.render.jointBlend : 1;
+    vwt *= jb;
+    if (vwt > 0.02) {
+      var par = g.parts[partName] && g.parts[partName].parent;
+      var full = deformChain(p, g, partName, pose);
+      var soft = par ? deformChain(p, g, par, pose) : p;
+      return v3(full.x + (soft.x - full.x) * vwt,
+                full.y + (soft.y - full.y) * vwt,
+                full.z + (soft.z - full.z) * vwt);
+    }
+  }
+  return deformChain(p, g, partName, pose);
+}
+function deformChain(p, g, partName, pose) {
   var name = partName, depth = 0, out = p;
   while (name && depth < 8) {
     var part = g.parts[name];

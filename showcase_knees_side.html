@@ -197,12 +197,60 @@ function quad(g, a, b, c, d) {
   g.faces.push({ i: [base, base + 1, base + 2], uv: [[0,0],[1,0],[1,1]] });
   g.faces.push({ i: [base, base + 2, base + 3], uv: [[0,0],[1,1],[0,1]] });
 }
+var MESH_PRESETS = {
+  cone:   { type: "lathe", profile: [[0.5, 0], [0.01, 1]], segments: 8 },
+  bush:   { type: "lathe", profile: [[0.3, 0], [0.55, 0.3], [0.45, 0.6], [0.05, 0.85]], segments: 7 },
+  barrel: { type: "lathe", profile: [[0.28, 0], [0.36, 0.25], [0.38, 0.5], [0.36, 0.75], [0.28, 1.0]], segments: 8 },
+  crate:  { type: "box", size: [1, 1, 1], originBottom: true },
+  rock:   { type: "lathe", profile: [[0.55, 0], [0.75, 0.28], [0.6, 0.62], [0.22, 0.95], [0.01, 1.05]], segments: 5 },
+  pillar: { type: "compound", parts: [
+    { type: "cylinder", radius: 0.3, height: 3, segments: 7 },
+    { type: "box", size: [0.9, 0.2, 0.9], at: [0, 3.05, 0] },
+    { type: "box", size: [0.9, 0.2, 0.9], at: [0, 0.05, 0] } ] },
+  tree:   { type: "compound", parts: [
+    { type: "cylinder", radius: 0.16, height: 1.5, segments: 6 },
+    { type: "lathe", profile: [[0.95, 0], [0.55, 0.9], [0.05, 1.7]], segments: 7, at: [0, 1.2, 0] },
+    { type: "lathe", profile: [[0.6, 0], [0.05, 1.1]], segments: 7, at: [0, 2.2, 0] } ] },
+  torch:  { type: "compound", parts: [
+    { type: "cylinder", radius: 0.05, height: 1.3, segments: 5 },
+    { type: "lathe", profile: [[0.12, 0], [0.16, 0.15], [0.02, 0.4]], segments: 5, at: [0, 1.3, 0] } ] },
+  fence:  { type: "compound", parts: [
+    { type: "box", size: [0.12, 1.1, 0.12], originBottom: true, at: [-1, 0, 0] },
+    { type: "box", size: [0.12, 1.1, 0.12], originBottom: true, at: [0, 0, 0] },
+    { type: "box", size: [0.12, 1.1, 0.12], originBottom: true, at: [1, 0, 0] },
+    { type: "box", size: [2.2, 0.1, 0.08], at: [0, 0.85, 0] },
+    { type: "box", size: [2.2, 0.1, 0.08], at: [0, 0.45, 0] } ] },
+  house:  { type: "compound", parts: [
+    { type: "box", size: [2.6, 1.7, 2.2], originBottom: true },
+    { type: "extrude", polygon: [[-1.45, -1.25], [1.45, -1.25], [1.45, 1.25], [-1.45, 1.25]],
+      height: 0.01, cap: "pyramid", capHeight: 1.0, at: [0, 1.7, 0] },
+    { type: "box", size: [0.6, 1.0, 0.08], originBottom: true, at: [0, 0, 1.12] } ] }
+};
+function mergePreset(p, s) {
+  var o = {}, k;
+  for (k in p) o[k] = p[k];
+  for (k in s) if (k !== "type") o[k] = s[k];
+  return o;
+}
 function buildMesh(name, spec) {
   if (meshCache[name]) return meshCache[name];
   var g = { verts: [], faces: [] }, i, j;
   var t = spec.type;
+  if (MESH_PRESETS[t]) { spec = mergePreset(MESH_PRESETS[t], spec); t = spec.type; }
 
-  if (t === "plane") {
+  if (t === "compound") {
+    var prts = spec.parts || [];
+    for (i = 0; i < prts.length; i++) {
+      var sub = buildMesh(name + "::" + i, prts[i]);
+      delete meshCache[name + "::" + i];
+      var off = prts[i].at || [0, 0, 0], vbase = g.verts.length;
+      for (j = 0; j < sub.verts.length; j++)
+        g.verts.push(v3(sub.verts[j].x + off[0], sub.verts[j].y + off[1], sub.verts[j].z + off[2]));
+      for (j = 0; j < sub.faces.length; j++)
+        g.faces.push({ i: [sub.faces[j].i[0] + vbase, sub.faces[j].i[1] + vbase, sub.faces[j].i[2] + vbase],
+                       uv: sub.faces[j].uv });
+    }
+  } else if (t === "plane") {
     var sz = spec.size || [20, 20], sub = spec.subdiv || 4;
     var hn = spec.heightNoise, nz = hn ? noise2(srandFor("mesh:" + name)) : null;
     var stepX = sz[0] / sub, stepZ = sz[1] / sub;
@@ -320,7 +368,7 @@ function buildMesh(name, spec) {
     if (round) partLathe("torso", 0, 1.0 * sc, 0, [[0.26,0],[0.34,0.25],[0.30,0.55],[0.18,0.62]]);
     else partBox("torso", 0, 1.28 * sc, 0, 0.62, 0.6, 0.4);
     // head: small lathe sphere-ish
-    if (round) partLathe("head", 0, 1.68 * sc, 0, [[0.01,0],[0.15,0.06],[0.17,0.2],[0.13,0.34],[0.01,0.4]]);
+    if (round && spec.headShape !== "block") partLathe("head", 0, 1.68 * sc, 0, [[0.01,0],[0.15,0.06],[0.17,0.2],[0.13,0.34],[0.01,0.4]]);
     else partBox("head", 0, 1.9 * sc, 0, 0.4, 0.4, 0.4);
     // limbs: tapered cylinders, pivot recorded at the joint
     function makeLimb(name, lower, px, py, thick, len) {
@@ -332,10 +380,25 @@ function buildMesh(name, spec) {
       else partBox(lower, px, py - half - half/2*sc, 0, thick*2.0, half, thick*2.0);
       g.parts[lower] = { pivot: v3(px, py - half, 0), parent: name };
     }
-    makeLimb("armL", "foreL", -0.40 * sc, 1.52 * sc, 0.09, 0.72 * sc);
-    makeLimb("armR", "foreR",  0.40 * sc, 1.52 * sc, 0.09, 0.72 * sc);
-    makeLimb("legL", "shinL", -0.16 * sc, 1.00 * sc, 0.11, 1.00 * sc);
-    makeLimb("legR", "shinR",  0.16 * sc, 1.00 * sc, 0.11, 1.00 * sc);
+    var BK = spec.bulk || 1, LL = spec.limbLen || 1;
+    makeLimb("armL", "foreL", -0.40 * sc, 1.52 * sc, 0.09 * BK, 0.72 * sc * LL);
+    makeLimb("armR", "foreR",  0.40 * sc, 1.52 * sc, 0.09 * BK, 0.72 * sc * LL);
+    makeLimb("legL", "shinL", -0.16 * sc, 1.00 * sc, 0.11 * BK, 1.00 * sc * LL);
+    makeLimb("legR", "shinR",  0.16 * sc, 1.00 * sc, 0.11 * BK, 1.00 * sc * LL);
+    if (spec.held) {
+      var whx = 0.40 * sc, why = 0.80 * sc * LL;
+      var wt = spec.held.type || "club";
+      if (wt === "sword") {
+        partBox("weapon", whx, why + 0.55 * sc, 0, 0.07, 1.1 * sc, 0.03);
+      } else if (wt === "staff") {
+        partBox("weapon", whx, why + 0.3 * sc, 0, 0.06, 2.0 * sc, 0.06);
+      } else {
+        if (round) partLathe("weapon", whx, why, 0, [[0.04, 0], [0.06, 0.35], [0.1, 0.6], [0.11, 0.75], [0.01, 0.85]]);
+        else partBox("weapon", whx, why + 0.4 * sc, 0, 0.16, 0.8 * sc, 0.16);
+      }
+      g.parts["weapon"] = { pivot: v3(whx, why, 0), parent: "foreR" };
+    }
+
     g.parts["torso"] = { pivot: v3(0, 1.0 * sc, 0) };
     g.parts["head"] = { pivot: v3(0, 1.68 * sc, 0) };
     // Bone hierarchy (Godot Skeleton3D shape): rotating torso carries the
@@ -348,9 +411,39 @@ function buildMesh(name, spec) {
       else partBox("horn", 0, 2.2 * sc, 0.1 * sc, 0.12, 0.35, 0.12);
     }
     if (g.parts["horn"]) g.parts["horn"].parent = "head";
+    // vertex joint weights: distance from the part pivot -> blend toward parent
+    (function () {
+      g.vw = {};
+      var span = 0.34 * sc;
+      for (var fi = 0; fi < g.faces.length; fi++) {
+        var fc = g.faces[fi];
+        if (!fc.part) continue;
+        var pt = g.parts[fc.part];
+        if (!pt || !pt.parent) continue;
+        for (var vi = 0; vi < 3; vi++) {
+          var idx2 = fc.i[vi];
+          if (g.vw[idx2] != null) continue;
+          var vv = g.verts[idx2];
+          var ddx = vv.x - pt.pivot.x, ddy = vv.y - pt.pivot.y, ddz = vv.z - pt.pivot.z;
+          var dd2 = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+          var w2 = 1 - Math.min(1, dd2 / span);
+          g.vw[idx2] = w2 * w2 * 0.5;
+        }
+      }
+    })();
     g.rigged = true;
     } else {
     g = buildMesh("_fallback", { type: "box", size: [1, 1, 1] });
+  }
+  if (spec.meshScale) {
+    for (i = 0; i < g.verts.length; i++) {
+      g.verts[i].x *= spec.meshScale; g.verts[i].y *= spec.meshScale; g.verts[i].z *= spec.meshScale;
+    }
+    if (g.parts) for (var pk in g.parts) {
+      g.parts[pk].pivot = v3(g.parts[pk].pivot.x * spec.meshScale,
+                             g.parts[pk].pivot.y * spec.meshScale,
+                             g.parts[pk].pivot.z * spec.meshScale);
+    }
   }
   meshCache[name] = g;
   return g;
@@ -965,6 +1058,7 @@ var camYaw = 0, camPitch = -10;
 
 function updateActor(n, dt) {
   if (n._ragStop) return; // ragdolled: the solver owns this actor
+  if (n.room && n.room !== scene._room) return;
   var t = n.transform = n.transform || {};
   // gait phase: driven by how far the actor actually moved this frame, so the
   // stride matches ground speed and stops instantly when the actor stops.
@@ -975,11 +1069,33 @@ function updateActor(n, dt) {
     n._gaitPhase = (n._gaitPhase || 0) + moved * (gait.stride ? (Math.PI / gait.stride) : 3.4);
     n._gaitAmt = Math.min(1, (n._gaitAmt || 0) + (moved > 0.001 ? dt * 8 : -dt * 6));
     if (n._gaitAmt < 0) n._gaitAmt = 0;
+    var stepN = Math.floor((n._gaitPhase || 0) / Math.PI);
+    if (n._stepN !== undefined && stepN !== n._stepN && (n._gaitAmt || 0) > 0.5)
+      playSound((gait.stepSound) || "__step", { x: t.pos[0], z: t.pos[2] });
+    n._stepN = stepN;
     n._moveSpeed = dt > 0 ? moved / dt : 0;
     n._lastPos = t.pos.slice();
   }
   t.pos = t.pos || [0, 0, 0];
   t.rot = t.rot || [0, 0, 0];
+  if (n.headLook && n._geo && n._geo.rigged) {
+    var lkT = n.headLook.target === "player" ? nodes[playerId] : nodes[n.headLook.target];
+    var lkDes = 0, lkDesP = 0;
+    if (lkT && lkT.transform && lkT !== n) {
+      var ldx = lkT.transform.pos[0] - t.pos[0], ldz = lkT.transform.pos[2] - t.pos[2];
+      var lrel = Math.atan2(ldx, ldz) / DEG - (t.rot[1] || 0);
+      while (lrel > 180) lrel -= 360; while (lrel < -180) lrel += 360;
+      var lmy = n.headLook.maxYaw != null ? n.headLook.maxYaw : 70;
+      lkDes = Math.max(-lmy, Math.min(lmy, lrel));
+      var ldy = (lkT.transform.pos[1] + 1.5) - (t.pos[1] + 1.6);
+      var ldist = Math.sqrt(ldx * ldx + ldz * ldz) || 1;
+      var lmp = n.headLook.maxPitch != null ? n.headLook.maxPitch : 25;
+      lkDesP = Math.max(-lmp, Math.min(lmp, Math.atan2(-ldy, ldist) / DEG));
+    }
+    var lsp = Math.min(1, dt * (n.headLook.speed || 6));
+    n._lookYaw = (n._lookYaw || 0) + (lkDes - (n._lookYaw || 0)) * lsp;
+    n._lookPitch = (n._lookPitch || 0) + (lkDesP - (n._lookPitch || 0)) * lsp;
+  }
   var ctl = n.controller;
 
   if (ctl && ctl.type === "thirdPerson") {
@@ -1001,7 +1117,14 @@ function updateActor(n, dt) {
       }
       t.rot[1] = Math.atan2(dx, dz) / DEG;
     }
-    t.pos[1] = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
+    var gy = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
+    n._vy = (n._vy || 0);
+    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) { n._vy = ctl.jumpVelocity || 7; n._addPose = { id: "__jump", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); playSound("__jump", { x: t.pos[0], z: t.pos[2] }); }
+    n._vy -= (ctl.gravity || 18) * dt;
+    n._airY = Math.max(0, (n._airY || 0) + n._vy * dt);
+    if (n._airY === 0 && n._vy < 0) { n._vy = 0; if (n._wasAir) { n._addPose = { id: "__land", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); playSound("__land", { x: t.pos[0], z: t.pos[2] }); } }
+    n._wasAir = n._airY > 0.01;
+    t.pos[1] = gy + n._airY;
   }
 
   if (ctl && ctl.type === "railPath") {
@@ -1330,7 +1453,16 @@ function updateAnims(dt) {
   }
 }
 
+function gotoRoom(id) { scene._room = id; if (scene.rooms && scene.rooms.defs && scene.rooms.defs[id]) setSoundscape(scene.rooms.defs[id].soundscape); }
 function runAction(self, a) {
+  if (a && a.action === "gotoRoom") { gotoRoom((a.args && a.args[0]) || a.target); return; }
+  if (a && a.action === "playSound") { playSound((a.args && a.args[0]) || a.target, self && self.worldPos); return; }
+  if (a && a.action === "explode") {
+    var xt = (a.target && nodes[a.target]) || self;
+    if (xt && xt.transform) explode(xt.transform.pos[0], xt.transform.pos[1], xt.transform.pos[2],
+      a.args && a.args[0], a.args && a.args[1], a.args && a.args[2]);
+    return;
+  }
   var target = a.target === "self" ? self : nodes[a.target];
   switch (a.action) {
     case "damage": if (target) { target.hp = Math.max(0, (target.hp || 0) - (a.amount || 0)); } break;
@@ -2616,6 +2748,7 @@ function updateTransforms(list, parentM) {
 
 function collectNode(n, parentM) {
   if (n._dead) return;
+  if (n.room && n.room !== scene._room) return;
   var m = n._world || matMul(parentM, nodeMatrix(n));
 
   if (n.type === "Billboard" && n.visible !== false) {
@@ -2634,10 +2767,16 @@ function collectNode(n, parentM) {
     var col = mat.color || "#9a9a9a";
     var g = n._geo;
     var pose = null;
+    var RN = scene.render || {};
+    var GOU = RN.gouraud && !n._bake;
+    var GCTR = GOU ? matApply(m, { x: 0, y: g.rigged ? 1.0 : 0.5, z: 0 }) : null;
+    var RIM = RN.rim && RN.rim.enabled && g.rigged;
+    var CFWD = RIM ? { x: viewM[8], y: viewM[9], z: viewM[10] } : null;
     if (g.rigged) pose = blendedPose(n);
     for (var f = 0; f < g.faces.length; f++) {
       var face = g.faces[f];
       var pv0 = g.verts[face.i[0]], pv1 = g.verts[face.i[1]], pv2 = g.verts[face.i[2]];
+      if (g.vw && pv0.__vi == null) { pv0.__vi = face.i[0]; pv1.__vi = face.i[1]; pv2.__vi = face.i[2]; }
       if (pose && face.part && g.parts[face.part]) {
         pv0 = deformVert(pv0, g, face.part, pose);
         pv1 = deformVert(pv1, g, face.part, pose);
@@ -2663,9 +2802,19 @@ function collectNode(n, parentM) {
         var irr = bakedFaceShade(n, face);
         if (irr) { bakedCol = bakedColor(col, irr); shade = 1; }
       }
+      var sh3 = null;
+      if (GOU && !bakedCol) {
+        var vn0 = vnorm(vsub(w0, GCTR)), vn1 = vnorm(vsub(w1, GCTR)), vn2 = vnorm(vsub(w2, GCTR));
+        sh3 = [0.45 + 0.55 * Math.max(0, vdot(vn0, LIGHT)),
+               0.45 + 0.55 * Math.max(0, vdot(vn1, LIGHT)),
+               0.45 + 0.55 * Math.max(0, vdot(vn2, LIGHT))];
+      }
+      var rimV = 0;
+      if (RIM) { var rd = Math.abs(vdot(nrm, CFWD)); rimV = (1 - rd) * (1 - rd); }
       drawList.push({
         p: [p0, p1, p2], uv: face.uv, tex: tex, col: bakedCol || col, shade: shade,
-        z: (p0.z + p1.z + p2.z) / 3, tiling: mat.tiling
+        z: (p0.z + p1.z + p2.z) / 3, tiling: mat.tiling,
+        sh3: sh3, rim: rimV, opac: mat.opacity != null ? mat.opacity : 1, layer: n.layer || 0
       });
     }
   }
@@ -2883,6 +3032,23 @@ function rotAboutAxes(p, pivot, a) {
 // Walks a bone up its parent chain, applying each ancestor's rotation about
 // that ancestor's pivot. Depth is capped so malformed data cannot loop.
 function deformVert(p, g, partName, pose) {
+  var vwt = 0;
+  if (g.vw && p.__vi != null) vwt = g.vw[p.__vi] || 0;
+  if (vwt > 0.02) {
+    var jb = (scene.render && scene.render.jointBlend != null) ? scene.render.jointBlend : 1;
+    vwt *= jb;
+    if (vwt > 0.02) {
+      var par = g.parts[partName] && g.parts[partName].parent;
+      var full = deformChain(p, g, partName, pose);
+      var soft = par ? deformChain(p, g, par, pose) : p;
+      return v3(full.x + (soft.x - full.x) * vwt,
+                full.y + (soft.y - full.y) * vwt,
+                full.z + (soft.z - full.z) * vwt);
+    }
+  }
+  return deformChain(p, g, partName, pose);
+}
+function deformChain(p, g, partName, pose) {
   var name = partName, depth = 0, out = p;
   while (name && depth < 8) {
     var part = g.parts[name];
@@ -2896,13 +3062,384 @@ function deformVert(p, g, partName, pose) {
 }
 
 // ---- pose clips ----------------------------------------------------------
-function poseDef(id) { return ((scene.resources || {}).poses || {})[id] || null; }
+// ---- AUDIO (procedural WebAudio; FMOD event model, PS1 synthesis) ----
+var AC = null, AMASTER = null, ASCAPE = null, AUDIO_ON = false;
+function audioInit() {
+  if (AC) return;
+  var Ctor = (typeof window !== "undefined") && (window.AudioContext || window.webkitAudioContext);
+  if (!Ctor) return;
+  AC = new Ctor();
+  var comp = AC.createDynamicsCompressor();
+  AMASTER = AC.createGain(); AMASTER.gain.value = 0.8;
+  AMASTER.connect(comp); comp.connect(AC.destination);
+  AUDIO_ON = true;
+}
+function audioUnlock() {
+  audioInit();
+  if (AC && AC.state === "suspended") AC.resume();
+  if (AUDIO_ON && typeof scene !== "undefined" && scene && scene.rooms && scene.rooms.defs && scene.rooms.defs[scene._room])
+    setSoundscape(scene.rooms.defs[scene._room].soundscape);
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("touchstart", audioUnlock);
+  document.addEventListener("mousedown", audioUnlock);
+  document.addEventListener("keydown", audioUnlock);
+}
+var BUILTIN_SOUNDS = {
+  __hit:   { layers: [
+    { type: "noise", filter: 1800, dur: 0.05, vol: 0.55, drive: 4 },
+    { type: "tone", wave: "square", freq: 260, sweep: -200, dur: 0.1, vol: 0.5, drive: 3 },
+    { type: "tone", wave: "sine", freq: 60, sweep: -25, dur: 0.16, vol: 0.7 }
+  ] },
+  __kick:  { layers: [
+    { type: "noise", filter: 1200, dur: 0.08, vol: 0.7, drive: 6 },
+    { type: "tone", wave: "square", freq: 180, sweep: -160, dur: 0.14, vol: 0.6, drive: 5 },
+    { type: "tone", wave: "sine", freq: 48, sweep: -20, dur: 0.24, vol: 0.9 }
+  ] },
+  __block: { type: "tone", wave: "square", freq: 90, sweep: -30, dur: 0.06, vol: 0.35 },
+  __step:  { type: "noise", filter: 600, dur: 0.05, vol: 0.16 },
+  __jump:  { type: "tone", wave: "sine", freq: 220, sweep: 170, dur: 0.12, vol: 0.3 },
+  __land:  { type: "noise", filter: 300, dur: 0.09, vol: 0.35 },
+  __thud:  { type: "tone", wave: "sine", freq: 70, sweep: -35, dur: 0.18, vol: 0.5 },
+  __boom:  { type: "noise", filter: 220, dur: 0.5, vol: 0.85 }
+};
+function soundDef(id) { return ((scene.resources || {}).sounds || {})[id] || BUILTIN_SOUNDS[id] || null; }
+function playSound(id, at) {
+  if (!AUDIO_ON) return;
+  var d = soundDef(id);
+  if (!d) return;
+  if (d.layers) {
+    for (var li = 0; li < d.layers.length; li++) playSoundDef(d.layers[li], at);
+    return;
+  }
+  playSoundDef(d, at);
+}
+function playSoundDef(d, at) {
+  if (!AUDIO_ON || !d) return;
+  if (d.type === "seq") {
+    var st = AC.currentTime, sv = d.vol != null ? d.vol : 0.4;
+    for (var ni = 0; ni < (d.notes || []).length; ni++) {
+      var nf = d.notes[ni][0], nd = d.notes[ni][1] || 0.12;
+      if (nf > 0) {
+        var no = AC.createOscillator(), ng = AC.createGain();
+        no.type = d.wave || "square";
+        no.frequency.setValueAtTime(nf, st);
+        ng.gain.setValueAtTime(sv, st);
+        ng.gain.exponentialRampToValueAtTime(0.001, st + nd);
+        no.connect(ng); ng.connect(AMASTER);
+        no.start(st); no.stop(st + nd + 0.02);
+      }
+      st += nd;
+    }
+    return;
+  }
+  var vol = d.vol != null ? d.vol : 0.5;
+  if (at && nodes[playerId] && nodes[playerId].worldPos) {
+    var ref = nodes[playerId].worldPos;
+    var adx = (at.x || 0) - ref.x, adz = (at.z || 0) - ref.z;
+    vol *= Math.max(0.05, 1 - Math.sqrt(adx * adx + adz * adz) / 30);
+  }
+  var t0 = AC.currentTime;
+  var g = AC.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + (d.dur || 0.1));
+  var dest = g;
+  if (d.drive) {
+    var ws = AC.createWaveShaper();
+    var wc = new Float32Array(256);
+    for (var wi = 0; wi < 256; wi++) {
+      var wx = wi / 128 - 1;
+      wc[wi] = Math.tanh(wx * d.drive);
+    }
+    ws.curve = wc;
+    g.connect(ws); ws.connect(AMASTER);
+  } else g.connect(AMASTER);
+  if (d.type === "noise") {
+    var alen = Math.ceil(AC.sampleRate * (d.dur || 0.1));
+    var abuf = AC.createBuffer(1, alen, AC.sampleRate);
+    var ach = abuf.getChannelData(0);
+    for (var ai = 0; ai < alen; ai++) ach[ai] = Math.random() * 2 - 1;
+    var asrc = AC.createBufferSource(); asrc.buffer = abuf;
+    if (d.filter) {
+      var af = AC.createBiquadFilter(); af.type = "lowpass"; af.frequency.value = d.filter;
+      asrc.connect(af); af.connect(g);
+    } else asrc.connect(g);
+    asrc.start(t0); asrc.stop(t0 + (d.dur || 0.1));
+  } else {
+    var ao = AC.createOscillator();
+    ao.type = d.wave || "sine";
+    ao.frequency.setValueAtTime(d.freq || 220, t0);
+    if (d.sweep) ao.frequency.linearRampToValueAtTime(Math.max(20, (d.freq || 220) + d.sweep), t0 + (d.dur || 0.1));
+    ao.connect(g); ao.start(t0); ao.stop(t0 + (d.dur || 0.1) + 0.02);
+  }
+}
+function setSoundscape(spec) {
+  if (!AUDIO_ON) return;
+  if (ASCAPE) {
+    ASCAPE.g.gain.linearRampToValueAtTime(0.0001, AC.currentTime + 1);
+    ASCAPE.src.stop(AC.currentTime + 1.1);
+    ASCAPE = null;
+  }
+  if (!spec) return;
+  var slen = AC.sampleRate * 2;
+  var sbuf = AC.createBuffer(1, slen, AC.sampleRate);
+  var sch = sbuf.getChannelData(0);
+  for (var si = 0; si < slen; si++) sch[si] = Math.random() * 2 - 1;
+  var ssrc = AC.createBufferSource(); ssrc.buffer = sbuf; ssrc.loop = true;
+  var sf = AC.createBiquadFilter(); sf.type = "lowpass"; sf.frequency.value = spec.filter || 400;
+  var sg = AC.createGain(); sg.gain.value = 0.0001;
+  sg.gain.linearRampToValueAtTime(spec.vol != null ? spec.vol : 0.12, AC.currentTime + 1.5);
+  ssrc.connect(sf); sf.connect(sg); sg.connect(AMASTER);
+  ssrc.start();
+  ASCAPE = { src: ssrc, g: sg };
+}
+
+// ---- DICE / CARDS / FRAME HOOKS ----
+var FRAME_HOOKS = [];
+var DICE = [];
+function rollDice(count, faces, wx, wz, cb) {
+  var vals = [];
+  for (var di = 0; di < count; di++) vals.push(1 + Math.floor(rnd() * faces));
+  DICE.push({ wx: wx, wz: wz, faces: faces, vals: vals, t0: world.time, cb: cb, fired: false });
+  playSound("__step");
+  return vals;
+}
+function drawPips(sx, sy, s, v) {
+  ctx.fillStyle = "#fdfaf2";
+  ctx.fillRect(sx - s / 2, sy - s / 2, s, s);
+  ctx.strokeStyle = "#2c2c2c"; ctx.lineWidth = 2;
+  ctx.strokeRect(sx - s / 2, sy - s / 2, s, s);
+  ctx.fillStyle = "#1c1c1c";
+  var o = s * 0.24, r = Math.max(2, s * 0.09);
+  var P = { 1: [[0, 0]], 2: [[-o, -o], [o, o]], 3: [[-o, -o], [0, 0], [o, o]],
+            4: [[-o, -o], [o, -o], [-o, o], [o, o]],
+            5: [[-o, -o], [o, -o], [0, 0], [-o, o], [o, o]],
+            6: [[-o, -o], [o, -o], [-o, 0], [o, 0], [-o, o], [o, o]] };
+  var pts = P[v] || P[1];
+  for (var pi = 0; pi < pts.length; pi++) {
+    ctx.beginPath(); ctx.arc(sx + pts[pi][0], sy + pts[pi][1], r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+function renderDice() {
+  for (var xi = DICE.length - 1; xi >= 0; xi--) {
+    var dd = DICE[xi];
+    var age = world.time - dd.t0;
+    if (age > 3) { DICE.splice(xi, 1); continue; }
+    var pp = project({ x: dd.wx, y: 0.4, z: dd.wz });
+    if (!pp) continue;
+    var ds = Math.max(18, 40 * fovScale / pp.z * 0.02);
+    for (var vi = 0; vi < dd.vals.length; vi++) {
+      var jx = (vi - (dd.vals.length - 1) / 2) * ds * 1.3;
+      var tumbling = age < 0.7;
+      var show = tumbling ? 1 + Math.floor(rndVisual() * dd.faces) : dd.vals[vi];
+      var wob = tumbling ? Math.sin(age * 40 + vi) * ds * 0.15 : 0;
+      drawPips(pp.x + jx + wob, pp.y - ds * (tumbling ? 0.5 + Math.abs(Math.sin(age * 12)) : 0.5), ds, show);
+    }
+    if (!dd.fired && age >= 0.7) { dd.fired = true; playSound("__land"); if (dd.cb) dd.cb(dd.vals); }
+  }
+}
+var _rvSeed = 12345;
+function rndVisual() { _rvSeed = (_rvSeed * 1103515245 + 12345) & 0x7fffffff; return _rvSeed / 0x7fffffff; }
+var CARD_RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+var CARD_SUITS = ["\u2660", "\u2665", "\u2666", "\u2663"];
+function newDeck(seedStr) {
+  var dk = [], drng = mulberry(hashStr(seedStr || (scene.meta && scene.meta.seed) || "kv"));
+  for (var s2 = 0; s2 < 4; s2++) for (var r2 = 0; r2 < 13; r2++) dk.push({ r: CARD_RANKS[r2], s: s2 });
+  for (var i2 = dk.length - 1; i2 > 0; i2--) {
+    var j2 = Math.floor(drng() * (i2 + 1));
+    var tmp = dk[i2]; dk[i2] = dk[j2]; dk[j2] = tmp;
+  }
+  return dk;
+}
+function drawCard(sx, sy, w, card, faceUp) {
+  var h2 = w * 1.45, rr = w * 0.08;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(sx + rr, sy);
+  ctx.arcTo(sx + w, sy, sx + w, sy + h2, rr);
+  ctx.arcTo(sx + w, sy + h2, sx, sy + h2, rr);
+  ctx.arcTo(sx, sy + h2, sx, sy, rr);
+  ctx.arcTo(sx, sy, sx + w, sy, rr);
+  ctx.closePath();
+  if (!faceUp) {
+    ctx.fillStyle = "#7a2f2f"; ctx.fill();
+    ctx.strokeStyle = "#e8ddd0"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = "rgba(232,221,208,0.35)";
+    for (var bi = 1; bi < 5; bi++) {
+      ctx.beginPath(); ctx.moveTo(sx + 3, sy + bi * h2 / 5); ctx.lineTo(sx + w - 3, sy + bi * h2 / 5); ctx.stroke();
+    }
+    ctx.restore(); return;
+  }
+  ctx.fillStyle = "#fdfaf2"; ctx.fill();
+  ctx.strokeStyle = "#2c2c2c"; ctx.lineWidth = 2; ctx.stroke();
+  var red = card.s === 1 || card.s === 2;
+  ctx.fillStyle = red ? "#c0392b" : "#1c1c1c";
+  ctx.font = "bold " + Math.round(w * 0.34) + "px monospace";
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillText(card.r, sx + w * 0.08, sy + h2 * 0.05);
+  ctx.font = Math.round(w * 0.5) + "px monospace";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(CARD_SUITS[card.s], sx + w / 2, sy + h2 * 0.58);
+  ctx.restore();
+}
+
+// ---- EXPLOSIONS ----
+var EXPLOSIONS = [];
+var DEBRIS = [];
+function explode(ex, ey, ez, radius, force, damage) {
+  radius = radius || 4; force = force || 9; damage = damage != null ? damage : 12;
+  EXPLOSIONS.push({ x: ex, y: ey, z: ez, t: world.time, r: radius });
+  playSound("__boom", { x: ex, z: ez });
+  var keys = Object.keys(nodes), ki, tn;
+  for (ki = 0; ki < keys.length; ki++) {
+    tn = nodes[keys[ki]];
+    if (!tn.transform || tn._dead) continue;
+    var edx = tn.transform.pos[0] - ex, edz = tn.transform.pos[2] - ez;
+    var ed = Math.sqrt(edx * edx + edz * edz);
+    if (ed > radius || ed < 1e-6) continue;
+    var fall = 1 - ed / radius;
+    if (tn.stats) {
+      tn.hp = Math.max(0, (tn.hp || 0) - Math.round(damage * fall));
+      tn._addPose = { id: "__stumble", t: 0 };
+      if (POSED.indexOf(tn) < 0) POSED.push(tn);
+      tn._deathImpulse = { x: edx / ed * force * fall, y: 3 * fall, z: edz / ed * force * fall };
+    }
+  }
+  for (var bi = 0; bi < BODIES.length; bi++) {
+    var bb = BODIES[bi];
+    if (bb.invMass === 0) continue;
+    var bp = bb.node.transform.pos;
+    var bdx = bp[0] - ex, bdz = bp[2] - ez;
+    var bd = Math.sqrt(bdx * bdx + bdz * bdz);
+    if (bd > radius || bd < 1e-6) continue;
+    var bf = force * (1 - bd / radius);
+    bb.vel.x += bdx / bd * bf; bb.vel.y += bf * 0.5; bb.vel.z += bdz / bd * bf;
+    bb.asleep = false; bb.sleep = 0;
+  }
+  for (var di = 0; di < 6; di++) {
+    var ang = (di / 6) * Math.PI * 2 + Math.random() * 0.6;
+    var dbody = {
+      node: { id: "boom:" + world.time + ":" + di, _dead: false,
+              transform: { pos: [ex + Math.cos(ang) * 0.3, ey + 0.4, ez + Math.sin(ang) * 0.3] } },
+      kind: "dynamic", shape: "sphere", r: 0.09, half: [0.09, 0.09, 0.09], h: 0.2,
+      mass: 0.4, invMass: 2.5, rest: 0.3, fric: 0.7, gs: 1,
+      vel: { x: Math.cos(ang) * force * 0.7, y: 3 + Math.random() * 3, z: Math.sin(ang) * force * 0.7 },
+      sleep: 0, asleep: false
+    };
+    BODIES.push(dbody);
+    DEBRIS.push({ body: dbody, dies: world.time + 3 });
+  }
+}
+function updateExplosions() {
+  for (var xi = EXPLOSIONS.length - 1; xi >= 0; xi--)
+    if (world.time - EXPLOSIONS[xi].t > 0.45) EXPLOSIONS.splice(xi, 1);
+  for (var qi = DEBRIS.length - 1; qi >= 0; qi--) {
+    if (world.time > DEBRIS[qi].dies) {
+      var qb = BODIES.indexOf(DEBRIS[qi].body);
+      if (qb >= 0) BODIES.splice(qb, 1);
+      DEBRIS.splice(qi, 1);
+    }
+  }
+}
+function renderExplosions() {
+  for (var xi = 0; xi < EXPLOSIONS.length; xi++) {
+    var ex = EXPLOSIONS[xi];
+    var pp = project({ x: ex.x, y: ex.y + 0.5, z: ex.z });
+    if (!pp) continue;
+    var age = (world.time - ex.t) / 0.45;
+    var rad = (0.3 + age * ex.r) * fovScale / pp.z;
+    ctx.globalAlpha = Math.max(0, 0.8 * (1 - age));
+    ctx.strokeStyle = age < 0.3 ? "#fff4c0" : "#ff9a3c";
+    ctx.lineWidth = Math.max(1, 6 * (1 - age));
+    ctx.beginPath(); ctx.arc(pp.x, pp.y, rad, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  }
+  for (var qi = 0; qi < DEBRIS.length; qi++) {
+    var dp = project({ x: DEBRIS[qi].body.node.transform.pos[0],
+                       y: DEBRIS[qi].body.node.transform.pos[1],
+                       z: DEBRIS[qi].body.node.transform.pos[2] });
+    if (!dp) continue;
+    var ds = Math.max(1.5, 5 * fovScale / dp.z * 0.02);
+    ctx.fillStyle = "#4a4038";
+    ctx.fillRect(dp.x - ds / 2, dp.y - ds / 2, ds, ds);
+  }
+}
+
+var BUILTIN_POSES = {
+  __jump: { dur: 0.5, loop: false, tracks: {
+    legL: [[0, 0], [0.15, { rx: -45 }], [0.4, { rx: -45 }], [0.5, 0]],
+    legR: [[0, 0], [0.15, { rx: -45 }], [0.4, { rx: -45 }], [0.5, 0]],
+    shinL: [[0, 0], [0.15, { rx: 70 }], [0.4, { rx: 70 }], [0.5, 0]],
+    shinR: [[0, 0], [0.15, { rx: 70 }], [0.4, { rx: 70 }], [0.5, 0]],
+    armL: [[0, 0], [0.15, { rx: -140, rz: 15 }], [0.5, 0]],
+    armR: [[0, 0], [0.15, { rx: -140, rz: -15 }], [0.5, 0]]
+  } },
+  __land: { dur: 0.25, loop: false, tracks: {
+    torso: [[0, 0], [0.06, { rx: 18 }], [0.25, 0]],
+    legL: [[0, 0], [0.06, { rx: -35 }], [0.25, 0]],
+    legR: [[0, 0], [0.06, { rx: -35 }], [0.25, 0]],
+    shinL: [[0, 0], [0.06, { rx: 55 }], [0.25, 0]],
+    shinR: [[0, 0], [0.06, { rx: 55 }], [0.25, 0]]
+  } },
+  __stumble: { dur: 0.45, loop: false, tracks: {
+    torso: [[0, 0], [0.08, { rx: 22, ry: 8 }], [0.3, { rx: 14 }], [0.45, 0]],
+    head:  [[0, 0], [0.08, { rx: -30 }], [0.45, 0]],
+    legL:  [[0, 0], [0.12, { rx: -25 }], [0.45, 0]],
+    armL:  [[0, 0], [0.1, { rx: -60, rz: 20 }], [0.45, 0]],
+    armR:  [[0, 0], [0.1, { rx: -60, rz: -20 }], [0.45, 0]]
+  } },
+  __flinch: { dur: 0.25, loop: false, tracks: {
+    head:  [[0, 0], [0.05, { rx: -28 }], [0.25, 0]],
+    torso: [[0, 0], [0.05, { rx: -14 }], [0.25, 0]],
+    armL:  [[0, 0], [0.06, { rx: -35 }], [0.25, 0]],
+    armR:  [[0, 0], [0.06, { rx: -35 }], [0.25, 0]]
+  } }
+};
+function mirrorBoneName(bn) {
+  var c = bn.slice(-1);
+  if (c === "L") return bn.slice(0, -1) + "R";
+  if (c === "R") return bn.slice(0, -1) + "L";
+  return bn;
+}
+function mirrorPoseDef(def) {
+  var out = { dur: def.dur, loop: def.loop, weight: def.weight, combat: def.combat, events: def.events, tracks: {} }, bn;
+  for (bn in (def.tracks || {})) {
+    var mk = [], keys = def.tracks[bn];
+    for (var mi = 0; mi < keys.length; mi++) {
+      var mv = keys[mi][1];
+      mk.push([keys[mi][0], typeof mv === "number" ? mv :
+        { rx: mv.rx || 0, ry: -(mv.ry || 0), rz: -(mv.rz || 0) }]);
+    }
+    out.tracks[mirrorBoneName(bn)] = mk;
+  }
+  return out;
+}
+function poseDef(id) {
+  var d = ((scene.resources || {}).poses || {})[id] || BUILTIN_POSES[id] || null;
+  if (!d && id.length > 2 && id.slice(-2) === "_m") {
+    var mc = scene._mc = scene._mc || {};
+    if (mc[id]) return mc[id];
+    var base = poseDef(id.slice(0, -2));
+    if (base) return (mc[id] = mirrorPoseDef(base));
+  }
+  return d;
+}
 var POSED = [];
 function playPose(n, id) {
   var def = poseDef(id);
   if (!def) return;
   n._pose = { id: id, t: 0, fired: {} };
+  n._xfFrom = basePose(n._lastLiving || {});
+  n._xfDur = def.blendIn != null ? def.blendIn : 0.1;
+  n._xfT = n._xfDur > 0 ? 0 : null;
   if (POSED.indexOf(n) < 0) POSED.push(n);
+}
+function queueAttack(n, id) {
+  if (!poseDef(id)) return;
+  if (!n._pose) { playPose(n, id); return; }
+  var qd = poseDef(n._pose.id);
+  var qci = qd && qd.combat && qd.combat.cancelInto;
+  if (qci && qci.indexOf(id) >= 0) n._nextAttack = id;
 }
 function samplePoseTrack(keys, t) {
   if (!keys || !keys.length) return null;
@@ -2913,6 +3450,7 @@ function samplePoseTrack(keys, t) {
     var ka = keys[i], kb = keys[i + 1];
     if (t >= ka[0] && t <= kb[0]) {
       var u = (t - ka[0]) / ((kb[0] - ka[0]) || 1e-9);
+      u = u * u * (3 - 2 * u);
       var A = poseAngles(ka[1]) || { rx: 0, ry: 0, rz: 0 };
       var B = poseAngles(kb[1]) || { rx: 0, ry: 0, rz: 0 };
       return { rx: A.rx + (B.rx - A.rx) * u,
@@ -2947,10 +3485,58 @@ function updatePoseClips(dt) {
     if (!n._pose) { if (!n._addPose) POSED.splice(i, 1); continue; }
     var def = poseDef(n._pose.id);
     if (!def) { n._pose = null; continue; }
+    if (n._hitstop && n._hitstop > 0) { n._hitstop -= dt; if (n._hitstop > 0) continue; n._hitstop = 0; }
+    if (n._xfT != null) n._xfT += dt;
     var prevT = n._pose.t;
     n._pose.t += dt;
     var dur = def.dur || 1;
     if (def.tracks && def.tracks.root && n.transform) applyRootMotion(n, def, prevT, n._pose.t);
+    if (def.combat && n._pose && n.transform) {
+      var cbt = def.combat, cph = cbt.phases || {};
+      var ct = n._pose.t, cdur = def.dur || 1;
+      n._combatPhase = ct < (cph.active || 0) ? "startup" :
+                       (ct < (cph.recovery || cdur) ? "active" : "recovery");
+      if (n._nextAttack && n._combatPhase === "recovery") {
+        var nxa = n._nextAttack; n._nextAttack = null;
+        playPose(n, nxa);
+        continue;
+      }
+      if (n._combatPhase === "active" && !n._pose.fired.__hit) {
+        var hb = cbt.hitbox || {};
+        var hya = (n.transform.rot[1] || 0) * DEG;
+        var hbx = n.transform.pos[0] + Math.sin(hya) * (hb.forward != null ? hb.forward : 1.2);
+        var hbz = n.transform.pos[2] + Math.cos(hya) * (hb.forward != null ? hb.forward : 1.2);
+        var hby = n.transform.pos[1] + (hb.height != null ? hb.height : 1.2);
+        var hbr = hb.r != null ? hb.r : 0.5;
+        var hkeys = Object.keys(nodes);
+        for (var hti = 0; hti < hkeys.length; hti++) {
+          var htg = nodes[hkeys[hti]];
+          if (htg === n || htg._dead || htg._ragStop || !htg.transform) continue;
+          if (hb.filter && !tagMatch(htg, hb.filter)) continue;
+          if (htg._pose && htg._combatPhase === "active") {
+            var hdd = poseDef(htg._pose.id);
+            if (hdd && hdd.combat && hdd.combat.dodge) continue;
+          }
+          var hdx = htg.transform.pos[0] - hbx;
+          var hdz = htg.transform.pos[2] - hbz;
+          var hdy = (htg.transform.pos[1] + 1.0) - hby;
+          if (hdx * hdx + hdy * hdy + hdz * hdz > hbr * hbr) continue;
+          n._pose.fired.__hit = 1;
+          if (htg.stats) htg.hp = Math.max(0, (htg.hp || 0) - (hb.damage != null ? hb.damage : 5));
+          n._hitstop = 0.1; htg._hitstop = 0.1;
+          var hpb = hb.pushback != null ? hb.pushback : 3;
+          htg.transform.pos[0] += Math.sin(hya) * hpb * 0.1;
+          htg.transform.pos[2] += Math.cos(hya) * hpb * 0.1;
+          htg._lastHit = { by: n.id, level: hb.level || "mid", t: world.time };
+          playSound(hb.sound || ((hb.damage != null ? hb.damage : 5) >= 8 ? "__kick" : "__hit"), { x: hbx, z: hbz });
+          htg._addPose = { id: (hb.stagger || (hb.damage != null ? hb.damage : 5) >= 8) ? "__stumble" : "__flinch", t: 0 };
+          if (POSED.indexOf(htg) < 0) POSED.push(htg);
+          var himp = hb.launch != null ? hb.launch : 5;
+          htg._deathImpulse = { x: Math.sin(hya) * himp, y: 2.5, z: Math.cos(hya) * himp };
+          break;
+        }
+      }
+    }
     // events fire once per playthrough, at their normalised time
     var evs = def.events || [];
     for (var e = 0; e < evs.length; e++) {
@@ -3070,6 +3656,7 @@ function samplePoseTrack3(keys, t) {
     var ka = keys[i], kb = keys[i + 1];
     if (t >= ka[0] && t <= kb[0]) {
       var u = (t - ka[0]) / ((kb[0] - ka[0]) || 1e-9);
+      u = u * u * (3 - 2 * u);
       var A = V(ka[1]), B = V(kb[1]);
       return { x: A.x + (B.x - A.x) * u, y: A.y + (B.y - A.y) * u, z: A.z + (B.z - A.z) * u };
     }
@@ -3129,7 +3716,18 @@ function startRagdoll(n, impulse) {
     b.restDir = { x: dx, y: dy, z: dz };
     b.linkParent = pn;
   }
+  rag.age = 0;
+  if (rag.bones) { /* placeholder, pb built after bones exist */ }
+  rag.pb = (rag.bones.head && rag.bones.foreL && rag.bones.foreR) ?
+    { head: rag.bones.head.body, foreL: rag.bones.foreL.body, foreR: rag.bones.foreR.body } : null;
+  rag.hinges = [];
+  var HJ = [["torso","armL","foreL"],["torso","armR","foreR"],["torso","legL","shinL"],["torso","legR","shinR"]];
+  for (i = 0; i < HJ.length; i++) {
+    if (rag.bones[HJ[i][0]] && rag.bones[HJ[i][1]] && rag.bones[HJ[i][2]])
+      rag.hinges.push({ inner: rag.bones[HJ[i][0]].body, mid: rag.bones[HJ[i][1]].body, outer: rag.bones[HJ[i][2]].body });
+  }
   n._rag = rag;
+  playSound("__thud", { x: n.transform.pos[0], z: n.transform.pos[2] });
   RAGDOLLS.push(rag);
   // the actor stops acting: no controller, no AI, no clips
   n._pose = null; n._addPose = null; n._treePose = null;
@@ -3163,6 +3761,38 @@ function solveRagdollLinks() {
 // Derives bone angles from where the simulation put each bone relative to
 // its parent. Approximate decomposition - a flopping corpse does not need
 // an exact solve, and the PS1 look forgives it.
+// Fold limit: elbows/knees cannot fold past ~120 degrees. Point-mass bones
+// have no orientation, so this is a relative-segment clamp: cheap, and it
+// stops limbs collapsing onto themselves.
+function solveRagdollHinges() {
+  for (var r = 0; r < RAGDOLLS.length; r++) {
+    var rag = RAGDOLLS[r];
+    if (rag.settled || !rag.hinges || (rag.age || 0) > 2.5) continue;
+    if (rag.pb && (rag.age || 0) < 0.6) {
+      var php = rag.pb.head.node.transform.pos, pfl = rag.pb.foreL.node.transform.pos, pfr = rag.pb.foreR.node.transform.pos;
+      pfl[0] += (php[0] - pfl[0]) * 0.02; pfl[1] += (php[1] - pfl[1]) * 0.02; pfl[2] += (php[2] - pfl[2]) * 0.02;
+      pfr[0] += (php[0] - pfr[0]) * 0.02; pfr[1] += (php[1] - pfr[1]) * 0.02; pfr[2] += (php[2] - pfr[2]) * 0.02;
+    }
+    for (var i = 0; i < rag.hinges.length; i++) {
+      var hg = rag.hinges[i];
+      var ip = hg.inner.node.transform.pos, mp = hg.mid.node.transform.pos, op = hg.outer.node.transform.pos;
+      var v1x = mp[0] - ip[0], v1y = mp[1] - ip[1], v1z = mp[2] - ip[2];
+      var v2x = op[0] - mp[0], v2y = op[1] - mp[1], v2z = op[2] - mp[2];
+      var l1 = Math.sqrt(v1x * v1x + v1y * v1y + v1z * v1z) || 1;
+      var l2 = Math.sqrt(v2x * v2x + v2y * v2y + v2z * v2z) || 1;
+      var fdot = (v1x * v2x + v1y * v2y + v1z * v2z) / (l1 * l2);
+      if (fdot < -0.5) {
+        var hcx = (mp[0] + v1x / l1 * l2 - op[0]) * 0.3;
+        var hcy = (mp[1] + v1y / l1 * l2 - op[1]) * 0.3;
+        var hcz = (mp[2] + v1z / l1 * l2 - op[2]) * 0.3;
+        var hcl = Math.sqrt(hcx * hcx + hcy * hcy + hcz * hcz);
+        if (hcl > 0.02) { hcx *= 0.02 / hcl; hcy *= 0.02 / hcl; hcz *= 0.02 / hcl; }
+        op[0] += hcx; op[1] += hcy; op[2] += hcz;
+      }
+    }
+  }
+}
+
 function ragdollPose(n) {
   var rag = n._rag;
   if (!rag) return null;
@@ -3193,11 +3823,13 @@ function updateRagdolls() {
       startRagdoll(n, n._deathImpulse);
     }
   }
+  updateExplosions();
   if (!RAGDOLLS.length) return;
   // settle: once every bone is slow for a while, sleep the whole rag and
   // stop solving its links -- the hub bone (torso) can never sleep otherwise
   for (var sr = 0; sr < RAGDOLLS.length; sr++) {
     var rg = RAGDOLLS[sr];
+    rg.age = (rg.age || 0) + 1 / 60;
     if (rg.settled) {
       var woke = false, wk;
       for (wk in rg.bones) if (!rg.bones[wk].body.asleep) { woke = true; break; }
@@ -3221,7 +3853,7 @@ function updateRagdolls() {
       rg.snap = {};
       for (dk in rg.bones) { sp = rg.bones[dk].body.node.transform.pos; rg.snap[dk] = [sp[0], sp[1], sp[2]]; }
     }
-    if (rg.still) {
+    if (rg.still || (rg.age || 0) > 4) {
       var sk;
       for (sk in rg.bones) {
         var sb = rg.bones[sk].body;
@@ -3232,6 +3864,7 @@ function updateRagdolls() {
     }
   }
   solveRagdollLinks();
+  solveRagdollHinges();
   // the body node follows its torso bone so the mesh travels with the corpse
   for (var r = 0; r < RAGDOLLS.length; r++) {
     var rag = RAGDOLLS[r];
@@ -3246,6 +3879,66 @@ function updateRagdolls() {
 }
 
 function blendedPose(n) {
+  var p = blendedPoseCore(n);
+  if (n._rag) {
+    var ga = n._rag.age || 0;
+    if (n._lastLiving && ga < 0.4 && p) {
+      var gw = ga / 0.4, gout = {}, gk;
+      for (gk in p) {
+        var gA = poseAngles(n._lastLiving[gk]) || { rx: 0, ry: 0, rz: 0 };
+        var gB = poseAngles(p[gk]) || { rx: 0, ry: 0, rz: 0 };
+        gout[gk] = { rx: gA.rx + (gB.rx - gA.rx) * gw,
+                     ry: gA.ry + (gB.ry - gA.ry) * gw,
+                     rz: gA.rz + (gB.rz - gA.rz) * gw };
+      }
+      return gout;
+    }
+    return p;
+  }
+  if (!n._pose && n._hadPose) {
+    n._xfFrom = basePose(n._lastLiving || {});
+    n._xfDur = 0.12; n._xfT = 0;
+  }
+  n._hadPose = !!n._pose;
+  var out = {}, k;
+  if (p) for (k in p) out[k] = p[k];
+  if (n._xfT != null && n._xfFrom) {
+    var xw = Math.min(1, n._xfT / (n._xfDur || 0.1));
+    var xe = xw * xw * (3 - 2 * xw);
+    out = lerpPose(n._xfFrom, basePose(out), xe);
+    if (xw >= 1) { n._xfT = null; n._xfFrom = null; }
+  }
+  if (n._lookYaw || n._lookPitch) {
+    var lh = poseAngles(out.head) || { rx: 0, ry: 0, rz: 0 };
+    out.head = { rx: lh.rx + (n._lookPitch || 0), ry: lh.ry + (n._lookYaw || 0) * 0.7, rz: lh.rz };
+    var lt = poseAngles(out.torso) || { rx: 0, ry: 0, rz: 0 };
+    out.torso = { rx: lt.rx, ry: lt.ry + (n._lookYaw || 0) * 0.3, rz: lt.rz };
+  }
+  if (n._geo && n._geo.rigged && n.springs !== false) {
+    var sdt = world.time - (n._sprT != null ? n._sprT : world.time);
+    n._sprT = world.time;
+    if (sdt > 0 && sdt < 0.1) {
+      n._spr = n._spr || {};
+      var SPB = ["head", "foreL", "foreR", "weapon"];
+      for (var si = 0; si < SPB.length; si++) {
+        var sbn = SPB[si];
+        if (!(n._geo.parts && n._geo.parts[sbn])) continue;
+        var tgt = poseAngles(out[sbn]) || { rx: 0, ry: 0, rz: 0 };
+        var st = n._spr[sbn];
+        if (!st) st = n._spr[sbn] = { x: tgt.rx, y: tgt.ry, z: tgt.rz, vx: 0, vy: 0, vz: 0 };
+        var K = 300, DA = Math.max(0, 1 - sdt * 16);
+        st.vx = (st.vx + (tgt.rx - st.x) * K * sdt) * DA;
+        st.vy = (st.vy + (tgt.ry - st.y) * K * sdt) * DA;
+        st.vz = (st.vz + (tgt.rz - st.z) * K * sdt) * DA;
+        st.x += st.vx * sdt; st.y += st.vy * sdt; st.z += st.vz * sdt;
+        out[sbn] = { rx: st.x, ry: st.y, rz: st.z };
+      }
+    }
+  }
+  n._lastLiving = out;
+  return out;
+}
+function blendedPoseCore(n) {
   // A ragdolled actor is driven by the solver: no gait, clips or blending.
   if (n._rag) return ragdollPose(n);
   // Layer 0: blend tree if declared, otherwise the procedural gait.
@@ -3298,11 +3991,11 @@ function gaitPose(n) {
   var arm = (gait.armSwing !== undefined ? gait.armSwing : 22) * amt;
   var sA = Math.sin(ph), sB = Math.sin(ph + Math.PI);
   var GAIT_KNEE = (gait.knee !== undefined ? gait.knee : 48) * amt;
-  var GAIT_ELBOW = (gait.elbow !== undefined ? gait.elbow : 14) * amt;
+  var GAIT_ELBOW = (gait.elbow !== undefined ? gait.elbow : 24) * amt;
   return {
     legL: sA * swing, legR: sB * swing,
     shinL: Math.max(0, sA) * GAIT_KNEE, shinR: Math.max(0, sB) * GAIT_KNEE,
-    foreL: -Math.abs(sB) * GAIT_ELBOW, foreR: -Math.abs(sA) * GAIT_ELBOW,
+    foreL: -(0.25 + 0.75 * Math.max(0, sB)) * GAIT_ELBOW, foreR: -(0.25 + 0.75 * Math.max(0, sA)) * GAIT_ELBOW,
     armL: sB * arm,  armR: sA * arm,
     torso: Math.abs(Math.sin(ph * 2)) * 2 * amt
   };
@@ -3501,7 +4194,7 @@ function renderFrame() {
     if (n.type === "CanvasLayer") return;
     collectNode(n, matIdent());
   });
-  drawList.sort(function (a, b) { return b.z - a.z; });
+  drawList.sort(function (a, b) { return ((a.layer || 0) - (b.layer || 0)) || (b.z - a.z); });
 
   var affine = r.affineTextures !== false;
   for (var i = 0; i < drawList.length; i++) {
@@ -3518,9 +4211,32 @@ function renderFrame() {
       ctx.globalAlpha = 1;
     } else {
       var rgb = hex2rgb(t.col);
-      ctx.fillStyle = "rgb(" + Math.round(rgb[0] * t.shade) + "," + Math.round(rgb[1] * t.shade) + "," + Math.round(rgb[2] * t.shade) + ")";
+      var bsh = t.sh3 ? Math.max(t.sh3[0], t.sh3[1], t.sh3[2]) : t.shade;
+      if (t.opac < 0.99) ctx.fillStyle = ditherPattern(rgb, bsh, t.opac);
+      else ctx.fillStyle = "rgb(" + Math.round(rgb[0] * bsh) + "," + Math.round(rgb[1] * bsh) + "," + Math.round(rgb[2] * bsh) + ")";
       ctx.beginPath(); ctx.moveTo(p[0].x, p[0].y); ctx.lineTo(p[1].x, p[1].y); ctx.lineTo(p[2].x, p[2].y);
       ctx.closePath(); ctx.fill();
+      if (t.sh3) {
+        var smin = Math.min(t.sh3[0], t.sh3[1], t.sh3[2]);
+        if (bsh - smin > 0.04) {
+          var iMn = t.sh3[0] === smin ? 0 : (t.sh3[1] === smin ? 1 : 2);
+          var iMx = t.sh3[0] === bsh ? 0 : (t.sh3[1] === bsh ? 1 : 2);
+          if (iMn !== iMx) {
+            var gg = ctx.createLinearGradient(p[iMn].x, p[iMn].y, p[iMx].x, p[iMx].y);
+            gg.addColorStop(0, "rgba(0,0,0," + Math.min(0.6, bsh - smin).toFixed(3) + ")");
+            gg.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = gg;
+            ctx.beginPath(); ctx.moveTo(p[0].x, p[0].y); ctx.lineTo(p[1].x, p[1].y); ctx.lineTo(p[2].x, p[2].y);
+            ctx.closePath(); ctx.fill();
+          }
+        }
+      }
+      if (t.rim > 0.15) {
+        ctx.globalAlpha = Math.min(0.4, t.rim * 0.4);
+        ctx.fillStyle = "#eef2ff";
+        ctx.beginPath(); ctx.moveTo(p[0].x, p[0].y); ctx.lineTo(p[1].x, p[1].y); ctx.lineTo(p[2].x, p[2].y);
+        ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+      }
     }
     // distance fog
     if (r.fog && r.fog.enabled) {
@@ -3535,11 +4251,49 @@ function renderFrame() {
   }
   renderProjectiles();
   renderLockMarker();
+  renderExplosions();
+  renderDice();
+  for (var fh = 0; fh < FRAME_HOOKS.length; fh++) { try { FRAME_HOOKS[fh](ctx); } catch (e) {} }
+  if (r.post && r.post.enabled) drawPostFX(r.post);
 }
 
 // ---------------------------------------------------------------------------
 // HUD  (CanvasLayer nodes render as DOM, kept out of the rasterizer)
 // ---------------------------------------------------------------------------
+var DITHER_CACHE = {};
+function ditherPattern(rgb, sh, opac) {
+  var cr = Math.round(rgb[0] * sh / 16) * 16, cg = Math.round(rgb[1] * sh / 16) * 16, cb = Math.round(rgb[2] * sh / 16) * 16;
+  var lvl = opac < 0.34 ? 1 : (opac < 0.67 ? 2 : 3);
+  var key = cr + "_" + cg + "_" + cb + "_" + lvl;
+  if (DITHER_CACHE[key]) return DITHER_CACHE[key];
+  var pc = document.createElement("canvas");
+  pc.width = 2; pc.height = 2;
+  var pg = pc.getContext("2d");
+  pg.fillStyle = "rgb(" + cr + "," + cg + "," + cb + ")";
+  if (lvl >= 1) pg.fillRect(0, 0, 1, 1);
+  if (lvl >= 2) pg.fillRect(1, 1, 1, 1);
+  if (lvl >= 3) pg.fillRect(1, 0, 1, 1);
+  return (DITHER_CACHE[key] = ctx.createPattern(pc, "repeat"));
+}
+var VIG_CACHE = null;
+function drawPostFX(cfg) {
+  var sa = cfg.scanAlpha != null ? cfg.scanAlpha : 0.1;
+  if (sa > 0) {
+    ctx.globalAlpha = sa; ctx.fillStyle = "#000";
+    for (var sy = 0; sy < H; sy += 2) ctx.fillRect(0, sy, W, 1);
+    ctx.globalAlpha = 1;
+  }
+  if (cfg.vignette !== false) {
+    if (!VIG_CACHE) {
+      VIG_CACHE = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, H * 0.85);
+      VIG_CACHE.addColorStop(0, "rgba(0,0,0,0)");
+      VIG_CACHE.addColorStop(1, "rgba(0,0,0,0.38)");
+    }
+    ctx.fillStyle = VIG_CACHE;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
 function buildHud() {
   hud.innerHTML = "";
   (scene.nodes || []).forEach(function (layer) {
@@ -3772,6 +4526,7 @@ function loadScene(json) {
 
   nodes = {}; actors = []; meshCache = {}; texCache = {}; backdropCache = {};
   scene._backdrop = null; scene._walkmesh = null; scene._tilemap = null;
+  scene._room = (scene.rooms && scene.rooms.start) || null;
   BODIES = []; PHYS.accum = 0;
   ALARMS = [];
   POSED.forEach(function (a) { a._pose = null; }); POSED = [];
