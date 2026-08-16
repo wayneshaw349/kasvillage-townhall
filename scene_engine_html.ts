@@ -3884,6 +3884,56 @@ function updateRagdolls() {
   }
 }
 
+// Two-bone IK: given hip height above the target foot point, return the
+// thigh/shin flexion that puts the foot on the ground. Law of cosines.
+function solveTwoBone(reach, thighLen, shinLen) {
+  var total = thighLen + shinLen;
+  var d = Math.max(0.05, Math.min(total * 0.999, reach));
+  var ca = (thighLen * thighLen + d * d - shinLen * shinLen) / (2 * thighLen * d);
+  var cb = (thighLen * thighLen + shinLen * shinLen - d * d) / (2 * thighLen * shinLen);
+  ca = Math.max(-1, Math.min(1, ca)); cb = Math.max(-1, Math.min(1, cb));
+  var hip = Math.acos(ca) / DEG;
+  var knee = 180 - Math.acos(cb) / DEG;
+  return { hip: -hip, knee: knee };
+}
+function applyFootIK(n, out) {
+  var cfg = n.footIK;
+  if (!cfg || cfg.enabled === false || n._rag) return out;
+  var g = n._geo;
+  if (!g || !g.rigged || !g.parts.legL || !g.parts.shinL) return out;
+  var air = (n._airY || 0) > 0.05;
+  n._ikW = (n._ikW == null ? 0 : n._ikW) + ((air ? 0 : 1) - (n._ikW || 0)) * 0.2;
+  if (n._ikW < 0.02) return out;
+  var t = n.transform, yaw = (t.rot[1] || 0) * DEG;
+  var half = Math.abs(g.parts.legL.pivot.y - g.parts.shinL.pivot.y) || 0.5;
+  var hipY = g.parts.legL.pivot.y;
+  var side = [["legL", "shinL", g.parts.legL.pivot.x], ["legR", "shinR", g.parts.legR.pivot.x]];
+  var drops = [];
+  for (var si = 0; si < side.length; si++) {
+    var ox = side[si][2];
+    var fx = t.pos[0] + Math.cos(yaw) * ox;
+    var fz = t.pos[2] - Math.sin(yaw) * ox;
+    var gh = scene._tilemap ? 0 : terrainHeight(fx, fz);
+    var reach = (t.pos[1] + hipY) - gh;
+    drops.push({ bone: side[si][0], shin: side[si][1], reach: reach, gh: gh });
+  }
+  var lowest = Math.min(drops[0].gh, drops[1].gh);
+  if (cfg.pelvisDrop !== false && n._animOffset) {
+    var pd = (lowest - (scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]))) * n._ikW;
+    n._animOffset.posY += pd * 0.5;
+  }
+  for (var di = 0; di < drops.length; di++) {
+    var dr = drops[di];
+    var sol = solveTwoBone(dr.reach, half, half);
+    var cur = poseAngles(out[dr.bone]) || { rx: 0, ry: 0, rz: 0 };
+    var curS = poseAngles(out[dr.shin]) || { rx: 0, ry: 0, rz: 0 };
+    out[dr.bone] = { rx: cur.rx + (sol.hip - cur.rx) * n._ikW * (cfg.weight != null ? cfg.weight : 0.7),
+                     ry: cur.ry, rz: cur.rz };
+    out[dr.shin] = { rx: curS.rx + (sol.knee - curS.rx) * n._ikW * (cfg.weight != null ? cfg.weight : 0.7),
+                     ry: curS.ry, rz: curS.rz };
+  }
+  return out;
+}
 function blendedPose(n) {
   var p = blendedPoseCore(n);
   if (n._rag) {
@@ -3941,6 +3991,7 @@ function blendedPose(n) {
       }
     }
   }
+  if (n.footIK) out = applyFootIK(n, out);
   n._lastLiving = out;
   return out;
 }
