@@ -2819,7 +2819,8 @@ function collectNode(n, parentM) {
       drawList.push({
         p: [p0, p1, p2], uv: face.uv, tex: tex, col: bakedCol || col, shade: shade,
         z: (p0.z + p1.z + p2.z) / 3, tiling: mat.tiling,
-        sh3: sh3, rim: rimV, opac: mat.opacity != null ? mat.opacity : 1, layer: n.layer || 0
+        sh3: sh3, rim: rimV, opac: mat.opacity != null ? mat.opacity : 1, layer: n.layer || 0,
+        glint: mat.glint ? mat.glint * Math.pow(Math.max(0, vdot(nrm, LIGHT)), 8) : 0
       });
     }
   }
@@ -4175,6 +4176,13 @@ function drawBillboard(t) {
 
 function renderFrame() {
   var r = scene.render || {};
+  var ssX = r.supersample && r.supersample > 1 ? r.supersample : 1;
+  if (ssX > 1 && view && view.width !== Math.floor(W * ssX)) {
+    view.width = Math.floor(W * ssX); view.height = Math.floor(H * ssX);
+    view.style.width = W + "px"; view.style.height = H + "px";
+    ctx.imageSmoothingEnabled = true;
+  }
+  if (ssX > 1) { ctx.setTransform(ssX, 0, 0, ssX, 0, 0); }
 
   // Tilemap stage short-circuits the 3D pipeline entirely.
   var tm = scene._tilemap;
@@ -4201,6 +4209,24 @@ function renderFrame() {
   });
   drawList.sort(function (a, b) { return ((a.layer || 0) - (b.layer || 0)) || (b.z - a.z); });
 
+  if (r.shadows) {
+    var shk = Object.keys(nodes);
+    for (var shi = 0; shi < shk.length; shi++) {
+      var shn = nodes[shk[shi]];
+      if (!shn._geo || !shn._geo.rigged || shn.visible === false || shn._dead) continue;
+      if (shn.room && shn.room !== scene._room) continue;
+      var gy2 = scene._tilemap ? 0 : terrainHeight(shn.transform.pos[0], shn.transform.pos[2]);
+      var spp = project({ x: shn.transform.pos[0], y: gy2 + 0.02, z: shn.transform.pos[2] });
+      if (!spp) continue;
+      var lift = Math.max(0, shn.transform.pos[1] - gy2);
+      var srx = (0.55 * fovScale / spp.z) / (1 + lift * 0.5);
+      ctx.globalAlpha = Math.max(0.08, 0.34 - lift * 0.08);
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.ellipse(spp.x, spp.y, srx, srx * 0.42, 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.globalAlpha = 1;
+    }
+  }
   var affine = r.affineTextures !== false;
   for (var i = 0; i < drawList.length; i++) {
     var t = drawList[i];
@@ -4236,6 +4262,12 @@ function renderFrame() {
           }
         }
       }
+      if (t.glint > 0.05) {
+        ctx.globalAlpha = Math.min(0.6, t.glint);
+        ctx.fillStyle = "#fffdf0";
+        ctx.beginPath(); ctx.moveTo(p[0].x, p[0].y); ctx.lineTo(p[1].x, p[1].y); ctx.lineTo(p[2].x, p[2].y);
+        ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+      }
       if (t.rim > 0.15) {
         ctx.globalAlpha = Math.min(0.4, t.rim * 0.4);
         ctx.fillStyle = "#eef2ff";
@@ -4248,7 +4280,16 @@ function renderFrame() {
       var near = r.fog.near || 10, far = r.fog.far || 40;
       var fa = Math.min(1, Math.max(0, (t.z - near) / (far - near)));
       if (fa > 0.01) {
-        ctx.globalAlpha = fa; ctx.fillStyle = r.fog.color || "#101820";
+        ctx.globalAlpha = fa;
+        if (r.fog.gradient !== false) {
+          var fgy0 = Math.min(p[0].y, p[1].y, p[2].y), fgy1 = Math.max(p[0].y, p[1].y, p[2].y);
+          if (fgy1 - fgy0 > 2) {
+            var fgr = ctx.createLinearGradient(0, fgy0, 0, fgy1);
+            fgr.addColorStop(0, r.fog.color || "#101820");
+            fgr.addColorStop(1, r.fog.colorLow || r.fog.color || "#101820");
+            ctx.fillStyle = fgr;
+          } else ctx.fillStyle = r.fog.color || "#101820";
+        } else ctx.fillStyle = r.fog.color || "#101820";
         ctx.beginPath(); ctx.moveTo(p[0].x, p[0].y); ctx.lineTo(p[1].x, p[1].y); ctx.lineTo(p[2].x, p[2].y);
         ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
       }
