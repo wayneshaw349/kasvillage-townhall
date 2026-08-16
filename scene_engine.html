@@ -197,12 +197,60 @@ function quad(g, a, b, c, d) {
   g.faces.push({ i: [base, base + 1, base + 2], uv: [[0,0],[1,0],[1,1]] });
   g.faces.push({ i: [base, base + 2, base + 3], uv: [[0,0],[1,1],[0,1]] });
 }
+var MESH_PRESETS = {
+  cone:   { type: "lathe", profile: [[0.5, 0], [0.01, 1]], segments: 8 },
+  bush:   { type: "lathe", profile: [[0.3, 0], [0.55, 0.3], [0.45, 0.6], [0.05, 0.85]], segments: 7 },
+  barrel: { type: "lathe", profile: [[0.28, 0], [0.36, 0.25], [0.38, 0.5], [0.36, 0.75], [0.28, 1.0]], segments: 8 },
+  crate:  { type: "box", size: [1, 1, 1], originBottom: true },
+  rock:   { type: "lathe", profile: [[0.55, 0], [0.75, 0.28], [0.6, 0.62], [0.22, 0.95], [0.01, 1.05]], segments: 5 },
+  pillar: { type: "compound", parts: [
+    { type: "cylinder", radius: 0.3, height: 3, segments: 7 },
+    { type: "box", size: [0.9, 0.2, 0.9], at: [0, 3.05, 0] },
+    { type: "box", size: [0.9, 0.2, 0.9], at: [0, 0.05, 0] } ] },
+  tree:   { type: "compound", parts: [
+    { type: "cylinder", radius: 0.16, height: 1.5, segments: 6 },
+    { type: "lathe", profile: [[0.95, 0], [0.55, 0.9], [0.05, 1.7]], segments: 7, at: [0, 1.2, 0] },
+    { type: "lathe", profile: [[0.6, 0], [0.05, 1.1]], segments: 7, at: [0, 2.2, 0] } ] },
+  torch:  { type: "compound", parts: [
+    { type: "cylinder", radius: 0.05, height: 1.3, segments: 5 },
+    { type: "lathe", profile: [[0.12, 0], [0.16, 0.15], [0.02, 0.4]], segments: 5, at: [0, 1.3, 0] } ] },
+  fence:  { type: "compound", parts: [
+    { type: "box", size: [0.12, 1.1, 0.12], originBottom: true, at: [-1, 0, 0] },
+    { type: "box", size: [0.12, 1.1, 0.12], originBottom: true, at: [0, 0, 0] },
+    { type: "box", size: [0.12, 1.1, 0.12], originBottom: true, at: [1, 0, 0] },
+    { type: "box", size: [2.2, 0.1, 0.08], at: [0, 0.85, 0] },
+    { type: "box", size: [2.2, 0.1, 0.08], at: [0, 0.45, 0] } ] },
+  house:  { type: "compound", parts: [
+    { type: "box", size: [2.6, 1.7, 2.2], originBottom: true },
+    { type: "extrude", polygon: [[-1.45, -1.25], [1.45, -1.25], [1.45, 1.25], [-1.45, 1.25]],
+      height: 0.01, cap: "pyramid", capHeight: 1.0, at: [0, 1.7, 0] },
+    { type: "box", size: [0.6, 1.0, 0.08], originBottom: true, at: [0, 0, 1.12] } ] }
+};
+function mergePreset(p, s) {
+  var o = {}, k;
+  for (k in p) o[k] = p[k];
+  for (k in s) if (k !== "type") o[k] = s[k];
+  return o;
+}
 function buildMesh(name, spec) {
   if (meshCache[name]) return meshCache[name];
   var g = { verts: [], faces: [] }, i, j;
   var t = spec.type;
+  if (MESH_PRESETS[t]) { spec = mergePreset(MESH_PRESETS[t], spec); t = spec.type; }
 
-  if (t === "plane") {
+  if (t === "compound") {
+    var prts = spec.parts || [];
+    for (i = 0; i < prts.length; i++) {
+      var sub = buildMesh(name + "::" + i, prts[i]);
+      delete meshCache[name + "::" + i];
+      var off = prts[i].at || [0, 0, 0], vbase = g.verts.length;
+      for (j = 0; j < sub.verts.length; j++)
+        g.verts.push(v3(sub.verts[j].x + off[0], sub.verts[j].y + off[1], sub.verts[j].z + off[2]));
+      for (j = 0; j < sub.faces.length; j++)
+        g.faces.push({ i: [sub.faces[j].i[0] + vbase, sub.faces[j].i[1] + vbase, sub.faces[j].i[2] + vbase],
+                       uv: sub.faces[j].uv });
+    }
+  } else if (t === "plane") {
     var sz = spec.size || [20, 20], sub = spec.subdiv || 4;
     var hn = spec.heightNoise, nz = hn ? noise2(srandFor("mesh:" + name)) : null;
     var stepX = sz[0] / sub, stepZ = sz[1] / sub;
@@ -320,7 +368,7 @@ function buildMesh(name, spec) {
     if (round) partLathe("torso", 0, 1.0 * sc, 0, [[0.26,0],[0.34,0.25],[0.30,0.55],[0.18,0.62]]);
     else partBox("torso", 0, 1.28 * sc, 0, 0.62, 0.6, 0.4);
     // head: small lathe sphere-ish
-    if (round) partLathe("head", 0, 1.68 * sc, 0, [[0.01,0],[0.15,0.06],[0.17,0.2],[0.13,0.34],[0.01,0.4]]);
+    if (round && spec.headShape !== "block") partLathe("head", 0, 1.68 * sc, 0, [[0.01,0],[0.15,0.06],[0.17,0.2],[0.13,0.34],[0.01,0.4]]);
     else partBox("head", 0, 1.9 * sc, 0, 0.4, 0.4, 0.4);
     // limbs: tapered cylinders, pivot recorded at the joint
     function makeLimb(name, lower, px, py, thick, len) {
@@ -332,10 +380,25 @@ function buildMesh(name, spec) {
       else partBox(lower, px, py - half - half/2*sc, 0, thick*2.0, half, thick*2.0);
       g.parts[lower] = { pivot: v3(px, py - half, 0), parent: name };
     }
-    makeLimb("armL", "foreL", -0.40 * sc, 1.52 * sc, 0.09, 0.72 * sc);
-    makeLimb("armR", "foreR",  0.40 * sc, 1.52 * sc, 0.09, 0.72 * sc);
-    makeLimb("legL", "shinL", -0.16 * sc, 1.00 * sc, 0.11, 1.00 * sc);
-    makeLimb("legR", "shinR",  0.16 * sc, 1.00 * sc, 0.11, 1.00 * sc);
+    var BK = spec.bulk || 1, LL = spec.limbLen || 1;
+    makeLimb("armL", "foreL", -0.40 * sc, 1.52 * sc, 0.09 * BK, 0.72 * sc * LL);
+    makeLimb("armR", "foreR",  0.40 * sc, 1.52 * sc, 0.09 * BK, 0.72 * sc * LL);
+    makeLimb("legL", "shinL", -0.16 * sc, 1.00 * sc, 0.11 * BK, 1.00 * sc * LL);
+    makeLimb("legR", "shinR",  0.16 * sc, 1.00 * sc, 0.11 * BK, 1.00 * sc * LL);
+    if (spec.held) {
+      var whx = 0.40 * sc, why = 0.80 * sc * LL;
+      var wt = spec.held.type || "club";
+      if (wt === "sword") {
+        partBox("weapon", whx, why + 0.55 * sc, 0, 0.07, 1.1 * sc, 0.03);
+      } else if (wt === "staff") {
+        partBox("weapon", whx, why + 0.3 * sc, 0, 0.06, 2.0 * sc, 0.06);
+      } else {
+        if (round) partLathe("weapon", whx, why, 0, [[0.04, 0], [0.06, 0.35], [0.1, 0.6], [0.11, 0.75], [0.01, 0.85]]);
+        else partBox("weapon", whx, why + 0.4 * sc, 0, 0.16, 0.8 * sc, 0.16);
+      }
+      g.parts["weapon"] = { pivot: v3(whx, why, 0), parent: "foreR" };
+    }
+
     g.parts["torso"] = { pivot: v3(0, 1.0 * sc, 0) };
     g.parts["head"] = { pivot: v3(0, 1.68 * sc, 0) };
     // Bone hierarchy (Godot Skeleton3D shape): rotating torso carries the
@@ -351,6 +414,16 @@ function buildMesh(name, spec) {
     g.rigged = true;
     } else {
     g = buildMesh("_fallback", { type: "box", size: [1, 1, 1] });
+  }
+  if (spec.meshScale) {
+    for (i = 0; i < g.verts.length; i++) {
+      g.verts[i].x *= spec.meshScale; g.verts[i].y *= spec.meshScale; g.verts[i].z *= spec.meshScale;
+    }
+    if (g.parts) for (var pk in g.parts) {
+      g.parts[pk].pivot = v3(g.parts[pk].pivot.x * spec.meshScale,
+                             g.parts[pk].pivot.y * spec.meshScale,
+                             g.parts[pk].pivot.z * spec.meshScale);
+    }
   }
   meshCache[name] = g;
   return g;
