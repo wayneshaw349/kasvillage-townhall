@@ -348,6 +348,10 @@ function buildMesh(name, spec) {
     var sc = (spec.scale || 1) * (beast ? 1.5 : 1);
     sc *= (spec.height || 1);
     var HS = spec.headSize || 1, SW = spec.shoulderW || 1, HW = spec.hipW || 1;
+    if (spec.build === "fem") { SW *= 0.86; HW *= 1.12; }
+    else if (spec.build === "masc") { SW *= 1.12; HW *= 0.95; }
+    var WA = spec.waist != null ? spec.waist : (spec.build === "fem" ? 0.82 : 1);
+    var CH = spec.chest != null ? spec.chest : (spec.build === "fem" ? 1.12 : 1);
     var TL = spec.torsoLen || 1, NL = spec.neckLen || 1, HUN = spec.hunch || 0;
     var QUAD = spec.bodyPlan === "quadruped";
     var DIG = !!spec.digitigrade;
@@ -397,7 +401,7 @@ function buildMesh(name, spec) {
     if (QUAD) {
       if (round) partLathe("torso", 0, 0.95 * sc, 0, [[0.30 * BKt, -0.55 * TL], [0.36 * BKt, -0.1], [0.34 * BKt, 0.35 * TL], [0.22 * BKt, 0.6 * TL]], 7);
       else partBox("torso", 0, 0.95 * sc, 0, 0.55 * BKt, 0.7 * TL, 1.5 * TL);
-    } else if (round) partLathe("torso", 0, 1.0 * sc, 0, [[0.26 * HW * BKt, 0], [0.34 * BKt, 0.25 * TL], [0.30 * SW * BKt, 0.55 * TL], [0.18 * SW, 0.62 * TL]]);
+    } else if (round) partLathe("torso", 0, 1.0 * sc, 0, [[0.26 * HW * BKt, 0], [0.30 * HW * BKt, 0.12 * TL], [0.25 * WA * BKt, 0.3 * TL], [0.33 * CH * BKt, 0.46 * TL], [0.30 * SW * BKt, 0.58 * TL], [0.18 * SW, 0.64 * TL]]);
     else partBox("torso", 0, 1.28 * sc, 0, 0.62 * SW * BKt, 0.6 * TL, 0.4 * BKt);
     // head: small lathe sphere-ish
     var HY = QUAD ? 1.25 * sc : (1.68 * TL * NL) * sc;
@@ -1205,6 +1209,62 @@ function updateActor(n, dt) {
   }
   var ctl = n.controller;
 
+  if (ctl && ctl.type === "firstPerson") {
+    camYaw += (INPUT.look.x || 0) * dt * 90 * (ctl.sensitivity || 1);
+    camPitch = Math.max(-70, Math.min(70, camPitch - (INPUT.look.y || 0) * dt * 70 * (ctl.sensitivity || 1)));
+    t.rot[1] = camYaw;
+    var fsp = (n.stats && n.stats.speed) || 4;
+    if (INPUT.move.length > 0.05) {
+      var fang = camYaw * DEG, ffx = Math.sin(fang), ffz = Math.cos(fang);
+      var fdx = (ffx * INPUT.move.y + ffz * INPUT.move.x) * fsp * dt;
+      var fdz = (ffz * INPUT.move.y - ffx * INPUT.move.x) * fsp * dt;
+      var fnx = t.pos[0] + fdx, fnz = t.pos[2] + fdz;
+      var ftm = scene._tilemap;
+      if (!(ftm ? tilemapBlocked(ftm, fnx, fnz) : !walkmeshAllows(fnx, fnz))) { t.pos[0] = fnx; t.pos[2] = fnz; }
+    }
+    var fgy = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
+    n._vy = (n._vy || 0);
+    if (INPUT.interact.pressed && Math.abs(n._airY || 0) < 0.01) { n._vy = ctl.jumpVelocity || 7; playSound("__jump", { x: t.pos[0], z: t.pos[2] }); }
+    n._vy -= (ctl.gravity || 18) * dt;
+    n._airY = Math.max(0, (n._airY || 0) + n._vy * dt);
+    if (n._airY === 0 && n._vy < 0) n._vy = 0;
+    t.pos[1] = fgy + n._airY;
+    var wcur = currentWeapon();
+    if (wcur) {
+      if (WEP.reloading > 0) {
+        WEP.reloading -= dt;
+        if (WEP.reloading <= 0) { WEP.ammo[WEP.idx] = wcur.ammo; WEP.reloading = 0; }
+      }
+      if (WEP.raise > 0) WEP.raise -= dt;
+      WEP.cool -= dt;
+      var firing = wcur.auto ? INPUT.attack.held : INPUT.attack.pressed;
+      if (!firing) { WEP.sprayT += dt; if (WEP.sprayT > 0.35) WEP.sprayN = Math.max(0, WEP.sprayN - dt * 9); }
+      if (WEP.ammo[WEP.idx] == null) WEP.ammo[WEP.idx] = wcur.ammo;
+      if (firing && WEP.cool <= 0 && WEP.reloading <= 0 && WEP.raise <= 0) {
+        if (WEP.ammo[WEP.idx] <= 0) { reloadWeapon(); }
+        else {
+          WEP.ammo[WEP.idx]--;
+          WEP.cool = 1 / (wcur.fireRate || 6);
+          WEP.sprayT = 0;
+          var pat = wcur.recoil || [[0, -2.5]];
+          var pk = pat[Math.min(pat.length - 1, Math.floor(WEP.sprayN))];
+          WEP.sprayN += 1;
+          viewPunch(pk[1], pk[0]);
+          VM.flash = 0.06;
+          camPitch = Math.max(-70, Math.min(70, camPitch - pk[1] * 0.35 * (1 - VM.ads * 0.4)));
+          camYaw += pk[0] * 0.3 * (1 - VM.ads * 0.4);
+          var sprd = (wcur.spread || 2) * (1 - VM.ads * 0.7) * 0.01;
+          var wang2 = (camYaw + (Math.random() - 0.5) * sprd * 60) * DEG;
+          var wpitch2 = Math.sin((-camPitch + (Math.random() - 0.5) * sprd * 40) * DEG);
+          shoot({ x: t.pos[0], y: t.pos[1], z: t.pos[2] },
+                { x: Math.sin(wang2), y: wpitch2, z: Math.cos(wang2) },
+                { speed: wcur.speed || 45, damage: wcur.damage || 8,
+                  color: wcur.projColor || "#ffd88a", owner: n.id,
+                  sound: wcur.sound || "__hit", explode: wcur.explode || null, trail: true });
+        }
+      }
+    }
+  }
   if (ctl && ctl.type === "thirdPerson") {
     camYaw += INPUT.look.x * dt * 60 * 0.5;
     var sp = (n.stats && n.stats.speed) || 4;
@@ -1564,6 +1624,15 @@ function gotoRoom(id) { scene._room = id; if (scene.rooms && scene.rooms.defs &&
 function runAction(self, a) {
   if (a && a.action === "gotoRoom") { gotoRoom((a.args && a.args[0]) || a.target); return; }
   if (a && a.action === "playSound") { playSound((a.args && a.args[0]) || a.target, self && self.worldPos); return; }
+  if (a && a.action === "shoot" && self && self.transform) {
+    var sag = (self.transform.rot[1] || 0) * DEG;
+    var sargs = a.args || [];
+    shoot({ x: self.transform.pos[0], y: self.transform.pos[1], z: self.transform.pos[2] },
+          { x: Math.sin(sag), y: sargs[2] != null ? sargs[2] : 0.05, z: Math.cos(sag) },
+          { speed: sargs[0] || 26, damage: sargs[1] || 6, owner: self.id,
+            gravity: sargs[3] || 0, color: a.color || "#e8ddc0" });
+    return;
+  }
   if (a && a.action === "explode") {
     var xt = (a.target && nodes[a.target]) || self;
     if (xt && xt.transform) explode(xt.transform.pos[0], xt.transform.pos[1], xt.transform.pos[2],
@@ -4538,11 +4607,13 @@ function renderFrame() {
       }
     }
   }
+  if ((scene.render || {}).viewmodel) updateViewmodel(1 / 60);
   renderProjectiles();
   renderLockMarker();
   renderExplosions();
   renderDice();
   for (var fh = 0; fh < FRAME_HOOKS.length; fh++) { try { FRAME_HOOKS[fh](ctx); } catch (e) {} }
+  if (r.viewmodel) drawViewmodel(r.viewmodel);
   if (r.post && r.post.enabled) drawPostFX(r.post);
 }
 
@@ -4580,6 +4651,245 @@ function drawPostFX(cfg) {
     }
     ctx.fillStyle = VIG_CACHE;
     ctx.fillRect(0, 0, W, H);
+  }
+}
+
+// ---- VIEWMODEL (id Tech pass + Source motion) ----
+var VM = { bob: 0, punchP: 0, punchY: 0, vpP: 0, vpY: 0, swayX: 0, swayY: 0, ads: 0, flash: 0 };
+var WEP = { idx: 0, cool: 0, sprayN: 0, sprayT: 0, ammo: {}, reloading: 0, raise: 0 };
+var BUILTIN_WEAPONS = {
+  rifle:  { parts: { body: "boxy", barrel: "long", stock: "heavy", mag: "curved" }, color: "#3a3f45", accent: "#6a4a2a",
+            fireRate: 9, damage: 9, speed: 55, spread: 2.0, auto: true, ammo: 30, reloadTime: 1.7,
+            recoil: [[0, -2.4], [0.3, -2.9], [-0.5, -3.1], [0.9, -2.6], [-0.8, -2.2]], projColor: "#ffd88a" },
+  pistol: { parts: { body: "compact", barrel: "short", stock: "none", mag: "straight" }, color: "#2f3338", accent: "#8a8378",
+            fireRate: 4, damage: 12, speed: 48, spread: 1.1, auto: false, ammo: 12, reloadTime: 1.2,
+            recoil: [[0, -3.4], [0.4, -3.0]], projColor: "#ffe8a0" },
+  cannon: { parts: { body: "bulky", barrel: "wide", stock: "heavy", mag: "drum" }, color: "#4a3a30", accent: "#c0392b",
+            fireRate: 1.1, damage: 22, speed: 30, spread: 3.5, auto: false, ammo: 5, reloadTime: 2.6,
+            recoil: [[0, -9], [1.4, -7]], projColor: "#ff9a3c", explode: { radius: 3.2, force: 8, damage: 12 } },
+  smg:    { parts: { body: "compact", barrel: "stub", stock: "folding", mag: "long" }, color: "#33383d", accent: "#556",
+            fireRate: 15, damage: 5, speed: 50, spread: 3.2, auto: true, ammo: 40, reloadTime: 1.4,
+            recoil: [[0, -1.6], [0.5, -1.9], [-0.6, -2.1], [0.7, -1.7]], projColor: "#cfe8ff" }
+};
+function weaponDef(id) { return ((scene.resources || {}).weapons || {})[id] || BUILTIN_WEAPONS[id] || null; }
+function equipList(n) {
+  var ctl = n && n.controller;
+  return (ctl && ctl.weapons) || [((scene.render || {}).viewmodel || {}).shape || "rifle"];
+}
+function currentWeapon() {
+  var pl = nodes[playerId];
+  var list = equipList(pl);
+  return weaponDef(list[WEP.idx % list.length]);
+}
+function switchWeapon(i) {
+  var pl = nodes[playerId];
+  var list = equipList(pl);
+  WEP.idx = ((i % list.length) + list.length) % list.length;
+  WEP.raise = 0.28; WEP.sprayN = 0; WEP.reloading = 0;
+  playSound("__step");
+}
+function nextWeapon() { switchWeapon(WEP.idx + 1); }
+function reloadWeapon() {
+  var w = currentWeapon();
+  if (!w || WEP.reloading > 0) return;
+  WEP.reloading = w.reloadTime || 1.5;
+  playSound("__block");
+}
+function drawWeaponShapes(x, y, sc2, shapes) {
+  var top = -20;
+  for (var i = 0; i < shapes.length; i++) {
+    var sh = shapes[i];
+    ctx.globalAlpha = sh.alpha != null ? sh.alpha : 1;
+    ctx.fillStyle = sh.color || "#3a3f45";
+    ctx.strokeStyle = sh.color || "#3a3f45";
+    if (sh.poly) {
+      ctx.beginPath();
+      for (var p = 0; p < sh.poly.length; p++) {
+        var px = x + sh.poly[p][0] * sc2, py = y + sh.poly[p][1] * sc2;
+        if (sh.poly[p][1] < top) top = sh.poly[p][1];
+        if (p === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      if (sh.outline) { ctx.lineWidth = (sh.width || 2) * sc2; ctx.stroke(); } else ctx.fill();
+    } else if (sh.rect) {
+      ctx.fillRect(x + sh.rect[0] * sc2, y + sh.rect[1] * sc2, sh.rect[2] * sc2, sh.rect[3] * sc2);
+      if (sh.rect[1] < top) top = sh.rect[1];
+    } else if (sh.circle) {
+      ctx.beginPath();
+      ctx.arc(x + sh.circle[0] * sc2, y + sh.circle[1] * sc2, sh.circle[2] * sc2, 0, Math.PI * 2);
+      ctx.fill();
+      if (sh.circle[1] - sh.circle[2] < top) top = sh.circle[1] - sh.circle[2];
+    } else if (sh.line) {
+      ctx.lineWidth = (sh.width || 3) * sc2;
+      ctx.beginPath();
+      ctx.moveTo(x + sh.line[0] * sc2, y + sh.line[1] * sc2);
+      ctx.lineTo(x + sh.line[2] * sc2, y + sh.line[3] * sc2);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  return -top;
+}
+function drawWeaponParts(x, y, sc2, w) {
+  var P = w.parts || {}, col = w.color || "#3a3f45", ac = w.accent || "#22262a";
+  var bodyW = P.body === "bulky" ? 40 : (P.body === "compact" ? 24 : 32);
+  var bodyH = P.body === "bulky" ? 64 : (P.body === "compact" ? 40 : 54);
+  var barLen = P.barrel === "long" ? 104 : (P.barrel === "wide" ? 74 : (P.barrel === "stub" ? 44 : 58));
+  var barW = P.barrel === "wide" ? 26 : (P.barrel === "long" ? 14 : 16);
+  ctx.fillStyle = col;
+  ctx.fillRect(x - bodyW / 2 * sc2, y - 12 * sc2, bodyW * sc2, bodyH * sc2);
+  ctx.fillRect(x - barW / 2 * sc2, y - barLen * sc2, barW * sc2, barLen * sc2);
+  ctx.fillStyle = ac;
+  if (P.stock === "heavy") ctx.fillRect(x + 4 * sc2, y + 30 * sc2, 20 * sc2, 40 * sc2);
+  else if (P.stock === "folding") ctx.fillRect(x + 6 * sc2, y + 26 * sc2, 12 * sc2, 26 * sc2);
+  if (P.mag === "curved") { ctx.fillRect(x - 6 * sc2, y + 22 * sc2, 14 * sc2, 30 * sc2); ctx.fillRect(x - 10 * sc2, y + 40 * sc2, 14 * sc2, 16 * sc2); }
+  else if (P.mag === "drum") { ctx.beginPath(); ctx.arc(x, y + 34 * sc2, 18 * sc2, 0, Math.PI * 2); ctx.fill(); }
+  else if (P.mag === "long") ctx.fillRect(x - 5 * sc2, y + 22 * sc2, 12 * sc2, 44 * sc2);
+  else if (P.mag === "straight") ctx.fillRect(x - 5 * sc2, y + 20 * sc2, 11 * sc2, 26 * sc2);
+  if (P.scope && P.scope !== "none") {
+    ctx.fillStyle = "#1c1f22";
+    ctx.fillRect(x - 10 * sc2, y - 34 * sc2, 22 * sc2, 10 * sc2);
+  }
+  return barLen;
+}
+function viewPunch(p, y) { VM.vpP += p; VM.vpY += y; }
+function fireViewmodel() { viewPunch(-2.4, (Math.random() - 0.5) * 1.2); VM.flash = 0.06; }
+function updateViewmodel(dt) {
+  var pl = nodes[playerId];
+  var spd = pl ? (pl._moveSpeed || 0) : 0;
+  VM.bob += dt * (3 + spd * 1.6);
+  var K = 60, D = 12;
+  VM.punchP += (VM.vpP - VM.punchP) * Math.min(1, dt * 14);
+  VM.punchY += (VM.vpY - VM.punchY) * Math.min(1, dt * 14);
+  VM.vpP -= VM.vpP * Math.min(1, dt * 6);
+  VM.vpY -= VM.vpY * Math.min(1, dt * 6);
+  VM.swayX += ((INPUT.look.x || 0) * 26 - VM.swayX) * Math.min(1, dt * 6);
+  VM.swayY += ((INPUT.look.y || 0) * 20 - VM.swayY) * Math.min(1, dt * 6);
+  var wantAds = INPUT.interact && INPUT.interact.held ? 1 : 0;
+  VM.ads += (wantAds - VM.ads) * Math.min(1, dt * 8);
+  if (VM.flash > 0) VM.flash -= dt;
+  VM._spd = spd;
+}
+function drawViewmodel(cfg) {
+  var shape = cfg.shape || "rifle";
+  var sc2 = (cfg.scale || 1) * Math.min(W, H) / 240;
+  var bobA = Math.min(1, (VM._spd || 0) / 4) * (1 - VM.ads * 0.7);
+  var bx = Math.sin(VM.bob) * 7 * bobA * sc2;
+  var by = Math.abs(Math.cos(VM.bob)) * 5 * bobA * sc2;
+  var restX = W * (0.68 - VM.ads * 0.18), restY = H * (0.72 - VM.ads * 0.06);
+  var dip = (WEP.reloading > 0 ? 60 : 0) + (WEP.raise > 0 ? WEP.raise * 220 : 0);
+  if (cfg.scope && VM.ads > 0.55) { drawCrosshair(VM.ads, VM._spd || 0, 1); return; }
+  restY += dip;
+  var x = restX + bx - VM.swayX * sc2 + VM.punchY * 4 * sc2;
+  var y = restY + by - VM.swayY * sc2 - VM.punchP * 5 * sc2;
+  var col = cfg.color || "#3a3f45";
+  ctx.save();
+  if (shape === "bow") {
+    ctx.strokeStyle = cfg.color || "#7a5a3a";
+    ctx.lineWidth = 4 * sc2;
+    ctx.beginPath();
+    ctx.arc(x - 40 * sc2, y - 30 * sc2, 70 * sc2, -Math.PI * 0.62, Math.PI * 0.62);
+    ctx.stroke();
+    ctx.strokeStyle = "#e8ddd0"; ctx.lineWidth = 1.5 * sc2;
+    ctx.beginPath();
+    ctx.moveTo(x - 40 * sc2 + Math.cos(-Math.PI * 0.62) * 70 * sc2, y - 30 * sc2 + Math.sin(-Math.PI * 0.62) * 70 * sc2);
+    ctx.lineTo(x + 6 * sc2, y - 30 * sc2);
+    ctx.lineTo(x - 40 * sc2 + Math.cos(Math.PI * 0.62) * 70 * sc2, y - 30 * sc2 + Math.sin(Math.PI * 0.62) * 70 * sc2);
+    ctx.stroke();
+  } else if (shape === "staff") {
+    ctx.strokeStyle = cfg.color || "#6a4a2a"; ctx.lineWidth = 9 * sc2;
+    ctx.beginPath(); ctx.moveTo(x + 60 * sc2, y + 90 * sc2); ctx.lineTo(x - 30 * sc2, y - 70 * sc2); ctx.stroke();
+    ctx.fillStyle = "#9fe8ff";
+    ctx.beginPath(); ctx.arc(x - 32 * sc2, y - 76 * sc2, 11 * sc2, 0, Math.PI * 2); ctx.fill();
+  } else {
+    var wdef = weaponDef(shape);
+    if (wdef && (wdef.shapes || wdef.adsShapes)) {
+      var useShapes = (VM.ads > 0.6 && wdef.adsShapes) ? wdef.adsShapes : (wdef.shapes || []);
+      var mtop = drawWeaponShapes(x, y, sc2, useShapes);
+      if (VM.flash > 0) {
+        var mz = wdef.muzzle || [0, -mtop];
+        ctx.globalAlpha = Math.min(1, VM.flash * 16);
+        ctx.fillStyle = wdef.flashColor || "#fff3b0";
+        ctx.beginPath();
+        ctx.arc(x + mz[0] * sc2, y + mz[1] * sc2, (wdef.flashSize || 16) * sc2, 0, Math.PI * 2);
+        ctx.fill(); ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+      drawCrosshair(VM.ads, VM._spd || 0, wdef.spread || 2);
+      return;
+    }
+    if (wdef && wdef.parts) {
+      var blen = drawWeaponParts(x, y, sc2, wdef);
+      if (VM.flash > 0) {
+        ctx.globalAlpha = Math.min(1, VM.flash * 16);
+        ctx.fillStyle = "#fff3b0";
+        ctx.beginPath(); ctx.arc(x, y - blen * sc2, (wdef.parts.barrel === "wide" ? 26 : 16) * sc2, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+      drawCrosshair(VM.ads, VM._spd || 0, wdef.spread || 2);
+      return;
+    }
+    var barrelLen = shape === "pistol" ? 46 : 96;
+    ctx.fillStyle = col;
+    ctx.fillRect(x - 12 * sc2, y - 12 * sc2, 30 * sc2, 56 * sc2);
+    ctx.fillRect(x - 8 * sc2, y - barrelLen * sc2, 15 * sc2, barrelLen * sc2);
+    ctx.fillStyle = "#22262a";
+    ctx.fillRect(x + 2 * sc2, y + 26 * sc2, 12 * sc2, 34 * sc2);
+    if (shape !== "pistol") ctx.fillRect(x - 26 * sc2, y - 4 * sc2, 16 * sc2, 20 * sc2);
+  }
+  if (VM.flash > 0) {
+    var fy = shape === "pistol" ? y - 50 * sc2 : y - 100 * sc2;
+    ctx.globalAlpha = Math.min(1, VM.flash * 16);
+    ctx.fillStyle = "#fff3b0";
+    ctx.beginPath(); ctx.arc(x, fy, 16 * sc2, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  drawCrosshair(VM.ads, VM._spd || 0, 2);
+}
+function drawCrosshair(ads, spd, spread) {
+  var vmc = (scene.render || {}).viewmodel || {};
+  if (vmc.scope && ads > 0.55) {
+    var rr2 = Math.min(W, H) * 0.36;
+    ctx.save();
+    ctx.globalAlpha = (ads - 0.55) / 0.45;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.arc(W / 2, H / 2, rr2, 0, Math.PI * 2, true);
+    ctx.fill("evenodd");
+    ctx.strokeStyle = "#0a0c0e"; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(W / 2, H / 2, rr2, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(220,230,210,0.85)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(W / 2 - rr2 * 0.85, H / 2); ctx.lineTo(W / 2 - 8, H / 2);
+    ctx.moveTo(W / 2 + 8, H / 2); ctx.lineTo(W / 2 + rr2 * 0.85, H / 2);
+    ctx.moveTo(W / 2, H / 2 - rr2 * 0.85); ctx.lineTo(W / 2, H / 2 - 8);
+    ctx.moveTo(W / 2, H / 2 + 8); ctx.lineTo(W / 2, H / 2 + rr2 * 0.85);
+    ctx.stroke();
+    for (var mk = 1; mk <= 4; mk++) {
+      var my = H / 2 + mk * rr2 * 0.16;
+      ctx.beginPath(); ctx.moveTo(W / 2 - 5, my); ctx.lineTo(W / 2 + 5, my); ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+  ctx.strokeStyle = "rgba(232,226,208,0.7)"; ctx.lineWidth = 1;
+  var cx2 = W / 2, cy2 = H / 2;
+  var gap = 3 + (1 - ads) * spread * 1.6 + spd + WEP.sprayN * 0.6;
+  ctx.beginPath();
+  ctx.moveTo(cx2 - gap - 5, cy2); ctx.lineTo(cx2 - gap, cy2);
+  ctx.moveTo(cx2 + gap, cy2); ctx.lineTo(cx2 + gap + 5, cy2);
+  ctx.moveTo(cx2, cy2 - gap - 5); ctx.lineTo(cx2, cy2 - gap);
+  ctx.moveTo(cx2, cy2 + gap); ctx.lineTo(cx2, cy2 + gap + 5);
+  ctx.stroke();
+  var w2 = currentWeapon();
+  if (w2) {
+    var am = WEP.ammo[WEP.idx];
+    ctx.fillStyle = "#e8e2d0"; ctx.font = "14px monospace";
+    ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    ctx.fillText(WEP.reloading > 0 ? "RELOADING" : ((am != null ? am : w2.ammo) + " / " + w2.ammo), W - 12, H - 10);
   }
 }
 
