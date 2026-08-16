@@ -1177,6 +1177,39 @@ function updateActor(n, dt) {
   }
   t.pos = t.pos || [0, 0, 0];
   t.rot = t.rot || [0, 0, 0];
+  if (n._grabbing) {
+    var gvn = nodes[n._grabbing.id];
+    if (!gvn || gvn._dead) { n._grabbing = null; }
+    else {
+      n._grabbing.t += dt;
+      var gdef = n._grabbing.def;
+      var gy2 = (n.transform.rot[1] || 0) * DEG;
+      var hold = gdef.holdDist != null ? gdef.holdDist : 0.9;
+      gvn.transform.pos[0] = n.transform.pos[0] + Math.sin(gy2) * hold;
+      gvn.transform.pos[2] = n.transform.pos[2] + Math.cos(gy2) * hold;
+      gvn.transform.pos[1] = n.transform.pos[1] + (gdef.lift || 0.35);
+      gvn.transform.rot[1] = (n.transform.rot[1] || 0) + 180;
+      if (gvn._grabBreak && n._grabbing.t < n._grabbing.breakWindow) {
+        gvn._grabBreak = false; gvn._grabbedBy = null;
+        gvn.transform.pos[1] = n.transform.pos[1];
+        gvn._addPose = { id: "__stumble", t: 0 };
+        if (POSED.indexOf(gvn) < 0) POSED.push(gvn);
+        n._grabbing = null;
+        playSound("__block");
+      } else if (n._grabbing.t >= (gdef.duration || 0.7)) {
+        var thf = gdef.throwForce || 9;
+        if (gvn.stats) gvn.hp = Math.max(0, (gvn.hp || 0) - (gdef.damage || 12));
+        gvn._deathImpulse = { x: Math.sin(gy2) * thf, y: 4, z: Math.cos(gy2) * thf };
+        gvn._addPose = { id: "__stumble", t: 0 };
+        if (POSED.indexOf(gvn) < 0) POSED.push(gvn);
+        if (gdef.ragdoll !== false && gvn.ragdoll && gvn.ragdoll.enabled !== false) startRagdoll(gvn, gvn._deathImpulse);
+        gvn._grabbedBy = null;
+        n._grabbing = null;
+        playSound("__thud", { x: gvn.transform.pos[0], z: gvn.transform.pos[2] });
+      }
+    }
+  }
+  if (n._grabbedBy) return;
   if (n.hover) {
     var hvG = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
     var hvTarget = hvG + (n.hover.height != null ? n.hover.height : 1.2);
@@ -3697,7 +3730,10 @@ function playPose(n, id) {
   n._xfT = n._xfDur > 0 ? 0 : null;
   if (POSED.indexOf(n) < 0) POSED.push(n);
 }
+function breakGrab(n) { if (n && n._grabbedBy) n._grabBreak = true; }
+function setStance(n, s) { if (n) n.stance = s; }
 function queueAttack(n, id) {
+  if (n._grabbedBy || (n._stunT && world.time < n._stunT)) return;
   if (!poseDef(id)) return;
   if (!n._pose) { playPose(n, id); return; }
   var qd = poseDef(n._pose.id);
@@ -3747,6 +3783,7 @@ function updatePoseClips(dt) {
     var n = POSED[i];
     if (!n._pose) { if (!n._addPose) POSED.splice(i, 1); continue; }
     var def = poseDef(n._pose.id);
+    if (def && def.combat && def.combat.toStance && n._pose.t >= (def.dur || 1) - 0.02) n.stance = def.combat.toStance;
     if (!def) { n._pose = null; continue; }
     if (n._hitstop && n._hitstop > 0) { n._hitstop -= dt; if (n._hitstop > 0) continue; n._hitstop = 0; }
     if (n._xfT != null) n._xfT += dt;
@@ -3763,6 +3800,28 @@ function updatePoseClips(dt) {
         var nxa = n._nextAttack; n._nextAttack = null;
         playPose(n, nxa);
         continue;
+      }
+      if (cbt.stance && n.stance && cbt.stance !== n.stance) { n._pose = null; continue; }
+      if (cbt.grab && !n._pose.fired.__grab && n._combatPhase === "active") {
+        var gr = cbt.grab;
+        var gya = (n.transform.rot[1] || 0) * DEG;
+        var gx = n.transform.pos[0] + Math.sin(gya) * (gr.range || 1.1);
+        var gz = n.transform.pos[2] + Math.cos(gya) * (gr.range || 1.1);
+        var gk2 = Object.keys(nodes);
+        for (var gi = 0; gi < gk2.length; gi++) {
+          var gv = nodes[gk2[gi]];
+          if (gv === n || gv._dead || gv._ragStop || !gv.transform) continue;
+          if (gr.filter && !tagMatch(gv, gr.filter)) continue;
+          var gdx = gv.transform.pos[0] - gx, gdz = gv.transform.pos[2] - gz;
+          if (gdx * gdx + gdz * gdz > (gr.radius || 0.8)) continue;
+          n._pose.fired.__grab = 1;
+          n._grabbing = { id: gv.id, t: 0, breakWindow: gr.breakWindow || 0.25, def: gr };
+          gv._grabbedBy = n.id;
+          gv._grabT = 0;
+          if (gr.victimPose) { gv._pose = { id: gr.victimPose, t: 0, fired: {} }; if (POSED.indexOf(gv) < 0) POSED.push(gv); }
+          playSound(gr.sound || "__block", { x: gx, z: gz });
+          break;
+        }
       }
       if (n._combatPhase === "active" && !n._pose.fired.__hit) {
         var hb = cbt.hitbox || {};
@@ -3785,7 +3844,23 @@ function updatePoseClips(dt) {
           var hdy = (htg.transform.pos[1] + 1.0) - hby;
           if (hdx * hdx + hdy * hdy + hdz * hdz > hbr * hbr) continue;
           n._pose.fired.__hit = 1;
-          if (htg.stats) htg.hp = Math.max(0, (htg.hp || 0) - (hb.damage != null ? hb.damage : 5));
+          var dmgIn = hb.damage != null ? hb.damage : 5;
+          var stanceDef = ((scene.resources || {}).stances || {})[htg.stance || ""] || {};
+          var guarded = stanceDef.guard && (!hb.level || stanceDef.guard === "all" || stanceDef.guard === hb.level);
+          if (guarded) {
+            htg.posture = (htg.posture || 0) + dmgIn;
+            dmgIn = Math.round(dmgIn * (stanceDef.chip != null ? stanceDef.chip : 0.15));
+            playSound("__block", { x: hbx, z: hbz });
+            if (htg.posture >= (htg.postureMax || 40)) {
+              htg.posture = 0;
+              htg._addPose = { id: "__stumble", t: 0 };
+              htg._stunT = world.time + 1.2;
+              if (POSED.indexOf(htg) < 0) POSED.push(htg);
+            }
+          } else { htg.posture = Math.max(0, (htg.posture || 0) - dmgIn * 0.3); }
+          var sMul = (((scene.resources || {}).stances || {})[n.stance || ""] || {}).damageMul;
+          if (sMul) dmgIn = Math.round(dmgIn * sMul);
+          if (htg.stats) htg.hp = Math.max(0, (htg.hp || 0) - dmgIn);
           n._hitstop = 0.1; htg._hitstop = 0.1;
           var hpb = hb.pushback != null ? hb.pushback : 3;
           htg.transform.pos[0] += Math.sin(hya) * hpb * 0.1;
