@@ -3391,6 +3391,9 @@ function playPose(n, id) {
   var def = poseDef(id);
   if (!def) return;
   n._pose = { id: id, t: 0, fired: {} };
+  n._xfFrom = basePose(n._lastLiving || {});
+  n._xfDur = def.blendIn != null ? def.blendIn : 0.1;
+  n._xfT = n._xfDur > 0 ? 0 : null;
   if (POSED.indexOf(n) < 0) POSED.push(n);
 }
 function queueAttack(n, id) {
@@ -3409,6 +3412,7 @@ function samplePoseTrack(keys, t) {
     var ka = keys[i], kb = keys[i + 1];
     if (t >= ka[0] && t <= kb[0]) {
       var u = (t - ka[0]) / ((kb[0] - ka[0]) || 1e-9);
+      u = u * u * (3 - 2 * u);
       var A = poseAngles(ka[1]) || { rx: 0, ry: 0, rz: 0 };
       var B = poseAngles(kb[1]) || { rx: 0, ry: 0, rz: 0 };
       return { rx: A.rx + (B.rx - A.rx) * u,
@@ -3444,6 +3448,7 @@ function updatePoseClips(dt) {
     var def = poseDef(n._pose.id);
     if (!def) { n._pose = null; continue; }
     if (n._hitstop && n._hitstop > 0) { n._hitstop -= dt; if (n._hitstop > 0) continue; n._hitstop = 0; }
+    if (n._xfT != null) n._xfT += dt;
     var prevT = n._pose.t;
     n._pose.t += dt;
     var dur = def.dur || 1;
@@ -3613,6 +3618,7 @@ function samplePoseTrack3(keys, t) {
     var ka = keys[i], kb = keys[i + 1];
     if (t >= ka[0] && t <= kb[0]) {
       var u = (t - ka[0]) / ((kb[0] - ka[0]) || 1e-9);
+      u = u * u * (3 - 2 * u);
       var A = V(ka[1]), B = V(kb[1]);
       return { x: A.x + (B.x - A.x) * u, y: A.y + (B.y - A.y) * u, z: A.z + (B.z - A.z) * u };
     }
@@ -3851,14 +3857,47 @@ function blendedPose(n) {
     }
     return p;
   }
-  n._lastLiving = p;
-  if (!n._lookYaw && !n._lookPitch) return p;
+  if (!n._pose && n._hadPose) {
+    n._xfFrom = basePose(n._lastLiving || {});
+    n._xfDur = 0.12; n._xfT = 0;
+  }
+  n._hadPose = !!n._pose;
   var out = {}, k;
   if (p) for (k in p) out[k] = p[k];
-  var lh = poseAngles(out.head) || { rx: 0, ry: 0, rz: 0 };
-  out.head = { rx: lh.rx + (n._lookPitch || 0), ry: lh.ry + (n._lookYaw || 0) * 0.7, rz: lh.rz };
-  var lt = poseAngles(out.torso) || { rx: 0, ry: 0, rz: 0 };
-  out.torso = { rx: lt.rx, ry: lt.ry + (n._lookYaw || 0) * 0.3, rz: lt.rz };
+  if (n._xfT != null && n._xfFrom) {
+    var xw = Math.min(1, n._xfT / (n._xfDur || 0.1));
+    var xe = xw * xw * (3 - 2 * xw);
+    out = lerpPose(n._xfFrom, basePose(out), xe);
+    if (xw >= 1) { n._xfT = null; n._xfFrom = null; }
+  }
+  if (n._lookYaw || n._lookPitch) {
+    var lh = poseAngles(out.head) || { rx: 0, ry: 0, rz: 0 };
+    out.head = { rx: lh.rx + (n._lookPitch || 0), ry: lh.ry + (n._lookYaw || 0) * 0.7, rz: lh.rz };
+    var lt = poseAngles(out.torso) || { rx: 0, ry: 0, rz: 0 };
+    out.torso = { rx: lt.rx, ry: lt.ry + (n._lookYaw || 0) * 0.3, rz: lt.rz };
+  }
+  if (n._geo && n._geo.rigged && n.springs !== false) {
+    var sdt = world.time - (n._sprT != null ? n._sprT : world.time);
+    n._sprT = world.time;
+    if (sdt > 0 && sdt < 0.1) {
+      n._spr = n._spr || {};
+      var SPB = ["head", "foreL", "foreR", "weapon"];
+      for (var si = 0; si < SPB.length; si++) {
+        var sbn = SPB[si];
+        if (!(n._geo.parts && n._geo.parts[sbn])) continue;
+        var tgt = poseAngles(out[sbn]) || { rx: 0, ry: 0, rz: 0 };
+        var st = n._spr[sbn];
+        if (!st) st = n._spr[sbn] = { x: tgt.rx, y: tgt.ry, z: tgt.rz, vx: 0, vy: 0, vz: 0 };
+        var K = 300, DA = Math.max(0, 1 - sdt * 16);
+        st.vx = (st.vx + (tgt.rx - st.x) * K * sdt) * DA;
+        st.vy = (st.vy + (tgt.ry - st.y) * K * sdt) * DA;
+        st.vz = (st.vz + (tgt.rz - st.z) * K * sdt) * DA;
+        st.x += st.vx * sdt; st.y += st.vy * sdt; st.z += st.vz * sdt;
+        out[sbn] = { rx: st.x, ry: st.y, rz: st.z };
+      }
+    }
+  }
+  n._lastLiving = out;
   return out;
 }
 function blendedPoseCore(n) {
