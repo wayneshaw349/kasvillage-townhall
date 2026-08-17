@@ -3720,7 +3720,9 @@ function playPose(n, id) {
   var def = poseDef(id);
   if (!def) return;
   n._pose = { id: id, t: 0, fired: {} };
-  n._xfFrom = basePose(n._lastLiving || {});
+  if (n._pose && n._pose.id !== id) { n._xfFrom = basePose(blendedPoseCore(n) || n._lastLiving || {}); n._xfSkip = 1; }
+  if (!n._xfSkip) n._xfFrom = basePose(n._lastLiving || {});
+  n._xfSkip = 0;
   n._xfDur = def.blendIn != null ? def.blendIn : 0.1;
   n._xfT = n._xfDur > 0 ? 0 : null;
   if (POSED.indexOf(n) < 0) POSED.push(n);
@@ -3785,7 +3787,27 @@ function updatePoseClips(dt) {
     var prevT = n._pose.t;
     n._pose.t += dt;
     var dur = def.dur || 1;
-    if (def.tracks && def.tracks.root && n.transform) applyRootMotion(n, def, prevT, n._pose.t);
+    if (def.tracks && def.tracks.root && n.transform) {
+      var warpK = 1;
+      if (def.combat && def.combat.warp && n._pose.t < 0.05) {
+        var wt = def.combat.warp;
+        var wtn = wt.target === "auto" ? (LOCK.target ? nodes[LOCK.target] : null) : nodes[wt.target];
+        if (wtn && wtn.transform) {
+          var wdx = wtn.transform.pos[0] - n.transform.pos[0];
+          var wdz = wtn.transform.pos[2] - n.transform.pos[2];
+          var wdist = Math.sqrt(wdx * wdx + wdz * wdz) - (wt.stopShort || 1.0);
+          var rk = def.tracks.root;
+          var rEnd = rk[rk.length - 1][1] || {};
+          var rTotal = Math.sqrt((rEnd.x || 0) * (rEnd.x || 0) + (rEnd.z || 0) * (rEnd.z || 0));
+          if (rTotal > 0.05 && wdist > 0) {
+            warpK = Math.max(0.25, Math.min(wt.maxScale || 2.5, wdist / rTotal));
+            n.transform.rot[1] = Math.atan2(wdx, wdz) / DEG;
+          }
+        }
+        n._warpK = warpK;
+      }
+      applyRootMotion(n, def, prevT, n._pose.t, n._warpK || 1);
+    }
     if (def.combat && n._pose && n.transform) {
       var cbt = def.combat, cph = cbt.phases || {};
       var ct = n._pose.t, cdur = def.dur || 1;
@@ -3964,7 +3986,7 @@ function blendTreePose(n, dt) {
 // ---- root motion ---------------------------------------------------------
 // A clip may carry a track named root: [[t,{x,y,z}],...]. The per-frame
 // delta is rotated into world space by the actor yaw and applied to pos.
-function applyRootMotion(n, def, prevT, nowT) {
+function applyRootMotion(n, def, prevT, nowT, warp) {
   var tr = (def.tracks || {}).root;
   if (!tr) return;
   var a = samplePoseTrack3(tr, prevT), b = samplePoseTrack3(tr, nowT);
@@ -3974,9 +3996,10 @@ function applyRootMotion(n, def, prevT, nowT) {
   var t = n.transform;
   var yaw = ((t.rot && t.rot[1]) || 0) * DEG;
   var c = Math.cos(yaw), s = Math.sin(yaw);
-  t.pos[0] += dx * c + dz * s;
+  var wk = warp || 1;
+  t.pos[0] += (dx * c + dz * s) * wk;
   t.pos[1] += dy;
-  t.pos[2] += -dx * s + dz * c;
+  t.pos[2] += (-dx * s + dz * c) * wk;
 }
 // Vector variant of samplePoseTrack for root tracks.
 function samplePoseTrack3(keys, t) {
@@ -4319,6 +4342,46 @@ function blendedPose(n) {
     }
   }
   if (n.footIK) out = applyFootIK(n, out);
+  if (n.footLock && n._geo && n._geo.rigged && !n._rag) {
+    var ph2 = n._gaitPhase || 0;
+    var planted = Math.sin(ph2) < 0 ? "L" : "R";
+    if (n._plantSide !== planted) { n._plantSide = planted; n._plantAt = null; }
+    var amt2 = n._gaitAmt || 0;
+    if (amt2 > 0.3 && (n._airY || 0) < 0.05) {
+      if (!n._plantAt) n._plantAt = [n.transform.pos[0], n.transform.pos[2]];
+      var lx = n.transform.pos[0] - n._plantAt[0];
+      var lz = n.transform.pos[2] - n._plantAt[1];
+      var ldist = Math.sqrt(lx * lx + lz * lz);
+      var maxStride = n.footLock.stride || 1.1;
+      if (ldist > maxStride) n._plantAt = [n.transform.pos[0], n.transform.pos[2]];
+      else {
+        var back = Math.min(38, ldist * 34) * (n.footLock.weight != null ? n.footLock.weight : 1);
+        var pb = poseAngles(out["leg" + planted]) || { rx: 0, ry: 0, rz: 0 };
+        out["leg" + planted] = { rx: pb.rx - back * 0.5, ry: pb.ry, rz: pb.rz };
+        var pk2 = poseAngles(out["shin" + planted]) || { rx: 0, ry: 0, rz: 0 };
+        out["shin" + planted] = { rx: pk2.rx + back * 0.35, ry: pk2.ry, rz: pk2.rz };
+      }
+    } else n._plantAt = null;
+  }
+  if (n.armIK) {
+    var atn = n.armIK.target === "lock" ? (LOCK.target ? nodes[LOCK.target] : null) : nodes[n.armIK.target];
+    if (atn && atn.transform) {
+      var adx = atn.transform.pos[0] - n.transform.pos[0];
+      var adz = atn.transform.pos[2] - n.transform.pos[2];
+      var ady = (atn.transform.pos[1] + 1.2) - (n.transform.pos[1] + 1.5);
+      var arel = Math.atan2(adx, adz) / DEG - (n.transform.rot[1] || 0);
+      while (arel > 180) arel -= 360; while (arel < -180) arel += 360;
+      var adist = Math.sqrt(adx * adx + adz * adz) || 1;
+      var apitch = Math.atan2(ady, adist) / DEG;
+      var aw = n.armIK.weight != null ? n.armIK.weight : 0.85;
+      var ar = poseAngles(out.armR) || { rx: 0, ry: 0, rz: 0 };
+      out.armR = { rx: ar.rx + (-90 + apitch - ar.rx) * aw,
+                   ry: ar.ry + (Math.max(-60, Math.min(60, arel)) - ar.ry) * aw,
+                   rz: ar.rz };
+      var af = poseAngles(out.foreR) || { rx: 0, ry: 0, rz: 0 };
+      out.foreR = { rx: af.rx + (0 - af.rx) * aw, ry: af.ry, rz: af.rz };
+    }
+  }
   n._lastLiving = out;
   return out;
 }
