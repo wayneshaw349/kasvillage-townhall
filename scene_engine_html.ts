@@ -6004,7 +6004,8 @@ function validate(s) {
   if (count > (lim.maxNodes || 512)) return "too many nodes: " + count;
   // Key-level check only: a scene may *mention* these words in documentation,
   // but must never carry them as keys, which is what would smuggle behaviour.
-  var forbidden = ["script", "eval", "fetch", "url", "endpoint", "html", "src", "onload", "href"];
+  var forbidden = ["script", "eval", "fetch", "url", "endpoint", "html", "src", "onload", "href",
+                   "__proto__", "constructor", "prototype"];
   var bad = null;
   (function keys(o, depth) {
     if (bad || !o || typeof o !== "object" || depth > 16) return;
@@ -6021,6 +6022,134 @@ function validate(s) {
   for (var pi = 0; pi < perms.length; pi++) {
     if (known.indexOf(perms[pi]) < 0) return "unknown permission: " + perms[pi];
   }
+
+  // --- A. HARDENING -------------------------------------------------
+  // No code can run from a scene, but data alone can still deny service,
+  // poison shared prototypes, or NaN-propagate the whole render.
+  var numBad = null;
+  (function nums(o, depth, path) {
+    if (numBad || o == null || depth > 24) return;
+    if (typeof o === "number") {
+      if (!isFinite(o)) numBad = path + " = " + o;
+      return;
+    }
+    if (typeof o !== "object") return;
+    if (Array.isArray(o)) {
+      for (var i = 0; i < o.length; i++) nums(o[i], depth + 1, path + "[" + i + "]");
+      return;
+    }
+    var ks = Object.keys(o);
+    for (var j = 0; j < ks.length; j++) nums(o[ks[j]], depth + 1, path + "." + ks[j]);
+  })(s, 0, "scene");
+  if (numBad) return "non-finite number: " + numBad;
+
+  var maxDim = (lim.maxMeshDim || 4096);
+  var meshes = (s.resources && s.resources.meshes) || {};
+  var mk = Object.keys(meshes);
+  for (var mi = 0; mi < mk.length; mi++) {
+    var md = meshes[mk[mi]] || {};
+    var dims = [].concat(md.size || [], md.radius != null ? [md.radius] : [],
+                         md.height != null ? [md.height] : []);
+    for (var di = 0; di < dims.length; di++) {
+      if (Math.abs(dims[di]) > maxDim) return "mesh " + mk[mi] + " dimension too large: " + dims[di];
+    }
+  }
+
+  var emitters = 0, partRate = 0;
+  (function emit(o, depth) {
+    if (!o || typeof o !== "object" || depth > 24) return;
+    if (Array.isArray(o)) { o.forEach(function (x) { emit(x, depth + 1); }); return; }
+    if (o.emitter && typeof o.emitter === "object") {
+      emitters++;
+      partRate += (o.emitter.rate || 10);
+    }
+    Object.keys(o).forEach(function (k) { emit(o[k], depth + 1); });
+  })(s.nodes, 0);
+  if (emitters > (lim.maxEmitters || 32)) return "too many emitters: " + emitters;
+  if (partRate > (lim.maxParticleRate || 4000)) return "particle rate too high: " + partRate;
+
+  var deepest = 0;
+  (function depth(list, d) {
+    if (d > deepest) deepest = d;
+    if (d > 64) return;
+    (list || []).forEach(function (n) { if (n && n.children) depth(n.children, d + 1); });
+  })(s.nodes, 1);
+  if (deepest > (lim.maxDepth || 32)) return "node nesting too deep: " + deepest;
+
+  // --- B. MOBILE DECISION WINDOWS (warnings only) -------------------
+  // Touch cannot deliver a controller's decision RATE or angular
+  // resolution. These flag designs that will feel broken on a phone.
+  var W = [];
+  var inp = s.input || {};
+  var tun = s.tuning || {};
+  var TAPS_PER_TURN = { continuous: 14, "16": 21, "8": 28, "4": null };
+  var mode = String(inp.headingMode || "continuous");
+  var tapRate = inp.tapRate || 6.9;
+  var needTaps = TAPS_PER_TURN[mode];
+  var minTurn = tun.minTurnInterval != null ? tun.minTurnInterval
+              : (needTaps ? needTaps / tapRate : 0);
+
+  if (mode === "4") W.push("headingMode 4 cannot represent diagonals; grid movement only");
+
+  // paths: measure the real geometry against the real speed
+  var byId = {};
+  (function idx(list) {
+    (list || []).forEach(function (n) { if (n && n.id) byId[n.id] = n; idx(n && n.children); });
+  })(s.nodes);
+
+  var speeds = {};
+  (function findSpeeds(o, depth) {
+    if (!o || typeof o !== "object" || depth > 24) return;
+    if (Array.isArray(o)) { o.forEach(function (x) { findSpeeds(x, depth + 1); }); return; }
+    if (o.type === "patrol" && o.path) speeds[o.path] = o.speed || 2;
+    Object.keys(o).forEach(function (k) { findSpeeds(o[k], depth + 1); });
+  })(s.nodes, 0);
+
+  Object.keys(byId).forEach(function (pid) {
+    var pn = byId[pid];
+    if (!pn || !pn.points || pn.points.length < 3) return;
+    var spd = speeds[pid] || 2;
+    var pts = pn.points, closed = !!pn.closed;
+    var worst = Infinity, worstAt = -1;
+    var lastN = closed ? pts.length : pts.length - 2;
+    for (var q = 0; q < lastN; q++) {
+      var a = pts[q], b = pts[(q + 1) % pts.length], c = pts[(q + 2) % pts.length];
+      var h1 = Math.atan2(b[2] - a[2], b[0] - a[0]);
+      var h2 = Math.atan2(c[2] - b[2], c[0] - b[0]);
+      var turn = Math.abs(h2 - h1);
+      while (turn > Math.PI) turn = Math.abs(turn - 2 * Math.PI);
+      if (turn < 0.35) continue;            // under 20deg is not a turn
+      var segLen = Math.sqrt(Math.pow(b[0] - a[0], 2) + Math.pow(b[2] - a[2], 2));
+      var interval = segLen / (spd || 1);
+      if (interval < worst) { worst = interval; worstAt = q; }
+    }
+    if (worst < minTurn) {
+      W.push("path " + pid + ": turn every " + worst.toFixed(2) + "s at speed " + spd +
+             " (segment " + worstAt + "); headingMode " + mode + " needs " +
+             minTurn.toFixed(2) + "s -- widen the corner or slow the actor");
+    }
+  });
+
+  // telegraphs: reaction time (~250ms) + channel latency
+  var minTel = tun.minTelegraphMs != null ? tun.minTelegraphMs : 300;
+  var poses = (s.resources && s.resources.poses) || {};
+  Object.keys(poses).forEach(function (pn2) {
+    var pd = poses[pn2];
+    if (!pd || !pd.combat || !pd.combat.phases) return;
+    var act = pd.combat.phases.active;
+    if (act == null) return;
+    var ms = act * 1000;
+    if (ms < minTel) {
+      W.push("pose " + pn2 + ": wind-up " + ms.toFixed(0) + "ms is under " + minTel +
+             "ms -- unreactable on touch, not hard");
+    }
+  });
+
+  s._warnings = W;
+  if (W.length && typeof console !== "undefined" && console.warn) {
+    for (var wi = 0; wi < W.length; wi++) console.warn("[kv-feel] " + W[wi]);
+  }
+
   return null;
 }
 
