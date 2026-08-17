@@ -2530,6 +2530,38 @@ function physContacts() {
   return contacts;
 }
 
+// Inverse inertia for the body's shape. Spheres: 2/5 m r^2. Boxes: the
+// principal diagonal of a cuboid tensor. Stored inverted so it multiplies.
+function pbInvInertia(b) {
+  if (b._invI) return b._invI;
+  var m = b.mass || 1;
+  if (b.invMass === 0) { b._invI = { x: 0, y: 0, z: 0 }; return b._invI; }
+  if (b.shape === "sphere") {
+    var r = b.r || 0.5;
+    var I = 0.4 * m * r * r;
+    b._invI = { x: 1 / I, y: 1 / I, z: 1 / I };
+  } else {
+    var hl = b.half || [0.5, 0.5, 0.5];
+    var w2 = (2 * hl[0]) * (2 * hl[0]), h2 = (2 * hl[1]) * (2 * hl[1]), d2 = (2 * hl[2]) * (2 * hl[2]);
+    var Ix = m * (h2 + d2) / 12, Iy = m * (w2 + d2) / 12, Iz = m * (w2 + h2) / 12;
+    b._invI = { x: 1 / Ix, y: 1 / Iy, z: 1 / Iz };
+  }
+  return b._invI;
+}
+// Applies an impulse at a world offset from the centre: linear + angular.
+function pbApplyImpulse(b, jx, jy, jz, rx, ry, rz) {
+  if (b.invMass === 0) return;
+  b.vel.x += jx * b.invMass; b.vel.y += jy * b.invMass; b.vel.z += jz * b.invMass;
+  if (b.spin === false) return;
+  var tqx = ry * jz - rz * jy;
+  var tqy = rz * jx - rx * jz;
+  var tqz = rx * jy - ry * jx;
+  var ii = pbInvInertia(b);
+  b.av = b.av || { x: 0, y: 0, z: 0 };
+  b.av.x += tqx * ii.x / DEG;
+  b.av.y += tqy * ii.y / DEG;
+  b.av.z += tqz * ii.z / DEG;
+}
 function physStep(h) {
   var i, b;
   // 1. gravity
@@ -2564,20 +2596,10 @@ function physStep(h) {
         var jt = -tl / im;
         var maxJt = Math.abs(jn) * mu;
         if (jt < -maxJt) jt = -maxJt; else if (jt > maxJt) jt = maxJt;
-        if (A.spin !== false && A.invMass > 0) {
-          A.av = A.av || { x: 0, y: 0, z: 0 };
-          A.av.x += (ct.ny * tz - ct.nz * ty) * tl * 22;
-          A.av.y += (ct.nz * tx - ct.nx * tz) * tl * 22;
-          A.av.z += (ct.nx * ty - ct.ny * tx) * tl * 22;
-        }
-        if (B.spin !== false && B.invMass > 0) {
-          B.av = B.av || { x: 0, y: 0, z: 0 };
-          B.av.x -= (ct.ny * tz - ct.nz * ty) * tl * 22;
-          B.av.y -= (ct.nz * tx - ct.nx * tz) * tl * 22;
-          B.av.z -= (ct.nx * ty - ct.ny * tx) * tl * 22;
-        }
-        A.vel.x -= jt * tx * A.invMass; A.vel.y -= jt * ty * A.invMass; A.vel.z -= jt * tz * A.invMass;
-        B.vel.x += jt * tx * B.invMass; B.vel.y += jt * ty * B.invMass; B.vel.z += jt * tz * B.invMass;
+        var cpA = pbPos(A), cpB = pbPos(B);
+        var lax = (cpB[0] - cpA[0]) * 0.5, lay = (cpB[1] - cpA[1]) * 0.5, laz = (cpB[2] - cpA[2]) * 0.5;
+        pbApplyImpulse(A, -jt * tx, -jt * ty, -jt * tz, lax, lay, laz);
+        pbApplyImpulse(B, jt * tx, jt * ty, jt * tz, -lax, -lay, -laz);
       }
     }
   }
@@ -2608,28 +2630,19 @@ function physStep(h) {
     if (b.invMass === 0 || b.asleep || b.node._dead) continue;
     var p = pbPos(b);
     p[0] += b.vel.x * h; p[1] += b.vel.y * h; p[2] += b.vel.z * h;
-    if (b.spin !== false) {
-      b.av = b.av || { x: 0, y: 0, z: 0 };
-      var airborne = Math.abs(b.vel.y) > 0.5;
-      if (!airborne) {
-        var damp = Math.max(0, 1 - h * (4 + b.fric * 6));
-        b.av.x *= damp; b.av.y *= damp; b.av.z *= damp;
-      }
-      var sp3 = Math.sqrt(b.vel.x * b.vel.x + b.vel.z * b.vel.z);
-      if (sp3 > 0.3 && airborne) {
-        b.av.x += (b.vel.z * 0.6 - b.av.x) * h * 2;
-        b.av.z += (-b.vel.x * 0.6 - b.av.z) * h * 2;
-      }
-      var mx = 720;
-      if (b.av.x > mx) b.av.x = mx; else if (b.av.x < -mx) b.av.x = -mx;
-      if (b.av.y > mx) b.av.y = mx; else if (b.av.y < -mx) b.av.y = -mx;
-      if (b.av.z > mx) b.av.z = mx; else if (b.av.z < -mx) b.av.z = -mx;
-      var tn2 = b.node.transform;
-      if (tn2) {
-        tn2.rot = tn2.rot || [0, 0, 0];
-        tn2.rot[0] = (tn2.rot[0] || 0) + b.av.x * h;
-        tn2.rot[1] = (tn2.rot[1] || 0) + b.av.y * h;
-        tn2.rot[2] = (tn2.rot[2] || 0) + b.av.z * h;
+    if (b.spin !== false && b.av) {
+      var adamp = Math.max(0, 1 - h * (0.6 + b.fric * 1.2));
+      b.av.x *= adamp; b.av.y *= adamp; b.av.z *= adamp;
+      var amax = 1440;
+      if (b.av.x > amax) b.av.x = amax; else if (b.av.x < -amax) b.av.x = -amax;
+      if (b.av.y > amax) b.av.y = amax; else if (b.av.y < -amax) b.av.y = -amax;
+      if (b.av.z > amax) b.av.z = amax; else if (b.av.z < -amax) b.av.z = -amax;
+      var tn3 = b.node.transform;
+      if (tn3) {
+        tn3.rot = tn3.rot || [0, 0, 0];
+        tn3.rot[0] = (tn3.rot[0] || 0) + b.av.x * h;
+        tn3.rot[1] = (tn3.rot[1] || 0) + b.av.y * h;
+        tn3.rot[2] = (tn3.rot[2] || 0) + b.av.z * h;
       }
     }
   }
@@ -3733,7 +3746,9 @@ function explode(ex, ey, ez, radius, force, damage) {
     var bd = Math.sqrt(bdx * bdx + bdz * bdz);
     if (bd > radius || bd < 1e-6) continue;
     var bf = force * (1 - bd / radius);
-    bb.vel.x += bdx / bd * bf; bb.vel.y += bf * 0.5; bb.vel.z += bdz / bd * bf;
+    pbApplyImpulse(bb, (bdx / bd * bf) / (bb.invMass || 1), (bf * 0.5) / (bb.invMass || 1),
+                   (bdz / bd * bf) / (bb.invMass || 1),
+                   (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4);
     bb.asleep = false; bb.sleep = 0;
   }
   for (var di = 0; di < 6; di++) {
