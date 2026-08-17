@@ -4980,8 +4980,160 @@ function drawBillboard(t) {
   }
 }
 
+// ---- 2D PIPELINE ----
+var CAM2 = { x: 0, y: 0 };
+function spriteDef(id) { return ((scene.resources || {}).sprites || {})[id] || null; }
+function drawSpriteShapes(sx, sy, shapes, sc2, flip) {
+  for (var i = 0; i < shapes.length; i++) {
+    var s = shapes[i];
+    ctx.fillStyle = s.color || "#e8e2d0";
+    var fx = flip ? -1 : 1;
+    if (s.rect) {
+      var rx = flip ? -(s.rect[0] + s.rect[2]) : s.rect[0];
+      ctx.fillRect(sx + rx * sc2, sy + s.rect[1] * sc2, s.rect[2] * sc2, s.rect[3] * sc2);
+    } else if (s.circle) {
+      ctx.beginPath();
+      ctx.arc(sx + s.circle[0] * fx * sc2, sy + s.circle[1] * sc2, s.circle[2] * sc2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (s.poly) {
+      ctx.beginPath();
+      for (var p = 0; p < s.poly.length; p++) {
+        var px = sx + s.poly[p][0] * fx * sc2, py = sy + s.poly[p][1] * sc2;
+        if (p === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill();
+    }
+  }
+}
+function update2D(dt) {
+  var list = scene.nodes || [];
+  var cam2 = null;
+  for (var i = 0; i < list.length; i++) {
+    var n = list[i];
+    if (n.type === "Camera2D") cam2 = n;
+    if (n.type !== "Sprite2D" || n._dead) continue;
+    var sd = spriteDef(n.sprite);
+    if (sd && sd.frames && sd.frames.length > 1) {
+      n._frameT = (n._frameT || 0) + dt * (sd.fps || 8);
+      n._frame = Math.floor(n._frameT) % sd.frames.length;
+    } else n._frame = 0;
+    if (n.controller && n.controller.type === "platformer2d") update2DPlatformer(n, dt);
+  }
+  if (cam2) {
+    var tgt = cam2.follow ? nodes[cam2.follow] : null;
+    var wantX = tgt ? tgt.transform.pos[0] : (cam2.transform ? cam2.transform.pos[0] : 0);
+    var wantY = tgt ? tgt.transform.pos[1] : (cam2.transform ? cam2.transform.pos[1] : 0);
+    var sm = cam2.smooth != null ? cam2.smooth : 0.12;
+    CAM2.x += (wantX - CAM2.x) * Math.min(1, dt / Math.max(0.001, sm));
+    CAM2.y += (wantY - CAM2.y) * Math.min(1, dt / Math.max(0.001, sm));
+    if (cam2.limits) {
+      CAM2.x = Math.max(cam2.limits[0], Math.min(cam2.limits[2], CAM2.x));
+      CAM2.y = Math.max(cam2.limits[1], Math.min(cam2.limits[3], CAM2.y));
+    }
+  }
+}
+function solids2D() {
+  var out = [], list = scene.nodes || [];
+  for (var i = 0; i < list.length; i++) {
+    var n = list[i];
+    if (n.type !== "Solid2D" || n._dead) continue;
+    if (n.room && n.room !== scene._room) continue;
+    out.push({ x: n.transform.pos[0], y: n.transform.pos[1], w: n.size[0], h: n.size[1], node: n });
+  }
+  return out;
+}
+function boxHit(ax, ay, aw, ah, b) {
+  return ax < b.x + b.w && ax + aw > b.x && ay < b.y + b.h && ay + ah > b.y;
+}
+// Celeste model: coyote time, jump buffering, variable height, corner correction.
+function update2DPlatformer(n, dt) {
+  var ctl = n.controller, t = n.transform;
+  var sd = spriteDef(n.sprite) || { w: 12, h: 16 };
+  var w = ctl.width || sd.w || 12, h = ctl.height || sd.h || 16;
+  var sp = ctl.speed || 90, acc = ctl.accel || 900, fr = ctl.friction || 1400;
+  var grav = ctl.gravity || 900, jumpV = ctl.jumpVelocity || 320;
+  var sol = solids2D();
+  n._vx = n._vx || 0; n._vy2 = n._vy2 || 0;
+  var want = (INPUT.move.x || 0) * sp;
+  if (Math.abs(want) > 0.1) n._vx += (want - n._vx) * Math.min(1, acc * dt / sp);
+  else n._vx -= Math.sign(n._vx) * Math.min(Math.abs(n._vx), fr * dt);
+  n._vy2 += grav * dt;
+  if (n._grounded) n._coyote = ctl.coyote || 0.1; else n._coyote = Math.max(0, (n._coyote || 0) - dt);
+  if (INPUT.attack.pressed) n._jumpBuf = ctl.buffer || 0.12;
+  else n._jumpBuf = Math.max(0, (n._jumpBuf || 0) - dt);
+  if (n._jumpBuf > 0 && n._coyote > 0) {
+    n._vy2 = -jumpV; n._jumpBuf = 0; n._coyote = 0; n._grounded = false;
+    playSound("__jump");
+  }
+  if (!INPUT.attack.held && n._vy2 < -jumpV * 0.35) n._vy2 = -jumpV * 0.35;
+  var nx = t.pos[0] + n._vx * dt;
+  for (var i = 0; i < sol.length; i++) {
+    if (boxHit(nx, t.pos[1], w, h, sol[i])) {
+      var corner = ctl.cornerCorrect || 4;
+      var up = t.pos[1] - corner;
+      if (!boxHit(nx, up, w, h, sol[i])) { t.pos[1] = up; }
+      else { nx = t.pos[0]; n._vx = 0; n._wall = Math.sign(n._vx || 1); }
+    }
+  }
+  t.pos[0] = nx;
+  var ny = t.pos[1] + n._vy2 * dt;
+  n._grounded = false;
+  for (var j = 0; j < sol.length; j++) {
+    if (boxHit(t.pos[0], ny, w, h, sol[j])) {
+      if (n._vy2 > 0) { ny = sol[j].y - h; n._grounded = true; if (n._vy2 > 120) playSound("__land"); }
+      else ny = sol[j].y + sol[j].h;
+      n._vy2 = 0;
+    }
+  }
+  t.pos[1] = ny;
+  if (Math.abs(n._vx) > 4) n.flipX = n._vx < 0;
+}
+function render2D() {
+  var r = scene.render || {};
+  ctx.fillStyle = r.bg || "#12181f";
+  ctx.fillRect(0, 0, W, H);
+  var zoom = r.zoom || 3;
+  var list = (scene.nodes || []).slice();
+  list.sort(function (a, b) { return (a.layer || 0) - (b.layer || 0); });
+  for (var i = 0; i < list.length; i++) {
+    var n = list[i];
+    if (n._dead || n.visible === false) continue;
+    if (n.room && n.room !== scene._room) continue;
+    if (n.type === "Parallax2D") {
+      var pf = n.factor != null ? n.factor : 0.4;
+      var pd = spriteDef(n.sprite);
+      if (!pd) continue;
+      var px2 = W / 2 - (CAM2.x * pf) * zoom + (n.transform ? n.transform.pos[0] * zoom : 0);
+      var py2 = H / 2 - (CAM2.y * pf) * zoom + (n.transform ? n.transform.pos[1] * zoom : 0);
+      var tile = (pd.w || 64) * zoom;
+      for (var rep = -1; rep <= Math.ceil(W / tile); rep++) {
+        drawSpriteShapes(px2 + rep * tile, py2, pd.frames[0], zoom, false);
+      }
+      continue;
+    }
+    if (n.type === "Solid2D") {
+      ctx.fillStyle = n.color || "#4a5560";
+      ctx.fillRect(W / 2 + (n.transform.pos[0] - CAM2.x) * zoom,
+                   H / 2 + (n.transform.pos[1] - CAM2.y) * zoom,
+                   n.size[0] * zoom, n.size[1] * zoom);
+      continue;
+    }
+    if (n.type !== "Sprite2D") continue;
+    var sd2 = spriteDef(n.sprite);
+    if (!sd2 || !sd2.frames) continue;
+    var fr2 = sd2.frames[n._frame || 0] || sd2.frames[0];
+    var ox = 0;
+    var oy = 0;
+    var sx2 = W / 2 + (n.transform.pos[0] - CAM2.x - ox) * zoom;
+    var sy2 = H / 2 + (n.transform.pos[1] - CAM2.y - oy) * zoom;
+    drawSpriteShapes(sx2, sy2, fr2, zoom, !!n.flipX);
+  }
+  for (var fh2 = 0; fh2 < FRAME_HOOKS.length; fh2++) { try { FRAME_HOOKS[fh2](ctx); } catch (e) {} }
+  if (scene.render && scene.render.post && scene.render.post.enabled) drawPostFX(scene.render.post);
+}
 function renderFrame() {
   var r = scene.render || {};
+  if (r.mode === "2d") { update2D(1 / 60); render2D(); return; }
   var ssX = r.supersample && r.supersample > 1 ? r.supersample : 1;
   if (ssX > 1 && view && view.width !== Math.floor(W * ssX)) {
     view.width = Math.floor(W * ssX); view.height = Math.floor(H * ssX);
@@ -5101,6 +5253,7 @@ function renderFrame() {
       }
     }
   }
+  if ((scene.render || {}).mode === "2d") update2D(1 / 60);
   if ((scene.render || {}).viewmodel) updateViewmodel(1 / 60);
   updateAudioParams();
   renderProjectiles();
