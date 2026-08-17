@@ -166,8 +166,8 @@ function snap(id) {
   return call(
     "(function(){var n=__nb('" + id + "');if(!n)return null;" +
     "var p=null;try{p=typeof blendedPose==='function'?blendedPose(n):null;}catch(e){p={__err:String(e.message)};}" +
-    "return JSON.stringify({pos:n.transform.pos.slice(),clip:n._clip?{name:n._clip.name||n._clip.id||'?',t:n._clip.t,done:!!n._clip.done}:null," +
-    "queue:n._clipQueue?n._clipQueue.length:0,combat:n._combat?{phase:n._combat.phase,t:n._combat.t}:null," +
+    "return JSON.stringify({pos:n.transform.pos.slice(),clip:n._pose?{name:n._pose.id,t:n._pose.t}:null," +
+    "queue:n._nextAttack?1:0,combat:n._combatPhase?{phase:n._combatPhase}:null," +
     "busy:!!n._busy,lock:!!n._actionLock,hitDone:!!n._hitDone,pose:p});})()");
 }
 function parse(s) { try { return JSON.parse(s); } catch (e) { return null; } }
@@ -183,7 +183,11 @@ const scene = {
   nodes: [
     { id: "cam", type: "Camera3D", mode: "fixed", fov: 50, transform: { pos: [0, 6, 12] } },
     { id: "hero", type: "Actor", mesh: "body", tags: ["player"],
-      transform: { pos: [0, 0, 0] }, stats: { hp: 20, maxHp: 40, speed: 4 } },
+      transform: { pos: [0, 0, 0] }, stats: { hp: 20, maxHp: 40, speed: 4 },
+      bt: { sequence: [ { task: { type: "seek", target: "goal", speed: 6 },
+                          until: "distance(self, goal) < 1" } ] } },
+    { id: "goal", type: "Actor", mesh: "body", tags: ["marker"],
+      transform: { pos: [200, 0, 0] }, stats: { hp: 1, maxHp: 1 } },
     { id: "orc", type: "Actor", mesh: "body", tags: ["enemy"],
       transform: { pos: [2, 0, 0] }, stats: { hp: 60, maxHp: 60, speed: 3 } },
     { id: "ground", type: "MeshInstance", mesh: "slab", material: "g",
@@ -277,17 +281,11 @@ ok("clip queue drained", !later || later.queue === 0,
 // --------------------------------------------------------------------------
 section("move: actor still moves after the interrupt");
 const before = parse(snap("hero"));
-call("(function(){var n=__nb('hero');" +
-     "if(typeof moveActor==='function'){n._probeMove=1;}" +
-     "n._vel=n._vel||{x:0,y:0,z:0};n._vel.x=4;" +
-     "if(n.stats)n.stats.speed=4;" +
-     "if(typeof setActorIntent==='function')setActorIntent(n,{x:1,z:0});" +
-     "else{n._intent={x:1,z:0};n._moveX=1;n._moveZ=0;}})()");
-run(60, "move");
+run(90, "move");
 const moved = parse(snap("hero"));
 const dx = (before && moved) ? Math.abs(moved.pos[0] - before.pos[0]) : 0;
-ok("position changed when driven", dx > 0.01, "dx=" + dx.toFixed(4) +
-   " (if 0, movement is gated by a flag that never cleared)");
+ok("bt seek still moves the actor after the interrupt", dx > 0.5,
+   "dx=" + dx.toFixed(4) + " (0 = movement gated by a flag that never cleared)");
 
 // --------------------------------------------------------------------------
 // raw dump on any failure — tells me exactly what latched
