@@ -1172,6 +1172,39 @@ function updateActor(n, dt) {
   }
   t.pos = t.pos || [0, 0, 0];
   t.rot = t.rot || [0, 0, 0];
+  if (n._grabbing) {
+    var gvn = nodes[n._grabbing.id];
+    if (!gvn || gvn._dead) { n._grabbing = null; }
+    else {
+      n._grabbing.t += dt;
+      var gdef = n._grabbing.def;
+      var gy2 = (n.transform.rot[1] || 0) * DEG;
+      var hold = gdef.holdDist != null ? gdef.holdDist : 0.9;
+      gvn.transform.pos[0] = n.transform.pos[0] + Math.sin(gy2) * hold;
+      gvn.transform.pos[2] = n.transform.pos[2] + Math.cos(gy2) * hold;
+      gvn.transform.pos[1] = n.transform.pos[1] + (gdef.lift || 0.35);
+      gvn.transform.rot[1] = (n.transform.rot[1] || 0) + 180;
+      if (gvn._grabBreak && n._grabbing.t < n._grabbing.breakWindow) {
+        gvn._grabBreak = false; gvn._grabbedBy = null;
+        gvn.transform.pos[1] = n.transform.pos[1];
+        gvn._addPose = { id: "__stumble", t: 0 };
+        if (POSED.indexOf(gvn) < 0) POSED.push(gvn);
+        n._grabbing = null;
+        playSound("__block");
+      } else if (n._grabbing.t >= (gdef.duration || 0.7)) {
+        var thf = gdef.throwForce || 9;
+        if (gvn.stats) gvn.hp = Math.max(0, (gvn.hp || 0) - (gdef.damage || 12));
+        gvn._deathImpulse = { x: Math.sin(gy2) * thf, y: 4, z: Math.cos(gy2) * thf };
+        gvn._addPose = { id: "__stumble", t: 0 };
+        if (POSED.indexOf(gvn) < 0) POSED.push(gvn);
+        if (gdef.ragdoll !== false && gvn.ragdoll && gvn.ragdoll.enabled !== false) startRagdoll(gvn, gvn._deathImpulse);
+        gvn._grabbedBy = null;
+        n._grabbing = null;
+        playSound("__thud", { x: gvn.transform.pos[0], z: gvn.transform.pos[2] });
+      }
+    }
+  }
+  if (n._grabbedBy) return;
   if (n.hover) {
     var hvG = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
     var hvTarget = hvG + (n.hover.height != null ? n.hover.height : 1.2);
@@ -1615,7 +1648,7 @@ function updateAnims(dt) {
   }
 }
 
-function gotoRoom(id) { scene._room = id; if (scene.rooms && scene.rooms.defs && scene.rooms.defs[id]) setSoundscape(scene.rooms.defs[id].soundscape); }
+function gotoRoom(id) { scene._room = id; if (scene.rooms && scene.rooms.defs && scene.rooms.defs[id]) { var rd = scene.rooms.defs[id]; setSoundscape(rd.soundscape); if (rd.reverb) setReverb(rd.reverb.size || 0.4, rd.reverb.wet || 0.2); else setReverb(0.3, 0); } }
 function runAction(self, a) {
   if (a && a.action === "gotoRoom") { gotoRoom((a.args && a.args[0]) || a.target); return; }
   if (a && a.action === "playSound") { playSound((a.args && a.args[0]) || a.target, self && self.worldPos); return; }
@@ -2497,6 +2530,165 @@ function physContacts() {
   return contacts;
 }
 
+// Inverse inertia for the body's shape. Spheres: 2/5 m r^2. Boxes: the
+// principal diagonal of a cuboid tensor. Stored inverted so it multiplies.
+// World-space corners of a rotated box body.
+function pbCorners(b) {
+  var hl = b.half || [0.5, 0.5, 0.5];
+  var p = pbPos(b);
+  var rt = (b.node.transform && b.node.transform.rot) || [0, 0, 0];
+  var cx2 = Math.cos((rt[0] || 0) * DEG), sx2 = Math.sin((rt[0] || 0) * DEG);
+  var cy2 = Math.cos((rt[1] || 0) * DEG), sy2 = Math.sin((rt[1] || 0) * DEG);
+  var cz2 = Math.cos((rt[2] || 0) * DEG), sz2 = Math.sin((rt[2] || 0) * DEG);
+  var out = [];
+  for (var i = 0; i < 8; i++) {
+    var lx = (i & 1 ? hl[0] : -hl[0]);
+    var ly = (i & 2 ? hl[1] : -hl[1]);
+    var lz = (i & 4 ? hl[2] : -hl[2]);
+    var y1 = ly * cx2 - lz * sx2, z1 = ly * sx2 + lz * cx2;
+    var x2 = lx * cy2 + z1 * sy2, z2 = -lx * sy2 + z1 * cy2;
+    var x3 = x2 * cz2 - y1 * sz2, y3 = x2 * sz2 + y1 * cz2;
+    out.push({ x: p[0] + x3, y: p[1] + y3, z: p[2] + z2 });
+  }
+  return out;
+}
+// Per-corner ground resolution: the deepest corners get impulses at their own
+// lever arm, which is what makes a box tip and rock rather than slide flat.
+function pbCornerGround(b, h) {
+  if (b.invMass === 0 || b.asleep || b.shape === "sphere" || b.obb === false) return;
+  if (!b.node.transform) return;
+  var cs = pbCorners(b), p = pbPos(b);
+  var gy = 0;
+  var hitAny = false;
+  for (var i = 0; i < cs.length; i++) {
+    var c = cs[i];
+    var floor = typeof terrainHeight === "function" ? terrainHeight(c.x, c.z) : 0;
+    var pen = floor - c.y;
+    if (pen <= 0) continue;
+    hitAny = true;
+    var rx = c.x - p[0], ry = c.y - p[1], rz = c.z - p[2];
+    var vpx = b.vel.x + ((b.av ? b.av.y * DEG : 0) * rz - (b.av ? b.av.z * DEG : 0) * ry);
+    var vpy = b.vel.y + ((b.av ? b.av.z * DEG : 0) * rx - (b.av ? b.av.x * DEG : 0) * rz);
+    var vpz = b.vel.z + ((b.av ? b.av.x * DEG : 0) * ry - (b.av ? b.av.y * DEG : 0) * rx);
+    if (vpy < 0) {
+      var e2 = vpy < -1 ? (b.rest || 0.1) : 0;
+      var jn2 = -(1 + e2) * vpy / (b.invMass * 4);
+      pbApplyImpulse(b, 0, jn2, 0, rx, ry, rz);
+      var fmu = b.fric || 0.7;
+      var tvx = vpx, tvz = vpz;
+      var tvl = Math.sqrt(tvx * tvx + tvz * tvz);
+      if (tvl > 1e-5) {
+        var jf = Math.min(tvl / (b.invMass * 4), Math.abs(jn2) * fmu);
+        pbApplyImpulse(b, -tvx / tvl * jf, 0, -tvz / tvl * jf, rx, ry, rz);
+      }
+    }
+    var pp2 = pbPos(b);
+    pp2[1] += pen * 0.32;
+  }
+  if (hitAny) { b.sleep = Math.max(0, b.sleep - h * 0.5); }
+}
+var JOINTS = [];
+function bodyOfNode(id) {
+  for (var i = 0; i < BODIES.length; i++) if (BODIES[i].node && BODIES[i].node.id === id) return BODIES[i];
+  return null;
+}
+function addJoint(spec) {
+  var ja = bodyOfNode(spec.a), jb = spec.b ? bodyOfNode(spec.b) : null;
+  if (!ja) return null;
+  var pa = pbPos(ja);
+  var anchor = spec.anchor || (jb ? null : [pa[0], pa[1], pa[2]]);
+  var restLen = spec.rest;
+  if (restLen == null) {
+    if (jb) { var pb2 = pbPos(jb); restLen = Math.sqrt(Math.pow(pb2[0] - pa[0], 2) + Math.pow(pb2[1] - pa[1], 2) + Math.pow(pb2[2] - pa[2], 2)); }
+    else restLen = 0;
+  }
+  var j = { type: spec.type || "ball", a: ja, b: jb, anchor: anchor, rest: restLen,
+           stiffness: spec.stiffness != null ? spec.stiffness : 0.7,
+           damping: spec.damping != null ? spec.damping : 0.15,
+           axis: spec.axis || null, breakForce: spec.breakForce || 0,
+           onBreak: spec.onBreak || null, dead: false };
+  JOINTS.push(j);
+  return j;
+}
+function breakJoint(j) {
+  j.dead = true;
+  playSound("__block");
+  if (j.onBreak) for (var i = 0; i < j.onBreak.length; i++) runAction(j.a.node, j.onBreak[i]);
+}
+function solveJoints(h) {
+  for (var i = JOINTS.length - 1; i >= 0; i--) {
+    var j = JOINTS[i];
+    if (j.dead) { JOINTS.splice(i, 1); continue; }
+    var A = j.a, B = j.b;
+    if (!A || A.node._dead || (B && B.node._dead)) { JOINTS.splice(i, 1); continue; }
+    var pa = pbPos(A);
+    var bx, by, bz;
+    if (B) { var pb3 = pbPos(B); bx = pb3[0]; by = pb3[1]; bz = pb3[2]; }
+    else { bx = j.anchor[0]; by = j.anchor[1]; bz = j.anchor[2]; }
+    var dx = bx - pa[0], dy = by - pa[1], dz = bz - pa[2];
+    var d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < 1e-6) continue;
+    var err = d - j.rest;
+    if (j.type === "spring") {
+      var f = err * j.stiffness * 40;
+      var ux = dx / d, uy = dy / d, uz = dz / d;
+      pbApplyImpulse(A, ux * f * h, uy * f * h, uz * f * h, 0, 0, 0);
+      if (B) pbApplyImpulse(B, -ux * f * h, -uy * f * h, -uz * f * h, 0, 0, 0);
+      if (j.breakForce && Math.abs(f) > j.breakForce) breakJoint(j);
+      continue;
+    }
+    if (j.type === "hinge" && j.axis) {
+      var ax = j.axis[0], ay = j.axis[1], az = j.axis[2];
+      var al = Math.sqrt(ax * ax + ay * ay + az * az) || 1;
+      ax /= al; ay /= al; az /= al;
+      if (A.av) {
+        var dot2 = A.av.x * ax + A.av.y * ay + A.av.z * az;
+        A.av.x = ax * dot2; A.av.y = ay * dot2; A.av.z = az * dot2;
+      }
+    }
+    var corr = err * j.stiffness;
+    var imA = A.invMass, imB = B ? B.invMass : 0;
+    var tot = imA + imB;
+    if (tot === 0) continue;
+    var cx3 = dx / d * corr, cy3 = dy / d * corr, cz3 = dz / d * corr;
+    pa[0] += cx3 * (imA / tot); pa[1] += cy3 * (imA / tot); pa[2] += cz3 * (imA / tot);
+    if (B) { var pb4 = pbPos(B); pb4[0] -= cx3 * (imB / tot); pb4[1] -= cy3 * (imB / tot); pb4[2] -= cz3 * (imB / tot); }
+    A.vel.x *= (1 - j.damping); A.vel.y *= (1 - j.damping); A.vel.z *= (1 - j.damping);
+    if (B) { B.vel.x *= (1 - j.damping); B.vel.y *= (1 - j.damping); B.vel.z *= (1 - j.damping); }
+    if (j.breakForce && Math.abs(err) * 40 > j.breakForce) breakJoint(j);
+    if (Math.abs(err) > 0.001) { pbWake(A); if (B) pbWake(B); }
+  }
+}
+function pbInvInertia(b) {
+  if (b._invI) return b._invI;
+  var m = b.mass || 1;
+  if (b.invMass === 0) { b._invI = { x: 0, y: 0, z: 0 }; return b._invI; }
+  if (b.shape === "sphere") {
+    var r = b.r || 0.5;
+    var I = 0.4 * m * r * r;
+    b._invI = { x: 1 / I, y: 1 / I, z: 1 / I };
+  } else {
+    var hl = b.half || [0.5, 0.5, 0.5];
+    var w2 = (2 * hl[0]) * (2 * hl[0]), h2 = (2 * hl[1]) * (2 * hl[1]), d2 = (2 * hl[2]) * (2 * hl[2]);
+    var Ix = m * (h2 + d2) / 12, Iy = m * (w2 + d2) / 12, Iz = m * (w2 + h2) / 12;
+    b._invI = { x: 1 / Ix, y: 1 / Iy, z: 1 / Iz };
+  }
+  return b._invI;
+}
+// Applies an impulse at a world offset from the centre: linear + angular.
+function pbApplyImpulse(b, jx, jy, jz, rx, ry, rz) {
+  if (b.invMass === 0) return;
+  b.vel.x += jx * b.invMass; b.vel.y += jy * b.invMass; b.vel.z += jz * b.invMass;
+  if (b.spin === false) return;
+  var tqx = ry * jz - rz * jy;
+  var tqy = rz * jx - rx * jz;
+  var tqz = rx * jy - ry * jx;
+  var ii = pbInvInertia(b);
+  b.av = b.av || { x: 0, y: 0, z: 0 };
+  b.av.x += tqx * ii.x / DEG;
+  b.av.y += tqy * ii.y / DEG;
+  b.av.z += tqz * ii.z / DEG;
+}
 function physStep(h) {
   var i, b;
   // 1. gravity
@@ -2531,20 +2723,10 @@ function physStep(h) {
         var jt = -tl / im;
         var maxJt = Math.abs(jn) * mu;
         if (jt < -maxJt) jt = -maxJt; else if (jt > maxJt) jt = maxJt;
-        if (A.spin !== false && A.invMass > 0) {
-          A.av = A.av || { x: 0, y: 0, z: 0 };
-          A.av.x += (ct.ny * tz - ct.nz * ty) * tl * 22;
-          A.av.y += (ct.nz * tx - ct.nx * tz) * tl * 22;
-          A.av.z += (ct.nx * ty - ct.ny * tx) * tl * 22;
-        }
-        if (B.spin !== false && B.invMass > 0) {
-          B.av = B.av || { x: 0, y: 0, z: 0 };
-          B.av.x -= (ct.ny * tz - ct.nz * ty) * tl * 22;
-          B.av.y -= (ct.nz * tx - ct.nx * tz) * tl * 22;
-          B.av.z -= (ct.nx * ty - ct.ny * tx) * tl * 22;
-        }
-        A.vel.x -= jt * tx * A.invMass; A.vel.y -= jt * ty * A.invMass; A.vel.z -= jt * tz * A.invMass;
-        B.vel.x += jt * tx * B.invMass; B.vel.y += jt * ty * B.invMass; B.vel.z += jt * tz * B.invMass;
+        var cpA = pbPos(A), cpB = pbPos(B);
+        var lax = (cpB[0] - cpA[0]) * 0.5, lay = (cpB[1] - cpA[1]) * 0.5, laz = (cpB[2] - cpA[2]) * 0.5;
+        pbApplyImpulse(A, -jt * tx, -jt * ty, -jt * tz, lax, lay, laz);
+        pbApplyImpulse(B, jt * tx, jt * ty, jt * tz, -lax, -lay, -laz);
       }
     }
   }
@@ -2575,30 +2757,29 @@ function physStep(h) {
     if (b.invMass === 0 || b.asleep || b.node._dead) continue;
     var p = pbPos(b);
     p[0] += b.vel.x * h; p[1] += b.vel.y * h; p[2] += b.vel.z * h;
-    if (b.spin !== false) {
-      b.av = b.av || { x: 0, y: 0, z: 0 };
-      var airborne = Math.abs(b.vel.y) > 0.5;
-      if (!airborne) {
-        var damp = Math.max(0, 1 - h * (4 + b.fric * 6));
-        b.av.x *= damp; b.av.y *= damp; b.av.z *= damp;
-      }
-      var sp3 = Math.sqrt(b.vel.x * b.vel.x + b.vel.z * b.vel.z);
-      if (sp3 > 0.3 && airborne) {
-        b.av.x += (b.vel.z * 0.6 - b.av.x) * h * 2;
-        b.av.z += (-b.vel.x * 0.6 - b.av.z) * h * 2;
-      }
-      var mx = 720;
-      if (b.av.x > mx) b.av.x = mx; else if (b.av.x < -mx) b.av.x = -mx;
-      if (b.av.y > mx) b.av.y = mx; else if (b.av.y < -mx) b.av.y = -mx;
-      if (b.av.z > mx) b.av.z = mx; else if (b.av.z < -mx) b.av.z = -mx;
-      var tn2 = b.node.transform;
-      if (tn2) {
-        tn2.rot = tn2.rot || [0, 0, 0];
-        tn2.rot[0] = (tn2.rot[0] || 0) + b.av.x * h;
-        tn2.rot[1] = (tn2.rot[1] || 0) + b.av.y * h;
-        tn2.rot[2] = (tn2.rot[2] || 0) + b.av.z * h;
+    if (b.spin !== false && b.av) {
+      var adamp = Math.max(0, 1 - h * (0.6 + b.fric * 1.2));
+      b.av.x *= adamp; b.av.y *= adamp; b.av.z *= adamp;
+      var amax = 1440;
+      if (b.av.x > amax) b.av.x = amax; else if (b.av.x < -amax) b.av.x = -amax;
+      if (b.av.y > amax) b.av.y = amax; else if (b.av.y < -amax) b.av.y = -amax;
+      if (b.av.z > amax) b.av.z = amax; else if (b.av.z < -amax) b.av.z = -amax;
+      var tn3 = b.node.transform;
+      if (tn3) {
+        tn3.rot = tn3.rot || [0, 0, 0];
+        tn3.rot[0] = (tn3.rot[0] || 0) + b.av.x * h;
+        tn3.rot[1] = (tn3.rot[1] || 0) + b.av.y * h;
+        tn3.rot[2] = (tn3.rot[2] || 0) + b.av.z * h;
       }
     }
+  }
+  // 4a. constraints
+  for (var jit = 0; jit < 3; jit++) solveJoints(h);
+  // 4b. oriented-box corner resolution against the ground
+  for (i = 0; i < BODIES.length; i++) {
+    b = BODIES[i];
+    if (b.invMass === 0 || b.asleep || b.node._dead) continue;
+    pbCornerGround(b, h);
   }
   // 5. positional passes: recompute contacts and relax residual overlap.
   // Impact wake + collision signals fire on the first pass only.
@@ -2631,7 +2812,7 @@ function physStep(h) {
     var sp2 = Math.sqrt(b.vel.x * b.vel.x + b.vel.y * b.vel.y + b.vel.z * b.vel.z);
     if (sp2 < PHYS.sleepVel) {
       b.sleep += h;
-      if (b.sleep > PHYS.sleepTime) { b.asleep = true; b.vel.x = b.vel.y = b.vel.z = 0; if (b.av) b.av.x = b.av.y = b.av.z = 0; }
+      if (b.sleep > PHYS.sleepTime) { b.asleep = true; b.vel.x = b.vel.y = b.vel.z = 0; if (b.av) b.av.x = b.av.y = b.av.z = 0; if (b.shape !== "sphere" && b.obb !== false && b.node.transform && b.node.transform.rot) { var rr3 = b.node.transform.rot; rr3[0] = Math.round(rr3[0] / 90) * 90; rr3[2] = Math.round(rr3[2] / 90) * 90; } }
     } else { b.sleep = 0; b.asleep = false; }
   }
 }
@@ -3318,6 +3499,116 @@ function deformChain(p, g, partName, pose) {
 // ---- pose clips ----------------------------------------------------------
 // ---- AUDIO (procedural WebAudio; FMOD event model, PS1 synthesis) ----
 var AC = null, AMASTER = null, ASCAPE = null, AUDIO_ON = false;
+var BUSES = null, REVERB = null, REVERB_WET = null, MUSIC = null;
+function busOf(name) { return (BUSES && BUSES[name]) ? BUSES[name].input : AMASTER; }
+function setBusVolume(name, v) { if (BUSES && BUSES[name]) BUSES[name].gain.gain.value = v; }
+function setBusFilter(name, hz) { if (BUSES && BUSES[name]) BUSES[name].filter.frequency.value = hz; }
+function setReverb(size, wet) {
+  if (!AUDIO_ON || !REVERB) return;
+  var len = Math.max(0.15, size * 2.4) * AC.sampleRate;
+  var buf = AC.createBuffer(2, Math.floor(len), AC.sampleRate);
+  for (var ch = 0; ch < 2; ch++) {
+    var d = buf.getChannelData(ch);
+    for (var i = 0; i < d.length; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.2 + size * 1.5);
+    }
+  }
+  REVERB.buffer = buf;
+  REVERB_WET.gain.linearRampToValueAtTime(wet, AC.currentTime + 0.8);
+}
+function evalAudioParam(src) {
+  var pl = nodes[playerId];
+  if (src === "playerHpFrac") return pl && pl.stats ? (pl.hp || 0) / (pl.stats.maxHp || 1) : 1;
+  if (src === "playerSpeed") return pl ? (pl._moveSpeed || 0) : 0;
+  if (src === "alert") return world.alert ? 1 : 0;
+  if (src === "enemiesNear") {
+    if (!pl) return 0;
+    var c = 0, ek = Object.keys(nodes);
+    for (var i = 0; i < ek.length; i++) {
+      var en = nodes[ek[i]];
+      if (!en.worldPos || !tagMatch(en, "enemy") || en._rag) continue;
+      if (dist(en.worldPos, pl.worldPos) < 12) c++;
+    }
+    return c;
+  }
+  if (src.indexOf("flag:") === 0) return world.flags[src.slice(5)] || 0;
+  return 0;
+}
+function mapCurve(map, v) {
+  if (!map || !map.length) return v;
+  if (v <= map[0][0]) return map[0][1];
+  if (v >= map[map.length - 1][0]) return map[map.length - 1][1];
+  for (var i = 0; i < map.length - 1; i++) {
+    if (v >= map[i][0] && v <= map[i + 1][0]) {
+      var u = (v - map[i][0]) / ((map[i + 1][0] - map[i][0]) || 1e-9);
+      return map[i][1] + (map[i + 1][1] - map[i][1]) * u;
+    }
+  }
+  return map[map.length - 1][1];
+}
+function updateAudioParams() {
+  if (!AUDIO_ON || !scene.audioParams) return;
+  for (var k in scene.audioParams) {
+    var p = scene.audioParams[k];
+    var v = mapCurve(p.map, evalAudioParam(p.source || ""));
+    var tg = (p.target || "").split(".");
+    if (tg[0] && tg[0].indexOf("bus:") === 0) {
+      var bn = tg[0].slice(4);
+      if (tg[1] === "filter") setBusFilter(bn, v);
+      else if (tg[1] === "volume") setBusVolume(bn, v);
+    } else if (p.target === "reverb.wet" && REVERB_WET) {
+      REVERB_WET.gain.value = v;
+    } else if (p.target && p.target.indexOf("music.layer") === 0 && MUSIC) {
+      var li = parseInt(p.target.slice(11), 10) || 0;
+      if (MUSIC.layers[li]) MUSIC.layers[li].gain.gain.value = v;
+    }
+  }
+}
+function playMusic(spec) {
+  if (!AUDIO_ON || !spec) return;
+  stopMusic(0.2);
+  var bpm = spec.bpm || 100, beat = 60 / bpm;
+  MUSIC = { spec: spec, layers: [], t0: AC.currentTime, beat: beat, timer: null };
+  (spec.layers || []).forEach(function (ly) {
+    var g = AC.createGain();
+    g.gain.value = ly.gain != null ? ly.gain : 1;
+    g.connect(busOf("music"));
+    MUSIC.layers.push({ def: ly, gain: g });
+  });
+  function schedule() {
+    if (!MUSIC) return;
+    var when = AC.currentTime + 0.05;
+    MUSIC.layers.forEach(function (lay) {
+      var t = when;
+      (lay.def.notes || []).forEach(function (nt) {
+        var f = nt[0], dur = (nt[1] || 1) * beat;
+        if (f > 0) {
+          var o = AC.createOscillator(), g2 = AC.createGain();
+          o.type = lay.def.wave || "square";
+          o.frequency.setValueAtTime(f, t);
+          g2.gain.setValueAtTime(0.0001, t);
+          g2.gain.exponentialRampToValueAtTime(lay.def.vol != null ? lay.def.vol : 0.25, t + 0.01);
+          g2.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.95);
+          o.connect(g2); g2.connect(lay.gain);
+          o.start(t); o.stop(t + dur);
+        }
+        t += dur;
+      });
+    });
+    var barLen = 0;
+    (spec.layers[0] || {}).notes && spec.layers[0].notes.forEach(function (nt) { barLen += (nt[1] || 1) * beat; });
+    if (spec.loop !== false && barLen > 0) MUSIC.timer = setTimeout(schedule, barLen * 1000 - 60);
+  }
+  schedule();
+}
+function stopMusic(fade) {
+  if (!MUSIC) return;
+  if (MUSIC.timer) clearTimeout(MUSIC.timer);
+  MUSIC.layers.forEach(function (l2) {
+    try { l2.gain.gain.linearRampToValueAtTime(0.0001, AC.currentTime + (fade || 0.4)); } catch (e) {}
+  });
+  MUSIC = null;
+}
 function audioInit() {
   if (AC) return;
   var Ctor = (typeof window !== "undefined") && (window.AudioContext || window.webkitAudioContext);
@@ -3326,6 +3617,17 @@ function audioInit() {
   var comp = AC.createDynamicsCompressor();
   AMASTER = AC.createGain(); AMASTER.gain.value = 0.8;
   AMASTER.connect(comp); comp.connect(AC.destination);
+  BUSES = {};
+  ["sfx", "music", "ambient"].forEach(function (bn) {
+    var bg = AC.createGain(); bg.gain.value = 1;
+    var bf = AC.createBiquadFilter(); bf.type = "lowpass"; bf.frequency.value = 20000;
+    bg.connect(bf); bf.connect(AMASTER);
+    BUSES[bn] = { gain: bg, filter: bf, input: bg };
+  });
+  REVERB = AC.createConvolver();
+  REVERB_WET = AC.createGain(); REVERB_WET.gain.value = 0;
+  REVERB.connect(REVERB_WET); REVERB_WET.connect(AMASTER);
+  setReverb(0.35, 0);
   AUDIO_ON = true;
 }
 function audioUnlock() {
@@ -3398,6 +3700,13 @@ function playSoundDef(d, at) {
   g.gain.setValueAtTime(vol, t0);
   g.gain.exponentialRampToValueAtTime(0.001, t0 + (d.dur || 0.1));
   var dest = g;
+  var outBus = busOf(d.bus || "sfx");
+  var pan = null;
+  if (at && AC.createStereoPanner && nodes[playerId] && nodes[playerId].worldPos) {
+    pan = AC.createStereoPanner();
+    var pdx = (at.x || 0) - nodes[playerId].worldPos.x;
+    pan.pan.value = Math.max(-1, Math.min(1, pdx / 12));
+  }
   if (d.drive) {
     var ws = AC.createWaveShaper();
     var wc = new Float32Array(256);
@@ -3406,8 +3715,13 @@ function playSoundDef(d, at) {
       wc[wi] = Math.tanh(wx * d.drive);
     }
     ws.curve = wc;
-    g.connect(ws); ws.connect(AMASTER);
-  } else g.connect(AMASTER);
+    g.connect(ws);
+    if (pan) { ws.connect(pan); pan.connect(outBus); } else ws.connect(outBus);
+    if (REVERB && d.reverb !== false) ws.connect(REVERB);
+  } else {
+    if (pan) { g.connect(pan); pan.connect(outBus); } else g.connect(outBus);
+    if (REVERB && d.reverb !== false) g.connect(REVERB);
+  }
   if (d.type === "noise") {
     var alen = Math.ceil(AC.sampleRate * (d.dur || 0.1));
     var abuf = AC.createBuffer(1, alen, AC.sampleRate);
@@ -3443,7 +3757,7 @@ function setSoundscape(spec) {
   var sf = AC.createBiquadFilter(); sf.type = "lowpass"; sf.frequency.value = spec.filter || 400;
   var sg = AC.createGain(); sg.gain.value = 0.0001;
   sg.gain.linearRampToValueAtTime(spec.vol != null ? spec.vol : 0.12, AC.currentTime + 1.5);
-  ssrc.connect(sf); sf.connect(sg); sg.connect(AMASTER);
+  ssrc.connect(sf); sf.connect(sg); sg.connect(busOf("ambient"));
   ssrc.start();
   ASCAPE = { src: ssrc, g: sg };
 }
@@ -3567,7 +3881,9 @@ function explode(ex, ey, ez, radius, force, damage) {
     var bd = Math.sqrt(bdx * bdx + bdz * bdz);
     if (bd > radius || bd < 1e-6) continue;
     var bf = force * (1 - bd / radius);
-    bb.vel.x += bdx / bd * bf; bb.vel.y += bf * 0.5; bb.vel.z += bdz / bd * bf;
+    pbApplyImpulse(bb, (bdx / bd * bf) / (bb.invMass || 1), (bf * 0.5) / (bb.invMass || 1),
+                   (bdz / bd * bf) / (bb.invMass || 1),
+                   (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4);
     bb.asleep = false; bb.sleep = 0;
   }
   for (var di = 0; di < 6; di++) {
@@ -3687,12 +4003,17 @@ function playPose(n, id) {
   var def = poseDef(id);
   if (!def) return;
   n._pose = { id: id, t: 0, fired: {} };
-  n._xfFrom = basePose(n._lastLiving || {});
+  if (n._pose && n._pose.id !== id) { n._xfFrom = basePose(blendedPoseCore(n) || n._lastLiving || {}); n._xfSkip = 1; }
+  if (!n._xfSkip) n._xfFrom = basePose(n._lastLiving || {});
+  n._xfSkip = 0;
   n._xfDur = def.blendIn != null ? def.blendIn : 0.1;
   n._xfT = n._xfDur > 0 ? 0 : null;
   if (POSED.indexOf(n) < 0) POSED.push(n);
 }
+function breakGrab(n) { if (n && n._grabbedBy) n._grabBreak = true; }
+function setStance(n, s) { if (n) n.stance = s; }
 function queueAttack(n, id) {
+  if (n._grabbedBy || (n._stunT && world.time < n._stunT)) return;
   if (!poseDef(id)) return;
   if (!n._pose) { playPose(n, id); return; }
   var qd = poseDef(n._pose.id);
@@ -3742,13 +4063,34 @@ function updatePoseClips(dt) {
     var n = POSED[i];
     if (!n._pose) { if (!n._addPose) POSED.splice(i, 1); continue; }
     var def = poseDef(n._pose.id);
+    if (def && def.combat && def.combat.toStance && n._pose.t >= (def.dur || 1) - 0.02) n.stance = def.combat.toStance;
     if (!def) { n._pose = null; continue; }
     if (n._hitstop && n._hitstop > 0) { n._hitstop -= dt; if (n._hitstop > 0) continue; n._hitstop = 0; }
     if (n._xfT != null) n._xfT += dt;
     var prevT = n._pose.t;
     n._pose.t += dt;
     var dur = def.dur || 1;
-    if (def.tracks && def.tracks.root && n.transform) applyRootMotion(n, def, prevT, n._pose.t);
+    if (def.tracks && def.tracks.root && n.transform) {
+      var warpK = 1;
+      if (def.combat && def.combat.warp && n._pose.t < 0.05) {
+        var wt = def.combat.warp;
+        var wtn = wt.target === "auto" ? (LOCK.target ? nodes[LOCK.target] : null) : nodes[wt.target];
+        if (wtn && wtn.transform) {
+          var wdx = wtn.transform.pos[0] - n.transform.pos[0];
+          var wdz = wtn.transform.pos[2] - n.transform.pos[2];
+          var wdist = Math.sqrt(wdx * wdx + wdz * wdz) - (wt.stopShort || 1.0);
+          var rk = def.tracks.root;
+          var rEnd = rk[rk.length - 1][1] || {};
+          var rTotal = Math.sqrt((rEnd.x || 0) * (rEnd.x || 0) + (rEnd.z || 0) * (rEnd.z || 0));
+          if (rTotal > 0.05 && wdist > 0) {
+            warpK = Math.max(0.25, Math.min(wt.maxScale || 2.5, wdist / rTotal));
+            n.transform.rot[1] = Math.atan2(wdx, wdz) / DEG;
+          }
+        }
+        n._warpK = warpK;
+      }
+      applyRootMotion(n, def, prevT, n._pose.t, n._warpK || 1);
+    }
     if (def.combat && n._pose && n.transform) {
       var cbt = def.combat, cph = cbt.phases || {};
       var ct = n._pose.t, cdur = def.dur || 1;
@@ -3758,6 +4100,28 @@ function updatePoseClips(dt) {
         var nxa = n._nextAttack; n._nextAttack = null;
         playPose(n, nxa);
         continue;
+      }
+      if (cbt.stance && n.stance && cbt.stance !== n.stance) { n._pose = null; continue; }
+      if (cbt.grab && !n._pose.fired.__grab && n._combatPhase === "active") {
+        var gr = cbt.grab;
+        var gya = (n.transform.rot[1] || 0) * DEG;
+        var gx = n.transform.pos[0] + Math.sin(gya) * (gr.range || 1.1);
+        var gz = n.transform.pos[2] + Math.cos(gya) * (gr.range || 1.1);
+        var gk2 = Object.keys(nodes);
+        for (var gi = 0; gi < gk2.length; gi++) {
+          var gv = nodes[gk2[gi]];
+          if (gv === n || gv._dead || gv._ragStop || !gv.transform) continue;
+          if (gr.filter && !tagMatch(gv, gr.filter)) continue;
+          var gdx = gv.transform.pos[0] - gx, gdz = gv.transform.pos[2] - gz;
+          if (gdx * gdx + gdz * gdz > (gr.radius || 0.8)) continue;
+          n._pose.fired.__grab = 1;
+          n._grabbing = { id: gv.id, t: 0, breakWindow: gr.breakWindow || 0.25, def: gr };
+          gv._grabbedBy = n.id;
+          gv._grabT = 0;
+          if (gr.victimPose) { gv._pose = { id: gr.victimPose, t: 0, fired: {} }; if (POSED.indexOf(gv) < 0) POSED.push(gv); }
+          playSound(gr.sound || "__block", { x: gx, z: gz });
+          break;
+        }
       }
       if (n._combatPhase === "active" && !n._pose.fired.__hit) {
         var hb = cbt.hitbox || {};
@@ -3780,7 +4144,23 @@ function updatePoseClips(dt) {
           var hdy = (htg.transform.pos[1] + 1.0) - hby;
           if (hdx * hdx + hdy * hdy + hdz * hdz > hbr * hbr) continue;
           n._pose.fired.__hit = 1;
-          if (htg.stats) htg.hp = Math.max(0, (htg.hp || 0) - (hb.damage != null ? hb.damage : 5));
+          var dmgIn = hb.damage != null ? hb.damage : 5;
+          var stanceDef = ((scene.resources || {}).stances || {})[htg.stance || ""] || {};
+          var guarded = stanceDef.guard && (!hb.level || stanceDef.guard === "all" || stanceDef.guard === hb.level);
+          if (guarded) {
+            htg.posture = (htg.posture || 0) + dmgIn;
+            dmgIn = Math.round(dmgIn * (stanceDef.chip != null ? stanceDef.chip : 0.15));
+            playSound("__block", { x: hbx, z: hbz });
+            if (htg.posture >= (htg.postureMax || 40)) {
+              htg.posture = 0;
+              htg._addPose = { id: "__stumble", t: 0 };
+              htg._stunT = world.time + 1.2;
+              if (POSED.indexOf(htg) < 0) POSED.push(htg);
+            }
+          } else { htg.posture = Math.max(0, (htg.posture || 0) - dmgIn * 0.3); }
+          var sMul = (((scene.resources || {}).stances || {})[n.stance || ""] || {}).damageMul;
+          if (sMul) dmgIn = Math.round(dmgIn * sMul);
+          if (htg.stats) htg.hp = Math.max(0, (htg.hp || 0) - dmgIn);
           n._hitstop = 0.1; htg._hitstop = 0.1;
           var hpb = hb.pushback != null ? hb.pushback : 3;
           htg.transform.pos[0] += Math.sin(hya) * hpb * 0.1;
@@ -3889,7 +4269,7 @@ function blendTreePose(n, dt) {
 // ---- root motion ---------------------------------------------------------
 // A clip may carry a track named root: [[t,{x,y,z}],...]. The per-frame
 // delta is rotated into world space by the actor yaw and applied to pos.
-function applyRootMotion(n, def, prevT, nowT) {
+function applyRootMotion(n, def, prevT, nowT, warp) {
   var tr = (def.tracks || {}).root;
   if (!tr) return;
   var a = samplePoseTrack3(tr, prevT), b = samplePoseTrack3(tr, nowT);
@@ -3899,9 +4279,10 @@ function applyRootMotion(n, def, prevT, nowT) {
   var t = n.transform;
   var yaw = ((t.rot && t.rot[1]) || 0) * DEG;
   var c = Math.cos(yaw), s = Math.sin(yaw);
-  t.pos[0] += dx * c + dz * s;
+  var wk = warp || 1;
+  t.pos[0] += (dx * c + dz * s) * wk;
   t.pos[1] += dy;
-  t.pos[2] += -dx * s + dz * c;
+  t.pos[2] += (-dx * s + dz * c) * wk;
 }
 // Vector variant of samplePoseTrack for root tracks.
 function samplePoseTrack3(keys, t) {
@@ -4244,6 +4625,46 @@ function blendedPose(n) {
     }
   }
   if (n.footIK) out = applyFootIK(n, out);
+  if (n.footLock && n._geo && n._geo.rigged && !n._rag) {
+    var ph2 = n._gaitPhase || 0;
+    var planted = Math.sin(ph2) < 0 ? "L" : "R";
+    if (n._plantSide !== planted) { n._plantSide = planted; n._plantAt = null; }
+    var amt2 = n._gaitAmt || 0;
+    if (amt2 > 0.3 && (n._airY || 0) < 0.05) {
+      if (!n._plantAt) n._plantAt = [n.transform.pos[0], n.transform.pos[2]];
+      var lx = n.transform.pos[0] - n._plantAt[0];
+      var lz = n.transform.pos[2] - n._plantAt[1];
+      var ldist = Math.sqrt(lx * lx + lz * lz);
+      var maxStride = n.footLock.stride || 1.1;
+      if (ldist > maxStride) n._plantAt = [n.transform.pos[0], n.transform.pos[2]];
+      else {
+        var back = Math.min(38, ldist * 34) * (n.footLock.weight != null ? n.footLock.weight : 1);
+        var pb = poseAngles(out["leg" + planted]) || { rx: 0, ry: 0, rz: 0 };
+        out["leg" + planted] = { rx: pb.rx - back * 0.5, ry: pb.ry, rz: pb.rz };
+        var pk2 = poseAngles(out["shin" + planted]) || { rx: 0, ry: 0, rz: 0 };
+        out["shin" + planted] = { rx: pk2.rx + back * 0.35, ry: pk2.ry, rz: pk2.rz };
+      }
+    } else n._plantAt = null;
+  }
+  if (n.armIK) {
+    var atn = n.armIK.target === "lock" ? (LOCK.target ? nodes[LOCK.target] : null) : nodes[n.armIK.target];
+    if (atn && atn.transform) {
+      var adx = atn.transform.pos[0] - n.transform.pos[0];
+      var adz = atn.transform.pos[2] - n.transform.pos[2];
+      var ady = (atn.transform.pos[1] + 1.2) - (n.transform.pos[1] + 1.5);
+      var arel = Math.atan2(adx, adz) / DEG - (n.transform.rot[1] || 0);
+      while (arel > 180) arel -= 360; while (arel < -180) arel += 360;
+      var adist = Math.sqrt(adx * adx + adz * adz) || 1;
+      var apitch = Math.atan2(ady, adist) / DEG;
+      var aw = n.armIK.weight != null ? n.armIK.weight : 0.85;
+      var ar = poseAngles(out.armR) || { rx: 0, ry: 0, rz: 0 };
+      out.armR = { rx: ar.rx + (-90 + apitch - ar.rx) * aw,
+                   ry: ar.ry + (Math.max(-60, Math.min(60, arel)) - ar.ry) * aw,
+                   rz: ar.rz };
+      var af = poseAngles(out.foreR) || { rx: 0, ry: 0, rz: 0 };
+      out.foreR = { rx: af.rx + (0 - af.rx) * aw, ry: af.ry, rz: af.rz };
+    }
+  }
   n._lastLiving = out;
   return out;
 }
@@ -4603,6 +5024,7 @@ function renderFrame() {
     }
   }
   if ((scene.render || {}).viewmodel) updateViewmodel(1 / 60);
+  updateAudioParams();
   renderProjectiles();
   renderLockMarker();
   renderExplosions();
@@ -4690,6 +5112,41 @@ function reloadWeapon() {
   WEP.reloading = w.reloadTime || 1.5;
   playSound("__block");
 }
+function drawWeaponShapes(x, y, sc2, shapes) {
+  var top = -20;
+  for (var i = 0; i < shapes.length; i++) {
+    var sh = shapes[i];
+    ctx.globalAlpha = sh.alpha != null ? sh.alpha : 1;
+    ctx.fillStyle = sh.color || "#3a3f45";
+    ctx.strokeStyle = sh.color || "#3a3f45";
+    if (sh.poly) {
+      ctx.beginPath();
+      for (var p = 0; p < sh.poly.length; p++) {
+        var px = x + sh.poly[p][0] * sc2, py = y + sh.poly[p][1] * sc2;
+        if (sh.poly[p][1] < top) top = sh.poly[p][1];
+        if (p === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      if (sh.outline) { ctx.lineWidth = (sh.width || 2) * sc2; ctx.stroke(); } else ctx.fill();
+    } else if (sh.rect) {
+      ctx.fillRect(x + sh.rect[0] * sc2, y + sh.rect[1] * sc2, sh.rect[2] * sc2, sh.rect[3] * sc2);
+      if (sh.rect[1] < top) top = sh.rect[1];
+    } else if (sh.circle) {
+      ctx.beginPath();
+      ctx.arc(x + sh.circle[0] * sc2, y + sh.circle[1] * sc2, sh.circle[2] * sc2, 0, Math.PI * 2);
+      ctx.fill();
+      if (sh.circle[1] - sh.circle[2] < top) top = sh.circle[1] - sh.circle[2];
+    } else if (sh.line) {
+      ctx.lineWidth = (sh.width || 3) * sc2;
+      ctx.beginPath();
+      ctx.moveTo(x + sh.line[0] * sc2, y + sh.line[1] * sc2);
+      ctx.lineTo(x + sh.line[2] * sc2, y + sh.line[3] * sc2);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  return -top;
+}
 function drawWeaponParts(x, y, sc2, w) {
   var P = w.parts || {}, col = w.color || "#3a3f45", ac = w.accent || "#22262a";
   var bodyW = P.body === "bulky" ? 40 : (P.body === "compact" ? 24 : 32);
@@ -4763,6 +5220,21 @@ function drawViewmodel(cfg) {
     ctx.beginPath(); ctx.arc(x - 32 * sc2, y - 76 * sc2, 11 * sc2, 0, Math.PI * 2); ctx.fill();
   } else {
     var wdef = weaponDef(shape);
+    if (wdef && (wdef.shapes || wdef.adsShapes)) {
+      var useShapes = (VM.ads > 0.6 && wdef.adsShapes) ? wdef.adsShapes : (wdef.shapes || []);
+      var mtop = drawWeaponShapes(x, y, sc2, useShapes);
+      if (VM.flash > 0) {
+        var mz = wdef.muzzle || [0, -mtop];
+        ctx.globalAlpha = Math.min(1, VM.flash * 16);
+        ctx.fillStyle = wdef.flashColor || "#fff3b0";
+        ctx.beginPath();
+        ctx.arc(x + mz[0] * sc2, y + mz[1] * sc2, (wdef.flashSize || 16) * sc2, 0, Math.PI * 2);
+        ctx.fill(); ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+      drawCrosshair(VM.ads, VM._spd || 0, wdef.spread || 2);
+      return;
+    }
     if (wdef && wdef.parts) {
       var blen = drawWeaponParts(x, y, sc2, wdef);
       if (VM.flash > 0) {
@@ -5100,6 +5572,8 @@ function loadScene(json) {
   initSession();
   // world matrices must exist before baking: vertices are lit in world space
   updateTransforms(scene.nodes, matIdent());
+  JOINTS = [];
+  if (scene.joints) for (var ji = 0; ji < scene.joints.length; ji++) addJoint(scene.joints[ji]);
   if (scene.lighting) bakeLighting();
   conSetup();
   post({ kv: "ready", id: scene.meta.id, permissions: scene.permissions || [] });

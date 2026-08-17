@@ -1314,10 +1314,17 @@ function updateActor(n, dt) {
     }
     var gy = scene._tilemap ? 0 : terrainHeight(t.pos[0], t.pos[2]);
     n._vy = (n._vy || 0);
-    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) { n._vy = ctl.jumpVelocity || 7; n._addPose = { id: "__jump", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); playSound("__jump", { x: t.pos[0], z: t.pos[2] }); }
+    if (INPUT.attack.pressed && Math.abs(n._airY || 0) < 0.01) { n._vy = ctl.jumpVelocity || 7; n._addPose = { id: "__jump", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); playSound("__jump", { x: t.pos[0], z: t.pos[2] }); var jang = camYaw * DEG, jfx = Math.sin(jang), jfz = Math.cos(jang); if (LOCK.target && nodes[LOCK.target] && nodes[LOCK.target].worldPos) { var jlf = vnorm(v3(nodes[LOCK.target].worldPos.x - t.pos[0], 0, nodes[LOCK.target].worldPos.z - t.pos[2])); jfx = jlf.x; jfz = jlf.z; } n._jvx = (jfx * INPUT.move.y + jfz * INPUT.move.x) * (ctl.jumpSpeed || sp); n._jvz = (jfz * INPUT.move.y - jfx * INPUT.move.x) * (ctl.jumpSpeed || sp); }
     n._vy -= (ctl.gravity || 18) * dt;
     n._airY = Math.max(0, (n._airY || 0) + n._vy * dt);
     if (n._airY === 0 && n._vy < 0) { n._vy = 0; if (n._wasAir) { n._addPose = { id: "__land", t: 0 }; if (POSED.indexOf(n) < 0) POSED.push(n); playSound("__land", { x: t.pos[0], z: t.pos[2] }); } }
+    if (n._airY > 0 && (n._jvx || n._jvz)) {
+      var jnx = t.pos[0] + n._jvx * dt, jnz = t.pos[2] + n._jvz * dt;
+      var jtm = scene._tilemap;
+      if (!(jtm ? tilemapBlocked(jtm, jnx, jnz) : !walkmeshAllows(jnx, jnz))) {
+        t.pos[0] = jnx; t.pos[2] = jnz;
+      }
+    } else if (n._airY === 0) { n._jvx = 0; n._jvz = 0; }
     n._wasAir = n._airY > 0.01;
     t.pos[1] = gy + n._airY;
   }
@@ -3116,14 +3123,46 @@ function updateAreas() {
 // ---------------------------------------------------------------------------
 var viewM = matIdent(), fovScale = 1;
 
+var CAM = { eye: null, look: null, shake: 0, shakeT: 0, fov: 0, fovTarget: 0 };
+function camShake(amount, dur) {
+  CAM.shake = Math.max(CAM.shake, amount || 0.4);
+  CAM.shakeT = Math.max(CAM.shakeT, dur || 0.25);
+}
+function camFov(target, speed) { CAM.fovTarget = target; CAM.fovSpeed = speed || 6; }
 function buildView() {
   var mode = (scene.render && scene.render.cameraMode) || (camera && camera.mode) || "follow";
   var eye, look;
   var pl = nodes[playerId];
+  if (pl && pl.worldPos && scene.cameraZones) {
+    for (var cz = 0; cz < scene.cameraZones.length; cz++) {
+      var zn = scene.cameraZones[cz];
+      if (pl.worldPos.x >= zn.min[0] && pl.worldPos.x <= zn.max[0] &&
+          pl.worldPos.z >= zn.min[1] && pl.worldPos.z <= zn.max[1]) {
+        if (nodes[zn.camera]) { camera = nodes[zn.camera]; mode = "fixed"; }
+        break;
+      }
+    }
+  }
 
   if (mode === "fixed" && camera) {
     eye = camera.worldPos;
     look = pl ? pl.worldPos : v3(0, 0, 0);
+  } else if (mode === "rail" && camera && camera.path && nodes[camera.path] && pl) {
+    var rpath = nodes[camera.path];
+    var rp0 = rpath.points[0];
+    var rpN = rpath.points[rpath.points.length - 1];
+    var rax = rpN[0] - rp0[0], raz = rpN[2] - rp0[2];
+    var ralen = Math.sqrt(rax * rax + raz * raz) || 1;
+    var rt = ((pl.worldPos.x - rp0[0]) * rax + (pl.worldPos.z - rp0[2]) * raz) / (ralen * ralen);
+    rt = Math.max(0, Math.min(1, rt));
+    var rpt = samplePath(rpath, rt * ralen);
+    eye = v3(rpt.x, rpt.y + (camera.height || 3), rpt.z);
+    look = v3(pl.worldPos.x, pl.worldPos.y + 1.2, pl.worldPos.z);
+  } else if (mode === "lockOn" && pl && LOCK.target && nodes[LOCK.target] && nodes[LOCK.target].worldPos) {
+    var lkt = nodes[LOCK.target].worldPos;
+    var away = vnorm(v3(pl.worldPos.x - lkt.x, 0, pl.worldPos.z - lkt.z));
+    eye = v3(pl.worldPos.x + away.x * 4.5, pl.worldPos.y + 3, pl.worldPos.z + away.z * 4.5);
+    look = v3((pl.worldPos.x + lkt.x) / 2, (pl.worldPos.y + lkt.y) / 2 + 1, (pl.worldPos.z + lkt.z) / 2);
   } else if (mode === "overhead" || mode === "isometric") {
     var c = pl ? pl.worldPos : v3();
     var h = mode === "isometric" ? 14 : 20;
@@ -3140,6 +3179,35 @@ function buildView() {
     look = vadd(c2, v3(0, 1.2, 0));
   }
 
+  // blend between camera positions so zone/mode changes glide instead of cut
+  var blendT = (scene.render && scene.render.cameraBlend != null) ? scene.render.cameraBlend : 0.3;
+  if (blendT > 0 && CAM.eye) {
+    var bk = Math.min(1, (1 / 60) / blendT * 3);
+    eye = v3(CAM.eye.x + (eye.x - CAM.eye.x) * bk,
+             CAM.eye.y + (eye.y - CAM.eye.y) * bk,
+             CAM.eye.z + (eye.z - CAM.eye.z) * bk);
+    look = v3(CAM.look.x + (look.x - CAM.look.x) * bk,
+              CAM.look.y + (look.y - CAM.look.y) * bk,
+              CAM.look.z + (look.z - CAM.look.z) * bk);
+  }
+  // collision: pull the eye toward the look point if something blocks the view
+  if (scene.render && scene.render.cameraCollide && mode !== "firstPerson") {
+    if (segmentBlocked(look, eye)) {
+      eye = v3(look.x + (eye.x - look.x) * 0.55,
+               look.y + (eye.y - look.y) * 0.55,
+               look.z + (eye.z - look.z) * 0.55);
+    }
+  }
+  // impact shake
+  if (CAM.shakeT > 0) {
+    CAM.shakeT -= 1 / 60;
+    var sAmp = CAM.shake * Math.max(0, CAM.shakeT);
+    eye = v3(eye.x + (Math.random() - 0.5) * sAmp,
+             eye.y + (Math.random() - 0.5) * sAmp,
+             eye.z + (Math.random() - 0.5) * sAmp);
+    if (CAM.shakeT <= 0) CAM.shake = 0;
+  }
+  CAM.eye = eye; CAM.look = look;
   var fwd = vnorm(vsub(look, eye));
   var right = vnorm(vcross(v3(0, 1, 0), fwd));
   var up = vcross(fwd, right);
@@ -3149,7 +3217,11 @@ function buildView() {
     fwd.x, fwd.y, fwd.z, -vdot(fwd, eye),
     0, 0, 0, 1
   ];
-  var fov = (camera && camera.fov) || 55;
+  var fovBase = (camera && camera.fov) || (scene.render && scene.render.fov) || 55;
+  if (!CAM.fov) CAM.fov = fovBase;
+  var fovWant = CAM.fovTarget || fovBase;
+  CAM.fov += (fovWant - CAM.fov) * Math.min(1, (1 / 60) * (CAM.fovSpeed || 6));
+  var fov = CAM.fov;
   fovScale = (H / 2) / Math.tan(fov / 2 * DEG);
 }
 
@@ -3858,6 +3930,11 @@ function explode(ex, ey, ez, radius, force, damage) {
   radius = radius || 4; force = force || 9; damage = damage != null ? damage : 12;
   EXPLOSIONS.push({ x: ex, y: ey, z: ez, t: world.time, r: radius });
   playSound("__boom", { x: ex, z: ez });
+  var plx = nodes[playerId];
+  if (plx && plx.worldPos) {
+    var edist = Math.sqrt(Math.pow(plx.worldPos.x - ex, 2) + Math.pow(plx.worldPos.z - ez, 2));
+    if (edist < radius * 3) camShake(0.8 * (1 - edist / (radius * 3)), 0.5);
+  }
   var keys = Object.keys(nodes), ki, tn;
   for (ki = 0; ki < keys.length; ki++) {
     tn = nodes[keys[ki]];
@@ -4162,6 +4239,7 @@ function updatePoseClips(dt) {
           if (sMul) dmgIn = Math.round(dmgIn * sMul);
           if (htg.stats) htg.hp = Math.max(0, (htg.hp || 0) - dmgIn);
           n._hitstop = 0.1; htg._hitstop = 0.1;
+          if (tagMatch(n, "player") || tagMatch(htg, "player")) camShake(0.16, 0.14);
           var hpb = hb.pushback != null ? hb.pushback : 3;
           htg.transform.pos[0] += Math.sin(hya) * hpb * 0.1;
           htg.transform.pos[2] += Math.cos(hya) * hpb * 0.1;
