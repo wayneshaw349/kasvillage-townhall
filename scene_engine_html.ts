@@ -710,7 +710,10 @@ var INPUT = {
   move: { x: 0, y: 0, length: 0 },
   look: { x: 0, y: 0, length: 0 },
   interact: { pressed: false, held: false },
-  attack: { pressed: false, held: false }
+  attack: { pressed: false, held: false },
+  // tap/stroke scheme (scene.input.scheme === "tap")
+  stroke: { active: false, angle: 0, length: 0, ms: 0, points: [], _edge: false },
+  tap: { x: 0, y: 0, heading: 0, _edge: false }
 };
 var keys = {};
 // ---------------------------------------------------------------------------
@@ -959,6 +962,7 @@ function setupInput() {
     el.addEventListener("touchend", up); el.addEventListener("mouseup", up);
   }
   bindBtn("bA", "interact"); bindBtn("bB", "attack");
+  setupTouchScheme();
 
   // drag anywhere outside the stick = look
   var lookId = null, lx = 0, ly = 0;
@@ -977,6 +981,143 @@ function setupInput() {
   }, { passive: false });
   pad.addEventListener("touchend", function () { lookId = null; INPUT.look.x = 0; INPUT.look.y = 0; });
 }
+// ---------------------------------------------------------------------------
+// TAP / STROKE SCHEME  (opt-in via scene.input.scheme === "tap")
+//
+// One thumb, one contact, three outcomes decided by how far and how fast the
+// finger travels. Movement is discrete when the player wants precision and
+// continuous when they want flow, and they never think about the mode.
+// ---------------------------------------------------------------------------
+function inputCfg() {
+  var c = (scene && scene.input) || {};
+  return {
+    scheme: c.scheme || "stick",
+    thresholdPx: c.tapThresholdPx != null ? c.tapThresholdPx : 10,
+    strokeStartMs: c.strokeStartMs != null ? c.strokeStartMs : 120,
+    headingMode: String(c.headingMode || "continuous"),
+    haptics: c.haptics !== false,
+    minStrokePx: c.minStrokePx != null ? c.minStrokePx : 40
+  };
+}
+
+function quantizeHeading(a, mode) {
+  var n = mode === "4" ? 4 : mode === "8" ? 8 : mode === "16" ? 16 : 0;
+  if (!n) return a;                       // continuous: best fidelity
+  var step = 2 * Math.PI / n;
+  return Math.round(a / step) * step;
+}
+
+function buzz(ms) {
+  var c = inputCfg();
+  if (!c.haptics) return;
+  try { if (navigator && navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
+}
+
+function setHeadingFrom(dx, dy, mode) {
+  var m = Math.sqrt(dx * dx + dy * dy);
+  if (m < 1e-6) { INPUT.move.x = 0; INPUT.move.y = 0; INPUT.move.length = 0; return 0; }
+  var a = quantizeHeading(Math.atan2(-dy, dx), mode);
+  INPUT.move.x = Math.cos(a);
+  INPUT.move.y = Math.sin(a);
+  INPUT.move.length = 1;
+  return a;
+}
+
+function setupTouchScheme() {
+  var st = null;   // { id, x0, y0, t0, moved, stroke, pts }
+
+  function inButtonZone(x, y) {
+    // fixed-zone buttons own their pixels; the play surface owns the rest
+    var W = window.innerWidth, H = window.innerHeight;
+    return (x > W - 150 && y > H - 130);
+  }
+
+  function down(e) {
+    var c = inputCfg();
+    if (c.scheme !== "tap") return;
+    var t = e.changedTouches ? e.changedTouches[0] : e;
+    if (inButtonZone(t.clientX, t.clientY)) return;
+    st = { id: t.identifier === undefined ? 1 : t.identifier,
+           x0: t.clientX, y0: t.clientY, t0: Date.now(),
+           moved: false, stroke: false, pts: [[t.clientX, t.clientY]] };
+    if (e.preventDefault) e.preventDefault();
+  }
+
+  function move(e) {
+    var c = inputCfg();
+    if (c.scheme !== "tap" || !st) return;
+    var list = e.changedTouches || [e], t = null;
+    for (var i = 0; i < list.length; i++) {
+      var id = list[i].identifier === undefined ? 1 : list[i].identifier;
+      if (id === st.id) { t = list[i]; break; }
+    }
+    if (!t) return;
+    var dx = t.clientX - st.x0, dy = t.clientY - st.y0;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    st.pts.push([t.clientX, t.clientY]);
+
+    if (!st.moved && dist > c.thresholdPx) {
+      st.moved = true;
+      // crossed the threshold FAST -> the player is drawing, not steering
+      st.stroke = (Date.now() - st.t0) < c.strokeStartMs;
+      if (st.stroke) INPUT.stroke.active = true;
+    }
+
+    // HOLD = continuous steering, the stick-quality path
+    if (st.moved && !st.stroke) setHeadingFrom(dx, dy, c.headingMode);
+    if (e.preventDefault) e.preventDefault();
+  }
+
+  function up(e) {
+    var c = inputCfg();
+    if (c.scheme !== "tap" || !st) return;
+    var t = (e.changedTouches && e.changedTouches[0]) || e;
+    var dur = Date.now() - st.t0;
+
+    if (st.stroke) {
+      var ax = st.pts[st.pts.length - 1][0] - st.pts[0][0];
+      var ay = st.pts[st.pts.length - 1][1] - st.pts[0][1];
+      var len = Math.sqrt(ax * ax + ay * ay);
+      if (len >= c.minStrokePx) {
+        INPUT.stroke.angle = Math.atan2(-ay, ax);
+        INPUT.stroke.length = len;
+        INPUT.stroke.ms = dur;
+        INPUT.stroke.points = st.pts.slice();
+        INPUT.stroke._edge = true;
+        INPUT.attack._edge = true;      // legacy consumers still fire
+        buzz(18);
+      }
+      INPUT.stroke.active = false;
+
+    } else if (!st.moved) {
+      // TAP -> heading from where the finger landed, relative to centre.
+      // Latched: the actor keeps this heading until the next tap.
+      var cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+      var tx = st.x0 - cx, ty = st.y0 - cy;
+      if (Math.sqrt(tx * tx + ty * ty) < 40) {
+        INPUT.move.x = 0; INPUT.move.y = 0; INPUT.move.length = 0;   // centre = stop
+      } else {
+        INPUT.tap.heading = setHeadingFrom(tx, ty, c.headingMode);
+      }
+      INPUT.tap.x = st.x0; INPUT.tap.y = st.y0;
+      INPUT.tap._edge = true;
+      buzz(8);
+    }
+    // HOLD release: movement stops, matching lift-to-block semantics
+    if (st.moved && !st.stroke) {
+      INPUT.move.x = 0; INPUT.move.y = 0; INPUT.move.length = 0;
+    }
+    st = null;
+  }
+
+  pad.addEventListener("touchstart", down, { passive: false });
+  pad.addEventListener("mousedown", down);
+  window.addEventListener("touchmove", move, { passive: false });
+  window.addEventListener("mousemove", move);
+  window.addEventListener("touchend", up);
+  window.addEventListener("mouseup", up);
+}
+
 function pollKeys() {
   var mx = 0, my = 0;
   if (keys["w"] || keys["arrowup"]) my += 1;
