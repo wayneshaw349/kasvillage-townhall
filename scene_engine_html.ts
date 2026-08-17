@@ -2537,6 +2537,133 @@ function physContacts() {
 
 // Inverse inertia for the body's shape. Spheres: 2/5 m r^2. Boxes: the
 // principal diagonal of a cuboid tensor. Stored inverted so it multiplies.
+// World-space corners of a rotated box body.
+function pbCorners(b) {
+  var hl = b.half || [0.5, 0.5, 0.5];
+  var p = pbPos(b);
+  var rt = (b.node.transform && b.node.transform.rot) || [0, 0, 0];
+  var cx2 = Math.cos((rt[0] || 0) * DEG), sx2 = Math.sin((rt[0] || 0) * DEG);
+  var cy2 = Math.cos((rt[1] || 0) * DEG), sy2 = Math.sin((rt[1] || 0) * DEG);
+  var cz2 = Math.cos((rt[2] || 0) * DEG), sz2 = Math.sin((rt[2] || 0) * DEG);
+  var out = [];
+  for (var i = 0; i < 8; i++) {
+    var lx = (i & 1 ? hl[0] : -hl[0]);
+    var ly = (i & 2 ? hl[1] : -hl[1]);
+    var lz = (i & 4 ? hl[2] : -hl[2]);
+    var y1 = ly * cx2 - lz * sx2, z1 = ly * sx2 + lz * cx2;
+    var x2 = lx * cy2 + z1 * sy2, z2 = -lx * sy2 + z1 * cy2;
+    var x3 = x2 * cz2 - y1 * sz2, y3 = x2 * sz2 + y1 * cz2;
+    out.push({ x: p[0] + x3, y: p[1] + y3, z: p[2] + z2 });
+  }
+  return out;
+}
+// Per-corner ground resolution: the deepest corners get impulses at their own
+// lever arm, which is what makes a box tip and rock rather than slide flat.
+function pbCornerGround(b, h) {
+  if (b.invMass === 0 || b.asleep || b.shape === "sphere" || b.obb === false) return;
+  if (!b.node.transform) return;
+  var cs = pbCorners(b), p = pbPos(b);
+  var gy = 0;
+  var hitAny = false;
+  for (var i = 0; i < cs.length; i++) {
+    var c = cs[i];
+    var floor = typeof terrainHeight === "function" ? terrainHeight(c.x, c.z) : 0;
+    var pen = floor - c.y;
+    if (pen <= 0) continue;
+    hitAny = true;
+    var rx = c.x - p[0], ry = c.y - p[1], rz = c.z - p[2];
+    var vpx = b.vel.x + ((b.av ? b.av.y * DEG : 0) * rz - (b.av ? b.av.z * DEG : 0) * ry);
+    var vpy = b.vel.y + ((b.av ? b.av.z * DEG : 0) * rx - (b.av ? b.av.x * DEG : 0) * rz);
+    var vpz = b.vel.z + ((b.av ? b.av.x * DEG : 0) * ry - (b.av ? b.av.y * DEG : 0) * rx);
+    if (vpy < 0) {
+      var e2 = vpy < -1 ? (b.rest || 0.1) : 0;
+      var jn2 = -(1 + e2) * vpy / (b.invMass * 4);
+      pbApplyImpulse(b, 0, jn2, 0, rx, ry, rz);
+      var fmu = b.fric || 0.7;
+      var tvx = vpx, tvz = vpz;
+      var tvl = Math.sqrt(tvx * tvx + tvz * tvz);
+      if (tvl > 1e-5) {
+        var jf = Math.min(tvl / (b.invMass * 4), Math.abs(jn2) * fmu);
+        pbApplyImpulse(b, -tvx / tvl * jf, 0, -tvz / tvl * jf, rx, ry, rz);
+      }
+    }
+    var pp2 = pbPos(b);
+    pp2[1] += pen * 0.32;
+  }
+  if (hitAny) { b.sleep = Math.max(0, b.sleep - h * 0.5); }
+}
+var JOINTS = [];
+function bodyOfNode(id) {
+  for (var i = 0; i < BODIES.length; i++) if (BODIES[i].node && BODIES[i].node.id === id) return BODIES[i];
+  return null;
+}
+function addJoint(spec) {
+  var ja = bodyOfNode(spec.a), jb = spec.b ? bodyOfNode(spec.b) : null;
+  if (!ja) return null;
+  var pa = pbPos(ja);
+  var anchor = spec.anchor || (jb ? null : [pa[0], pa[1], pa[2]]);
+  var restLen = spec.rest;
+  if (restLen == null) {
+    if (jb) { var pb2 = pbPos(jb); restLen = Math.sqrt(Math.pow(pb2[0] - pa[0], 2) + Math.pow(pb2[1] - pa[1], 2) + Math.pow(pb2[2] - pa[2], 2)); }
+    else restLen = 0;
+  }
+  var j = { type: spec.type || "ball", a: ja, b: jb, anchor: anchor, rest: restLen,
+           stiffness: spec.stiffness != null ? spec.stiffness : 0.7,
+           damping: spec.damping != null ? spec.damping : 0.15,
+           axis: spec.axis || null, breakForce: spec.breakForce || 0,
+           onBreak: spec.onBreak || null, dead: false };
+  JOINTS.push(j);
+  return j;
+}
+function breakJoint(j) {
+  j.dead = true;
+  playSound("__block");
+  if (j.onBreak) for (var i = 0; i < j.onBreak.length; i++) runAction(j.a.node, j.onBreak[i]);
+}
+function solveJoints(h) {
+  for (var i = JOINTS.length - 1; i >= 0; i--) {
+    var j = JOINTS[i];
+    if (j.dead) { JOINTS.splice(i, 1); continue; }
+    var A = j.a, B = j.b;
+    if (!A || A.node._dead || (B && B.node._dead)) { JOINTS.splice(i, 1); continue; }
+    var pa = pbPos(A);
+    var bx, by, bz;
+    if (B) { var pb3 = pbPos(B); bx = pb3[0]; by = pb3[1]; bz = pb3[2]; }
+    else { bx = j.anchor[0]; by = j.anchor[1]; bz = j.anchor[2]; }
+    var dx = bx - pa[0], dy = by - pa[1], dz = bz - pa[2];
+    var d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < 1e-6) continue;
+    var err = d - j.rest;
+    if (j.type === "spring") {
+      var f = err * j.stiffness * 40;
+      var ux = dx / d, uy = dy / d, uz = dz / d;
+      pbApplyImpulse(A, ux * f * h, uy * f * h, uz * f * h, 0, 0, 0);
+      if (B) pbApplyImpulse(B, -ux * f * h, -uy * f * h, -uz * f * h, 0, 0, 0);
+      if (j.breakForce && Math.abs(f) > j.breakForce) breakJoint(j);
+      continue;
+    }
+    if (j.type === "hinge" && j.axis) {
+      var ax = j.axis[0], ay = j.axis[1], az = j.axis[2];
+      var al = Math.sqrt(ax * ax + ay * ay + az * az) || 1;
+      ax /= al; ay /= al; az /= al;
+      if (A.av) {
+        var dot2 = A.av.x * ax + A.av.y * ay + A.av.z * az;
+        A.av.x = ax * dot2; A.av.y = ay * dot2; A.av.z = az * dot2;
+      }
+    }
+    var corr = err * j.stiffness;
+    var imA = A.invMass, imB = B ? B.invMass : 0;
+    var tot = imA + imB;
+    if (tot === 0) continue;
+    var cx3 = dx / d * corr, cy3 = dy / d * corr, cz3 = dz / d * corr;
+    pa[0] += cx3 * (imA / tot); pa[1] += cy3 * (imA / tot); pa[2] += cz3 * (imA / tot);
+    if (B) { var pb4 = pbPos(B); pb4[0] -= cx3 * (imB / tot); pb4[1] -= cy3 * (imB / tot); pb4[2] -= cz3 * (imB / tot); }
+    A.vel.x *= (1 - j.damping); A.vel.y *= (1 - j.damping); A.vel.z *= (1 - j.damping);
+    if (B) { B.vel.x *= (1 - j.damping); B.vel.y *= (1 - j.damping); B.vel.z *= (1 - j.damping); }
+    if (j.breakForce && Math.abs(err) * 40 > j.breakForce) breakJoint(j);
+    if (Math.abs(err) > 0.001) { pbWake(A); if (B) pbWake(B); }
+  }
+}
 function pbInvInertia(b) {
   if (b._invI) return b._invI;
   var m = b.mass || 1;
@@ -2651,6 +2778,14 @@ function physStep(h) {
       }
     }
   }
+  // 4a. constraints
+  for (var jit = 0; jit < 3; jit++) solveJoints(h);
+  // 4b. oriented-box corner resolution against the ground
+  for (i = 0; i < BODIES.length; i++) {
+    b = BODIES[i];
+    if (b.invMass === 0 || b.asleep || b.node._dead) continue;
+    pbCornerGround(b, h);
+  }
   // 5. positional passes: recompute contacts and relax residual overlap.
   // Impact wake + collision signals fire on the first pass only.
   for (var pc = 0; pc < 3; pc++) {
@@ -2682,7 +2817,7 @@ function physStep(h) {
     var sp2 = Math.sqrt(b.vel.x * b.vel.x + b.vel.y * b.vel.y + b.vel.z * b.vel.z);
     if (sp2 < PHYS.sleepVel) {
       b.sleep += h;
-      if (b.sleep > PHYS.sleepTime) { b.asleep = true; b.vel.x = b.vel.y = b.vel.z = 0; if (b.av) b.av.x = b.av.y = b.av.z = 0; }
+      if (b.sleep > PHYS.sleepTime) { b.asleep = true; b.vel.x = b.vel.y = b.vel.z = 0; if (b.av) b.av.x = b.av.y = b.av.z = 0; if (b.shape !== "sphere" && b.obb !== false && b.node.transform && b.node.transform.rot) { var rr3 = b.node.transform.rot; rr3[0] = Math.round(rr3[0] / 90) * 90; rr3[2] = Math.round(rr3[2] / 90) * 90; } }
     } else { b.sleep = 0; b.asleep = false; }
   }
 }
@@ -5442,6 +5577,8 @@ function loadScene(json) {
   initSession();
   // world matrices must exist before baking: vertices are lit in world space
   updateTransforms(scene.nodes, matIdent());
+  JOINTS = [];
+  if (scene.joints) for (var ji = 0; ji < scene.joints.length; ji++) addJoint(scene.joints[ji]);
   if (scene.lighting) bakeLighting();
   conSetup();
   post({ kv: "ready", id: scene.meta.id, permissions: scene.permissions || [] });
