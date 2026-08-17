@@ -4110,6 +4110,7 @@ function playPose(n, id) {
   n._pose = { id: id, t: 0, fired: {} };
   if (!n._xfSkip) n._xfFrom = basePose(n._lastLiving || {});
   n._xfSkip = 0;
+  if (!def.combat) n._combatPhase = null;
   n._xfDur = def.blendIn != null ? def.blendIn : 0.1;
   n._xfT = n._xfDur > 0 ? 0 : null;
   if (POSED.indexOf(n) < 0) POSED.push(n);
@@ -4166,6 +4167,7 @@ function updatePoseClips(dt) {
   for (var i = POSED.length - 1; i >= 0; i--) {
     var n = POSED[i];
     if (!n._pose) {
+      n._combatPhase = null;
       if (n._xfT != null) n._xfT += dt;
       if (!n._addPose && n._xfT == null) POSED.splice(i, 1);
       continue;
