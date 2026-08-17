@@ -4533,7 +4533,9 @@ function applyFootIK(n, out) {
   var cfg = n.footIK;
   if (!cfg || cfg.enabled === false || n._rag) return out;
   var g = n._geo;
-  if (!g || !g.rigged || !g.parts.legL || !g.parts.shinL) return out;
+  if (!g || !g.rigged || !g.parts) return out;
+  if (!g.parts.legL || !g.parts.shinL || !g.parts.legR || !g.parts.shinR) return out;
+  if (!g.parts.legL.pivot || !g.parts.shinL.pivot || !g.parts.legR.pivot) return out;
   var air = (n._airY || 0) > 0.05;
   n._ikW = (n._ikW == null ? 0 : n._ikW) + ((air ? 0 : 1) - (n._ikW || 0)) * 0.2;
   if (n._ikW < 0.02) return out;

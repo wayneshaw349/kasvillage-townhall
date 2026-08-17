@@ -1184,12 +1184,12 @@ function updateActor(n, dt) {
     else {
       n._grabbing.t += dt;
       var gdef = n._grabbing.def;
-      var gy2 = (n.transform.rot[1] || 0) * DEG;
+      var gy2 = ((n.transform.rot || [0,0,0])[1] || 0) * DEG;
       var hold = gdef.holdDist != null ? gdef.holdDist : 0.9;
       gvn.transform.pos[0] = n.transform.pos[0] + Math.sin(gy2) * hold;
       gvn.transform.pos[2] = n.transform.pos[2] + Math.cos(gy2) * hold;
       gvn.transform.pos[1] = n.transform.pos[1] + (gdef.lift || 0.35);
-      gvn.transform.rot[1] = (n.transform.rot[1] || 0) + 180;
+      (gvn.transform.rot || [0,0,0])[1] = ((n.transform.rot || [0,0,0])[1] || 0) + 180;
       if (gvn._grabBreak && n._grabbing.t < n._grabbing.breakWindow) {
         gvn._grabBreak = false; gvn._grabbedBy = null;
         gvn.transform.pos[1] = n.transform.pos[1];
@@ -1666,7 +1666,7 @@ function runAction(self, a) {
   if (a && a.action === "gotoRoom") { gotoRoom((a.args && a.args[0]) || a.target); return; }
   if (a && a.action === "playSound") { playSound((a.args && a.args[0]) || a.target, self && self.worldPos); return; }
   if (a && a.action === "shoot" && self && self.transform) {
-    var sag = (self.transform.rot[1] || 0) * DEG;
+    var sag = ((self.transform.rot || [0,0,0])[1] || 0) * DEG;
     var sargs = a.args || [];
     shoot({ x: self.transform.pos[0], y: self.transform.pos[1], z: self.transform.pos[2] },
           { x: Math.sin(sag), y: sargs[2] != null ? sargs[2] : 0.05, z: Math.cos(sag) },
@@ -2902,7 +2902,7 @@ function segmentBlocked(a, b) {
 }
 
 // canSee(a, b): inside a's vision cone AND unoccluded.
-// a.vision = { range: 12, fovDeg: 90 } (defaults). Facing = a.transform.rot[1].
+// a.vision = { range: 12, fovDeg: 90 } (defaults). Facing = (a.transform.rot || [0,0,0])[1].
 function canSee(a, b) {
   if (!a || !b || !a.worldPos || !b.worldPos) return false;
   var range = (a.vision && a.vision.range) || 12;
@@ -2910,7 +2910,7 @@ function canSee(a, b) {
   var dx = b.worldPos.x - a.worldPos.x, dz = b.worldPos.z - a.worldPos.z;
   var d = Math.sqrt(dx * dx + dz * dz);
   if (d > range) return false;
-  var facing = ((a.transform && a.transform.rot && a.transform.rot[1]) || 0);
+  var facing = ((a.transform && a.transform.rot && (a.transform.rot || [0,0,0])[1]) || 0);
   var angTo = Math.atan2(dx, dz) / DEG;
   var diff = ((angTo - facing) % 360 + 540) % 360 - 180;
   if (Math.abs(diff) > fov) return false;
@@ -3085,7 +3085,7 @@ function updateLock() {
     if (LOCK.target && nodes[LOCK.target]) {
       dir = vsub(nodes[LOCK.target].worldPos, pl.worldPos); dir.y = 0;
     } else {
-      var ya = ((pl.transform.rot && pl.transform.rot[1]) || 0) * DEG;
+      var ya = ((pl.transform.rot && (pl.transform.rot || [0,0,0])[1]) || 0) * DEG;
       dir = v3(Math.sin(ya), 0, Math.cos(ya));
     }
     shoot(pl.worldPos, dir, {
@@ -3182,7 +3182,7 @@ function buildView() {
     look = c;
   } else if (mode === "firstPerson" && pl) {
     eye = vadd(pl.worldPos, v3(0, 1.6, 0));
-    var ya = (pl.transform.rot[1] || 0) * DEG;
+    var ya = ((pl.transform.rot || [0,0,0])[1] || 0) * DEG;
     look = vadd(eye, v3(Math.sin(ya), 0, Math.cos(ya)));
   } else {
     var c2 = pl ? pl.worldPos : v3();
@@ -4102,8 +4102,12 @@ var POSED = [];
 function playPose(n, id) {
   var def = poseDef(id);
   if (!def) return;
+  var __prevPose = n._pose;
+  if (__prevPose && __prevPose.id !== id) {
+    n._xfFrom = basePose(blendedPoseCore(n) || n._lastLiving || {});
+    n._xfSkip = 1;
+  }
   n._pose = { id: id, t: 0, fired: {} };
-  if (n._pose && n._pose.id !== id) { n._xfFrom = basePose(blendedPoseCore(n) || n._lastLiving || {}); n._xfSkip = 1; }
   if (!n._xfSkip) n._xfFrom = basePose(n._lastLiving || {});
   n._xfSkip = 0;
   n._xfDur = def.blendIn != null ? def.blendIn : 0.1;
@@ -4161,7 +4165,11 @@ function updatePoseClips(dt) {
   // main clip layer
   for (var i = POSED.length - 1; i >= 0; i--) {
     var n = POSED[i];
-    if (!n._pose) { if (!n._addPose) POSED.splice(i, 1); continue; }
+    if (!n._pose) {
+      if (n._xfT != null) n._xfT += dt;
+      if (!n._addPose && n._xfT == null) POSED.splice(i, 1);
+      continue;
+    }
     var def = poseDef(n._pose.id);
     if (def && def.combat && def.combat.toStance && n._pose.t >= (def.dur || 1) - 0.02) n.stance = def.combat.toStance;
     if (!def) { n._pose = null; continue; }
@@ -4184,7 +4192,7 @@ function updatePoseClips(dt) {
           var rTotal = Math.sqrt((rEnd.x || 0) * (rEnd.x || 0) + (rEnd.z || 0) * (rEnd.z || 0));
           if (rTotal > 0.05 && wdist > 0) {
             warpK = Math.max(0.25, Math.min(wt.maxScale || 2.5, wdist / rTotal));
-            n.transform.rot[1] = Math.atan2(wdx, wdz) / DEG;
+            (n.transform.rot || [0,0,0])[1] = Math.atan2(wdx, wdz) / DEG;
           }
         }
         n._warpK = warpK;
@@ -4204,7 +4212,7 @@ function updatePoseClips(dt) {
       if (cbt.stance && n.stance && cbt.stance !== n.stance) { n._pose = null; continue; }
       if (cbt.grab && !n._pose.fired.__grab && n._combatPhase === "active") {
         var gr = cbt.grab;
-        var gya = (n.transform.rot[1] || 0) * DEG;
+        var gya = ((n.transform.rot || [0,0,0])[1] || 0) * DEG;
         var gx = n.transform.pos[0] + Math.sin(gya) * (gr.range || 1.1);
         var gz = n.transform.pos[2] + Math.cos(gya) * (gr.range || 1.1);
         var gk2 = Object.keys(nodes);
@@ -4225,7 +4233,7 @@ function updatePoseClips(dt) {
       }
       if (n._combatPhase === "active" && !n._pose.fired.__hit) {
         var hb = cbt.hitbox || {};
-        var hya = (n.transform.rot[1] || 0) * DEG;
+        var hya = ((n.transform.rot || [0,0,0])[1] || 0) * DEG;
         var hbx = n.transform.pos[0] + Math.sin(hya) * (hb.forward != null ? hb.forward : 1.2);
         var hbz = n.transform.pos[2] + Math.cos(hya) * (hb.forward != null ? hb.forward : 1.2);
         var hby = n.transform.pos[1] + (hb.height != null ? hb.height : 1.2);
@@ -4635,7 +4643,9 @@ function applyFootIK(n, out) {
   var cfg = n.footIK;
   if (!cfg || cfg.enabled === false || n._rag) return out;
   var g = n._geo;
-  if (!g || !g.rigged || !g.parts.legL || !g.parts.shinL) return out;
+  if (!g || !g.rigged || !g.parts) return out;
+  if (!g.parts.legL || !g.parts.shinL || !g.parts.legR || !g.parts.shinR) return out;
+  if (!g.parts.legL.pivot || !g.parts.shinL.pivot || !g.parts.legR.pivot) return out;
   var air = (n._airY || 0) > 0.05;
   n._ikW = (n._ikW == null ? 0 : n._ikW) + ((air ? 0 : 1) - (n._ikW || 0)) * 0.2;
   if (n._ikW < 0.02) return out;
@@ -4689,6 +4699,7 @@ function blendedPose(n) {
   if (!n._pose && n._hadPose) {
     n._xfFrom = basePose(n._lastLiving || {});
     n._xfDur = 0.12; n._xfT = 0;
+    if (typeof POSED !== "undefined" && POSED.indexOf(n) < 0) POSED.push(n);
   }
   n._hadPose = !!n._pose;
   var out = {}, k;
@@ -4754,7 +4765,7 @@ function blendedPose(n) {
       var adx = atn.transform.pos[0] - n.transform.pos[0];
       var adz = atn.transform.pos[2] - n.transform.pos[2];
       var ady = (atn.transform.pos[1] + 1.2) - (n.transform.pos[1] + 1.5);
-      var arel = Math.atan2(adx, adz) / DEG - (n.transform.rot[1] || 0);
+      var arel = Math.atan2(adx, adz) / DEG - ((n.transform.rot || [0,0,0])[1] || 0);
       while (arel > 180) arel -= 360; while (arel < -180) arel += 360;
       var adist = Math.sqrt(adx * adx + adz * adz) || 1;
       var apitch = Math.atan2(ady, adist) / DEG;
@@ -5350,7 +5361,7 @@ function saveState() {
     var rec = {};
     if (n.transform) {
       rec.p = [round3(n.transform.pos[0]), round3(n.transform.pos[1]), round3(n.transform.pos[2])];
-      if (n.transform.rot) rec.r = [round3(n.transform.rot[0]), round3(n.transform.rot[1]), round3(n.transform.rot[2])];
+      if (n.transform.rot) rec.r = [round3((n.transform.rot || [0,0,0])[0]), round3((n.transform.rot || [0,0,0])[1]), round3((n.transform.rot || [0,0,0])[2])];
     }
     if (n.hp != null) rec.hp = n.hp;
     if (n._dead) rec.dead = 1;
