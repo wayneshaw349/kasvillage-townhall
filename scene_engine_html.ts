@@ -1171,6 +1171,7 @@ function updateActor(n, dt) {
     var stepN = Math.floor((n._gaitPhase || 0) / Math.PI);
     if (n._stepN !== undefined && stepN !== n._stepN && (n._gaitAmt || 0) > 0.5)
       playSound((gait.stepSound) || "__step", { x: t.pos[0], z: t.pos[2] });
+      if ((n._moveSpeed || 0) > 2.5) emit("dust", t.pos[0], t.pos[1] + 0.05, t.pos[2], { scale: 0.3, jitter: 0.2 });
     n._stepN = stepN;
     n._moveSpeed = dt > 0 ? moved / dt : 0;
     n._lastPos = t.pos.slice();
@@ -1671,6 +1672,12 @@ function runAction(self, a) {
           { x: Math.sin(sag), y: sargs[2] != null ? sargs[2] : 0.05, z: Math.cos(sag) },
           { speed: sargs[0] || 26, damage: sargs[1] || 6, owner: self.id,
             gravity: sargs[3] || 0, color: a.color || "#e8ddc0" });
+    return;
+  }
+  if (a && a.action === "emit" && self && self.transform) {
+    emit((a.args && a.args[0]) || "dust", self.transform.pos[0],
+         self.transform.pos[1] + ((a.args && a.args[1]) || 0.5), self.transform.pos[2],
+         { scale: (a.args && a.args[2]) || 1, jitter: 0.3 });
     return;
   }
   if (a && a.action === "explode") {
@@ -3260,6 +3267,14 @@ function updateTransforms(list, parentM) {
 function collectNode(n, parentM) {
   if (n._dead) return;
   if (n.room && n.room !== scene._room) return;
+    var cullCfg = (scene.render || {}).cull;
+    if (cullCfg && n.worldPos && CAM.eye) {
+      var cdx = n.worldPos.x - CAM.eye.x, cdz = n.worldPos.z - CAM.eye.z;
+      var cd2 = cdx * cdx + cdz * cdz;
+      var cmax = (cullCfg.distance || 60);
+      if (cd2 > cmax * cmax) continue;
+      n._lod = (cullCfg.fadeAt && cd2 > cullCfg.fadeAt * cullCfg.fadeAt) ? 1 : 0;
+    } else n._lod = 0;
   var m = n._world || matMul(parentM, nodeMatrix(n));
 
   if (n.type === "Billboard" && n.visible !== false) {
@@ -3935,6 +3950,9 @@ function explode(ex, ey, ez, radius, force, damage) {
   radius = radius || 4; force = force || 9; damage = damage != null ? damage : 12;
   EXPLOSIONS.push({ x: ex, y: ey, z: ez, t: world.time, r: radius });
   playSound("__boom", { x: ex, z: ez });
+  emit("spark", ex, ey + 0.4, ez, { scale: 2, jitter: 0.5 });
+  emit("smoke", ex, ey + 0.5, ez, { scale: 2, jitter: 0.8 });
+  decal(ex, ez, radius * 0.55, "#241a14", 25);
   var plx = nodes[playerId];
   if (plx && plx.worldPos) {
     var edist = Math.sqrt(Math.pow(plx.worldPos.x - ex, 2) + Math.pow(plx.worldPos.z - ez, 2));
@@ -4250,6 +4268,7 @@ function updatePoseClips(dt) {
           htg.transform.pos[2] += Math.cos(hya) * hpb * 0.1;
           htg._lastHit = { by: n.id, level: hb.level || "mid", t: world.time };
           playSound(hb.sound || ((hb.damage != null ? hb.damage : 5) >= 8 ? "__kick" : "__hit"), { x: hbx, z: hbz });
+          emit("blood", hbx, (htg.transform.pos[1] || 0) + 1.2, hbz, { scale: 0.6, jitter: 0.2 });
           htg._addPose = { id: (hb.stagger || (hb.damage != null ? hb.damage : 5) >= 8) ? "__stumble" : "__flinch", t: 0 };
           if (POSED.indexOf(htg) < 0) POSED.push(htg);
           var himp = hb.launch != null ? hb.launch : 5;
@@ -4748,6 +4767,7 @@ function blendedPose(n) {
       out.foreR = { rx: af.rx + (0 - af.rx) * aw, ry: af.ry, rz: af.rz };
     }
   }
+  if (n._devPose) { for (var dk in n._devPose) out[dk] = n._devPose[dk]; }
   n._lastLiving = out;
   return out;
 }
@@ -5038,6 +5058,13 @@ function update2D(dt) {
   }
 }
 function solids2D() {
+  var tms2 = (scene.resources || {}).tilemaps;
+  var tmOut = [];
+  if (tms2) for (var tk2 in tms2) {
+    if (tms2[tk2].solid === false) continue;
+    var cs = tilemap2DSolids(tms2[tk2]);
+    for (var ci = 0; ci < cs.length; ci++) tmOut.push({ x: cs[ci].x, y: cs[ci].y, w: cs[ci].w, h: cs[ci].h, node: null });
+  }
   var out = [], list = scene.nodes || [];
   for (var i = 0; i < list.length; i++) {
     var n = list[i];
@@ -5045,7 +5072,7 @@ function solids2D() {
     if (n.room && n.room !== scene._room) continue;
     out.push({ x: n.transform.pos[0], y: n.transform.pos[1], w: n.size[0], h: n.size[1], node: n });
   }
-  return out;
+  return out.concat(tmOut);
 }
 function boxHit(ax, ay, aw, ah, b) {
   return ax < b.x + b.w && ax + aw > b.x && ay < b.y + b.h && ay + ah > b.y;
@@ -5093,6 +5120,60 @@ function update2DPlatformer(n, dt) {
   t.pos[1] = ny;
   if (Math.abs(n._vx) > 4) n.flipX = n._vx < 0;
 }
+// 2D tilemap: grid of ids, drawn with autotiled top edges.
+function tilemap2DSolids(tm) {
+  var out = [], ts = tm.tileSize || 8;
+  for (var y = 0; y < tm.rows.length; y++) {
+    var row = tm.rows[y];
+    for (var x = 0; x < row.length; x++) {
+      if (row[x] === "." || row[x] === " ") continue;
+      out.push({ x: (tm.origin ? tm.origin[0] : 0) + x * ts,
+                 y: (tm.origin ? tm.origin[1] : 0) + y * ts,
+                 w: ts, h: ts, ch: row[x],
+                 top: (y === 0 || tm.rows[y - 1][x] === "." || tm.rows[y - 1][x] === " ") });
+    }
+  }
+  return out;
+}
+function render2DTilemap(tm, zoom) {
+  var cells = tilemap2DSolids(tm);
+  var pal = tm.colors || { "#": "#4a5560", "=": "#3f5a3c" };
+  for (var i = 0; i < cells.length; i++) {
+    var c2 = cells[i];
+    var sx = W / 2 + (c2.x - CAM2.x) * zoom, sy = H / 2 + (c2.y - CAM2.y) * zoom;
+    ctx.fillStyle = pal[c2.ch] || "#4a5560";
+    ctx.fillRect(sx, sy, c2.w * zoom + 1, c2.h * zoom + 1);
+    if (c2.top) {
+      ctx.fillStyle = tm.topColor || "#6a8a5a";
+      ctx.fillRect(sx, sy, c2.w * zoom + 1, Math.max(1, zoom));
+    }
+  }
+}
+// 2D lighting: darkness overlay punched through by radial lights.
+function render2DLights(cfg, zoom) {
+  var lay = document.createElement("canvas");
+  lay.width = W; lay.height = H;
+  var lg = lay.getContext("2d");
+  lg.fillStyle = cfg.ambient || "rgba(6,10,16,0.82)";
+  lg.fillRect(0, 0, W, H);
+  lg.globalCompositeOperation = "destination-out";
+  var list = scene.nodes || [];
+  for (var i = 0; i < list.length; i++) {
+    var n = list[i];
+    if (!n.light2d || n._dead) continue;
+    var lx = W / 2 + (n.transform.pos[0] - CAM2.x) * zoom;
+    var ly = H / 2 + (n.transform.pos[1] - CAM2.y) * zoom;
+    var rr = (n.light2d.radius || 40) * zoom;
+    var flick = n.light2d.flicker ? (0.9 + Math.random() * 0.2) : 1;
+    var grd = lg.createRadialGradient(lx, ly, 0, lx, ly, rr * flick);
+    grd.addColorStop(0, "rgba(0,0,0,1)");
+    grd.addColorStop(0.55, "rgba(0,0,0,0.7)");
+    grd.addColorStop(1, "rgba(0,0,0,0)");
+    lg.fillStyle = grd;
+    lg.beginPath(); lg.arc(lx, ly, rr * flick, 0, Math.PI * 2); lg.fill();
+  }
+  ctx.drawImage(lay, 0, 0);
+}
 function render2D() {
   var r = scene.render || {};
   ctx.fillStyle = r.bg || "#12181f";
@@ -5133,8 +5214,177 @@ function render2D() {
     var sy2 = H / 2 + (n.transform.pos[1] - CAM2.y - oy) * zoom;
     drawSpriteShapes(sx2, sy2, fr2, zoom, !!n.flipX);
   }
+  var tms = (scene.resources || {}).tilemaps;
+  if (tms) for (var tk in tms) render2DTilemap(tms[tk], zoom);
+  if (r.light2d) render2DLights(r.light2d, zoom);
   for (var fh2 = 0; fh2 < FRAME_HOOKS.length; fh2++) { try { FRAME_HOOKS[fh2](ctx); } catch (e) {} }
   if (scene.render && scene.render.post && scene.render.post.enabled) drawPostFX(scene.render.post);
+}
+// ---- PARTICLES + DECALS ----
+var PARTICLES = [], DECALS = [];
+var PARTICLE_PRESETS = {
+  dust:  { count: 8,  life: 0.7, size: 0.09, color: "#c9bda6", spread: 0.7, rise: 0.5, gravity: 1.2, fade: true },
+  spark: { count: 12, life: 0.45, size: 0.06, color: "#ffd88a", spread: 2.6, rise: 2.2, gravity: 9, fade: true, glow: true },
+  smoke: { count: 10, life: 1.8, size: 0.28, color: "#5a5f66", spread: 0.5, rise: 1.1, gravity: -0.4, fade: true, grow: 1.8 },
+  blood: { count: 10, life: 0.6, size: 0.07, color: "#8a1f1f", spread: 2.0, rise: 1.6, gravity: 11, fade: false, decal: "#5a1414" },
+  leaf:  { count: 6,  life: 2.6, size: 0.12, color: "#4a7a3a", spread: 0.8, rise: 0.2, gravity: 0.5, fade: true, flutter: true },
+  rain:  { count: 40, life: 1.2, size: 0.03, color: "#9fc8e8", spread: 6, rise: -8, gravity: 0, fade: false, streak: true },
+  magic: { count: 14, life: 1.0, size: 0.08, color: "#9fe8ff", spread: 1.2, rise: 1.4, gravity: -0.6, fade: true, glow: true }
+};
+function particleDef(id) {
+  var custom = ((scene.resources || {}).particles || {})[id];
+  if (custom) {
+    var base = PARTICLE_PRESETS[custom.preset || id] || PARTICLE_PRESETS.dust;
+    var m = {}, k;
+    for (k in base) m[k] = base[k];
+    for (k in custom) m[k] = custom[k];
+    return m;
+  }
+  return PARTICLE_PRESETS[id] || null;
+}
+function emit(id, x, y, z, opts) {
+  var d = particleDef(id);
+  if (!d) return;
+  opts = opts || {};
+  var n = Math.round((d.count || 8) * (opts.scale || 1));
+  for (var i = 0; i < n; i++) {
+    var ang = Math.random() * Math.PI * 2;
+    var sp = (d.spread || 1) * (0.4 + Math.random() * 0.6);
+    PARTICLES.push({
+      x: x + (opts.jitter ? (Math.random() - 0.5) * opts.jitter : 0),
+      y: y + Math.random() * 0.2,
+      z: z + (opts.jitter ? (Math.random() - 0.5) * opts.jitter : 0),
+      vx: Math.cos(ang) * sp + (opts.vx || 0),
+      vy: (d.rise || 0) * (0.5 + Math.random()) + (opts.vy || 0),
+      vz: Math.sin(ang) * sp + (opts.vz || 0),
+      life: (d.life || 1) * (0.7 + Math.random() * 0.6),
+      age: 0, def: d
+    });
+  }
+  if (PARTICLES.length > 400) PARTICLES.splice(0, PARTICLES.length - 400);
+}
+function decal(x, z, radius, color, life) {
+  DECALS.push({ x: x, z: z, r: radius || 0.6, color: color || "#3a2a20",
+                life: life || 18, age: 0 });
+  if (DECALS.length > 60) DECALS.shift();
+}
+function updateParticles(dt) {
+  for (var i = PARTICLES.length - 1; i >= 0; i--) {
+    var p = PARTICLES[i];
+    p.age += dt;
+    if (p.age >= p.life) {
+      if (p.def.decal) decal(p.x, p.z, 0.18 + Math.random() * 0.2, p.def.decal, 14);
+      PARTICLES.splice(i, 1); continue;
+    }
+    p.vy -= (p.def.gravity || 0) * dt;
+    if (p.def.flutter) p.vx += Math.sin(p.age * 7) * dt * 0.9;
+    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    var gy = scene._tilemap ? 0 : terrainHeight(p.x, p.z);
+    if (p.y < gy) {
+      if (p.def.decal) { decal(p.x, p.z, 0.18 + Math.random() * 0.25, p.def.decal, 14); PARTICLES.splice(i, 1); continue; }
+      p.y = gy; p.vy = -p.vy * 0.25; p.vx *= 0.6; p.vz *= 0.6;
+    }
+  }
+  for (var d2 = DECALS.length - 1; d2 >= 0; d2--) {
+    DECALS[d2].age += dt;
+    if (DECALS[d2].age >= DECALS[d2].life) DECALS.splice(d2, 1);
+  }
+  // emitters on nodes
+  var ids = Object.keys(nodes);
+  for (var e = 0; e < ids.length; e++) {
+    var nd = nodes[ids[e]];
+    if (!nd.emitter || nd._dead || nd.emitter.auto === false) continue;
+    if (nd.room && nd.room !== scene._room) continue;
+    nd._emitT = (nd._emitT || 0) + dt;
+    var iv = 1 / (nd.emitter.rate || 4);
+    if (nd._emitT >= iv) {
+      nd._emitT = 0;
+      emit(nd.emitter.particle || "dust", nd.transform.pos[0],
+           nd.transform.pos[1] + (nd.emitter.height || 0.3), nd.transform.pos[2],
+           { scale: nd.emitter.scale || 0.4, jitter: nd.emitter.jitter || 0.3 });
+    }
+  }
+}
+function renderDecals() {
+  for (var i = 0; i < DECALS.length; i++) {
+    var d = DECALS[i];
+    var gy = scene._tilemap ? 0 : terrainHeight(d.x, d.z);
+    var pp = project({ x: d.x, y: gy + 0.02, z: d.z });
+    if (!pp) continue;
+    var rr = d.r * fovScale / pp.z;
+    ctx.globalAlpha = Math.max(0, 0.5 * (1 - d.age / d.life));
+    ctx.fillStyle = d.color;
+    ctx.beginPath();
+    ctx.ellipse(pp.x, pp.y, rr, rr * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+function renderParticles() {
+  for (var i = 0; i < PARTICLES.length; i++) {
+    var p = PARTICLES[i];
+    var pp = project({ x: p.x, y: p.y, z: p.z });
+    if (!pp) continue;
+    var u = p.age / p.life;
+    var sz = (p.def.size || 0.1) * (p.def.grow ? 1 + u * p.def.grow : 1) * fovScale / pp.z;
+    if (sz < 0.4) continue;
+    ctx.globalAlpha = p.def.fade ? Math.max(0, 1 - u) : 1;
+    ctx.fillStyle = p.def.color || "#fff";
+    if (p.def.streak) ctx.fillRect(pp.x, pp.y, Math.max(1, sz * 0.4), Math.max(2, sz * 5));
+    else if (p.def.glow) {
+      ctx.beginPath(); ctx.arc(pp.x, pp.y, sz, 0, Math.PI * 2); ctx.fill();
+    } else ctx.fillRect(pp.x - sz / 2, pp.y - sz / 2, sz, sz);
+    ctx.globalAlpha = 1;
+  }
+}
+// ---- SAVE / LOAD ----
+function saveState() {
+  var out = { v: 1, seed: (scene.meta || {}).seed || "", room: scene._room || null,
+              time: world.time, gold: world.gold || 0,
+              flags: JSON.parse(JSON.stringify(world.flags || {})),
+              inv: (typeof INV !== "undefined" && INV) ? JSON.parse(JSON.stringify(INV)) : null,
+              nodes: {} };
+  var ids = Object.keys(nodes);
+  for (var i = 0; i < ids.length; i++) {
+    var n = nodes[ids[i]];
+    var rec = {};
+    if (n.transform) {
+      rec.p = [round3(n.transform.pos[0]), round3(n.transform.pos[1]), round3(n.transform.pos[2])];
+      if (n.transform.rot) rec.r = [round3(n.transform.rot[0]), round3(n.transform.rot[1]), round3(n.transform.rot[2])];
+    }
+    if (n.hp != null) rec.hp = n.hp;
+    if (n._dead) rec.dead = 1;
+    if (n._rag) rec.rag = 1;
+    if (n.stance) rec.st = n.stance;
+    if (n.posture) rec.po = n.posture;
+    if (n.visible === false) rec.hid = 1;
+    if (n._smState) rec.sm = n._smState;
+    out.nodes[ids[i]] = rec;
+  }
+  return out;
+}
+function round3(v) { return Math.round((v || 0) * 1000) / 1000; }
+function loadState(st) {
+  if (!st || !st.nodes) return false;
+  world.time = st.time || 0;
+  world.gold = st.gold || 0;
+  world.flags = st.flags || {};
+  if (st.inv && typeof INV !== "undefined") INV = st.inv;
+  for (var id in st.nodes) {
+    var n = nodes[id], rec = st.nodes[id];
+    if (!n) continue;
+    if (rec.p && n.transform) { n.transform.pos[0] = rec.p[0]; n.transform.pos[1] = rec.p[1]; n.transform.pos[2] = rec.p[2]; }
+    if (rec.r && n.transform) { n.transform.rot = [rec.r[0], rec.r[1], rec.r[2]]; }
+    if (rec.hp != null) n.hp = rec.hp;
+    n._dead = !!rec.dead;
+    n.visible = rec.hid ? false : (n.visible !== false);
+    if (rec.st) n.stance = rec.st;
+    if (rec.po) n.posture = rec.po;
+    if (rec.sm) n._smState = rec.sm;
+    if (rec.rag && n.ragdoll && !n._rag && typeof startRagdoll === "function") startRagdoll(n, { x: 0, y: 0, z: 0 });
+  }
+  if (st.room && st.room !== scene._room) gotoRoom(st.room);
+  return true;
 }
 function renderFrame() {
   var r = scene.render || {};
@@ -5260,10 +5510,13 @@ function renderFrame() {
   }
   if ((scene.render || {}).mode === "2d") update2D(1 / 60);
   if ((scene.render || {}).viewmodel) updateViewmodel(1 / 60);
+  updateParticles(1 / 60);
   updateAudioParams();
   renderProjectiles();
   renderLockMarker();
   renderExplosions();
+  renderDecals();
+  renderParticles();
   renderDice();
   for (var fh = 0; fh < FRAME_HOOKS.length; fh++) { try { FRAME_HOOKS[fh](ctx); } catch (e) {} }
   if (r.viewmodel) drawViewmodel(r.viewmodel);
@@ -5793,7 +6046,7 @@ function loadScene(json) {
   if (shopEl) shopEl.style.display = "none";
   ENC = { steps: 0, threshold: 0, zone: null, rng: null };
   BATTLE = null; MENU = null;
-  STIMULI = []; PROJECTILES = []; LOCK = { target: null };
+  STIMULI = []; PROJECTILES = []; LOCK = { target: null }; PARTICLES = []; DECALS = [];
   world._alertT = 0;
   if (battleEl) battleEl.style.display = "none";
   if (menuEl) menuEl.style.display = "none";
