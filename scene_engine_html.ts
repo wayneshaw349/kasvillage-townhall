@@ -3272,7 +3272,7 @@ function collectNode(n, parentM) {
       var cdx = n.worldPos.x - CAM.eye.x, cdz = n.worldPos.z - CAM.eye.z;
       var cd2 = cdx * cdx + cdz * cdz;
       var cmax = (cullCfg.distance || 60);
-      if (cd2 > cmax * cmax) continue;
+      if (cd2 > cmax * cmax) return;
       n._lod = (cullCfg.fadeAt && cd2 > cullCfg.fadeAt * cullCfg.fadeAt) ? 1 : 0;
     } else n._lod = 0;
   var m = n._world || matMul(parentM, nodeMatrix(n));
