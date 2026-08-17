@@ -1083,11 +1083,32 @@ function applyPrefab(n) {
   delete n.instance;
 }
 
+// Fill every optional transform field once, at load. Downstream systems
+// (pose clips, foot IK, root motion, warping) may then read pos/rot/scale
+// unconditionally instead of each guarding independently.
+function normalizeTransform(n) {
+  if (!n || typeof n !== "object") return n;
+  var t = n.transform;
+  if (!t || typeof t !== "object") t = n.transform = {};
+  if (!Array.isArray(t.pos)) t.pos = [0, 0, 0];
+  if (!Array.isArray(t.rot)) t.rot = [0, 0, 0];
+  if (!Array.isArray(t.scale)) {
+    t.scale = (typeof t.scale === "number") ? [t.scale, t.scale, t.scale] : [1, 1, 1];
+  }
+  for (var i = 0; i < 3; i++) {
+    if (typeof t.pos[i] !== "number" || !isFinite(t.pos[i])) t.pos[i] = 0;
+    if (typeof t.rot[i] !== "number" || !isFinite(t.rot[i])) t.rot[i] = 0;
+    if (typeof t.scale[i] !== "number" || !isFinite(t.scale[i])) t.scale[i] = 1;
+  }
+  return n;
+}
+
 function walkNodes(list, parent) {
   (list || []).forEach(function (n) {
     if (n.instance) applyPrefab(n);
     n._parent = parent || null;
     n.worldPos = v3();
+    normalizeTransform(n);
     nodes[n.id] = n;
 
     if (n.type === "Spawner") { expandSpawner(n); }
