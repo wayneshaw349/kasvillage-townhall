@@ -963,6 +963,7 @@ function setupInput() {
   }
   bindBtn("bA", "interact"); bindBtn("bB", "attack");
   setupTouchScheme();
+  setupAutosave();
 
   // drag anywhere outside the stick = look
   var lookId = null, lx = 0, ly = 0;
@@ -6114,16 +6115,38 @@ function initSession() {
     KV.getBalance().then(function (r) { if (r && !r.error) SESSION.balance = r.sompi || 0; });
   }
   if (scene.persistence && scene.persistence.restore !== false) {
-    KV.getState(gameIdOf()).then(function (r) {
+    kvGetState(gameIdOf()).then(function (r) {
       if (r && !r.error && r.state) applySavedState(r.state);
     });
   }
+  PERSIST.backend = null;   // re-resolve per scene
+  PERSIST.lastSave = Date.now();
 }
 function gameIdOf() {
   return (scene.persistence && scene.persistence.gameId) || scene.meta.id;
 }
+// Save data is the ONE input that reaches node properties without passing
+// through validate(). Everything below treats it as hostile.
+var SAVE_BANNED = ["__proto__", "constructor", "prototype"];
+function saveKeyAllowed(k) {
+  var parts = String(k).split(".");
+  for (var i = 0; i < parts.length; i++) {
+    if (SAVE_BANNED.indexOf(parts[i]) >= 0) return false;   // prototype pollution
+    if (parts[i].charAt(0) === "_") return false;           // engine internals
+  }
+  // a poisoned blob cannot name a key the scene never declared
+  var declared = (scene && scene.persistence && scene.persistence.saveKeys) || [];
+  return declared.indexOf(k) >= 0;
+}
+
 function applySavedState(state) {
   Object.keys(state || {}).forEach(function (k) {
+    if (!saveKeyAllowed(k)) {
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("[kv-save] rejected key from save: " + k);
+      }
+      return;
+    }
     var parts = k.split("."), tgt = nodes[parts[0]];
     if (!tgt || parts.length < 2) {
       if (parts[0] === "score") world.score = state[k];
@@ -6137,17 +6160,127 @@ function applySavedState(state) {
   });
   console.log("[SceneEngine] restored saved state");
 }
-function bridgeCommit() {
+// ---------------------------------------------------------------------------
+// PERSISTENCE BACKENDS
+// The game asks to save; it never learns which backend served the request.
+//   bridge  native SDK present (in-wallet)
+//   local   localStorage present (opened from a link)
+//   memory  neither -- session only, and we say so once
+// ---------------------------------------------------------------------------
+var PERSIST = { backend: null, mem: {}, lastSave: 0, warned: false };
+var SAVE_MAX_BYTES = 262144;
+
+function hasBridge() {
+  try {
+    return typeof ReactNativeWebView !== "undefined" &&
+           ReactNativeWebView && typeof ReactNativeWebView.postMessage === "function";
+  } catch (e) { return false; }
+}
+
+function persistBackend() {
+  if (PERSIST.backend) return PERSIST.backend;
+  var want = (scene.persistence && scene.persistence.backend) || "auto";
+  // "local" is deliberately NOT offered: a browser-writable save blob is
+  // reachable by devtools, by any XSS on the origin, and by any other game
+  // claiming the same (unverified) gameId.
+  if (want === "bridge" || want === "memory") { PERSIST.backend = want; return want; }
+  PERSIST.backend = hasBridge() ? "bridge" : "memory";
+  if (PERSIST.backend === "memory" && !PERSIST.warned) {
+    PERSIST.warned = true;
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("[kv-save] no wallet bridge: progress is session-only");
+    }
+  }
+  return PERSIST.backend;
+}
+function saveKeyOf(gameId) { return "kv.save." + gameId; }
+
+function kvGetState(gameId) {
+  var b = persistBackend();
+  if (b === "bridge") return KV.getState(gameId);
+  return new Promise(function (resolve) {
+    resolve({ state: PERSIST.mem[gameId] || null });
+  });
+}
+
+function kvCommit(gameId, state) {
+  var b = persistBackend();
+  var raw;
+  try { raw = JSON.stringify(state); }
+  catch (e) { return Promise.resolve({ error: "save not serialisable" }); }
+  if (raw.length > SAVE_MAX_BYTES) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("[kv-save] state " + raw.length + "B exceeds " + SAVE_MAX_BYTES + "B cap");
+    }
+    return Promise.resolve({ error: "save too large" });
+  }
+  if (b === "bridge") return KV.commit(gameId, state);
+  return new Promise(function (resolve) {
+    PERSIST.mem[gameId] = state; resolve({ ok: true });
+  });
+}
+
+function collectSaveState() {
   var keys2 = (scene.persistence && scene.persistence.saveKeys) || [];
   var state = {};
   keys2.forEach(function (k) {
     if (k === "inventory") { state[k] = INV; return; }
     if (k === "flags") { state[k] = world.flags; return; }
-    var v = resolvePath(k.split("."), exprCtx(null));
+    var parts = k.split(".");
+    // hygiene: never persist engine internals or identity
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].charAt(0) === "_") return;
+    }
+    if (parts[0] === "session") return;
+    var v = resolvePath(parts, exprCtx(null));
     if (v && v.x !== undefined) v = [v.x, v.y, v.z];
+    if (typeof v === "function" || typeof v === "undefined") return;
     state[k] = v;
   });
-  KV.commit(gameIdOf(), state);
+  return state;
+}
+
+function bridgeCommit() {
+  PERSIST.lastSave = (typeof Date !== "undefined") ? Date.now() : 0;
+  return kvCommit(gameIdOf(), collectSaveState());
+}
+
+// Autosave. Declared, not hardcoded: a board game saves per move, a story
+// game every 20s, neither writes engine code. onHide is the one that matters
+// on phones -- Android reclaims backgrounded tabs without warning.
+function setupAutosave() {
+  function cfg() {
+    var p = (scene && scene.persistence) || {};
+    var a = p.autosave;
+    if (a === false) return null;
+    a = a || {};
+    return { onHide: a.onHide !== false, intervalSec: a.intervalSec != null ? a.intervalSec : 0 };
+  }
+  function flush() {
+    var c = cfg();
+    if (!c || !scene || !scene.persistence) return;
+    try { bridgeCommit(); } catch (e) {}
+  }
+  try {
+    document.addEventListener("visibilitychange", function () {
+      var c = cfg();
+      if (c && c.onHide && document.visibilityState === "hidden") flush();
+    });
+    window.addEventListener("pagehide", function () {
+      var c = cfg(); if (c && c.onHide) flush();
+    });
+  } catch (e) {}
+}
+
+// called from the frame loop; cheap when disabled
+function autosaveTick() {
+  var p = (scene && scene.persistence) || null;
+  if (!p || p.autosave === false) return;
+  var iv = (p.autosave && p.autosave.intervalSec) || 0;
+  if (iv <= 0) return;
+  var now = Date.now();
+  if (now - PERSIST.lastSave < iv * 1000) return;
+  try { bridgeCommit(); } catch (e) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -6237,6 +6370,20 @@ function validate(s) {
     (list || []).forEach(function (n) { if (n && n.children) depth(n.children, d + 1); });
   })(s.nodes, 1);
   if (deepest > (lim.maxDepth || 32)) return "node nesting too deep: " + deepest;
+
+  var sk = (s.persistence && s.persistence.saveKeys) || [];
+  if (!Array.isArray(sk)) return "persistence.saveKeys must be an array";
+  for (var si = 0; si < sk.length; si++) {
+    var segs = String(sk[si]).split(".");
+    if (segs[0] === "session") return "saveKeys may not persist session.*: " + sk[si];
+    for (var sj = 0; sj < segs.length; sj++) {
+      if (segs[sj].charAt(0) === "_") return "saveKeys may not reach internals: " + sk[si];
+    }
+  }
+  var pbk = (s.persistence && s.persistence.backend) || "auto";
+  if (["auto", "bridge", "memory"].indexOf(pbk) < 0) {
+    return "unknown persistence.backend: " + pbk;
+  }
 
   // --- B. MOBILE DECISION WINDOWS (warnings only) -------------------
   // Touch cannot deliver a controller's decision RATE or angular
