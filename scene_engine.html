@@ -1648,7 +1648,7 @@ function updateAnims(dt) {
   }
 }
 
-function gotoRoom(id) { scene._room = id; if (scene.rooms && scene.rooms.defs && scene.rooms.defs[id]) setSoundscape(scene.rooms.defs[id].soundscape); }
+function gotoRoom(id) { scene._room = id; if (scene.rooms && scene.rooms.defs && scene.rooms.defs[id]) { var rd = scene.rooms.defs[id]; setSoundscape(rd.soundscape); if (rd.reverb) setReverb(rd.reverb.size || 0.4, rd.reverb.wet || 0.2); else setReverb(0.3, 0); } }
 function runAction(self, a) {
   if (a && a.action === "gotoRoom") { gotoRoom((a.args && a.args[0]) || a.target); return; }
   if (a && a.action === "playSound") { playSound((a.args && a.args[0]) || a.target, self && self.worldPos); return; }
@@ -3351,6 +3351,116 @@ function deformChain(p, g, partName, pose) {
 // ---- pose clips ----------------------------------------------------------
 // ---- AUDIO (procedural WebAudio; FMOD event model, PS1 synthesis) ----
 var AC = null, AMASTER = null, ASCAPE = null, AUDIO_ON = false;
+var BUSES = null, REVERB = null, REVERB_WET = null, MUSIC = null;
+function busOf(name) { return (BUSES && BUSES[name]) ? BUSES[name].input : AMASTER; }
+function setBusVolume(name, v) { if (BUSES && BUSES[name]) BUSES[name].gain.gain.value = v; }
+function setBusFilter(name, hz) { if (BUSES && BUSES[name]) BUSES[name].filter.frequency.value = hz; }
+function setReverb(size, wet) {
+  if (!AUDIO_ON || !REVERB) return;
+  var len = Math.max(0.15, size * 2.4) * AC.sampleRate;
+  var buf = AC.createBuffer(2, Math.floor(len), AC.sampleRate);
+  for (var ch = 0; ch < 2; ch++) {
+    var d = buf.getChannelData(ch);
+    for (var i = 0; i < d.length; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.2 + size * 1.5);
+    }
+  }
+  REVERB.buffer = buf;
+  REVERB_WET.gain.linearRampToValueAtTime(wet, AC.currentTime + 0.8);
+}
+function evalAudioParam(src) {
+  var pl = nodes[playerId];
+  if (src === "playerHpFrac") return pl && pl.stats ? (pl.hp || 0) / (pl.stats.maxHp || 1) : 1;
+  if (src === "playerSpeed") return pl ? (pl._moveSpeed || 0) : 0;
+  if (src === "alert") return world.alert ? 1 : 0;
+  if (src === "enemiesNear") {
+    if (!pl) return 0;
+    var c = 0, ek = Object.keys(nodes);
+    for (var i = 0; i < ek.length; i++) {
+      var en = nodes[ek[i]];
+      if (!en.worldPos || !tagMatch(en, "enemy") || en._rag) continue;
+      if (dist(en.worldPos, pl.worldPos) < 12) c++;
+    }
+    return c;
+  }
+  if (src.indexOf("flag:") === 0) return world.flags[src.slice(5)] || 0;
+  return 0;
+}
+function mapCurve(map, v) {
+  if (!map || !map.length) return v;
+  if (v <= map[0][0]) return map[0][1];
+  if (v >= map[map.length - 1][0]) return map[map.length - 1][1];
+  for (var i = 0; i < map.length - 1; i++) {
+    if (v >= map[i][0] && v <= map[i + 1][0]) {
+      var u = (v - map[i][0]) / ((map[i + 1][0] - map[i][0]) || 1e-9);
+      return map[i][1] + (map[i + 1][1] - map[i][1]) * u;
+    }
+  }
+  return map[map.length - 1][1];
+}
+function updateAudioParams() {
+  if (!AUDIO_ON || !scene.audioParams) return;
+  for (var k in scene.audioParams) {
+    var p = scene.audioParams[k];
+    var v = mapCurve(p.map, evalAudioParam(p.source || ""));
+    var tg = (p.target || "").split(".");
+    if (tg[0] && tg[0].indexOf("bus:") === 0) {
+      var bn = tg[0].slice(4);
+      if (tg[1] === "filter") setBusFilter(bn, v);
+      else if (tg[1] === "volume") setBusVolume(bn, v);
+    } else if (p.target === "reverb.wet" && REVERB_WET) {
+      REVERB_WET.gain.value = v;
+    } else if (p.target && p.target.indexOf("music.layer") === 0 && MUSIC) {
+      var li = parseInt(p.target.slice(11), 10) || 0;
+      if (MUSIC.layers[li]) MUSIC.layers[li].gain.gain.value = v;
+    }
+  }
+}
+function playMusic(spec) {
+  if (!AUDIO_ON || !spec) return;
+  stopMusic(0.2);
+  var bpm = spec.bpm || 100, beat = 60 / bpm;
+  MUSIC = { spec: spec, layers: [], t0: AC.currentTime, beat: beat, timer: null };
+  (spec.layers || []).forEach(function (ly) {
+    var g = AC.createGain();
+    g.gain.value = ly.gain != null ? ly.gain : 1;
+    g.connect(busOf("music"));
+    MUSIC.layers.push({ def: ly, gain: g });
+  });
+  function schedule() {
+    if (!MUSIC) return;
+    var when = AC.currentTime + 0.05;
+    MUSIC.layers.forEach(function (lay) {
+      var t = when;
+      (lay.def.notes || []).forEach(function (nt) {
+        var f = nt[0], dur = (nt[1] || 1) * beat;
+        if (f > 0) {
+          var o = AC.createOscillator(), g2 = AC.createGain();
+          o.type = lay.def.wave || "square";
+          o.frequency.setValueAtTime(f, t);
+          g2.gain.setValueAtTime(0.0001, t);
+          g2.gain.exponentialRampToValueAtTime(lay.def.vol != null ? lay.def.vol : 0.25, t + 0.01);
+          g2.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.95);
+          o.connect(g2); g2.connect(lay.gain);
+          o.start(t); o.stop(t + dur);
+        }
+        t += dur;
+      });
+    });
+    var barLen = 0;
+    (spec.layers[0] || {}).notes && spec.layers[0].notes.forEach(function (nt) { barLen += (nt[1] || 1) * beat; });
+    if (spec.loop !== false && barLen > 0) MUSIC.timer = setTimeout(schedule, barLen * 1000 - 60);
+  }
+  schedule();
+}
+function stopMusic(fade) {
+  if (!MUSIC) return;
+  if (MUSIC.timer) clearTimeout(MUSIC.timer);
+  MUSIC.layers.forEach(function (l2) {
+    try { l2.gain.gain.linearRampToValueAtTime(0.0001, AC.currentTime + (fade || 0.4)); } catch (e) {}
+  });
+  MUSIC = null;
+}
 function audioInit() {
   if (AC) return;
   var Ctor = (typeof window !== "undefined") && (window.AudioContext || window.webkitAudioContext);
@@ -3359,6 +3469,17 @@ function audioInit() {
   var comp = AC.createDynamicsCompressor();
   AMASTER = AC.createGain(); AMASTER.gain.value = 0.8;
   AMASTER.connect(comp); comp.connect(AC.destination);
+  BUSES = {};
+  ["sfx", "music", "ambient"].forEach(function (bn) {
+    var bg = AC.createGain(); bg.gain.value = 1;
+    var bf = AC.createBiquadFilter(); bf.type = "lowpass"; bf.frequency.value = 20000;
+    bg.connect(bf); bf.connect(AMASTER);
+    BUSES[bn] = { gain: bg, filter: bf, input: bg };
+  });
+  REVERB = AC.createConvolver();
+  REVERB_WET = AC.createGain(); REVERB_WET.gain.value = 0;
+  REVERB.connect(REVERB_WET); REVERB_WET.connect(AMASTER);
+  setReverb(0.35, 0);
   AUDIO_ON = true;
 }
 function audioUnlock() {
@@ -3431,6 +3552,13 @@ function playSoundDef(d, at) {
   g.gain.setValueAtTime(vol, t0);
   g.gain.exponentialRampToValueAtTime(0.001, t0 + (d.dur || 0.1));
   var dest = g;
+  var outBus = busOf(d.bus || "sfx");
+  var pan = null;
+  if (at && AC.createStereoPanner && nodes[playerId] && nodes[playerId].worldPos) {
+    pan = AC.createStereoPanner();
+    var pdx = (at.x || 0) - nodes[playerId].worldPos.x;
+    pan.pan.value = Math.max(-1, Math.min(1, pdx / 12));
+  }
   if (d.drive) {
     var ws = AC.createWaveShaper();
     var wc = new Float32Array(256);
@@ -3439,8 +3567,13 @@ function playSoundDef(d, at) {
       wc[wi] = Math.tanh(wx * d.drive);
     }
     ws.curve = wc;
-    g.connect(ws); ws.connect(AMASTER);
-  } else g.connect(AMASTER);
+    g.connect(ws);
+    if (pan) { ws.connect(pan); pan.connect(outBus); } else ws.connect(outBus);
+    if (REVERB && d.reverb !== false) ws.connect(REVERB);
+  } else {
+    if (pan) { g.connect(pan); pan.connect(outBus); } else g.connect(outBus);
+    if (REVERB && d.reverb !== false) g.connect(REVERB);
+  }
   if (d.type === "noise") {
     var alen = Math.ceil(AC.sampleRate * (d.dur || 0.1));
     var abuf = AC.createBuffer(1, alen, AC.sampleRate);
@@ -3476,7 +3609,7 @@ function setSoundscape(spec) {
   var sf = AC.createBiquadFilter(); sf.type = "lowpass"; sf.frequency.value = spec.filter || 400;
   var sg = AC.createGain(); sg.gain.value = 0.0001;
   sg.gain.linearRampToValueAtTime(spec.vol != null ? spec.vol : 0.12, AC.currentTime + 1.5);
-  ssrc.connect(sf); sf.connect(sg); sg.connect(AMASTER);
+  ssrc.connect(sf); sf.connect(sg); sg.connect(busOf("ambient"));
   ssrc.start();
   ASCAPE = { src: ssrc, g: sg };
 }
@@ -4741,6 +4874,7 @@ function renderFrame() {
     }
   }
   if ((scene.render || {}).viewmodel) updateViewmodel(1 / 60);
+  updateAudioParams();
   renderProjectiles();
   renderLockMarker();
   renderExplosions();
