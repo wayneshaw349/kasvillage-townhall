@@ -26,3 +26,5 @@ seller.json
 honest.json
 forged.json
 *.bak*
+
+showcase_*.html
