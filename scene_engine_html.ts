@@ -2160,6 +2160,20 @@ function runAction(self, a) {
       world.flags.beat0 = world.time;
       break;
     }
+    case "spawn": {
+      if (!a.args || !a.args[0]) break;
+      var spCap = (scene.compliance && scene.compliance.maxNodes) || 512;
+      if (Object.keys(nodes).length >= spCap) break;
+      var spName = String(a.args[0]);
+      var spNode = { id: a.args[4] != null ? String(a.args[4]) : spName + "_" + Math.floor(rnd() * 100000),
+                     transform: { pos: [a.args[1] || 0, a.args[2] || 0, a.args[3] || 0] } };
+      if (nodes[spNode.id]) break;
+      if ((scene.prefabs || {})[spName]) spNode.instance = spName;
+      else { spNode.type = "MeshInstance"; spNode.mesh = spName; }
+      scene.nodes.push(spNode);
+      walkNodes([spNode], null);
+      break;
+    }
     case "prompt": {
       // args: [flagName, question, ...optionLabels]. Answer index lands in
       // the flag; -1 while pending. No options -> a single "OK".
