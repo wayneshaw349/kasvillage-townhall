@@ -578,7 +578,20 @@ var FN = {
   level: function () { return playerLevel(); },
   gold: function () { return gold(); },
   canSee: function (a, b) { return canSee(a, b); },
-  heard: function (a) { return heardBy(a); }
+  heard: function (a) { return heardBy(a); },
+  deckSize: function (id) {
+    var d = (world.decks || {})[id];
+    return d ? d.draw.length : 0;
+  },
+  lastCard: function (id) {
+    var lc = world.flags["card_" + id];
+    return lc == null ? -1 : lc;
+  },
+  seat: function () { return world.flags.seat || 1; },
+  seatStat: function (s, name) {
+    var st = (world.seats || [])[(s || 1) - 1];
+    return st && st[name] != null ? st[name] : 0;
+  }
 };
 function tokenize(s) {
   var out = [], i = 0;
@@ -2038,6 +2051,79 @@ function runAction(self, a) {
     case "openMenu": openMenu(); break;
     case "raiseAlert": raiseAlert(a.amount || 10); break;
     case "noise": if (self && self.worldPos) emitStimulus(self.worldPos, a.amount || 8, "scripted"); break;
+    // ---- generic game-structure verbs (deck / seats / counters) ----------
+    case "addFlag": {
+      var afk = a.args ? a.args[0] : "f";
+      world.flags[afk] = (world.flags[afk] || 0) + (a.amount != null ? a.amount : 1);
+      break;
+    }
+    case "shuffleDeck": {
+      var sdId = a.args ? a.args[0] : "";
+      var sdDef = ((scene.tables || {}).decks || {})[sdId];
+      if (sdDef == null) break;
+      var sdN = typeof sdDef === "number" ? sdDef : (Array.isArray(sdDef) ? sdDef.length : 0);
+      world.decks = world.decks || {};
+      var sdSt = world.decks[sdId] = world.decks[sdId] || { draw: [], discard: [], shuffles: 0 };
+      var sdCards = [];
+      for (var sdi = 0; sdi < sdN; sdi++) sdCards.push(sdi);
+      var sdRng = srandFor("deck:" + sdId + ":" + (sdSt.shuffles++));
+      for (var sdj = sdCards.length - 1; sdj > 0; sdj--) {
+        var sdk = Math.floor(sdRng() * (sdj + 1));
+        var sdt = sdCards[sdj]; sdCards[sdj] = sdCards[sdk]; sdCards[sdk] = sdt;
+      }
+      sdSt.draw = sdCards; sdSt.discard = [];
+      break;
+    }
+    case "drawCard": {
+      var dcId = a.args ? a.args[0] : "";
+      world.decks = world.decks || {};
+      var dcSt = world.decks[dcId];
+      if (!dcSt) { runAction(self, { action: "shuffleDeck", args: [dcId] }); dcSt = world.decks[dcId]; }
+      if (!dcSt) break;
+      if (!dcSt.draw.length && dcSt.discard.length) {
+        dcSt.draw = dcSt.discard; dcSt.discard = [];
+        var dcRng = srandFor("deck:" + dcId + ":" + (dcSt.shuffles++));
+        for (var dcj = dcSt.draw.length - 1; dcj > 0; dcj--) {
+          var dck = Math.floor(dcRng() * (dcj + 1));
+          var dct = dcSt.draw[dcj]; dcSt.draw[dcj] = dcSt.draw[dck]; dcSt.draw[dck] = dct;
+        }
+      }
+      if (!dcSt.draw.length) break;
+      var dcCard = dcSt.draw.pop();
+      dcSt.discard.push(dcCard);
+      world.flags[(a.args && a.args[1]) || ("card_" + dcId)] = dcCard;
+      break;
+    }
+    case "nextSeat": {
+      var nsN = (scene.meta && scene.meta.players) || 4;
+      world.seats = world.seats || [];
+      var nsCur = world.flags.seat || 1;
+      for (var nsi = 0; nsi < nsN; nsi++) {
+        nsCur = (nsCur % nsN) + 1;
+        var nsSt = world.seats[nsCur - 1];
+        if (!nsSt || nsSt.alive === undefined || nsSt.alive) break;
+      }
+      world.flags.seat = nsCur;
+      world.flags.turn = (world.flags.turn || 0) + 1;
+      break;
+    }
+    case "setSeatStat": {
+      var ssIdx = (a.args && a.args[0] === "current") || !a.args || a.args[0] == null
+        ? (world.flags.seat || 1) : a.args[0];
+      world.seats = world.seats || [];
+      world.seats[ssIdx - 1] = world.seats[ssIdx - 1] || {};
+      world.seats[ssIdx - 1][(a.args && a.args[1]) || "v"] = a.args ? a.args[2] : 0;
+      break;
+    }
+    case "addSeatStat": {
+      var asIdx = (a.args && a.args[0] === "current") || !a.args || a.args[0] == null
+        ? (world.flags.seat || 1) : a.args[0];
+      world.seats = world.seats || [];
+      var asSt = world.seats[asIdx - 1] = world.seats[asIdx - 1] || {};
+      var asK = (a.args && a.args[1]) || "v";
+      asSt[asK] = (asSt[asK] || 0) + (a.amount != null ? a.amount : 0);
+      break;
+    }
   }
 }
 
@@ -6512,6 +6598,17 @@ function validate(s) {
       }
     }
     if (sndErr) return sndErr;
+  }
+  var dks = (s.tables || {}).decks;
+  if (dks) {
+    if (typeof dks !== "object" || Array.isArray(dks)) return "tables.decks must be an object";
+    var dkIds = Object.keys(dks);
+    if (dkIds.length > 16) return "too many decks: " + dkIds.length;
+    for (var dki = 0; dki < dkIds.length; dki++) {
+      var dkD = dks[dkIds[dki]];
+      var dkN = typeof dkD === "number" ? dkD : (Array.isArray(dkD) ? dkD.length : -1);
+      if (dkN < 1 || dkN > 128 || dkN !== Math.floor(dkN)) return "deck " + dkIds[dki] + ": size must be 1..128";
+    }
   }
   var known = ["identity", "stats", "balance", "persist"];
   var perms = s.permissions || [];
