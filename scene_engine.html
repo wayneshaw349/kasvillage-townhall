@@ -1270,6 +1270,143 @@ function walkNodes(list, parent) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// DESPAWN + POOL
+// A node can be registered in seven places at once. Removing it from six and
+// forgetting the seventh leaves a ghost: invisible, still burning CPU, and
+// possibly still colliding. Everything below unregisters symmetrically.
+// ---------------------------------------------------------------------------
+var POOL = {};
+var POOL_MAX = 256;
+
+function poolKeyOf(n) {
+  return (n.type || "MeshInstance") + "|" + (n.mesh || "") + "|" + (n.instance || "");
+}
+
+function spliceOut(arr, pred) {
+  if (!arr || !arr.length) return 0;
+  var removed = 0;
+  for (var i = arr.length - 1; i >= 0; i--) {
+    if (pred(arr[i])) { arr.splice(i, 1); removed++; }
+  }
+  return removed;
+}
+
+function detachFromParent(n) {
+  var p = n._parent;
+  var list = p ? p.children : (scene && scene.nodes);
+  if (!list) return;
+  var i = list.indexOf(n);
+  if (i >= 0) list.splice(i, 1);
+}
+
+// Remove a node and everything registered on its behalf. Children go too:
+// leaving them parented to a removed node is how orphans accumulate.
+function despawn(target, opts) {
+  opts = opts || {};
+  var n = (typeof target === "string") ? nodes[target] : target;
+  if (!n) return false;
+
+  // depth first, so a child never outlives its parent
+  var kids = (n.children || []).slice();
+  for (var k = 0; k < kids.length; k++) despawn(kids[k], { _child: true, pool: opts.pool });
+
+  spliceOut(actors, function (a) { return a === n; });
+  spliceOut(POSED, function (p) { return p === n; });
+  spliceOut(ANIMS, function (a) { return a === n; });
+  spliceOut(ALARMS, function (a) { return a.node === n; });
+
+  // physics: the node body, plus any ragdoll bone bodies that reference it
+  spliceOut(BODIES, function (b) { return b === n._pb || b.node === n || (b.owner && b.owner === n); });
+  spliceOut(RAGDOLLS, function (r) {
+    if (r.node !== n && r.owner !== n) return false;
+    var bones = r.bodies || r.bones || [];
+    spliceOut(BODIES, function (b) { return bones.indexOf(b) >= 0; });
+    return true;
+  });
+
+  if (typeof PROJECTILES !== "undefined") spliceOut(PROJECTILES, function (p) { return p.owner === n || p.node === n; });
+  if (typeof STIMULI !== "undefined") spliceOut(STIMULI, function (s) { return s.node === n || s.from === n; });
+
+  // singletons must not keep pointing at a removed node
+  if (typeof LOCK !== "undefined" && LOCK && LOCK.target === n.id) LOCK.target = null;
+  if (camera === n) camera = null;
+  if (terrainMesh === n) terrainMesh = null;
+  if (playerId === n.id) playerId = null;
+
+  delete nodes[n.id];
+  if (!opts._child) detachFromParent(n);
+
+  // park for reuse: _geo is the expensive part and survives intact
+  if (opts.pool !== false) {
+    var key = poolKeyOf(n);
+    var bucket = POOL[key] || (POOL[key] = []);
+    if (bucket.length < POOL_MAX) {
+      n._pooled = true;
+      n._pb = null; n._bt = null; n._pose = null; n._rag = null;
+      n._xfFrom = null; n._xfT = null; n._combatPhase = null;
+      n._parent = null; n.children = [];
+      bucket.push(n);
+    }
+  }
+  return true;
+}
+
+// Create (or revive) a node and run the same registration walkNodes does.
+function spawnNode(def, parent) {
+  var key = poolKeyOf(def);
+  var bucket = POOL[key];
+  var n;
+
+  if (bucket && bucket.length) {
+    n = bucket.pop();            // reuse: keeps _geo, skips buildMesh
+    var geo = n._geo;
+    for (var k in n) { if (k.charAt(0) === "_") continue; delete n[k]; }
+    for (var d in def) n[d] = def[d];
+    n._geo = geo;
+    n._pooled = false;
+  } else {
+    n = {};
+    for (var d2 in def) n[d2] = def[d2];
+  }
+
+  if (!n.id) n.id = "sp_" + (spawnNode._seq = (spawnNode._seq || 0) + 1);
+  if (nodes[n.id]) despawn(n.id, { pool: false });   // id collision: old one loses
+
+  n._parent = parent || null;
+  n.worldPos = v3();
+  normalizeTransform(n);
+  nodes[n.id] = n;
+
+  if (n.instance) applyPrefab(n);
+  if (!n._geo && n.mesh) {
+    n._geo = buildMesh(n.mesh, (scene.resources.meshes || {})[n.mesh] || { type: "box" });
+  }
+  if (n.type === "AnimationPlayer") { ANIMS.push(n); if (n.autoplay) animPlay(n, n.autoplay); }
+  if (n.physics) physRegister(n);
+  if (n.alarms) alarmRegister(n);
+  if (n.bt && !n.stateMachine) { n._bt = {}; actors.push(n); }
+  if (n.stateMachine) {
+    n._state = n.stateMachine.initial;
+    n._stateT = 0;
+    actors.push(n);
+  } else if (n.controller) { actors.push(n); }
+  if (n.stats) { n.hp = n.stats.hp; n.maxHp = n.stats.maxHp || n.stats.hp; }
+
+  var list = parent ? (parent.children = parent.children || []) : scene.nodes;
+  if (list.indexOf(n) < 0) list.push(n);
+  return n;
+}
+
+function poolStats() {
+  var out = { keys: 0, parked: 0, live: Object.keys(nodes).length,
+              actors: actors.length, bodies: BODIES.length,
+              posed: POSED.length, alarms: ALARMS.length,
+              anims: ANIMS.length, ragdolls: RAGDOLLS.length };
+  for (var k in POOL) { out.keys++; out.parked += POOL[k].length; }
+  return out;
+}
+
 function expandSpawner(n) {
   var pl = n.placement || {}, rng = srandFor("spawn:" + n.id);
   var out = [], tries = 0;
@@ -6479,6 +6616,7 @@ function loadScene(json) {
   scene._backdrop = null; scene._walkmesh = null; scene._tilemap = null;
   scene._room = (scene.rooms && scene.rooms.start) || null;
   BODIES = []; PHYS.accum = 0;
+  POOL = {};   // pooled nodes belong to the scene that made them
   ALARMS = [];
   POSED.forEach(function (a) { a._pose = null; }); POSED = [];
   RAGDOLLS = [];
