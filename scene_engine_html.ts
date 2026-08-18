@@ -6465,6 +6465,42 @@ function validate(s) {
     });
   })(s, 0);
   if (bad) return "forbidden key: " + bad;
+  // Sound defs: bound every number so a hostile descriptor cannot weaponize
+  // the audio path (ear-splitting volume, ultrasonic tones, minute-long buffers).
+  var snds = (s.resources || {}).sounds;
+  if (snds) {
+    if (typeof snds !== "object" || Array.isArray(snds)) return "resources.sounds must be an object";
+    var sIds = Object.keys(snds);
+    if (sIds.length > 32) return "too many sounds: " + sIds.length;
+    var sndErr = null;
+    function num(v, lo, hi) { return typeof v === "number" && isFinite(v) && v >= lo && v <= hi; }
+    function ckLayer(id, L) {
+      if (!L || typeof L !== "object") return "sound " + id + ": layer not an object";
+      if (L.type !== "tone" && L.type !== "noise") return "sound " + id + ": bad type";
+      if (L.type === "tone") {
+        if (L.wave !== undefined && ["sine","square","sawtooth","triangle"].indexOf(L.wave) < 0)
+          return "sound " + id + ": bad wave";
+        if (L.freq !== undefined && !num(L.freq, 20, 8000)) return "sound " + id + ": freq out of range";
+      }
+      if (L.dur !== undefined && !num(L.dur, 0.005, 2)) return "sound " + id + ": dur out of range";
+      if (L.vol !== undefined && !num(L.vol, 0, 1.5)) return "sound " + id + ": vol out of range";
+      if (L.sweep !== undefined && !num(L.sweep, -4000, 4000)) return "sound " + id + ": sweep out of range";
+      if (L.filter !== undefined && !num(L.filter, 20, 12000)) return "sound " + id + ": filter out of range";
+      if (L.drive !== undefined && !num(L.drive, 0, 10)) return "sound " + id + ": drive out of range";
+      return null;
+    }
+    for (var sdi = 0; sdi < sIds.length && !sndErr; sdi++) {
+      var SD = snds[sIds[sdi]];
+      if (!SD || typeof SD !== "object") { sndErr = "sound " + sIds[sdi] + ": not an object"; break; }
+      if (SD.layers) {
+        if (!Array.isArray(SD.layers) || SD.layers.length > 6) { sndErr = "sound " + sIds[sdi] + ": bad layers"; break; }
+        for (var sli = 0; sli < SD.layers.length && !sndErr; sli++) sndErr = ckLayer(sIds[sdi], SD.layers[sli]);
+      } else {
+        sndErr = ckLayer(sIds[sdi], SD);
+      }
+    }
+    if (sndErr) return sndErr;
+  }
   var known = ["identity", "stats", "balance", "persist"];
   var perms = s.permissions || [];
   if (!Array.isArray(perms)) return "permissions must be an array";
