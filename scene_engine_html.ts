@@ -418,6 +418,13 @@ function buildMesh(name, spec) {
       if (round) partLathe(lower, px, py - half, 0, [[thick*0.85,0],[thick*0.6,-half]]);
       else partBox(lower, px, py - half - half/2*sc, 0, thick*2.0, half, thick*2.0);
       g.parts[lower] = { pivot: v3(px, py - half, 0), parent: name };
+      var END = { legL: "footL", legR: "footR", armL: "handL", armR: "handR" }[name];
+      if (END) {
+        var ey = py - len, isFoot = END.charAt(0) === "f";
+        if (isFoot) partBox(END, px, ey - 0.03 * sc, 0.06 * sc, thick * 2.0, 0.07 * sc, thick * 3.4);
+        else partBox(END, px, ey - 0.05 * sc, 0, thick * 1.7, 0.11 * sc, thick * 1.7);
+        g.parts[END] = { pivot: v3(px, ey, 0), parent: lower };
+      }
     }
     var BK = spec.bulk || 1, LL = spec.limbLen || 1;
     if (QUAD) {
@@ -429,6 +436,8 @@ function buildMesh(name, spec) {
       g.parts.armR.pivot.z = 0.6 * sc; g.parts.foreR.pivot.z = 0.6 * sc;
       g.parts.legL.pivot.z = -0.6 * sc; g.parts.shinL.pivot.z = -0.6 * sc;
       g.parts.legR.pivot.z = -0.6 * sc; g.parts.shinR.pivot.z = -0.6 * sc;
+      g.parts.handL.pivot.z = 0.6 * sc; g.parts.handR.pivot.z = 0.6 * sc;
+      g.parts.footL.pivot.z = -0.6 * sc; g.parts.footR.pivot.z = -0.6 * sc;
     } else {
       makeLimb("armL", "foreL", -0.40 * SW * sc, 1.52 * TL * sc, 0.09 * BK, 0.72 * sc * LL);
       makeLimb("armR", "foreR",  0.40 * SW * sc, 1.52 * TL * sc, 0.09 * BK, 0.72 * sc * LL);
@@ -4727,7 +4736,7 @@ function playPoseAdditive(n, id) {
 // RAGDOLL (v9) -- bones driven by the rigid body solver instead of clips.
 // ---------------------------------------------------------------------------
 var RAGDOLLS = [];
-var RAG_BONES = ["torso", "head", "armL", "armR", "legL", "legR", "foreL", "foreR", "shinL", "shinR"];
+var RAG_BONES = ["torso", "head", "armL", "armR", "legL", "legR", "foreL", "foreR", "shinL", "shinR", "footL", "footR", "handL", "handR"];
 
 function startRagdoll(n, impulse) {
   if (n._rag || !n._geo || !n._geo.parts) return;
@@ -4772,7 +4781,7 @@ function startRagdoll(n, impulse) {
   rag.pb = (rag.bones.head && rag.bones.foreL && rag.bones.foreR) ?
     { head: rag.bones.head.body, foreL: rag.bones.foreL.body, foreR: rag.bones.foreR.body } : null;
   rag.hinges = [];
-  var HJ = [["torso","armL","foreL"],["torso","armR","foreR"],["torso","legL","shinL"],["torso","legR","shinR"]];
+  var HJ = [["torso","armL","foreL"],["torso","armR","foreR"],["torso","legL","shinL"],["torso","legR","shinR"],["armL","foreL","handL"],["armR","foreR","handR"],["legL","shinL","footL"],["legR","shinR","footR"]];
   for (i = 0; i < HJ.length; i++) {
     if (rag.bones[HJ[i][0]] && rag.bones[HJ[i][1]] && rag.bones[HJ[i][2]])
       rag.hinges.push({ inner: rag.bones[HJ[i][0]].body, mid: rag.bones[HJ[i][1]].body, outer: rag.bones[HJ[i][2]].body });
@@ -4978,6 +4987,13 @@ function applyFootIK(n, out) {
                      ry: cur.ry, rz: cur.rz };
     out[dr.shin] = { rx: curS.rx + (sol.knee - curS.rx) * n._ikW * (cfg.weight != null ? cfg.weight : 0.7),
                      ry: curS.ry, rz: curS.rz };
+    var footB = dr.bone === "legL" ? "footL" : "footR";
+    if (g.parts[footB]) {
+      var curF = poseAngles(out[footB]) || { rx: 0, ry: 0, rz: 0 };
+      var flat = -(sol.hip + sol.knee);
+      out[footB] = { rx: curF.rx + (flat - curF.rx) * n._ikW * (cfg.weight != null ? cfg.weight : 0.7),
+                     ry: curF.ry, rz: curF.rz };
+    }
   }
   return out;
 }
@@ -5134,7 +5150,7 @@ function gaitPose(n) {
   var stanceK = geo && geo.digitigrade ? 34 : 0;
   if (geo && geo.quadruped) stanceT = { rx: (geo.hunch || 0) };
   var amt = n._gaitAmt || 0;
-  if (amt <= 0.01) return (stanceT || stanceK) ? { torso: stanceT || 0, shinL: stanceK, shinR: stanceK } : null;
+  if (amt <= 0.01) return (stanceT || stanceK) ? { torso: stanceT || 0, shinL: stanceK, shinR: stanceK, footL: -stanceK * 0.55, footR: -stanceK * 0.55 } : null;
   var ph = n._gaitPhase || 0;
   var gait = n.gait || {};
   var swing = (gait.swing !== undefined ? gait.swing : 32) * amt;
@@ -5145,6 +5161,7 @@ function gaitPose(n) {
   return {
     legL: (geo && geo.quadruped ? sB : sA) * swing, legR: (geo && geo.quadruped ? sA : sB) * swing,
     shinL: stanceK + Math.max(0, sA) * GAIT_KNEE, shinR: stanceK + Math.max(0, sB) * GAIT_KNEE,
+    footL: -(stanceK + Math.max(0, sA) * GAIT_KNEE) * 0.55, footR: -(stanceK + Math.max(0, sB) * GAIT_KNEE) * 0.55,
     foreL: -(0.25 + 0.75 * Math.max(0, sB)) * GAIT_ELBOW, foreR: -(0.25 + 0.75 * Math.max(0, sA)) * GAIT_ELBOW,
     armL: sB * (geo && geo.quadruped ? swing : arm),  armR: sA * (geo && geo.quadruped ? swing : arm),
     torso: stanceT ? { rx: stanceT.rx, ry: 0, rz: Math.abs(Math.sin(ph * 2)) * 2 * amt } : Math.abs(Math.sin(ph * 2)) * 2 * amt

@@ -717,7 +717,7 @@ section("ragdoll: triggers on death, bones fall and stay linked");
   call("nodes['victim'].hp = 0;");
   pump(2);
   ok("death starts a ragdoll", call("nodes['victim']._rag") != null);
-  ok("one body per bone spawned", G("BODIES.length") - bodiesBefore === 10,
+  ok("one body per bone spawned", G("BODIES.length") - bodiesBefore === 14,
      "delta=" + (G("BODIES.length") - bodiesBefore));
   ok("actor is not marked dead (corpse stays visible)", call("nodes['victim']._dead") !== true);
 
@@ -941,6 +941,12 @@ section("knees: limb split, chain, gait flexion");
   ok("shinL exists with knee pivot", call("nodes['hero']._geo.parts['shinL']") != null);
   ok("shinL parents to legL", call("nodes['hero']._geo.parts['shinL'].parent") === "legL");
   ok("foreR parents to armR", call("nodes['hero']._geo.parts['foreR'].parent") === "armR");
+  ok("footL exists with ankle pivot", call("nodes['hero']._geo.parts['footL']") != null);
+  ok("footL parents to shinL", call("nodes['hero']._geo.parts['footL'].parent") === "shinL");
+  ok("handR parents to foreR", call("nodes['hero']._geo.parts['handR'].parent") === "foreR");
+  const ankleBelow = call(
+    "(function(){var p=nodes['hero']._geo.parts;return p['footL'].pivot.y < p['shinL'].pivot.y;})()");
+  ok("ankle pivot sits below the knee", ankleBelow === true);
   const kneeBelow = call(
     "(function(){var p=nodes['hero']._geo.parts;return p['shinL'].pivot.y < p['legL'].pivot.y;})()");
   ok("knee pivot sits below the hip", kneeBelow === true);
