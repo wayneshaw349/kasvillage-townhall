@@ -86,8 +86,10 @@ export const EngineHost: React.FC<EngineHostProps> = ({
     (async () => {
       try {
         if (expectedHash) {
+          let canon = descriptor;
+          try { canon = JSON.stringify(JSON.parse(descriptor)); } catch {}
           const digest = await Crypto.digestStringAsync(
-            Crypto.CryptoDigestAlgorithm.SHA256, descriptor);
+            Crypto.CryptoDigestAlgorithm.SHA256, canon);
           if (!alive) return;
           if (digest.toLowerCase() !== expectedHash.toLowerCase()) {
             setPhase('hash_mismatch');
