@@ -595,6 +595,19 @@ var FN = {
   ownerOf: function (key) {
     var ow = (world.owners || {})[String(key)];
     return ow == null ? 0 : ow;
+  },
+  beat: function () {
+    var bpm = world.flags.bpm;
+    if (!bpm) return -1;
+    return Math.floor((world.time - (world.flags.beat0 || 0)) * bpm / 60);
+  },
+  onBeat: function (win) {
+    var bpm = world.flags.bpm;
+    if (!bpm) return false;
+    var w = (typeof win === "number" && win > 0 && win < 0.5) ? win : 0.15;
+    var ph = ((world.time - (world.flags.beat0 || 0)) * bpm / 60) % 1;
+    if (ph < 0) ph += 1;
+    return ph < w || ph > 1 - w;
   }
 };
 function tokenize(s) {
@@ -2138,6 +2151,13 @@ function runAction(self, a) {
       if (!a.args || a.args[0] == null) break;
       world.owners = world.owners || {};
       delete world.owners[String(a.args[0])];
+      break;
+    }
+    case "setBpm": {
+      var bpmV = a.amount != null ? a.amount : (a.args && a.args[0]) || 0;
+      if (typeof bpmV !== "number" || !isFinite(bpmV) || bpmV < 1 || bpmV > 400) break;
+      world.flags.bpm = bpmV;
+      world.flags.beat0 = world.time;
       break;
     }
     case "prompt": {
