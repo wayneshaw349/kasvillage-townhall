@@ -586,6 +586,10 @@ var FN = {
   seatStat: function (s, name) {
     var st = (world.seats || [])[(s || 1) - 1];
     return st && st[name] != null ? st[name] : 0;
+  },
+  ownerOf: function (key) {
+    var ow = (world.owners || {})[String(key)];
+    return ow == null ? 0 : ow;
   }
 };
 function tokenize(s) {
@@ -2117,6 +2121,37 @@ function runAction(self, a) {
       var asSt = world.seats[asIdx - 1] = world.seats[asIdx - 1] || {};
       var asK = (a.args && a.args[1]) || "v";
       asSt[asK] = (asSt[asK] || 0) + (a.amount != null ? a.amount : 0);
+      break;
+    }
+    case "claim": {
+      if (!a.args || a.args[0] == null) break;
+      world.owners = world.owners || {};
+      world.owners[String(a.args[0])] = a.args[1] != null ? a.args[1] : (world.flags.seat || 1);
+      break;
+    }
+    case "release": {
+      if (!a.args || a.args[0] == null) break;
+      world.owners = world.owners || {};
+      delete world.owners[String(a.args[0])];
+      break;
+    }
+    case "prompt": {
+      // args: [flagName, question, ...optionLabels]. Answer index lands in
+      // the flag; -1 while pending. No options -> a single "OK".
+      var prF = (a.args && a.args[0]) || "choice";
+      var prQ = String((a.args && a.args[1]) || "");
+      var prOpts = (a.args || []).slice(2);
+      if (!prOpts.length) prOpts = ["OK"];
+      var prEsc = function (s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      };
+      var prChoices = [];
+      for (var pri = 0; pri < prOpts.length && pri < 8; pri++) {
+        prChoices.push({ label: prEsc(prOpts[pri]), set: [prF, pri] });
+      }
+      world.flags[prF] = -1;
+      DLG = { tree: { nodes: { q: { text: prEsc(prQ), choices: prChoices } }, start: "q" }, nodeId: "q" };
+      renderDialogue();
       break;
     }
   }
