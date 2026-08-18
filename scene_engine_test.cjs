@@ -973,5 +973,76 @@ section("knees: limb split, chain, gait flexion");
 })();
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 14. GAME-STRUCTURE VOCABULARY — decks, seats, counters
+// ---------------------------------------------------------------------------
+section("vocab: seeded decks, seat rotation, counters");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene",
+    meta: { id: "vocab", title: "v", seed: "v1", players: 3 },
+    render: BASE_RENDER,
+    nodes: [{ id: "hero", type: "Actor", mesh: "cube", tags: ["player"], transform: { pos: [0, 0, 0] } }],
+    resources: { meshes: { cube: { type: "box" } }, materials: {} },
+    tables: { decks: { chance: 5 } }
+  });
+
+  // addFlag: increments, defaults, stacks
+  call("runAction(null, { action: 'addFlag', args: ['laps'], amount: 1 });");
+  call("runAction(null, { action: 'addFlag', args: ['laps'], amount: 2 });");
+  ok("addFlag accumulates", G("world.flags.laps") === 3, G("world.flags.laps"));
+
+  // deck: shuffle fills draw pile with every index exactly once
+  call("runAction(null, { action: 'shuffleDeck', args: ['chance'] });");
+  const dsz = call("world.decks['chance'].draw.length");
+  ok("shuffle fills the draw pile", dsz === 5, "size=" + dsz);
+  const sorted = call("world.decks['chance'].draw.slice().sort().join(',')");
+  ok("shuffle is a permutation (no dupes, no gaps)", sorted === "0,1,2,3,4", sorted);
+
+  // determinism: same seed + same shuffle index = same order
+  const order1 = call("world.decks['chance'].draw.join(',')");
+  call("world.decks['chance'].shuffles = 0;");
+  call("runAction(null, { action: 'shuffleDeck', args: ['chance'] });");
+  const order2 = call("world.decks['chance'].draw.join(',')");
+  ok("same seed reproduces the same shuffle", order1 === order2, order1 + " vs " + order2);
+
+  // draw: writes flag, moves card to discard, exhausts, then auto-reshuffles
+  for (var dd = 0; dd < 5; dd++) call("runAction(null, { action: 'drawCard', args: ['chance'] });");
+  ok("five draws empty the pile into discard",
+     call("world.decks['chance'].draw.length") === 0 &&
+     call("world.decks['chance'].discard.length") === 5);
+  const lastFlag = G("world.flags.card_chance");
+  ok("drawCard writes the card flag", lastFlag >= 0 && lastFlag <= 4, lastFlag);
+  call("runAction(null, { action: 'drawCard', args: ['chance'] });");
+  ok("exhausted deck reshuffles the discard and keeps dealing",
+     call("world.decks['chance'].draw.length") === 4 &&
+     call("world.decks['chance'].discard.length") === 1);
+  call("runAction(null, { action: 'drawCard', args: ['chance', 'my_card'] });");
+  ok("drawCard honours a custom flag name", G("world.flags.my_card") >= 0);
+
+  // seats: stats, rotation, dead-seat skip
+  call("runAction(null, { action: 'setSeatStat', args: [1, 'cash', 1500] });");
+  call("runAction(null, { action: 'addSeatStat', args: [1, 'cash'], amount: -300 });");
+  ok("seat stats set and add", call("world.seats[0].cash") === 1200, call("world.seats[0].cash"));
+  ok("seatStat() reads it in expressions",
+     call("evalExpr(compileExpr(\"seatStat(1,'cash') == 1200\"), exprCtx(null))") === true);
+
+  call("world.flags.seat = 1;");
+  call("runAction(null, { action: 'nextSeat' });");
+  ok("nextSeat advances", G("world.flags.seat") === 2, G("world.flags.seat"));
+  call("runAction(null, { action: 'setSeatStat', args: [3, 'alive', 0] });");
+  call("runAction(null, { action: 'nextSeat' });");
+  ok("nextSeat skips a dead seat and wraps", G("world.flags.seat") === 1, G("world.flags.seat"));
+  ok("nextSeat counts turns", G("world.flags.turn") === 2, G("world.flags.turn"));
+
+  // FN readers
+  ok("deckSize() reads the pile",
+     call("evalExpr(compileExpr('deckSize(\\'chance\\') == 3'), exprCtx(null))") === true);
+  ok("lastCard() reads the drawn flag",
+     call("evalExpr(compileExpr('lastCard(\\'chance\\') >= 0'), exprCtx(null))") === true);
+  ok("seat() reads the current seat",
+     call("evalExpr(compileExpr('seat() == 1'), exprCtx(null))") === true);
+})();
+
 console.log("\n" + (fail === 0 ? "ALL GREEN" : "FAILURES") + "  pass=" + pass + " fail=" + fail);
 process.exit(fail === 0 ? 0 : 1);
