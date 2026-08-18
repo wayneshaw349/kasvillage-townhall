@@ -4186,7 +4186,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     if (!_priv || !userPubkey || !_addr) throw new Error('wallet keys unavailable');
                     const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: 'testnet-10' as any };
                     setGameStage('Anchoring pledge...');
-                    const _pub: any = await publishContent(_owner, 'dapp', { name: v.game.name, category: 'GameGrid' }, 1, 500_000_000n);
+                    const _Crypto = require('expo-crypto');
+                    const _cHash = await _Crypto.digestStringAsync(_Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify(v.game));
+                    const _pub: any = await publishContent(_owner, 'dapp', { name: v.game.name, category: 'GameGrid', contentHash: _cHash }, 1, 500_000_000n);
                     if (!_pub || _pub.success === false) throw new Error('dapp publish failed: ' + (_pub && _pub.error));
                     setGameStage('Publishing descriptor...');
                     const _ck: any = await publishConfigChunks(_owner, _pub.storeAddress, v.game);

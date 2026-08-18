@@ -8,6 +8,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import EngineHost from './EngineHost';
+import { SCENE_ENGINE_HTML } from './scene_engine_html';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
@@ -284,7 +286,8 @@ const DAppDetailModal: React.FC<{
   dapp: DApp | null; 
   visible: boolean; 
   onClose: () => void;
-}> = ({ dapp, visible, onClose }) => {
+  onLaunch: (d: DApp) => void;
+}> = ({ dapp, visible, onClose, onLaunch }) => {
   if (!dapp) return null;
   
   const stats = getProtectionStats(dapp);
@@ -338,7 +341,7 @@ const DAppDetailModal: React.FC<{
             
             <TouchableOpacity 
               style={styles.visitButton}
-              onPress={() => Linking.openURL(dapp.url)}
+              onPress={() => onLaunch(dapp)}
             >
               <Text style={styles.visitButtonText}>🌐 Visit DApp</Text>
             </TouchableOpacity>
@@ -391,6 +394,32 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
   const [dapps, setDapps] = useState<DApp[]>(mockDApps);
   const [bookshelf, setBookshelf] = useState<BookshelfItem[]>(mockBookshelf);
   const [selectedDApp, setSelectedDApp] = useState<DApp | null>(null);
+  // In-app engine player. null = not playing; otherwise the fetched
+  // descriptor plus the record it came from.
+  const [playingGame, setPlayingGame] = useState<{ dapp: DApp; descriptor: string } | null>(null);
+  const [launching, setLaunching] = useState(false);
+
+  // Play routing: scene descriptors play IN-APP through EngineHost;
+  // everything else keeps the historical system-browser behaviour.
+  const launchDApp = async (dapp: DApp) => {
+    if (launching) return;
+    setLaunching(true);
+    try {
+      const res = await fetch(dapp.url);
+      const text = (await res.text()).trim();
+      if (text.startsWith('{')) {
+        // Looks like a scene descriptor. EngineHost hash-pins it when the
+        // record carries an attested hash, and its validate() gates the rest.
+        setPlayingGame({ dapp, descriptor: text });
+      } else {
+        Linking.openURL(dapp.url);
+      }
+    } catch (e) {
+      // Unreachable content: fall back to the browser rather than a dead tap.
+      Linking.openURL(dapp.url);
+    }
+    setLaunching(false);
+  };
   const [refreshing, setRefreshing] = useState(false);
 
   const filteredDApps = dapps.filter(d => {
@@ -420,6 +449,26 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
       prev.map(b => b.id === item.id ? { ...b, purchased: true, purchasedAt: Date.now() } : b)
     );
   };
+
+  // Full-screen player takes over the Entertainment Center while a game
+  // is running; closing returns to the directory exactly where it was.
+  if (playingGame) {
+    return (
+      <EngineHost
+        engineHtml={SCENE_ENGINE_HTML}
+        descriptor={playingGame.descriptor}
+        expectedHash={(playingGame.dapp as any).contentHash || (playingGame.dapp as any).content_hash || undefined}
+        gameId={playingGame.dapp.id}
+        title={playingGame.dapp.name}
+        onClose={() => setPlayingGame(null)}
+        onResult={(r) => {
+          // Episode completions / match results surface here and ride the
+          // existing KVSTAT3 dual-sign rail. Log until that hookup lands.
+          console.log('[EC] engine game result:', JSON.stringify(r).slice(0, 200));
+        }}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -561,6 +610,7 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
         dapp={selectedDApp}
         visible={!!selectedDApp}
         onClose={() => setSelectedDApp(null)}
+        onLaunch={(d) => { setSelectedDApp(null); launchDApp(d); }}
       />
     </SafeAreaView>
   );
