@@ -459,4 +459,128 @@ The discipline that keeps this codebase healthy, in one line: **change → build
 
 ---
 
-*Manual current as of engine build 295 KB, tests at 122 green, August 2026.*
+---
+
+## Part 13: The Complete Vocabulary (Read This Before Designing Anything)
+
+This chapter is the boundary line of the whole engine. As the engine's own source puts it: **adding a verb requires an engine change — that boundary is what keeps published scenes incapable of surprising anyone.** If a word is not on these lists, the engine ignores it. Your scene will still render — it just won't *do* the thing. Design your game from this vocabulary first; invent nothing.
+
+### 13.1 Actions — the 34 verbs
+
+Actions are what triggers, events, and behavior trees *do*. The shape is always:
+
+```json
+{ "action": "damage", "target": "goblin_1", "amount": 5 }
+```
+
+The key is **`action`** (not "do", not "act"). `target` names a node or `"self"`. Extra inputs ride in `args` (an array) or `amount` (a number).
+
+**World & flow:** `gotoRoom` · `startBattle` · `startDialogue` · `openShop` · `openMenu` · `commit` (push state to the host bridge)
+
+**Life & damage:** `damage` · `heal` · `despawn` (optional `delay` in seconds) · `ragdoll` (args = impulse x,y,z)
+
+**Movement & physics:** `teleport` (args x,y,z) · `impulse` · `setVelocity` · `wake`
+
+**Combat & senses:** `shoot` (args: speed, damage, arc, gravity) · `raiseAlert` · `noise` (makes a sound AIs can hear)
+
+**Animation:** `playPose` (args: poseId, optional `"additive"`) · `stopPose` · `play` (AnimationPlayer clip) · `stop` · `tween` (args: path, to, duration, ease)
+
+**Presentation & FX:** `show` · `hide` · `setText` · `emit` (particles) · `explode` · `playSound`
+
+**Economy & progress:** `addScore` · `setState` (args: flagName, value) · `addFlag` (args: flagName; amount — increments a numeric flag: laps, waves, combos, money ticks) · `giveGold` · `giveXp` · `giveItem` · `takeItem`
+
+**Game structure (the universal-genre modules):**
+- `shuffleDeck` (args: deckId) — seeded Fisher-Yates over a deck declared in `tables.decks` (a size 1–128, up to 16 decks). Same seed, same order, every device.
+- `drawCard` (args: deckId, optional flagName) — deals the next index into `world.flags.card_<id>` (or your flag); exhausted decks auto-reshuffle their discard.
+- `nextSeat` — rotates `world.flags.seat` through `meta.players`, skipping seats whose `alive` stat is 0, and counts `world.flags.turn`.
+- `setSeatStat` / `addSeatStat` (args: seatIdx or "current", statName, value) — per-player stats in `world.seats`.
+- `claim` / `release` (args: key, optional owner — defaults to the current seat) — a generic ownership ledger in `world.owners` for properties, territory, capture points.
+- `prompt` (args: flagName, question, ...optionLabels up to 8) — opens a choice dialog; the answer index lands in the flag, which pends at -1. Timeouts compose from an alarm that checks the flag is still -1.
+- `setBpm` (amount: 1–400) — anchors a beat clock at the current sim time for rhythm games.
+- `spawn` (args: prefabOrMesh, x, y, z, optionalId) — instantiates a prefab at runtime, refused past the scene's node cap and on duplicate ids. Waves, drops, spawners.
+
+That's the entire list. There is no `payRent`, no `drawCard`, no `promptBuy`, no `rollSeeded`. A Monopoly-style game must build its economy out of `setState` flags, `giveGold`, areas, and expressions — or wait for the engine to grow a board-game module.
+
+### 13.2 Conditions — the expression language
+
+Wherever the engine asks a question — a BT `cond`, a task's `until`, a state machine's `when` — you write a small expression **as a string**:
+
+```json
+{ "cond": "distance(self, player) < 3 && self.hp > 10" }
+```
+
+It is a deliberately closed language: no loops, no assignment, no calling anything outside the whitelist. A bad expression doesn't crash — it logs a warning and evaluates to 0 (false).
+
+**You can use:** numbers · `'strings'` in single quotes · `+ - * /` · `< > <= >= == !=` · `&& || !` · parentheses · dotted paths.
+
+**Roots you can read:** `self` (this node — `self.hp`, `self.stats.spd`, `self.blackboard.x`) · `player` · `world` (`world.score`, `world.flags.gold`, `world.time`) · `input` (`input.attack.pressed`, `input.move.length`) · `animation.finished` · `session` · `time`.
+
+**The 12 functions (the whole whitelist):**
+
+| Function | Answers |
+|---|---|
+| `distance(a, b)` | How far apart? (9999 if either is missing) |
+| `length(v)` | Size of a vector or number |
+| `min / max / abs` | The math basics |
+| `rand()` | Seeded random 0–1 — deterministic, safe |
+| `has('itemId')` | How many of this item in inventory? |
+| `stat(base, 'atk')` | Base stat plus equipped item bonuses |
+| `level()` / `gold()` | Player level / gold |
+| `canSee(a, b)` | Is b inside a's vision cone and unblocked? |
+| `heard(a)` | Has a heard a noise stimulus? |
+| `deckSize('id')` | Cards left in the draw pile |
+| `lastCard('id')` | The most recently drawn index (-1 if none) |
+| `seat()` | Whose turn it is |
+| `seatStat(n, 'cash')` | Read any seat's stat |
+| `ownerOf('key')` | Who claimed it (0 = unowned) |
+| `beat()` | Whole beats since setBpm (-1 without a bpm) |
+| `onBeat(0.15)` | True inside the timing window around any beat |
+
+Division by zero returns 0. Expressions deeper than 24 levels refuse to parse. Missing paths read as 0.
+
+### 13.3 Behavior trees — the exact grammar
+
+A BT lives on a node as `bt:` and is built from these words and only these:
+
+**Composites:** `selector` (try children until one succeeds), `sequence` (do children in order; *reactive* — guards re-check every tick), `parallel` (run all; `requireAll: false` means one success is enough).
+
+**Decorators:** `invert` · `succeed` (always report OK) · `repeat` (forever) · `cooldown` (seconds; wraps a `child`, blocks re-entry until the timer clears).
+
+**Leaves:** `cond` (expression string) · `wait` (seconds) · `task` (a behavior, below; add `until:` expression to finish it, or `once: true` for single-frame) · `do` (an action: `{ "do": { "action": "playSound", "to": "self", "args": ["dice"] } }` — note the leaf key is `do`, the verb inside is still `action`, and the target key is `to`) · `setBlackboard` (`{ key, value }` — the node's scratch memory, readable as `self.blackboard.key`).
+
+### 13.4 Behavior tasks — 3 movements
+
+`task` accepts exactly three types, all terrain-following:
+
+- `{ "type": "patrol", "path": "route_node", "speed": 2 }` — walk a path node's points, facing along it.
+- `{ "type": "seek", "target": "player", "speed": 5 }` — walk toward.
+- `{ "type": "flee", "target": "player", "speed": 4 }` — walk away.
+
+There is no `stepToken`, no grid movement task. Board-token movement is authored as `teleport`/`tween` chains or waits for an engine module.
+
+### 13.5 AnimationPlayer & tweens
+
+An `AnimationPlayer` node drives any property path on a target over keyframes:
+
+```json
+{ "type": "AnimationPlayer", "target": "gate",
+  "clips": { "open": { "loop": false,
+    "tracks": [{ "path": "transform.pos.1", "ease": "outCubic", "keys": [[0, 0], [0.8, 3]] }] } },
+  "autoplay": "open" }
+```
+
+Eases: `linear, inQuad, outQuad, inOutQuad, inCubic, outCubic, outElastic, outBounce`. Verbs: `play`, `stop`, and the one-shot `tween` action.
+
+### 13.6 Input — six named channels
+
+Scenes never see keys or touches — only named actions: `move` (x, y, length) · `look` · `interact` (pressed/held) · `attack` (pressed/held) · `stroke` (drawn gesture: angle, length, ms) · `tap` (x, y, heading). Read them in expressions: `input.attack.pressed`.
+
+### 13.7 A worked warning: the KasCity lesson
+
+A full Monopoly-style descriptor was once written for this engine using verbs like `rollSeeded`, `payRent`, `promptBuy`, `buildImprovement`, and tests like `tileUnowned` — a beautiful, complete rulebook. The engine rendered the board perfectly and executed **none of it**, because every one of those words was invented. The board drew; the game never started.
+
+The lesson, in one sentence: **the renderer is generous, the vocabulary is strict.** That gap is why the game-structure modules now exist: seeded decks, seats and turns, an ownership ledger, prompts, a beat clock, counters, and runtime spawning — the generic primitives that compose into board games, card games, rhythm games, wave games, racing laps, and economy ticks without ever opening the door to arbitrary code. Before designing, build your rules from the **46 actions, 21 functions, 3 tasks**, and the BT grammar. If your design still needs a word that isn't here, it's a proposal for a new engine module — bring it as one.
+
+---
+
+*Manual current as of engine build 302 KB, tests at 156 green, August 2026.*
