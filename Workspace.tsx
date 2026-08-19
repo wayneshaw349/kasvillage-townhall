@@ -4196,9 +4196,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     const _ck: any = await publishConfigChunks(_owner, _pub.storeAddress, v.game);
                     if (!_ck.success) throw new Error('descriptor chunks failed: ' + _ck.error);
                     setGameStage('Announcing...');
-                    const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, v.game.name, 'GameGrid', 'dapp', { configHash: _ck.hash });
+                    const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, _gname, 'GameGrid', 'dapp', { configHash: _ck.hash });
                     if (!_ann || _ann.success === false) console.warn('[Game] announce failed:', _ann && _ann.error);
-                    Alert.alert('Game Published!', v.game.name + ' is live on Kaspa L1.\nDescriptor hash: ' + _ck.hash.slice(0, 16) + '...');
+                    Alert.alert('Game Published!', _gname + ' is live on Kaspa L1.\nDescriptor hash: ' + _ck.hash.slice(0, 16) + '...');
                     console.log('[Game] published - addr:', _pub.storeAddress, 'hash:', _ck.hash.slice(0, 16));
                   } catch (e: any) {
                     Alert.alert('Publish Failed', String(e?.message || e));
