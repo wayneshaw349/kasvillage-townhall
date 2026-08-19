@@ -1044,5 +1044,64 @@ section("vocab: seeded decks, seat rotation, counters");
      call("evalExpr(compileExpr('seat() == 1'), exprCtx(null))") === true);
 })();
 
+// ---------------------------------------------------------------------------
+// 15. GAME-STRUCTURE VOCABULARY II — ownership, prompt, beat, spawn
+// ---------------------------------------------------------------------------
+section("vocab2: ownership, prompt, beat clock, spawn");
+(function () {
+  load({
+    kind: "kv_game_v1", engine: "scene",
+    meta: { id: "vocab2", title: "v2", seed: "v2", players: 2 },
+    render: BASE_RENDER,
+    nodes: [{ id: "hero", type: "Actor", mesh: "cube", tags: ["player"], transform: { pos: [0, 0, 0] } }],
+    prefabs: { mob: { mesh: "cube", stats: { hp: 9 }, tags: ["enemy"] } },
+    resources: { meshes: { cube: { type: "box" } }, materials: {} }
+  });
+
+  // ownership: claim defaults to current seat, explicit owner wins, release clears
+  call("world.flags.seat = 2;");
+  call("runAction(null, { action: 'claim', args: ['tile_5'] });");
+  ok("claim defaults to the current seat", call("world.owners['tile_5']") === 2);
+  call("runAction(null, { action: 'claim', args: ['tile_5', 1] });");
+  ok("explicit owner overrides", call("world.owners['tile_5']") === 1);
+  ok("ownerOf() reads it in expressions",
+     call("evalExpr(compileExpr(\"ownerOf('tile_5') == 1\"), exprCtx(null))") === true);
+  call("runAction(null, { action: 'release', args: ['tile_5'] });");
+  ok("release clears ownership; ownerOf reports 0",
+     call("evalExpr(compileExpr(\"ownerOf('tile_5') == 0\"), exprCtx(null))") === true);
+
+  // prompt: flag pends at -1, dialogue opens, choice writes the index
+  call("runAction(null, { action: 'prompt', args: ['buy_ok', 'Buy this district?', 'Yes', 'No'] });");
+  ok("prompt pends the flag at -1", G("world.flags.buy_ok") === -1);
+  ok("prompt opened a dialogue", call("DLG != null") === true);
+  ok("prompt carries both options", call("DLG.tree.nodes.q.choices.length") === 2);
+  call("advanceDialogue(1);");
+  ok("choosing writes the option index", G("world.flags.buy_ok") === 1);
+  ok("dialogue closes after the choice", call("DLG == null") === true);
+
+  // beat clock: pure function of world.time
+  call("world.time = 10; runAction(null, { action: 'setBpm', amount: 120 });");
+  ok("setBpm anchors beat zero", G("world.flags.bpm") === 120 && G("world.flags.beat0") === 10);
+  call("world.time = 10.25;");
+  ok("half a beat later is off-beat",
+     call("evalExpr(compileExpr('onBeat(0.15)'), exprCtx(null))") === false);
+  call("world.time = 10.52;");
+  ok("just after a beat boundary is on-beat",
+     call("evalExpr(compileExpr('onBeat(0.15)'), exprCtx(null))") === true);
+  call("world.time = 11.5;");
+  ok("beat() counts whole beats", call("evalExpr(compileExpr('beat()'), exprCtx(null))") === 3);
+  call("runAction(null, { action: 'setBpm', amount: 9999 });");
+  ok("out-of-range bpm is rejected", G("world.flags.bpm") === 120);
+
+  // spawn: prefab instance appears, resolves stats, cap holds
+  const nBefore = call("Object.keys(nodes).length");
+  call("runAction(null, { action: 'spawn', args: ['mob', 3, 0, 2, 'mob_x'] });");
+  ok("spawn adds a node", call("Object.keys(nodes).length") === nBefore + 1);
+  ok("spawned prefab resolves stats", call("nodes['mob_x'] && nodes['mob_x'].hp") === 9);
+  ok("spawn places the node", call("nodes['mob_x'].transform.pos[0]") === 3);
+  call("runAction(null, { action: 'spawn', args: ['mob', 0, 0, 0, 'mob_x'] });");
+  ok("duplicate id is refused", call("Object.keys(nodes).length") === nBefore + 1);
+})();
+
 console.log("\n" + (fail === 0 ? "ALL GREEN" : "FAILURES") + "  pass=" + pass + " fail=" + fail);
 process.exit(fail === 0 ? 0 : 1);
