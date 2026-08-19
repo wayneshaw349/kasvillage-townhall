@@ -303,8 +303,58 @@ Damage uses `atk² / (atk + def)` with a small **seeded** variance — the wobbl
 
 ### Score, flags, world state
 
-`world.score` and `world.flags` are your scratchpad — quest progress, door-opened switches, currency. Flags persist (Part 9).
+`world.score` and `world.flags` are your scratchpad — quest progress, door-opened switches, currency, whose turn it is. Flags persist (Part 9).
 
+#### Seeding initial flags — read this before you write a turn-based game
+
+**A top-level `world` block in your descriptor is ignored.** The engine resets
+world state on every load:
+
+```js
+world = { alert: false, flags: {}, score: 0, time: 0 };
+```
+
+Nothing reads `scene.world`. Write one and it is silently discarded — the
+scene still validates, still renders, and every flag you declared reads as 0.
+
+That matters because **missing paths read as 0**, so a wrong start value does
+not throw; it just makes your rules wrong in ways that look like a dead game:
+
+- `seat()` reads `world.flags.seat`. Starting at 0 means no branch guarded by
+  `seat() == 1` ever matches, so tokens never move.
+- A "waiting for the player" flag that should start at `-1` starts at 0, so a
+  `>= 0` guard fires immediately and the game answers its own prompt.
+
+**Seed flags in the boot alarm, and gate your behaviour tree behind a sentinel
+so nothing ticks before seeding finishes.** Alarms fire on a timer; the BT runs
+from the first frame, so without the gate the tree gets several ticks against
+an empty flag table.
+
+```json
+"alarms": [{
+  "id": "boot", "at": 0.1,
+  "actions": [
+    { "action": "setState", "args": ["seat", 1] },
+    { "action": "setState", "args": ["go", -1] },
+    { "action": "setState", "args": ["phase", 0] },
+    { "action": "shuffleDeck", "args": ["fate"] },
+    { "action": "setState", "args": ["ready", 1] }
+  ]
+}]
+```
+
+`ready` is set **last**, and the director's tree opens with it:
+
+```json
+"bt": { "sequence": [
+  { "cond": "world.flags.ready == 1" },
+  { "selector": [ /* the real tree */ ] }
+]}
+```
+
+The same pattern is how a restored save should be applied: rewrite the flags,
+then raise `ready`. Restoring after the tree has already started is the same
+race, with the same symptom.
 ---
 
 ## Part 8: Sound
