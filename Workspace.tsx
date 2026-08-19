@@ -4188,7 +4188,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     setGameStage('Anchoring pledge...');
                     const _Crypto = require('expo-crypto');
                     const _cHash = await _Crypto.digestStringAsync(_Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify(v.game));
-                    const _pub: any = await publishContent(_owner, 'dapp', { name: v.game.name, category: 'GameGrid', contentHash: _cHash }, 1, 500_000_000n);
+                    const _gmeta: any = (v.game as any).meta || {};
+                    const _gname = (v.game as any).name || _gmeta.name || _gmeta.id || 'Untitled Game';
+                    const _pub: any = await publishContent(_owner, 'dapp', { name: _gname, category: 'GameGrid', contentHash: _cHash }, 1, 500_000_000n);
                     if (!_pub || _pub.success === false) throw new Error('dapp publish failed: ' + (_pub && _pub.error));
                     setGameStage('Publishing descriptor...');
                     const _ck: any = await publishConfigChunks(_owner, _pub.storeAddress, v.game);
