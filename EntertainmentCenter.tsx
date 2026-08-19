@@ -405,6 +405,16 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
     if (launching) return;
     setLaunching(true);
     try {
+      const _gh = (dapp as any).gameHash || '';
+      if (_gh) {
+        // On-chain game: descriptor lives in config chunks under the dapp address.
+        const { fetchStoreConfig } = await import('./config_chunks');
+        const { config, error } = await fetchStoreConfig(dapp.id, _gh, 'testnet-10');
+        if (!config) throw new Error('descriptor fetch failed: ' + (error || 'no config'));
+        setPlayingGame({ dapp, descriptor: JSON.stringify(config) });
+        setLaunching(false);
+        return;
+      }
       const res = await fetch(dapp.url);
       const text = (await res.text()).trim();
       if (text.startsWith('{')) {
@@ -457,7 +467,7 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
       <EngineHost
         engineHtml={SCENE_ENGINE_HTML}
         descriptor={playingGame.descriptor}
-        expectedHash={(playingGame.dapp as any).contentHash || (playingGame.dapp as any).content_hash || undefined}
+        expectedHash={(playingGame.dapp as any).gameHash || (playingGame.dapp as any).contentHash || (playingGame.dapp as any).content_hash || undefined}
         gameId={playingGame.dapp.id}
         title={playingGame.dapp.name}
         onClose={() => setPlayingGame(null)}
