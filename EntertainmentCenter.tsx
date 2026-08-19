@@ -411,6 +411,12 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
         const { fetchStoreConfig } = await import('./config_chunks');
         const { config, error } = await fetchStoreConfig(dapp.id, _gh, 'testnet-10');
         if (!config) throw new Error('descriptor fetch failed: ' + (error || 'no config'));
+        const { scanDescriptor, reasonMessage } = require('./content_filter');
+        const _scan = scanDescriptor(config);
+        if (!_scan.ok) {
+          console.warn('[Launch] content rejected:', _scan.reason, _scan.path);
+          throw new Error(reasonMessage(_scan.reason));
+        }
         setPlayingGame({ dapp, descriptor: JSON.stringify(config) });
         setLaunching(false);
         return;

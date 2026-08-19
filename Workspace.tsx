@@ -3313,6 +3313,21 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: 'testnet-10' as any };
       const STORE_PLEDGE_SOMPI = 500_000_000n; // 5 KAS default stake
       const _cfgHash = bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(storefrontConfig))));
+      {
+        const { scanObject, scanText, reasonMessage } = require('./content_filter');
+        const _hits = [
+          scanText(brandName),
+          scanText(storeCategory),
+          scanText(primaryLink),
+          scanObject(storefrontConfig),
+        ].filter((r: any) => !r.ok);
+        if (_hits.length) {
+          setPubStage('');
+          Alert.alert('Cannot publish', reasonMessage(_hits[0].reason));
+          console.warn('[Workspace] store content rejected:', _hits[0].reason, _hits[0].path || '');
+          return;
+        }
+      }
       setPubStage('Anchoring pledge on Kaspa L1...');
       const _pub: any = await publishContent(_owner, 'store', {
         name: brandName,
@@ -4190,6 +4205,18 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     const _cHash = await _Crypto.digestStringAsync(_Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify(v.game));
                     const _gmeta: any = (v.game as any).meta || {};
                     const _gname = (v.game as any).name || _gmeta.name || _gmeta.id || 'Untitled Game';
+                    // Publish-side gate. Courtesy to our own users: a rejected
+                    // descriptor never becomes a permanent, unremovable record.
+                    {
+                      const { scanDescriptor, reasonMessage } = require('./content_filter');
+                      const _scan = scanDescriptor(v.game);
+                      if (!_scan.ok) {
+                        setGamePublishing(false);
+                        Alert.alert('Cannot publish', reasonMessage(_scan.reason));
+                        console.warn('[Publish] content rejected:', _scan.reason, _scan.path);
+                        return;
+                      }
+                    }
                     const _pub: any = await publishContent(_owner, 'dapp', { name: _gname, category: 'GameGrid', contentHash: _cHash }, 1, 500_000_000n);
                     if (!_pub || _pub.success === false) throw new Error('dapp publish failed: ' + (_pub && _pub.error));
                     setGameStage('Publishing descriptor...');

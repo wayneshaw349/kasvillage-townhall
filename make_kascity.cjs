@@ -266,6 +266,9 @@ const director = {
     ],
   },
 };
+// The BT must not tick before the boot alarm seeds the flags: unseeded,
+// seat() reads 0 (no movement branch matches) and go reads 0 (instant roll).
+director.bt = { sequence: [{ cond: 'world.flags.ready == 1' }, director.bt] };
 nodes.push(director);
 
 // ---------- descriptor ----------
@@ -343,8 +346,19 @@ const g = {
       { action: 'setSeatStat', args: [s, 'cash', 1500] },
       { action: 'setSeatStat', args: [s, 'alive', 1] },
     ])).concat([
+      { action: 'setState', args: ['phase', 0] },
+      { action: 'setState', args: ['asked', 0] },
+      { action: 'setState', args: ['pos', 0] },
+      { action: 'setState', args: ['sum', 0] },
+      { action: 'setState', args: ['moved', 1] },
+      { action: 'setState', args: ['go', -1] },
+      { action: 'setState', args: ['buy', -1] },
+      { action: 'setState', args: ['buy_tile', -1] },
+      { action: 'setState', args: ['seat', 1] },
+      { action: 'setState', args: ['turn', 0] },
       { action: 'shuffleDeck', args: ['fate'] },
       { action: 'shuffleDeck', args: ['cards'] },
+      { action: 'setState', args: ['ready', 1] },
     ]),
   }],
 };

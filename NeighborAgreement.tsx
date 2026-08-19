@@ -3517,7 +3517,17 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
     Alert.alert('Proposal Sent', 'Your split proposal has been sent to the other party.');
   };
   
-  const canProceedFromCreate = (contract.itemDescription || '').length > 0 && contract.itemPriceKas > 0;
+  // Contract text renders to the counterparty during release, when their
+  // guard is lowest. Gate it before the agreement can advance.
+  const _contentScan = (() => {
+    try {
+      const { scanText } = require('./content_filter');
+      const a = scanText(contract.itemDescription || '');
+      if (!a.ok) return a;
+      return scanText((contract as any).stipulations || '');
+    } catch { return { ok: true } as any; }
+  })();
+  const canProceedFromCreate = (contract.itemDescription || '').length > 0 && contract.itemPriceKas > 0 && _contentScan.ok;
   
     const handleCancelAgreement = async () => {
     Alert.alert(

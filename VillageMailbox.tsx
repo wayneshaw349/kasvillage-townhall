@@ -932,6 +932,16 @@ export default function VillageMailbox() {
                           const { fetchStoreConfig } = await import('./config_chunks');
                           const { config, error } = await fetchStoreConfig(gameView.addr, gameView.hash, 'testnet-10');
                           if (!config) { setGameView(g => g ? { ...g, loading: false, error: error || 'fetch failed' } : g); return; }
+                          // Display-side gate. This is the one that matters:
+                          // anyone can write to the registry address without
+                          // going through this app.
+                          const { scanDescriptor, reasonMessage } = require('./content_filter');
+                          const _scan = scanDescriptor(config);
+                          if (!_scan.ok) {
+                            console.warn('[Game] content rejected:', _scan.reason, _scan.path);
+                            setGameView(g => g ? { ...g, loading: false, error: reasonMessage(_scan.reason) } : g);
+                            return;
+                          }
                           const v = validateGameDescriptor(config);
                           if (!v.ok || !v.game) { setGameView(g => g ? { ...g, loading: false, error: v.error || 'invalid descriptor' } : g); return; }
                           console.log('[Game] generated:', v.game.name, v.game.board + 'x' + v.game.board);
@@ -981,6 +991,22 @@ export default function VillageMailbox() {
                 for (let i = 0; i < (name || '').length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
                 return 'hsl(' + (Math.abs(h) % 360) + ', 55%, 62%)';
               };
+              // Display-side gate on fetched store configs. Same exposure the
+              // game rail had: anyone can write to the registry directly.
+              try {
+                const { scanObject, reasonMessage } = require('./content_filter');
+                const _sc = scanObject(cfg);
+                if (!_sc.ok) {
+                  console.warn('[Store] content rejected:', _sc.reason, _sc.path || '');
+                  return (
+                    <View style={{ padding: rs.s(20), alignItems: 'center' }}>
+                      <Text style={{ fontSize: rs.font(11), color: COLORS.red500, textAlign: 'center' }}>
+                        {reasonMessage(_sc.reason)}
+                      </Text>
+                    </View>
+                  );
+                }
+              } catch {}
               const items: any[] = cfg?.stash || [];
               const social: Record<string, string> = cfg?.socialLinks || {};
               const links = Object.entries(social).filter(([, v]) => v);

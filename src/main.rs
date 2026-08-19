@@ -2088,6 +2088,44 @@ static PROHIBITED_PATTERNS: Lazy<Vec<(Regex, &'static str, Severity)>> = Lazy::n
     ]
 });
 
+// Content rules shared with the client (content_filter.ts). The client
+// enforces at publish and render; this table makes the server's verdict agree.
+static CONTENT_PATTERNS: Lazy<Vec<(Regex, &'static str, Severity)>> = Lazy::new(|| {
+    vec![
+        (Regex::new(r"(?i)\bseed\s*phrase\b").unwrap(), "seed_phrase", Severity::Critical),
+        (Regex::new(r"(?i)\brecovery\s*phrase\b").unwrap(), "recovery_phrase", Severity::Critical),
+        (Regex::new(r"(?i)\bmnemonic\b").unwrap(), "mnemonic", Severity::Critical),
+        (Regex::new(r"(?i)\bprivate\s*key\b").unwrap(), "private_key_text", Severity::Critical),
+        (Regex::new(r"(?i)\bwallet\s*(password|pin|passphrase)\b").unwrap(), "wallet_credential", Severity::Critical),
+        (Regex::new(r"(?i)\benter\s+your\s+(key|phrase|password|pin)\b").unwrap(), "credential_solicit", Severity::Critical),
+        (Regex::new(r"(?i)\bverify\s+your\s+wallet\b").unwrap(), "verify_wallet", Severity::Critical),
+        (Regex::new(r"(?i)\bconnect\s+your\s+wallet\s+to\s+claim\b").unwrap(), "connect_claim", Severity::Critical),
+        (Regex::new(r"(?i)\bimport\s+your\s+wallet\b").unwrap(), "import_wallet", Severity::Critical),
+        (Regex::new(r"(?i)\bclaim\s+your\s+airdrop\b").unwrap(), "airdrop_claim", Severity::High),
+        (Regex::new(r"(?i)\bdouble\s+your\s+(kas|balance|funds)\b").unwrap(), "double_funds", Severity::Critical),
+        (Regex::new(r"(?i)\bkill\s+your\s*self\b").unwrap(), "threat", Severity::Critical),
+        (Regex::new(r"(?i)\bkys\b").unwrap(), "threat_kys", Severity::Critical),
+        (Regex::new(r"(?i)\bi\s+will\s+(kill|hurt|find|rape)\s+you\b").unwrap(), "directed_threat", Severity::Critical),
+        (Regex::new(r"(?i)\b(child|kid|minor|underage|preteen|toddler|infant|schoolgirl|schoolboy|loli|shota)\b[^.!?]{0,40}\b(sex|sexual|nude|naked|porn|erotic|rape|molest|strip)\b").unwrap(), "child_safety", Severity::Critical),
+        (Regex::new(r"(?i)\b(sex|sexual|nude|naked|porn|erotic|rape|molest|strip)\b[^.!?]{0,40}\b(child|kid|minor|underage|preteen|toddler|infant|schoolgirl|schoolboy|loli|shota)\b").unwrap(), "child_safety", Severity::Critical),
+    ]
+});
+
+// Real-money gambling, applied to Game and DApp only. The ban is gambling WITH
+// REAL MONEY -- "poker" and "wager" as card-game vocabulary must pass.
+static GAME_MONEY_PATTERNS: Lazy<Vec<(Regex, &'static str, Severity)>> = Lazy::new(|| {
+    vec![
+        (Regex::new(r"(?i)real[\s_-]*money[\s_-]*(bet|wager|gambl)").unwrap(), "real_money_gambling", Severity::Critical),
+        (Regex::new(r"(?i)(deposit|withdraw)[^.!?]{0,30}(usd|eur|gbp|cad|aud|fiat)\b").unwrap(), "fiat_gambling", Severity::Critical),
+        (Regex::new(r"(?i)cash[\s_-]*out[\s_-]*winnings").unwrap(), "cashout_winnings", Severity::Critical),
+        (Regex::new(r"(?i)loot[\s_-]*box[^.!?]{0,20}(\$|pay|buy|purchase)").unwrap(), "paid_lootbox", Severity::High),
+        (Regex::new(r"(?i)gacha[^.!?]{0,20}(pay|\$|purchase)").unwrap(), "paid_gacha", Severity::High),
+        (Regex::new(r"(?i)(buy|purchase)[\s_-]*(gems|coins|crystals)[\s_-]*\$").unwrap(), "paid_currency", Severity::High),
+        (Regex::new(r"(?i)guaranteed[\s_-]*(win|payout|return)").unwrap(), "guaranteed_win", Severity::Critical),
+        (Regex::new(r"(?i)(rigged|fixed)[\s_-]*(odds|game|outcome)").unwrap(), "rigged_admission", Severity::Critical),
+    ]
+});
+
 static SUSPICIOUS_PATTERNS: Lazy<Vec<(Regex, &'static str, Severity)>> = Lazy::new(|| {
     vec![
         (Regex::new(r"(?i)\beval\s*\(").unwrap(), "eval", Severity::High),
@@ -2117,6 +2155,32 @@ pub fn scan_code(code: &str, entity_type: EntityType) -> CodeScanResult {
                 Severity::High => high.push(m),
                 Severity::Medium => medium.push(m),
                 Severity::Low => low.push(m),
+            }
+        }
+    }
+
+    for (regex, name, severity) in CONTENT_PATTERNS.iter() {
+        if regex.is_match(code) {
+            let m = PatternMatch { pattern_name: name.to_string(), severity: *severity, line_number: None, context: None };
+            match severity {
+                Severity::Critical => critical.push(m),
+                Severity::High => high.push(m),
+                Severity::Medium => medium.push(m),
+                Severity::Low => low.push(m),
+            }
+        }
+    }
+
+    if matches!(entity_type, EntityType::Game | EntityType::DApp) {
+        for (regex, name, severity) in GAME_MONEY_PATTERNS.iter() {
+            if regex.is_match(code) {
+                let m = PatternMatch { pattern_name: name.to_string(), severity: *severity, line_number: None, context: None };
+                match severity {
+                    Severity::Critical => critical.push(m),
+                    Severity::High => high.push(m),
+                    Severity::Medium => medium.push(m),
+                    Severity::Low => low.push(m),
+                }
             }
         }
     }
