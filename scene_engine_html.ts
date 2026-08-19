@@ -601,6 +601,8 @@ var FN = {
     if (!bpm) return -1;
     return Math.floor((world.time - (world.flags.beat0 || 0)) * bpm / 60);
   },
+  floor: Math.floor,
+  mod: function (a, b) { return b ? ((a % b) + b) % b : 0; },
   onBeat: function (win) {
     var bpm = world.flags.bpm;
     if (!bpm) return false;
@@ -2158,6 +2160,13 @@ function runAction(self, a) {
       if (typeof bpmV !== "number" || !isFinite(bpmV) || bpmV < 1 || bpmV > 400) break;
       world.flags.bpm = bpmV;
       world.flags.beat0 = world.time;
+      break;
+    }
+    case "setFlagExpr": {
+      if (!a.args || a.args[0] == null || a.args[1] == null) break;
+      var sfeV = evalExpr(compileExpr(String(a.args[1])), exprCtx(self));
+      if (typeof sfeV === "number" && !isFinite(sfeV)) break;
+      world.flags[String(a.args[0])] = sfeV;
       break;
     }
     case "spawn": {
