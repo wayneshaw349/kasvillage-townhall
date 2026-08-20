@@ -3135,6 +3135,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     if (!isAllowed && url.startsWith('http')) { Alert.alert('Whitelist Only', 'Links must be from: Instagram, Pinterest, Etsy, TikTok, Facebook, YouTube, or eBay'); return; }
     
     const contentErr = validateContentText(itemForm.name) || validateContentText(itemForm.description); if (contentErr) { Alert.alert('Blocked', contentErr); return; }
+    try { const { scanText, reasonMessage } = require('./content_filter'); const _h = [scanText(itemForm.name), scanText(itemForm.description)].find((r) => !r.ok); if (_h) { Alert.alert('Blocked', reasonMessage(_h.reason)); return; } } catch {}
     const item = {
       id: editingItem?.id || 'item_' + Date.now(),
       name: itemForm.name.trim(),
