@@ -75,7 +75,9 @@ const CSAM: RegExp[] = [
 // Plain "gun"/"knife" must pass; solicitation to buy/sell must not.
 const ILLEGAL_TRADE: RegExp[] = [
   /\b(buy|sell|order|purchase)\s+(a\s+|an\s+|some\s+)?(gun|guns|firearm|firearms|rifle|rifles|pistol|pistols|shotgun|shotguns|ammo|ammunition)\b/i,
-  /\b(buy|sell|order|purchase)\s+(a\s+|an\s+|some\s+)?(cocaine|heroin|meth|fentanyl|mdma|ecstasy|lsd)\b/i,
+  /\b(buy|sell|order|purchase|ship|deliver|source|supply|score)\s+(a\s+|an\s+|some\s+)?(cocaine|crack|heroin|meth|methamphetamine|fentanyl|carfentanil|mdma|ecstasy|molly|lsd|ketamine|pcp|dmt|oxycontin|oxycodone|percocet|percs|xanax|xannies|adderall|vicodin|hydrocodone|codeine|opioids?|opiates?|shrooms|psilocybin|ghb|rohypnol|roofies)\b/i,
+  /\b(cocaine|crack|heroin|meth|methamphetamine|fentanyl|carfentanil|mdma|ecstasy|molly|lsd|ketamine|pcp|dmt|oxycontin|oxycodone|percocet|percs|xanax|xannies|adderall|vicodin|hydrocodone|codeine|opioids?|opiates?|shrooms|psilocybin|ghb|rohypnol|roofies)\s+(for\s+sale|available|in\s+stock|shipped|delivered)\b/i,
+  /\b(sex\s+trafficking|labor\s+trafficking|organ\s+(sale|trade|harvest))\b/i,
   /\b(illegal\s+weapon|ghost\s*gun|unregistered\s+(gun|firearm))\b/i,
   /\b(drug\s+dealer|narcotics\s+for\s+sale|controlled\s+substance)\b/i,
   /\b(human\s+trafficking|sex\s+trade|flesh\s+trade)\b/i,
