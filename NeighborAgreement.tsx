@@ -3247,6 +3247,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
             } catch (e) { console.warn('[Refund] Prepare/build failed — nothing sent:', e); Alert.alert('Error', 'Refund prepare failed. Nothing was sent.'); }
           }
 
+          try { const { scanText } = require('./content_filter'); const _cpg = scanText(String(canon.description || '')); if (!_cpg.ok) { Alert.alert('Import Blocked', 'Counterparty description failed content check.'); return; } } catch {}
           setContract(prev => ({
             ...prev,
             agreementId: agrId,
@@ -3687,6 +3688,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                         if (_isColl) { setReleaseMode('cancel'); console.log('[Resume] Collateral detected (' + (collateralRef.current ? 'toggle' : 'dual-commitment') + ') - mode: cancel (2 outputs)'); }
                         collateralRef.current = false;
                         setResumeAsCollateral(false);
+                        try { const { scanText } = require('./content_filter'); const _cpg = scanText(String(_p.description || '')); if (!_cpg.ok) { Alert.alert('Resume Blocked', 'Pasted description failed content check.'); return; } } catch {}
                         setContract({
                           agreementId: _p.agrId,
                           multisigAddress: _fd.address,
