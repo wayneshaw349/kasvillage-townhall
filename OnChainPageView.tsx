@@ -51,6 +51,18 @@ const BRIDGE = `
 })();
 `;
 
+// [CSP-LEAK-FIX] Subresource fetches (<img src>, CSS url()/@import, fonts) are
+// NOT routed through onShouldStartLoadWithRequest on either platform — a remote
+// tracking pixel leaks the viewer's IP to the page author. A restrictive CSP in
+// <head> closes the channel entirely: no network, inline style + data: only.
+const CSP_META = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; media-src data:; font-src data:;">';
+function injectCsp(raw: string): string {
+  if (/http-equiv=["']Content-Security-Policy["']/i.test(raw)) return raw;
+  if (/<head[^>]*>/i.test(raw)) return raw.replace(/<head([^>]*)>/i, '<head$1>' + CSP_META);
+  if (/<html[^>]*>/i.test(raw)) return raw.replace(/<html([^>]*)>/i, '<html$1><head>' + CSP_META + '</head>');
+  return CSP_META + raw;
+}
+
 export default function OnChainPageView(props: OnChainPageViewProps) {
   const { storeAddress, pageHash, network = 'testnet-10', ownerPubkey } = props;
   const [html, setHtml] = useState<string | null>(null);
@@ -64,7 +76,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
     (async () => {
       const res = await fetchHtmlPage(storeAddress, pageHash, network);
       if (!alive) return;
-      if (res.html) setHtml(res.html);
+      if (res.html) setHtml(injectCsp(res.html));
       else setError(res.error || 'page unavailable');
     })();
     return () => { alive = false; };
