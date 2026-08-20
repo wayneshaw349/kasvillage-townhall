@@ -2085,6 +2085,22 @@ static PROHIBITED_PATTERNS: Lazy<Vec<(Regex, &'static str, Severity)>> = Lazy::n
         (Regex::new(r"(?i)\b(white|race)[\s_-]*supremac").unwrap(), "supremacist", Severity::Critical),
         (Regex::new(r"(?i)\bnazi\b").unwrap(), "nazi", Severity::Critical),
         (Regex::new(r"(?i)\bterroris[mt]\b").unwrap(), "terrorism", Severity::Critical),
+        // [RULESET-MERGE] exploitation/trafficking + weapons/drug sales (from townhall_verification_complete.rs)
+        (Regex::new(r"(?i)\b(buy|sell|rent|hire|order)\s+(girl|boy|child|minor|teen|kid|infant)\b").unwrap(), "exploitation_solicit", Severity::Critical),
+        (Regex::new(r"(?i)\b(young|underage|minor)\s+(female|male|escort|companion|model)\b").unwrap(), "exploitation_minor", Severity::Critical),
+        (Regex::new(r"(?i)\b(child|kid|minor|teen)\s+(for\s+sale|available|services|labor)\b").unwrap(), "exploitation_sale", Severity::Critical),
+        (Regex::new(r"(?i)\b(sex|slave|traffic)\s*(child|minor|girl|boy|teen|kid)\b").unwrap(), "exploitation_traffic", Severity::Critical),
+        (Regex::new(r"(?i)\b(child|minor|teen|kid)\s*(sex|slave|traffic|bride|groom)\b").unwrap(), "exploitation_traffic2", Severity::Critical),
+        (Regex::new(r"(?i)\b(lolita|jailbait|pedo|paedo)\b").unwrap(), "exploitation_term", Severity::Critical),
+        (Regex::new(r"(?i)\b(escort|companion)\s+(service|available)\s+(young|teen|minor)\b").unwrap(), "exploitation_escort", Severity::Critical),
+        (Regex::new(r"(?i)\b(fresh|new|virgin)\s+(meat|girl|boy|stock)\b").unwrap(), "exploitation_coded", Severity::Critical),
+        (Regex::new(r"(?i)\b(human\s+trafficking|sex\s+trade|flesh\s+trade)\b").unwrap(), "trafficking", Severity::Critical),
+        (Regex::new(r"(?i)\b(buy|sell|order)\s+(gun|firearm|rifle|pistol|shotgun|ammo|ammunition)\b").unwrap(), "weapon_sale", Severity::Critical),
+        (Regex::new(r"(?i)\b(buy|sell|order)\s+(cocaine|heroin|meth|fentanyl|mdma|ecstasy|lsd)\b").unwrap(), "drug_sale", Severity::Critical),
+        (Regex::new(r"(?i)\b(illegal\s+weapon|ghost\s*gun|unregistered\s+(gun|firearm))\b").unwrap(), "illegal_weapon", Severity::Critical),
+        (Regex::new(r"(?i)\b(drug\s+dealer|narcotics\s+for\s+sale|controlled\s+substance)\b").unwrap(), "drug_market", Severity::Critical),
+        (Regex::new(r"(?i)\bbomb\s*making\b").unwrap(), "bomb_making", Severity::Critical),
+        (Regex::new(r"(?i)\bexplosives?\s*guide\b").unwrap(), "explosives_guide", Severity::Critical),
     ]
 });
 
@@ -2136,6 +2152,19 @@ static SUSPICIOUS_PATTERNS: Lazy<Vec<(Regex, &'static str, Severity)>> = Lazy::n
         (Regex::new(r"(?i)localStorage").unwrap(), "localstorage", Severity::Low),
         (Regex::new(r"(?i)privateKey").unwrap(), "private_key", Severity::Medium),
         (Regex::new(r"(?i)seed\s*phrase").unwrap(), "seed_phrase", Severity::High),
+        // [RULESET-MERGE] exfil, miners, iframe, string timers, CSS image bypass
+        (Regex::new(r#"(?i)fetch\s*\(\s*['"]https?://"#).unwrap(), "external_fetch", Severity::High),
+        (Regex::new(r"(?i)XMLHttpRequest").unwrap(), "xhr", Severity::High),
+        (Regex::new(r"(?i)navigator\.sendBeacon").unwrap(), "send_beacon", Severity::High),
+        (Regex::new(r"(?i)coinhive").unwrap(), "miner_coinhive", Severity::High),
+        (Regex::new(r"(?i)cryptonight").unwrap(), "miner_cryptonight", Severity::High),
+        (Regex::new(r#"(?i)<iframe[^>]*src\s*=\s*['"]https?://"#).unwrap(), "iframe_external", Severity::High),
+        (Regex::new(r#"(?i)setTimeout\s*\(\s*['"]"#).unwrap(), "string_settimeout", Severity::Medium),
+        (Regex::new(r#"(?i)setInterval\s*\(\s*['"]"#).unwrap(), "string_setinterval", Severity::Medium),
+        (Regex::new(r#"(?i)background(-image)?\s*:\s*url\s*\("#).unwrap(), "css_image_bypass", Severity::Medium),
+        (Regex::new(r"(?i)<object\b").unwrap(), "object_tag", Severity::Medium),
+        (Regex::new(r"(?i)<embed\b").unwrap(), "embed_tag", Severity::Medium),
+        (Regex::new(r#"(?i)<video[^>]*poster\s*="#).unwrap(), "video_poster", Severity::Medium),
     ]
 });
 
