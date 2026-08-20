@@ -71,6 +71,8 @@ const PHASE = n => SET('phase', n);
 const nodes = [
   { id: 'terrain', mesh: 'ground', material: 'felt', collision: 'mesh', transform: { pos: [0, -0.25, 0] } },
   { id: 'board_base', mesh: 'board', material: 'board', transform: { pos: [0, 0, 0] } },
+  // Top-down camera. Board is 24x24 centered at origin; sit high, pitch straight down.
+  { id: 'gamecam', type: 'Camera3D', transform: { pos: [0, 34, 0.01], rot: [-89, 0, 0] } },
 ];
 
 // ---------- decorative city (cosmetic only: no tags, no collision, no bt) ----------
@@ -269,17 +271,36 @@ const director = {
 // The BT must not tick before the boot alarm seeds the flags: unseeded,
 // seat() reads 0 (no movement branch matches) and go reads 0 (instant roll).
 director.bt = { sequence: [{ cond: 'world.flags.ready == 1' }, director.bt] };
+// Boot seeding as per-node alarms: engine reads node.alarms = [{after, do:{action,args}}],
+// one action each. Stagger 'after' so 'ready' fires last. (scene.world and a
+// top-level scene.alarms block are both ignored by the engine.)
+director.alarms = (function () {
+  var al = [];
+  [['phase',0],['asked',0],['pos',0],['sum',0],['moved',1],['go',-1],
+   ['buy',-1],['buy_tile',-1],['seat',1],['turn',0]].forEach(function (kv) {
+    al.push({ after: 0.05, do: { action: 'setState', args: [kv[0], kv[1]] } });
+  });
+  SEATS.forEach(function (sp) {
+    al.push({ after: 0.05, do: { action: 'setSeatStat', args: [sp, 'cash', 1500] } });
+    al.push({ after: 0.05, do: { action: 'setSeatStat', args: [sp, 'alive', 1] } });
+  });
+  al.push({ after: 0.06, do: { action: 'shuffleDeck', args: ['fate'] } });
+  al.push({ after: 0.06, do: { action: 'shuffleDeck', args: ['cards'] } });
+  al.push({ after: 0.10, do: { action: 'setState', args: ['ready', 1] } });
+  return al;
+})();
 nodes.push(director);
 
 // ---------- descriptor ----------
 const g = {
   kind: 'kv_game_v1',
   engine: 'scene',
-  meta: { id: 'kascity_v2', name: 'KasCity', seed: 'kc2', players: 4, category: 'board' },
+  meta: { id: 'kascity_v3', name: 'KasCity', seed: 'kc2', players: 4, category: 'board' },
   debug: false,
   permissions: ['identity', 'persist', 'stats'],
   compliance: { maxNodes: 512 },
   input: { scheme: 'tap' },
+  render: { cameraMode: 'fixed' },
   world: { score: 0, flags: { phase: 0, asked: 0, pos: 0, sum: 0, moved: 1, go: -1, buy: -1, buy_tile: -1, seat: 1, turn: 0 } },
   tables: { decks: { fate: 11, cards: 8 } },
   nodes,
@@ -340,27 +361,7 @@ const g = {
       win: { layers: [{ type: 'tone', wave: 'sine', freq: 523, dur: 0.3, vol: 0.32 }, { type: 'tone', wave: 'sine', freq: 784, dur: 0.42, vol: 0.3 }] },
     },
   },
-  alarms: [{
-    id: 'boot', at: 0.1,
-    actions: [].concat(...SEATS.map(s => [
-      { action: 'setSeatStat', args: [s, 'cash', 1500] },
-      { action: 'setSeatStat', args: [s, 'alive', 1] },
-    ])).concat([
-      { action: 'setState', args: ['phase', 0] },
-      { action: 'setState', args: ['asked', 0] },
-      { action: 'setState', args: ['pos', 0] },
-      { action: 'setState', args: ['sum', 0] },
-      { action: 'setState', args: ['moved', 1] },
-      { action: 'setState', args: ['go', -1] },
-      { action: 'setState', args: ['buy', -1] },
-      { action: 'setState', args: ['buy_tile', -1] },
-      { action: 'setState', args: ['seat', 1] },
-      { action: 'setState', args: ['turn', 0] },
-      { action: 'shuffleDeck', args: ['fate'] },
-      { action: 'shuffleDeck', args: ['cards'] },
-      { action: 'setState', args: ['ready', 1] },
-    ]),
-  }],
+
 };
 
 const count = (function walk(a) { return a.reduce((n, x) => n + 1 + (x.children ? walk(x.children) : 0), 0); })(g.nodes);

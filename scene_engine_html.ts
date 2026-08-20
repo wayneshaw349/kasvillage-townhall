@@ -9,7 +9,10 @@ export const SCENE_ENGINE_HTML: string = `<meta name="viewport" content="width=d
     -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
     font-family:-apple-system,system-ui,sans-serif}
   #view{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated}
-  #hud{position:absolute;inset:0;pointer-events:none;color:#e8e2d0;font-size:12px}
+  /* #pad is later in the DOM and covers the viewport, so without an explicit
+     z-index it paints over the hud and eats every dialogue tap. hud stays
+     pointer-events:none; only its interactive children opt back in. */
+  #hud{position:absolute;inset:0;pointer-events:none;color:#e8e2d0;font-size:12px;z-index:5}
   .bar{position:absolute;border:1px solid rgba(0,0,0,.5)}
   .bar > i{display:block;height:100%}
   .lbl{position:absolute;text-shadow:1px 1px 0 #000;white-space:pre}
@@ -2274,6 +2277,7 @@ function advanceDialogue(choiceIdx) {
 }
 
 var dlgEl = null;
+function __kvEsc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 function renderDialogue() {
   var node = dlgNode();
   if (!node) return hideDialogue();
@@ -2285,14 +2289,14 @@ function renderDialogue() {
     hud.appendChild(dlgEl);
   }
   var htmlStr = "";
-  if (node.speaker) htmlStr += '<div style="color:#c9b48a;font-size:11px;margin-bottom:3px">' + node.speaker + '</div>';
-  htmlStr += '<div>' + String(node.text || "") + '</div>';
+  if (node.speaker) htmlStr += '<div style="color:#c9b48a;font-size:11px;margin-bottom:3px">' + __kvEsc(node.speaker) + '</div>';
+  htmlStr += '<div>' + __kvEsc(node.text || "") + '</div>';
   var ch = visibleChoices(node);
   if (ch.length) {
     htmlStr += '<div style="margin-top:8px">';
     ch.forEach(function (c, i) {
       htmlStr += '<div data-i="' + i + '" style="padding:5px 8px;margin-top:3px;background:#1b2430;' +
-        'border-radius:4px;cursor:pointer">&#9656; ' + c.label + '</div>';
+        'border-radius:4px;cursor:pointer">&#9656; ' + __kvEsc(c.label) + '</div>';
     });
     htmlStr += '</div>';
   } else {
@@ -2325,13 +2329,13 @@ function renderShop() {
       "padding:12px;color:#e8e2d0;font-size:13px;overflow:auto;pointer-events:auto";
     hud.appendChild(shopEl);
   }
-  var d = SHOP.def, htmlStr = '<div style="color:#c9b48a;font-weight:600">' + (d.name || "Shop") +
+  var d = SHOP.def, htmlStr = '<div style="color:#c9b48a;font-weight:600">' + __kvEsc(d.name || "Shop") +
     '</div><div style="font-size:11px;margin:4px 0 8px;color:#8a8a8a">Gold: ' + gold() + '</div>';
   (d.sells || []).forEach(function (id) {
     var it = itemDef(id);
     htmlStr += '<div data-buy="' + id + '" style="display:flex;justify-content:space-between;' +
       'padding:6px 8px;margin-top:4px;background:#1b2430;border-radius:4px;cursor:pointer">' +
-      '<span>' + (it.name || id) + ' <span style="color:#8a8a8a;font-size:11px">x' + invCount(id) + '</span></span>' +
+      '<span>' + __kvEsc(it.name || id) + ' <span style="color:#8a8a8a;font-size:11px">x' + invCount(id) + '</span></span>' +
       '<span style="color:#c9b48a">' + (it.price || 0) + 'g</span></div>';
   });
   htmlStr += '<div data-close="1" style="margin-top:10px;text-align:center;padding:7px;' +
@@ -2696,7 +2700,7 @@ function renderGridUi() {
   }
   h += "</div>";
   if (u && u.side === "party") {
-    h += '<div style="margin-top:6px;font-size:11px;color:#8a8a8a">' + u.name +
+    h += '<div style="margin-top:6px;font-size:11px;color:#8a8a8a">' + __kvEsc(u.name) +
       " — " + (BATTLE.phase === "move" ? "choose a cell" : "attack or wait") + "</div>";
     if (BATTLE.phase === "act") h += '<div data-wait="1" style="display:inline-block;margin-top:5px;padding:5px 10px;background:#3f5c6b;border-radius:4px;cursor:pointer">Wait</div>';
   }
@@ -2734,7 +2738,7 @@ function unitBars(withAtb) {
       var u = BATTLE.units[id];
       var pct = Math.round(u.hp / u.maxHp * 100);
       h += '<div style="margin-bottom:4px;opacity:' + (u.hp > 0 ? 1 : 0.35) + '">' +
-        '<div style="font-size:10px">' + u.name + " " + u.hp + "/" + u.maxHp + "</div>" +
+        '<div style="font-size:10px">' + __kvEsc(u.name) + " " + u.hp + "/" + u.maxHp + "</div>" +
         '<div style="height:5px;background:#171d28;border-radius:2px"><div style="height:5px;width:' + pct +
         '%;background:' + (side === "party" ? "#49c07a" : "#a3564f") + ';border-radius:2px"></div></div>';
       if (withAtb && u.hp > 0) {
@@ -2810,7 +2814,7 @@ function renderMenu() {
     h += "<div>Gold " + gold() + "</div>";
     h += "<div>ATK " + derivedStat((pl.stats && pl.stats.attack) || 0, "atk") +
       " &nbsp; DEF " + derivedStat(0, "def") + "</div>";
-    var eq = Object.keys(INV.equipped).map(function (sl) { return sl + ": " + (itemDef(INV.equipped[sl]).name || INV.equipped[sl]); });
+    var eq = Object.keys(INV.equipped).map(function (sl) { return __kvEsc(sl) + ": " + __kvEsc(itemDef(INV.equipped[sl]).name || INV.equipped[sl]); });
     if (eq.length) h += '<div style="margin-top:6px;color:#8a8a8a">' + eq.join(" · ") + "</div>";
   } else if (MENU.tab === "items") {
     var ids = Object.keys(INV.items);
@@ -2819,7 +2823,7 @@ function renderMenu() {
       var it = itemDef(id);
       h += '<div data-use="' + id + '" style="display:flex;justify-content:space-between;padding:6px 8px;' +
         'margin-top:4px;background:#1b2430;border-radius:4px;cursor:pointer">' +
-        "<span>" + (it.name || id) + " x" + invCount(id) + "</span>" +
+        "<span>" + __kvEsc(it.name || id) + " x" + invCount(id) + "</span>" +
         '<span style="color:#8a8a8a;font-size:11px">' + (it.kind === "weapon" || it.kind === "trinket" ? "equip" : (it.heal ? "use" : "")) + "</span></div>";
     });
   } else if (MENU.tab === "save") {
@@ -6830,6 +6834,49 @@ function validate(s) {
              "ms -- unreactable on touch, not hard");
     }
   });
+
+  // --- C. UNKNOWN KEYS ----------------------------------------------
+  // An unrecognized key is silently discarded at load, so a scene that
+  // declares state the engine never reads renders perfectly and does
+  // nothing. Warn loudly rather than reject: forward compatibility.
+  var KNOWN_SCENE_KEYS = ["kind", "engine", "meta", "nodes", "resources", "render",
+    "permissions", "compliance", "input", "tuning", "persistence", "lighting",
+    "rooms", "prefabs", "dialogues", "shops", "battles", "encounters", "tables",
+    "joints", "cameraZones", "audioParams", "debug", "seed"];
+  var sk2 = Object.keys(s);
+  for (var uk = 0; uk < sk2.length; uk++) {
+    var kk = sk2[uk];
+    if (kk.charAt(0) === "_") continue;
+    if (KNOWN_SCENE_KEYS.indexOf(kk) >= 0) continue;
+    if (kk === "world") {
+      W.push("top-level 'world' is IGNORED: loadScene resets world state. " +
+             "Seed flags from a node alarm instead -- see the manual, Part 7");
+    } else if (kk === "alarms") {
+      W.push("top-level 'alarms' is IGNORED: alarms are per-node, " +
+             "node.alarms = [{ after, repeat, do:{action,args} }]");
+    } else {
+      W.push("unknown top-level key '" + kk + "' -- the engine will ignore it");
+    }
+  }
+
+  // A Camera3D node alone does nothing: buildView picks its mode from
+  // scene.render.cameraMode, then camera.mode, then defaults to "follow".
+  (function () {
+    var hasCam = false;
+    (function scan(list) {
+      (list || []).forEach(function (n) {
+        if (n && n.type === "Camera3D") hasCam = true;
+        if (n) scan(n.children);
+      });
+    })(s.nodes);
+    if (!hasCam) return;
+    var m = (s.render && s.render.cameraMode) || null;
+    if (!m) {
+      W.push("a Camera3D node is declared but no camera mode is selected: " +
+             "set render.cameraMode (fixed / overhead / isometric / rail / " +
+             "lockOn / firstPerson) or the engine uses follow and ignores it");
+    }
+  })();
 
   s._warnings = W;
   if (W.length && typeof console !== "undefined" && console.warn) {

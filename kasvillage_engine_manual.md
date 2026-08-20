@@ -157,6 +157,69 @@ Add a `lighting` block to your scene and the engine **bakes** light when the sce
 
 ---
 
+## Part 4b: Cameras
+
+### A Camera3D node alone does nothing
+
+This is the single most expensive thing to learn the hard way. Declaring a
+camera node does **not** point the camera at anything:
+
+```json
+{ "id": "gamecam", "type": "Camera3D",
+  "transform": { "pos": [0, 34, 0.01], "rot": [-89, 0, 0] } }
+```
+
+The engine chooses its viewpoint like this:
+
+```js
+mode = scene.render.cameraMode  ||  camera.mode  ||  "follow"
+```
+
+With no mode selected you get **follow** — and follow tracks the node tagged
+`"player"`. A board game has no player node, so follow frames the world origin
+from about `(0, 3.4, -7)`: a low, sideways view of whatever happens to be near
+the middle. The board renders correctly and looks completely wrong.
+
+Always declare the mode:
+
+```json
+"render": { "cameraMode": "fixed" }
+```
+
+### The modes
+
+| Mode | Eye | Use it for |
+|---|---|---|
+| `fixed` | The camera node's own `worldPos` | Board games, fixed-angle scenes, survival horror |
+| `overhead` | 20 units above the player | Top-down action |
+| `isometric` | Offset diagonally, 14 up | Tactics, city builders |
+| `follow` (default) | Behind the player at `camera.distance` / `camera.height` | Third-person |
+| `firstPerson` | The player's eye height, facing their yaw | FPS |
+| `rail` | Slides along a path node as the player moves | 2.5D sections |
+| `lockOn` | Frames player and locked target together | Combat |
+
+`fixed` is the only mode that uses the camera node's transform verbatim. The
+others compute the eye from the player, so a scene with no player node should
+use `fixed`.
+
+### Fixed-angle cuts (the survival-horror grammar)
+
+Declare several `Camera3D` nodes and a `cameraZones` list; when the player
+enters a zone the engine switches to that camera and forces `fixed` mode:
+
+```json
+"cameraZones": [
+  { "min": [-10, -10], "max": [0, 10], "camera": "cam_hall_west" },
+  { "min": [0, -10], "max": [10, 10], "camera": "cam_hall_east" }
+]
+```
+
+Cuts are blended by `render.cameraBlend` (default 0.3s); set it to 0 for a
+hard cut. `render.cameraCollide: true` pulls the eye in when geometry blocks
+the view.
+
+---
+
 ## Part 5: Making Things Move
 
 ### Poses: the heart of animation
@@ -419,6 +482,22 @@ The engine's simulation is proven pure — no `Math.random`, `Date.now`, or `per
 1. Always set a `seed`.
 2. Never wish for real time or real randomness — use alarms and seeded variance.
 3. Node order matters: the same nodes in a different order can simulate differently. Keep your descriptor stable; don't shuffle it between versions.
+
+### Silence is the engine's worst habit
+
+An unrecognized key is **discarded without complaint**. Your scene still
+validates, still renders, and simply does not do the thing you wrote. Three
+separate bugs in one debugging session traced to exactly this: a top-level
+`world` block (ignored), a top-level `alarms` block (alarms are per-node),
+and a `Camera3D` node with no mode selected (ignored in favour of follow).
+
+The engine now **warns** about these on load. Open the console when a scene
+behaves oddly and read the `[kv-schema]` lines before debugging anything else:
+they name the key and say what the engine expected. Warnings never reject a
+scene — a newer engine may know keys this build does not.
+
+If a rule you wrote is not firing, the first question is never "is my logic
+wrong". It is "is the engine reading this key at all".
 
 ### Validation: the bouncer at the door
 
