@@ -5166,9 +5166,9 @@ nonces: _killNonces,
                                 const _outs = (tmpl as any).o || [];
                                 let _unknown = false;
                                 const _lines = _outs.map((out: any) => {
-                                  const scr = String(out.script || out.scriptPublicKey || '');
+                                  const scr = String(out.s || out.script || '');
                                   const who = (_sx && scr.includes(_sx)) ? 'YOU (seller)' : (_bx && scr.includes(_bx)) ? 'Buyer' : (_unknown = true, 'UNKNOWN ADDRESS');
-                                  return (Number(out.amount || 0) / 1e8).toFixed(4) + ' KAS \u2192 ' + who;
+                                  return (Number(out.v || out.amount || 0) / 1e8).toFixed(4) + ' KAS \u2192 ' + who;
                                 });
                                 const _kind = _outs.length === 1 ? 'RELEASE \u2014 trade complete' : 'CANCEL \u2014 collateral returned';
                                 const _warn = _unknown ? '\n\n\u26a0 An output pays an address that is neither party. Refuse unless you expect this.' : '';
