@@ -71,6 +71,15 @@ const CSAM: RegExp[] = [
 // gambling WITH REAL MONEY, never the vocabulary of card games -- a poker
 // descriptor or a "wager" mechanic in a board game is legitimate content.
 // ---------------------------------------------------------------------------
+// Illegal trade — act-based (verb + item), mirrors TownHall PROHIBITED merge.
+// Plain "gun"/"knife" must pass; solicitation to buy/sell must not.
+const ILLEGAL_TRADE: RegExp[] = [
+  /\b(buy|sell|order|purchase)\s+(a\s+|an\s+|some\s+)?(gun|guns|firearm|firearms|rifle|rifles|pistol|pistols|shotgun|shotguns|ammo|ammunition)\b/i,
+  /\b(buy|sell|order|purchase)\s+(a\s+|an\s+|some\s+)?(cocaine|heroin|meth|fentanyl|mdma|ecstasy|lsd)\b/i,
+  /\b(illegal\s+weapon|ghost\s*gun|unregistered\s+(gun|firearm))\b/i,
+  /\b(drug\s+dealer|narcotics\s+for\s+sale|controlled\s+substance)\b/i,
+  /\b(human\s+trafficking|sex\s+trade|flesh\s+trade)\b/i,
+];
 const GAMBLING: RegExp[] = [
   /real[\s_-]*money[\s_-]*(bet|wager|gambl)/i,
   /(deposit|withdraw)[^.!?]{0,30}(usd|eur|gbp|cad|aud|fiat)\b/i,
@@ -160,6 +169,7 @@ export function scanText(raw: string): ScanResult {
     for (const re of PHISH) if (re.test(s)) return { ok: false, reason: 'credential_phishing' };
     for (const re of THREAT) if (re.test(s)) return { ok: false, reason: 'threat' };
     for (const re of GAMBLING) if (re.test(s)) return { ok: false, reason: 'real_money_gambling' };
+    for (const re of ILLEGAL_TRADE) if (re.test(s)) return { ok: false, reason: 'illegal_trade' };
     if (slurRe && slurRe.test(s)) return { ok: false, reason: 'slur' };
   }
   return { ok: true };
@@ -205,6 +215,7 @@ export function scanDescriptor(game: any): ScanResult {
 
 /** Human-facing message. Deliberately vague on child_safety: never echo the match. */
 export function reasonMessage(reason?: string): string {
+  if (reason === 'illegal_trade') return 'This text solicits an illegal sale and cannot be published.';
   switch (reason) {
     case 'child_safety': return 'This content cannot be published or displayed.';
     case 'credential_phishing': return 'This content asks for wallet credentials. No legitimate game or store does this.';
