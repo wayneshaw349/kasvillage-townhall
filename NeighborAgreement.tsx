@@ -5158,6 +5158,32 @@ nonces: _killNonces,
                             const tmpl = parseTemplate(stripKvHeader(v));
                             if (!tmpl) { Alert.alert('Error', 'Invalid template format'); setIsLoading(false); return; }
                             try { await SecureStore.setItemAsync('kv_paste_tmpl_' + (contract.agreementId || ''), v); } catch {} // CAPTURE buyer template
+                            // [SIGN-PREVIEW] Show exactly what this signature releases before signing.
+                            const _previewOk = await new Promise((res) => {
+                              try {
+                                const _sx = (contract.sellerPubkey || '').replace(/^0[23]/, '');
+                                const _bx = (contract.buyerPubkey || '').replace(/^0[23]/, '');
+                                const _outs = (tmpl as any).o || [];
+                                let _unknown = false;
+                                const _lines = _outs.map((out: any) => {
+                                  const scr = String(out.script || out.scriptPublicKey || '');
+                                  const who = (_sx && scr.includes(_sx)) ? 'YOU (seller)' : (_bx && scr.includes(_bx)) ? 'Buyer' : (_unknown = true, 'UNKNOWN ADDRESS');
+                                  return (Number(out.amount || 0) / 1e8).toFixed(4) + ' KAS \u2192 ' + who;
+                                });
+                                const _kind = _outs.length === 1 ? 'RELEASE \u2014 trade complete' : 'CANCEL \u2014 collateral returned';
+                                const _warn = _unknown ? '\n\n\u26a0 An output pays an address that is neither party. Refuse unless you expect this.' : '';
+                                Alert.alert('Co-Sign: ' + _kind, _lines.join('\n') + _warn + '\n\nYour signature is final. Sign only if this matches what you agreed.', [
+                                  { text: 'Refuse', style: 'cancel', onPress: () => res(false) },
+                                  { text: 'Sign', onPress: () => res(true) },
+                                ], { cancelable: false });
+                              } catch (_pe) {
+                                Alert.alert('Cannot Decode Template', 'The outputs could not be decoded for preview. Signing blind is not recommended.', [
+                                  { text: 'Refuse', style: 'cancel', onPress: () => res(false) },
+                                  { text: 'Sign Anyway', onPress: () => res(true) },
+                                ], { cancelable: false });
+                              }
+                            });
+                            if (!_previewOk) { setIsLoading(false); return; }
                             const result = sellerSignTemplate({
                               privateKeyHex: wallet.privKeyHex,
                               sellerPubkey: contract.sellerPubkey || '',
