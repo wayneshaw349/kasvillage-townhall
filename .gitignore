@@ -28,3 +28,9 @@ forged.json
 *.bak*
 
 showcase_*.html
+
+kcprev.html
+kascity_preview.html
+*_test.json
+make_evil_test.cjs
+*.bak*
