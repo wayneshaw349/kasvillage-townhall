@@ -6335,6 +6335,14 @@ function buildHud() {
       } else {
         el.className = "lbl";
         el.style.fontSize = (n.size || 12) + "px";
+        // [LBL-STYLE] optional comic styling from the descriptor
+        if (n.weight) el.style.fontWeight = String(n.weight);
+        if (n.color) el.style.color = n.color;
+        if (n.spacing) el.style.letterSpacing = n.spacing + "px";
+        if (n.font) el.style.fontFamily = n.font;
+        if (n.shadow) el.style.textShadow =
+          "3px 3px 0 " + n.shadow + ", -2px -2px 0 " + n.shadow +
+          ", 2px -2px 0 " + n.shadow + ", -2px 2px 0 " + n.shadow;
       }
       placeAnchor(el, n);
       hud.appendChild(el);
