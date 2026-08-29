@@ -26,6 +26,18 @@ const N = 40;
 // toJail (teleport + fine)
 const G = { kiln:"#6b4a2f", copper:"#7fb8d8", market:"#c9569a", orchard:"#d98232",
             amber:"#c0392b", beacon:"#d8c33a", cathedral:"#3f9e5a", crown:"#2f3f8e" };
+// ---- v13 bot AI tunables ---------------------------------------------------
+// aggr is a RESERVE multiplier: lower = keener to buy. Owning group-mates
+// lowers it further (colour-set instinct); rand() adds a seeded wobble so a
+// bot is not perfectly predictable, while replays stay identical.
+const AI = {
+  AGGR:      { 2: 1.2, 3: 1.5, 4: 2.2 },  // per bot seat; seat 1 is human
+  MATE_PULL: 0.35,   // per owned group-mate
+  WOBBLE:    0.40,   // rand() jitter band
+  TURN_STOP: 40,     // seat-turns, not rounds: 40 = 10 rounds each at 4 players
+  SELL_FLOOR: 100,   // cash below this triggers a sale
+  SELL_PCT:  0.60    // refund fraction
+};
 const T = [
   { n:"The Depot", k:"depot" },
   { n:"Riverbend Row", k:"prop", g:"kiln", p:60, r:8 },
@@ -125,6 +137,22 @@ for (let s = 1; s <= PLAYERS; s++) {
 // ---- the phase-machine behavior tree on a controller node ------------------
 const bt = { selector: [] };
 
+// SETUP: runs once. The engine ignores top-level scene.alarms (only node
+// alarms are registered), so seeding has to live in the tree itself.
+bt.selector.push((function () {
+  const acts = [cond("world.flags.setup == 0")];
+  for (let s = 1; s <= PLAYERS; s++) {
+    acts.push(act("setSeatStat", [s, "cash", 1500]));
+    acts.push(act("setSeatStat", [s, "alive", 1]));
+    if (AI.AGGR[s] != null) acts.push(act("setSeatStat", [s, "aggr", AI.AGGR[s]]));
+  }
+  acts.push(act("shuffleDeck", ["fate"]));
+  acts.push(act("shuffleDeck", ["cards"]));
+  acts.push(act("setState", ["setup", 1]));
+  return seq.apply(null, acts);
+})());
+
+
 // PHASE 0: offer the roll exactly once, then roll + move on the answer.
 bt.selector.push(seq(
   cond("world.flags.phase == 0"),
@@ -183,9 +211,31 @@ resolve.selector.forEach((br) => {
 T.forEach((t, i) => {
   const at = "world.flags.pos == " + i + " && world.flags.moved == 1";
   if (t.k === "prop" || t.k === "transit" || t.k === "utility") {
+    // --- v13 bots: seats 2..N decide for themselves, no prompt ---
+    const _mates = t.g
+      ? T.map((x, xi) => (x.g === t.g && xi !== i) ? xi : -1).filter(x => x >= 0)
+      : [];
+    const _eff = "seatStat(seat(),'aggr')"
+      + (_mates.length
+          ? " - " + AI.MATE_PULL + " * (" +
+            _mates.map(m => "(ownerOf('t" + m + "') == seat())").join(" + ") + ")"
+          : "")
+      + " + " + AI.WOBBLE + " * rand()";
+    resolve.selector.push(seq(
+      cond(at + " && ownerOf('t" + i + "') == 0 && seat() != 1"
+           + " && world.flags.turn < " + AI.TURN_STOP
+           + " && seatStat(seat(),'cash') >= " + t.p + " * (" + _eff + ")"),
+      act("setState", ["buy_tile", i]),
+      act("setState", ["buy", 0]),
+      act("setState", ["phase", 2])
+    ));
+    resolve.selector.push(seq(
+      cond(at + " && ownerOf('t" + i + "') == 0 && seat() != 1"),
+      act("setState", ["phase", 3])
+    ));
     // unowned -> ask to buy (phase 2)
     resolve.selector.push(seq(
-      cond(at + " && ownerOf('t" + i + "') == 0 && seatStat(seat(),'cash') >= " + t.p),
+      cond(at + " && ownerOf('t" + i + "') == 0 && seatStat(seat(),'cash') >= " + t.p + " && seat() == 1"),
       act("prompt", ["buy", t.n + " is unowned. Buy for " + t.p + "?", "Buy (" + t.p + ")", "Pass"]),
       act("setState", ["buy_tile", i]),
       act("setState", ["phase", 2])
@@ -301,7 +351,7 @@ const scene = {
   permissions: ["identity", "persist", "stats"],
   compliance: { maxNodes: 512 },
   input: { scheme: "tap" },
-  world: { score: 0, flags: { phase: 0, asked: 0, pos: 0, sum: 0, moved: 1,
+  world: { score: 0, flags: { setup: 0, phase: 0, asked: 0, pos: 0, sum: 0, moved: 1,
                               go: -1, buy: -1, buy_tile: -1, seat: 1, turn: 0 } },
   tables: { decks: { fate: 11, cards: 8 } },
   nodes: nodes.concat([{ id: "director", type: "Actor", tags: ["director"],
@@ -353,6 +403,35 @@ const scene = {
 };
 
 // ---- emit -------------------------------------------------------------------
+// ---- v13 AI: personality stats + sell-when-broke ---------------------------
+(function injectAI() {
+  const boot = scene.alarms.find(a => a && a.id === "boot");
+  if (!boot) throw new Error("boot alarm missing");
+  Object.keys(AI.AGGR).forEach(s =>
+    boot.actions.push({ action: "setSeatStat", args: [+s, "aggr", AI.AGGR[s]] }));
+
+  const p3 = bt.selector.find(b =>
+    b.sequence && b.sequence[0] && b.sequence[0].cond === "world.flags.phase == 3");
+  if (!p3) throw new Error("phase 3 block missing");
+  const sel = p3.sequence.filter(x => Array.isArray(x.selector)).pop();
+  if (!sel) throw new Error("phase 3 selector missing");
+
+  // broke bots liquidate: first owned tile in board order, refunded at SELL_PCT
+  const sells = [];
+  T.forEach((t, i) => {
+    if (t.k !== "prop" && t.k !== "transit" && t.k !== "utility") return;
+    sells.push(seq(
+      cond("seat() != 1 && seatStat(seat(),'cash') < " + AI.SELL_FLOOR
+           + " && ownerOf('t" + i + "') == seat()"),
+      act("release", ["t" + i]),
+      act("addSeatStat", ["current", "cash"], Math.round(t.p * AI.SELL_PCT)),
+      act("playSound", ["buy"])
+    ));
+  });
+  sel.selector.unshift.apply(sel.selector, sells);
+  console.log("OK v13 AI: " + sells.length + " sell branches, aggr on seats "
+    + Object.keys(AI.AGGR).join(","));
+})();
 const json = JSON.stringify(scene);
 fs.writeFileSync("kascity_v2.json", json);
 console.log("OK kascity_v2.json (" + (json.length / 1024).toFixed(1) + " KB, " +

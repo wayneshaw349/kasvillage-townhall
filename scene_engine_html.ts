@@ -2285,7 +2285,7 @@ function renderDialogue() {
     dlgEl = document.createElement("div");
     dlgEl.style.cssText = "position:absolute;left:8px;right:8px;bottom:8px;" +
       "background:rgba(12,16,24,.92);border:1px solid #3f5c6b;border-radius:6px;" +
-      "padding:10px 12px;color:#e8e2d0;font-size:13px;line-height:1.45;pointer-events:auto";
+      "padding:10px 12px;color:#e8e2d0;font-size:13px;line-height:1.45;pointer-events:auto;z-index:9999";
     hud.appendChild(dlgEl);
   }
   var htmlStr = "";
@@ -3761,7 +3761,8 @@ function collectNode(n, parentM) {
     if (bp) {
       var sz = (n.spriteSize || 2) * fovScale / bp.z;
       drawList.push({ billboard: true, x: bp.x, y: bp.y, w: sz * (n.aspect || 0.7), h: sz,
-        z: bp.z, col: n.color || "#c9b48a", shape: n.shape || "figure" });
+        z: bp.z, col: n.color || "#c9b48a", shape: n.shape || "figure",
+        sprite: n.sprite || null, frame: n.frame || 0, flipX: !!n.flipX });
     }
   }
   if (n._geo && n.visible !== false) {
@@ -5502,6 +5503,20 @@ function drawTexTri(t) {
 }
 
 function drawBillboard(t) {
+  // [BB-SPRITE] a named sprite wins over the blob recipes. Sprite coords are
+  // authored in sprite space (sd.w x sd.h); scale to the projected height and
+  // centre on the node's screen point.
+  if (t.sprite) {
+    var sd = spriteDef(t.sprite);
+    var fr = sd && sd.frames ? (sd.frames[t.frame] || sd.frames[0]) : null;
+    if (fr) {
+      var sc = t.h / (sd.h || 16);
+      ctx.save();
+      drawSpriteShapes(t.x - (sd.w || 12) * sc / 2, t.y - t.h, fr, sc, t.flipX);
+      ctx.restore();
+      return;
+    }
+  }
   ctx.fillStyle = t.col;
   if (t.shape === "figure") {
     // head + torso blob: reads as a person at any size
@@ -6325,6 +6340,14 @@ function buildHud() {
       } else {
         el.className = "lbl";
         el.style.fontSize = (n.size || 12) + "px";
+        // [LBL-STYLE] optional comic styling from the descriptor
+        if (n.weight) el.style.fontWeight = String(n.weight);
+        if (n.color) el.style.color = n.color;
+        if (n.spacing) el.style.letterSpacing = n.spacing + "px";
+        if (n.font) el.style.fontFamily = n.font;
+        if (n.shadow) el.style.textShadow =
+          "3px 3px 0 " + n.shadow + ", -2px -2px 0 " + n.shadow +
+          ", 2px -2px 0 " + n.shadow + ", -2px 2px 0 " + n.shadow;
       }
       placeAnchor(el, n);
       hud.appendChild(el);

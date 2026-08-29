@@ -1,0 +1,10 @@
+const L=require('fs').readFileSync('showcase_kascity161.html','utf8').split(/\r?\n/);
+const R=L.find(l=>l.indexOf('world.flags.left')>=0&&l.length>100000)||'';
+const J=R.replace(/\\"/g,'"');
+console.log('== engine: how pos advances');
+[...J.matchAll(/"setFlagExpr","args":\["pos"[^\]]*\]/g)].slice(0,6).forEach(m=>console.log('  @'+m.index+' '+J.slice(Math.max(0,m.index-200),m.index+260).replace(/\s+/g,' ')));
+console.log('\n== engine: p<seat> position writes');
+[...J.matchAll(/"setFlagExpr","args":\["p\d"[^\]]*\]/g)].slice(0,4).forEach(m=>console.log('  @'+m.index+' '+J.slice(Math.max(0,m.index-160),m.index+220).replace(/\s+/g,' ')));
+console.log('\n== JS: token placement / tile order');
+const re=/TIDS|tileOrder|angleFor|posOf|function place|lab\[i\]|spot\[i\]|track\[/;
+let n=0;L.forEach((l,i)=>{if(l.length<1500&&re.test(l)&&n<30){console.log((i+1)+': '+l.trim().slice(0,190));n++}});

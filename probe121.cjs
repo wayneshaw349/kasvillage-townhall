@@ -1,0 +1,12 @@
+const L=require('fs').readFileSync('showcase_kascity119.html','utf8').split(/\r?\n/);
+const s=L.findIndex(l=>l.indexOf('// ---- stall detector (escalating) ----')>=0);
+console.log('== JS stall detector');
+for(let i=s;i<s+60&&i<L.length;i++)console.log((i+1)+': '+L[i].trim().slice(0,220));
+const R=L.find(l=>l.indexOf('world.flags.left')>=0&&l.length>100000)||'';
+const J=R.replace(/\\"/g,'"');
+console.log('== phase 21 selector (full)');
+let m=J.indexOf('"cond":"world.flags.phase == 21"');
+if(m>=0) console.log(J.slice(m-40, m+1600).replace(/\s+/g,' '));
+console.log('== who sets phase 21 (first 3)');
+[...J.matchAll(/"setState","args":\["phase",21\]/g)].slice(0,3).forEach(x=>console.log('  @'+x.index+' '+J.slice(x.index-520,x.index+60).replace(/\s+/g,' ')));
+console.log('count phase21 setters: '+[...J.matchAll(/"setState","args":\["phase",21\]/g)].length);

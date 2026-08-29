@@ -1,0 +1,12 @@
+const L=require('fs').readFileSync('showcase_kascity162.html','utf8').split(/\r?\n/);
+const R=L.find(l=>l.indexOf('world.flags.left')>=0&&l.length>100000)||'';
+const J=R.replace(/\\"/g,'"');
+console.log('== what sends a player to 10');
+[...J.matchAll(/"(p[1-4])","10"\]|"args":\["p\d",10\]|setState","args":\["p\d",10\]/g)].slice(0,8).forEach(m=>console.log('  @'+m.index+' '+J.slice(Math.max(0,m.index-420),m.index+160).replace(/\s+/g,' ')));
+console.log('\n== jail / holding / arrest wording');
+[...J.matchAll(/jail|Jail|JAIL|holding|Holding|arrest|detain|caught/g)].slice(0,10).forEach(m=>console.log('  @'+m.index+' '+J.slice(Math.max(0,m.index-260),m.index+260).replace(/\s+/g,' ')));
+console.log('\n== tile 10 name');
+const i=L.findIndex(l=>l.indexOf('KV_NAMES')>=0&&l.indexOf('=')>=0);
+if(i>=0) console.log((i+1)+': '+L[i].trim().slice(0,600));
+const m10=J.match(/"t10"[^}]{0,200}/); if(m10) console.log('scene t10: '+m10[0]);
+[...J.matchAll(/"id":"t10"[\s\S]{0,220}/g)].slice(0,2).forEach(x=>console.log('  '+x[0].replace(/\s+/g,' ')));

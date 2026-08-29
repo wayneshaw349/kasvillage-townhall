@@ -45,6 +45,7 @@ mod townhall_verification_complete;
 mod canary_scanner;
 mod content_validator_sync;
 mod node_registry;
+mod game_rooms;
 
 use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, Responder, middleware::Logger};
 use actix_cors::Cors;
@@ -8470,6 +8471,7 @@ async fn main() -> std::io::Result<()> {
                     .configure(configure_routes_v3)
                     .configure(kaspa_relay::configure_kaspa_relay_routes)
                     .configure(node_registry::configure_node_registry_routes)
+                    .configure(game_rooms::configure)
             })
             .bind(&addr)?
             .run()

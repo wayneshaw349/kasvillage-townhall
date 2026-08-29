@@ -1,0 +1,98 @@
+--- LEFT-TICK @72788
+,0]}}]},{"sequence":[{"cond":"world.flags.cel == 12 && world.time - world.flags.cel_t > 1.9"},{"do":{"action":"hide","args":[],"to":"panel_win"}},{"do":{"action":"hide","args":[],"to":"cap"}},{"do":{"action":"hide","args":[],"to":"capsub"}},{"do":{"action":"setState","args":["cel",0]}}]},{"sequence":[{"cond":"world.flags.t0 == 0"},{"do":{"action":"setFlagExpr","args":["t0","world.time"]}}]},{"sequence":[{"cond":"world.flags.t0 > 0 && world.flags.over == 0"},{"do":{"action":"setFlagExpr","args":["left","600 - floor(world.time - world.flags.t0)"]}},{"cond":"1 == 0"}]},{"sequence":[{"cond":"world.flags.over == 0 && world.flags.left != world.flags.mark"},{"do":{"action":"setFlagExpr","args":["mark","world.flags.left"]}},{"do":{"action":"setFlagExpr","args":["cmin","floor(world.flags.left / 60)"]}},{"do":{"action":"setFlagExpr","args":["csec","mod(world.flags.left, 60)"]}},{"cond":"1 == 0"}]},{"sequence":[{"cond":"world.flags.over == 0 && world.flags.cmin == 0 && world.flags.shown_m != 0"},{"do":{"action":"setState","args":["shown_m",0]}},{"do":{"action":"setText","args":["0:"],"to":"clock_m"}}]},{"sequence":[{"cond":"world.flags.over == 0 && world.flags.cmin == 1 && world.flags.shown_m
+
+--- LEFT-TICK @991841
+o":{"action":"setState","args":["turn",0]}},{"after":0.1,"do":{"action":"setState","args":["p1",0]}},{"after":0.1,"do":{"action":"setState","args":["p2",0]}},{"after":0.1,"do":{"action":"setState","args":["p3",0]}},{"after":0.1,"do":{"action":"setState","args":["p4",0]}},{"after":0.1,"do":{"action":"setState","args":["hud_seat",0]}},{"after":0.1,"do":{"action":"setState","args":["shown",-1]}},{"after":0.1,"do":{"action":"setState","args":["t0",0]}},{"after":0.1,"do":{"action":"setState","args":["left",600]}},{"after":0.1,"do":{"action":"setState","args":["mark",9999]}},{"after":0.1,"do":{"action":"setState","args":["over",0]}},{"after":0.1,"do":{"action":"setState","args":["cmin",10]}},{"after":0.1,"do":{"action":"setState","args":["csec",0]}},{"after":0.1,"do":{"action":"setState","args":["shown_m",-1]}},{"after":0.1,"do":{"action":"setState","args":["shown_s",-1]}},{"after":0.1,"do":{"action":"setState","args":["cel",0]}},{"after":0.1,"do":{"action":"setState","args":["cel_t",0]}},{"after":0.1,"do":{"action":"setState","args":["go",-1]}},{"after":0.1,"do":{"action":"setState","args":["buy",-1]}},{"after":0.1,"do":{"action":"setState","args":["buy_tile",-1]}},{"after":0.1,"do":{"a
+
+########
+
+--- CMIN @73052
+args":["t0","world.time"]}}]},{"sequence":[{"cond":"world.flags.t0 > 0 && world.flags.over == 0"},{"do":{"action":"setFlagExpr","args":["left","600 - floor(world.time - world.flags.t0)"]}},{"cond":"1 == 0"}]},{"sequence":[{"cond":"world.flags.over == 0 && world.flags.left != world.flags.mark"},{"do":{"action":"setFlagExpr","args":["mark","world.flags.left"]}},{"do":{"action":"setFlagExpr","args":["cmin","floor(world.flags.left / 60)"]}},{"do":{"action":"setFlagExpr","args":["csec","mod(world.flags.left, 60)"]}},{"cond":"1 == 0"}]},{"sequence":[{"cond":"world.flags.over == 0 && world.flags.cmin == 0 && world.flags.shown_m != 0"},{"do":{"action":"setState","args":["shown_m",0]}},{"do":{"action":"setText","args":["0:"],"to":"clock_m"}}]},{"sequence":[{"cond":"world.flags.over == 0 && world.flags.cmin == 1 && world.flags.shown_m != 1"},{"do":{"action":"setState","args":["shown_m",1]}},{"do":{"action":"setText","args":["1:"],"to":"clock_m"}}]},{"sequence":[{"cond":"world.flags.over == 0 && world.flags.cmin == 2 && world.flags.shown_m != 2"},{"do":{"action":"setState","args":["shown_m",2]}
+
+--- CMIN @992023
+.1,"do":{"action":"setState","args":["hud_seat",0]}},{"after":0.1,"do":{"action":"setState","args":["shown",-1]}},{"after":0.1,"do":{"action":"setState","args":["t0",0]}},{"after":0.1,"do":{"action":"setState","args":["left",600]}},{"after":0.1,"do":{"action":"setState","args":["mark",9999]}},{"after":0.1,"do":{"action":"setState","args":["over",0]}},{"after":0.1,"do":{"action":"setState","args":["cmin",10]}},{"after":0.1,"do":{"action":"setState","args":["csec",0]}},{"after":0.1,"do":{"action":"setState","args":["shown_m",-1]}},{"after":0.1,"do":{"action":"setState","args":["shown_s",-1]}},{"after":0.1,"do":{"action":"setState","args":["cel",0]}},{"after":0.1,"do":{"action":"setState","args":["cel_t",0]}},{"after":0.1,"do":{"action":"setState","args":["go",-1]}},{"after":0.1,"do":{"action":"setState","args":["buy",-1]}},{"after":0.1,"do":{"action":"setState","args":["buy_tile",-1]}},{"after":0.1,"do":{"action":"setState","args":["offer_tile",-1]}},{"after":0.1,"do":{"action":"setState","args":["offer_from",0]}},{"after":0.1,"do":{"action":"setState","args":["offer_ask",-1]}},{"after
+
+########
+
+--- GLIDE-TWEEN @352442
+d":"1 == 1"}]},{"selector":[{"sequence":[{"cond":"seatStat(seat(),'mort') < 0"},{"do":{"action":"setSeatStat","args":["current","mort",0]}}]},{"cond":"1 == 1"}]}]},{"cond":"1 == 1"}]},{"selector":[{"sequence":[{"cond":"seat() == 1 && world.flags.pos == 0 && world.flags.moved == 0"},{"do":{"action":"tween","args":["transform.pos.0",11,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"tween","args":["transform.pos.2",10.45,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"setState","args":["moved",1]}}]},{"sequence":[{"cond":"seat() == 1 && world.flags.pos == 1 && world.flags.moved == 0"},{"do":{"action":"tween","args":["transform.pos.0",8.8,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"tween","args":["transform.pos.2",10.45,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"setState","args":["moved",1]}}]},{"sequence":[{"cond":"seat() == 1 && world.flags.pos == 2 && world.flags.mov
+
+--- GLIDE-TWEEN @352529
+"action":"setSeatStat","args":["current","mort",0]}}]},{"cond":"1 == 1"}]}]},{"cond":"1 == 1"}]},{"selector":[{"sequence":[{"cond":"seat() == 1 && world.flags.pos == 0 && world.flags.moved == 0"},{"do":{"action":"tween","args":["transform.pos.0",11,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"tween","args":["transform.pos.2",10.45,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"setState","args":["moved",1]}}]},{"sequence":[{"cond":"seat() == 1 && world.flags.pos == 1 && world.flags.moved == 0"},{"do":{"action":"tween","args":["transform.pos.0",8.8,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"tween","args":["transform.pos.2",10.45,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"setState","args":["moved",1]}}]},{"sequence":[{"cond":"seat() == 1 && world.flags.pos == 2 && world.flags.moved == 0"},{"do":{"action":"tween","args":["transform.pos.0",6.6,0.55,"outQuad"],"to":"t
+
+--- GLIDE-TWEEN @352755
+:["transform.pos.0",11,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"tween","args":["transform.pos.2",10.45,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"setState","args":["moved",1]}}]},{"sequence":[{"cond":"seat() == 1 && world.flags.pos == 1 && world.flags.moved == 0"},{"do":{"action":"tween","args":["transform.pos.0",8.8,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"tween","args":["transform.pos.2",10.45,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"setState","args":["moved",1]}}]},{"sequence":[{"cond":"seat() == 1 && world.flags.pos == 2 && world.flags.moved == 0"},{"do":{"action":"tween","args":["transform.pos.0",6.6,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"tween","args":["transform.pos.2",10.45,0.55,"outQuad"],"to":"token_p1"}},{"do":{"action":"setState","args":["moved",1]}}]},{"sequence":[{"cond":"seat() == 1 && world.flags.pos == 3 && world.flags.mo
+
+########
+
+--- OQ-FLOW @965699
+:"world.flags.buy == 1"},{"do":{"action":"setState","args":["buy",-1]}},{"do":{"action":"setState","args":["phase",3]}}]}]}]},{"sequence":[{"cond":"world.flags.phase == 21"},{"selector":[{"sequence":[{"cond":"seat() != 1"},{"do":{"action":"setState","args":["offer_ask",-1]}},{"do":{"action":"setState","args":["phase",3]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 1 && world.flags.oq == 0 && world.flags.offer_tile == -1 && seatStat(seat(),'cash') >= 54"},{"do":{"action":"setState","args":["oq",1]}},{"do":{"action":"prompt","args":["mkoffer","Offer to buy Riverbend Row for 54? The owner decides on their turn.","Make offer","No"]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 1 && world.flags.mkoffer == 0"},{"do":{"action":"setState","args":["offer_tile",1]}},{"do":{"action":"setFlagExpr","args":["offer_from","seat()"]}},{"do":{"action":"playSound","args":["card"]}},{"do":{"action":"setState","args":["mkoffer",-1]}},{"do":{"action":"setState","args":["oq",0]}},{"do":{"action":"setState","args":["offer_ask",-1]}},{"do":{"action":"setState","args":["phase",3]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 3 && world.flags.oq == 0 && world.flags.offer_tile == -1 && seatStat(seat(),'cash') >= 72"},{"do":{"action":"setState","args":["oq",1]}},{"do":{"action":"prompt","args
+
+--- OQ-FLOW @966172
+action":"setState","args":["oq",1]}},{"do":{"action":"prompt","args":["mkoffer","Offer to buy Riverbend Row for 54? The owner decides on their turn.","Make offer","No"]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 1 && world.flags.mkoffer == 0"},{"do":{"action":"setState","args":["offer_tile",1]}},{"do":{"action":"setFlagExpr","args":["offer_from","seat()"]}},{"do":{"action":"playSound","args":["card"]}},{"do":{"action":"setState","args":["mkoffer",-1]}},{"do":{"action":"setState","args":["oq",0]}},{"do":{"action":"setState","args":["offer_ask",-1]}},{"do":{"action":"setState","args":["phase",3]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 3 && world.flags.oq == 0 && world.flags.offer_tile == -1 && seatStat(seat(),'cash') >= 72"},{"do":{"action":"setState","args":["oq",1]}},{"do":{"action":"prompt","args":["mkoffer","Offer to buy Kiln Street for 72? The owner decides on their turn.","Make offer","No"]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 3 && world.flags.mkoffer == 0"},{"do":{"action":"setState","args":["offer_tile",3]}},{"do":{"action":"setFlagExpr","args":["offer_from","seat()"]}},{"do":{"action":"playSound","args":["card"]}},{"do":{"action":"setState","args":["mkoffer",-1]}},{"do":{"action":"setState","args":["oq",0]}},{"do":{"action":"setState","args
+
+--- OQ-FLOW @966459
+"offer_tile",1]}},{"do":{"action":"setFlagExpr","args":["offer_from","seat()"]}},{"do":{"action":"playSound","args":["card"]}},{"do":{"action":"setState","args":["mkoffer",-1]}},{"do":{"action":"setState","args":["oq",0]}},{"do":{"action":"setState","args":["offer_ask",-1]}},{"do":{"action":"setState","args":["phase",3]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 3 && world.flags.oq == 0 && world.flags.offer_tile == -1 && seatStat(seat(),'cash') >= 72"},{"do":{"action":"setState","args":["oq",1]}},{"do":{"action":"prompt","args":["mkoffer","Offer to buy Kiln Street for 72? The owner decides on their turn.","Make offer","No"]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 3 && world.flags.mkoffer == 0"},{"do":{"action":"setState","args":["offer_tile",3]}},{"do":{"action":"setFlagExpr","args":["offer_from","seat()"]}},{"do":{"action":"playSound","args":["card"]}},{"do":{"action":"setState","args":["mkoffer",-1]}},{"do":{"action":"setState","args":["oq",0]}},{"do":{"action":"setState","args":["offer_ask",-1]}},{"do":{"action":"setState","args":["phase",3]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 5 && world.flags.oq == 0 && world.flags.offer_tile == -1 && seatStat(seat(),'cash') >= 180"},{"do":{"action":"setState","args":["oq",1]}},{"do":{"action":"prompt","args"
+
+--- OQ-FLOW @966930
+{"action":"setState","args":["oq",1]}},{"do":{"action":"prompt","args":["mkoffer","Offer to buy Kiln Street for 72? The owner decides on their turn.","Make offer","No"]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 3 && world.flags.mkoffer == 0"},{"do":{"action":"setState","args":["offer_tile",3]}},{"do":{"action":"setFlagExpr","args":["offer_from","seat()"]}},{"do":{"action":"playSound","args":["card"]}},{"do":{"action":"setState","args":["mkoffer",-1]}},{"do":{"action":"setState","args":["oq",0]}},{"do":{"action":"setState","args":["offer_ask",-1]}},{"do":{"action":"setState","args":["phase",3]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 5 && world.flags.oq == 0 && world.flags.offer_tile == -1 && seatStat(seat(),'cash') >= 180"},{"do":{"action":"setState","args":["oq",1]}},{"do":{"action":"prompt","args":["mkoffer","Offer to buy North Transit for 180? The owner decides on their turn.","Make offer","No"]}}]},{"sequence":[{"cond":"world.flags.offer_ask == 5 && world.flags.mkoffer == 0"},{"do":{"action":"setState","args":["offer_tile",5]}},{"do":{"action":"setFlagExpr","args":["offer_from","seat()"]}},{"do":{"action":"playSound","args":["card"]}},{"do":{"action":"setState","args":["mkoffer",-1]}},{"do":{"action":"setState","args":["oq",0]}},{"do":{"action":"setState","
+
+########
+
+ENGINE PROBES
+onPointer -> 0 occurrence(s)
+addEventListener("click -> 0 occurrence(s)
+addEventListener("pointerdown -> 0 occurrence(s)
+raycast -> 2 occurrence(s)
+pickNode -> 0 occurrence(s)
+hitTest -> 0 occurrence(s)
+screenToWorld -> 0 occurrence(s)
+project( -> 14 occurrence(s)
+world.time -> 26 occurrence(s)
+requestAnimationFrame -> 2 occurrence(s)
+dt = -> 4 occurrence(s)
+delta -> 2 occurrence(s)
+
+--- FRAME LOOP CONTEXT ---
+ INV = { items: {}, equipped: {} };
+  DLG = null; SHOP = null;
+  if (dlgEl) dlgEl.style.display = "none";
+  if (shopEl) shopEl.style.display = "none";
+  ENC = { steps: 0, threshold: 0, zone: null, rng: null };
+  BATTLE = null; MENU = null;
+  STIMULI = []; PROJECTILES = []; LOCK = { target: null }; PARTICLES = []; DECALS = [];
+  world._alertT = 0;
+  if (battleEl) battleEl.style.display = "none";
+  if (menuEl) menuEl.style.display = "none";
+  rnd = mulberry(hashStr(scene.meta.seed || "kv"));
+
+  scene.resources = scene.resources || {};
+  resize();
+  walkNodes(scene.nodes, null);
+  actors.forEach(function (a) { if (a.stateMachine) enterState(a, a.stateMachine.initial); });
+  buildHud();
+  updateTransforms(scene.nodes, matIdent());
+  initSession();
+  // world matrices must exist before baking: vertices are lit in world space
+  updateTransforms(scene.nodes, matIdent());
+  JOINTS = [];
+  if (scene.joints) for (var ji = 0; ji < scene.joints.length; ji++) addJoint(scene.joints[ji]);
+  if (scene.lighting) bakeLighting();
+  conSetup();
+  post({ kv: "ready", id: scene.meta.id, permissions: scene.permissions || [] });
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function fail(msg) {
+  running = false;
+  var el = document.getElementById("err");
+  el.style.display = "block";
+  el.textContent = msg;
+  post({ kv: "error", message: msg });
+}
+
+// Every per-frame simulation system, in order. loop() and the headless test
+// harness both call this, so a new system cannot be live in the engine but
+// missing from the reg
