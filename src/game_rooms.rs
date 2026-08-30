@@ -24,7 +24,8 @@ use once_cell::sync::Lazy;
 static ROOMS: Lazy<Mutex<HashMap<String, Room>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 const ROOM_TTL_SECS: u64 = 3 * 60 * 60; // 3h — covers a full game + postgame
-const MAX_PLAYERS: usize = 4;
+const DEFAULT_MAX_PLAYERS: usize = 4;
+const HARD_MAX_PLAYERS: usize = 8;
 const MAX_MOVES: usize = 4096;
 const MAX_MOVE_BYTES: usize = 8192;
 const MAX_ROOMS: usize = 500;
@@ -47,6 +48,9 @@ struct Room {
     #[serde(skip)]
     touched_at: u64,
     seed_commit: String,
+    game: String,
+    max_players: usize,
+    turn_deadline_secs: Option<u64>,
     players: Vec<Player>,
     started: bool,
     // index -> move record (opaque JSON from the client, hash included)
@@ -70,7 +74,13 @@ pub struct CreateReq {
     pub room: String,        // client-chosen id (same id posted to all nodes)
     pub wallet: String,      // creator wallet address
     pub seed_commit: String, // sha256 commitment to the game seed
+    #[serde(default = "default_game")]
+    pub game: String,        // game label, e.g. "kascity", "fighter"
+    pub max_players: Option<usize>,       // 1..8, default 4
+    pub turn_deadline_secs: Option<u64>,  // echoed only; enforced by clients
 }
+
+fn default_game() -> String { "kascity".to_string() }
 
 #[derive(Deserialize)]
 pub struct JoinReq {
@@ -105,12 +115,19 @@ async fn create_room(body: web::Json<CreateReq>) -> HttpResponse {
     if map.len() >= MAX_ROOMS && !map.contains_key(&body.room) {
         return HttpResponse::ServiceUnavailable().json(json!({"error":"room capacity"}));
     }
-    // idempotent: re-create of an existing room with same seed_commit = ok (broadcast retry)
+    let maxp = body.max_players.unwrap_or(DEFAULT_MAX_PLAYERS);
+    if maxp < 1 || maxp > HARD_MAX_PLAYERS {
+        return HttpResponse::BadRequest().json(json!({"error":"max_players must be 1..8"}));
+    }
+    if body.game.is_empty() || body.game.len() > 32 || !body.game.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return HttpResponse::BadRequest().json(json!({"error":"bad game label"}));
+    }
+    // idempotent: re-create of an existing room with same seed_commit + game = ok (broadcast retry)
     if let Some(r) = map.get(&body.room) {
-        if r.seed_commit == body.seed_commit {
-            return HttpResponse::Ok().json(json!({"room": body.room, "existed": true}));
+        if r.seed_commit == body.seed_commit && r.game == body.game {
+            return HttpResponse::Ok().json(json!({"room": body.room, "game": r.game, "existed": true}));
         }
-        return HttpResponse::Conflict().json(json!({"error":"room exists with different seed"}));
+        return HttpResponse::Conflict().json(json!({"error":"room exists with different seed or game"}));
     }
     let t = now();
     map.insert(body.room.clone(), Room {
@@ -118,6 +135,9 @@ async fn create_room(body: web::Json<CreateReq>) -> HttpResponse {
         created_at: t,
         touched_at: t,
         seed_commit: body.seed_commit.clone(),
+        game: body.game.clone(),
+        max_players: maxp,
+        turn_deadline_secs: body.turn_deadline_secs,
         players: vec![Player { wallet: body.wallet.clone(), seat: 1, joined_at: t }],
         started: false,
         moves: BTreeMap::new(),
@@ -139,7 +159,7 @@ async fn join_room(path: web::Path<String>, body: web::Json<JoinReq>) -> HttpRes
     if r.started {
         return HttpResponse::Conflict().json(json!({"error":"game already started"}));
     }
-    if r.players.len() >= MAX_PLAYERS {
+    if r.players.len() >= r.max_players {
         return HttpResponse::Conflict().json(json!({"error":"room full"}));
     }
     let seat = (r.players.len() + 1) as u8;
@@ -149,14 +169,17 @@ async fn join_room(path: web::Path<String>, body: web::Json<JoinReq>) -> HttpRes
 
 async fn start_room(path: web::Path<String>, body: web::Json<StartReq>) -> HttpResponse {
     let id = path.into_inner();
-    if body.roster.is_empty() || body.roster.len() > MAX_PLAYERS {
-        return HttpResponse::BadRequest().json(json!({"error":"roster must have 1..4 wallets"}));
+    if body.roster.is_empty() {
+        return HttpResponse::BadRequest().json(json!({"error":"roster must not be empty"}));
     }
     let mut map = ROOMS.lock().unwrap();
     let Some(r) = map.get_mut(&id) else {
         return HttpResponse::NotFound().json(json!({"error":"no such room"}));
     };
     r.touched_at = now();
+    if body.roster.len() > r.max_players {
+        return HttpResponse::BadRequest().json(json!({"error":"roster exceeds room max_players"}));
+    }
     let incoming: Vec<String> = body.roster.clone();
     if r.started {
         let current: Vec<String> = r.players.iter().map(|p| p.wallet.clone()).collect();
@@ -232,8 +255,11 @@ async fn room_info(path: web::Path<String>) -> HttpResponse {
     r.touched_at = now();
     HttpResponse::Ok().json(json!({
         "room": r.id,
+        "game": r.game,
         "created_at": r.created_at,
         "seed_commit": r.seed_commit,
+        "max_players": r.max_players,
+        "turn_deadline_secs": r.turn_deadline_secs,
         "players": r.players,
         "started": r.started,
         "move_count": r.moves.len()
