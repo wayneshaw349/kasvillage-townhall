@@ -78,6 +78,11 @@ pub struct JoinReq {
 }
 
 #[derive(Deserialize)]
+pub struct StartReq {
+    pub roster: Vec<String>, // ordered wallets; index+1 = seat; same list broadcast to every node
+}
+
+#[derive(Deserialize)]
 pub struct MoveReq {
     pub wallet: String,
     #[serde(rename = "move")]
@@ -142,14 +147,31 @@ async fn join_room(path: web::Path<String>, body: web::Json<JoinReq>) -> HttpRes
     HttpResponse::Ok().json(json!({"room": id, "seat": seat}))
 }
 
-async fn start_room(path: web::Path<String>) -> HttpResponse {
+async fn start_room(path: web::Path<String>, body: web::Json<StartReq>) -> HttpResponse {
     let id = path.into_inner();
+    if body.roster.is_empty() || body.roster.len() > MAX_PLAYERS {
+        return HttpResponse::BadRequest().json(json!({"error":"roster must have 1..4 wallets"}));
+    }
     let mut map = ROOMS.lock().unwrap();
     let Some(r) = map.get_mut(&id) else {
         return HttpResponse::NotFound().json(json!({"error":"no such room"}));
     };
     r.touched_at = now();
-    r.started = true; // idempotent
+    let incoming: Vec<String> = body.roster.clone();
+    if r.started {
+        let current: Vec<String> = r.players.iter().map(|p| p.wallet.clone()).collect();
+        if current == incoming {
+            return HttpResponse::Ok().json(json!({"room": id, "started": true, "players": r.players}));
+        }
+        return HttpResponse::Conflict().json(json!({"error":"started with different roster"}));
+    }
+    let t = now();
+    r.players = incoming.iter().enumerate().map(|(i, w)| Player {
+        wallet: w.clone(),
+        seat: (i + 1) as u8,
+        joined_at: t,
+    }).collect();
+    r.started = true;
     HttpResponse::Ok().json(json!({"room": id, "started": true, "players": r.players}))
 }
 
