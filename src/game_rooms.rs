@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use once_cell::sync::Lazy;
+use sha2::{Digest, Sha256};
 
 static ROOMS: Lazy<Mutex<HashMap<String, Room>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -56,6 +57,25 @@ struct Room {
     // index -> move record (opaque JSON from the client, hash included)
     #[serde(skip)]
     moves: BTreeMap<u64, serde_json::Value>,
+    // ---- v2 ordered log: the relay is the organizer ----
+    // Server-assigned dense indices; each entry hash-chains over the previous,
+    // so every node's log is a verifiable commitment to its arrival order.
+    // (Nodes remain independent: the client picks one node as its orderer for
+    // a room, or merges by comparing chains.)
+    #[serde(skip)]
+    log: Vec<LogEntry>,
+    #[serde(skip)]
+    chain: String,
+}
+
+#[derive(Serialize, Clone)]
+struct LogEntry {
+    i: u64,
+    ts: u64,
+    wallet: String,
+    kind: String,               // "move" | "gun" | "beacon" | anything the game defines
+    body: serde_json::Value,    // opaque to the relay
+    h: String,                  // sha256(prev_h | i | wallet | kind | body) hex
 }
 
 fn sweep(map: &mut HashMap<String, Room>) {
@@ -141,6 +161,8 @@ async fn create_room(body: web::Json<CreateReq>) -> HttpResponse {
         players: vec![Player { wallet: body.wallet.clone(), seat: 1, joined_at: t }],
         started: false,
         moves: BTreeMap::new(),
+        log: Vec::new(),
+        chain: String::from("genesis"),
     });
     HttpResponse::Ok().json(json!({"room": body.room, "seat": 1}))
 }
@@ -266,6 +288,94 @@ async fn room_info(path: web::Path<String>) -> HttpResponse {
     }))
 }
 
+// ---------- v2: server-ordered, hash-chained log (generic for any game) ----------
+
+#[derive(Deserialize)]
+pub struct AppendReq {
+    pub wallet: String,
+    #[serde(default = "default_kind")]
+    pub kind: String,
+    pub body: serde_json::Value,   // opaque game payload (a move, a gun, a beacon, ...)
+    // optional client idempotency key: same (wallet,kind,nonce) appended twice
+    // returns the original entry instead of a duplicate
+    pub nonce: Option<String>,
+}
+
+fn default_kind() -> String { "move".to_string() }
+
+fn chain_hash(prev: &str, i: u64, wallet: &str, kind: &str, body: &serde_json::Value) -> String {
+    let mut hz = Sha256::new();
+    hz.update(prev.as_bytes());
+    hz.update(i.to_le_bytes());
+    hz.update(wallet.as_bytes());
+    hz.update(kind.as_bytes());
+    hz.update(body.to_string().as_bytes());
+    hex::encode(hz.finalize())
+}
+
+async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> HttpResponse {
+    let id = path.into_inner();
+    if body.kind.is_empty() || body.kind.len() > 24
+        || !body.kind.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return HttpResponse::BadRequest().json(json!({"error":"bad kind"}));
+    }
+    let raw = body.body.to_string();
+    if raw.len() > MAX_MOVE_BYTES {
+        return HttpResponse::PayloadTooLarge().json(json!({"error":"entry too large"}));
+    }
+    let mut map = ROOMS.lock().unwrap();
+    let Some(r) = map.get_mut(&id) else {
+        return HttpResponse::NotFound().json(json!({"error":"no such room"}));
+    };
+    r.touched_at = now();
+    if !r.players.iter().any(|p| p.wallet == body.wallet) {
+        return HttpResponse::Forbidden().json(json!({"error":"wallet not in room"}));
+    }
+    if r.log.len() >= MAX_MOVES {
+        return HttpResponse::PayloadTooLarge().json(json!({"error":"log capacity"}));
+    }
+    // idempotency: nonce replay returns the already-stored entry
+    if let Some(n) = &body.nonce {
+        let key = format!("{}|{}|{}", body.wallet, body.kind, n);
+        if let Some(e) = r.log.iter().find(|e|
+            e.body.get("__nonce").and_then(|v| v.as_str())
+                .map(|s| format!("{}|{}|{}", e.wallet, e.kind, s) == key)
+                .unwrap_or(false)) {
+            return HttpResponse::Ok().json(json!({"room": id, "i": e.i, "h": e.h, "stored": false, "head": r.log.len(), "chain": r.chain}));
+        }
+    }
+    let i = r.log.len() as u64;
+    let mut b = body.body.clone();
+    if let (Some(n), Some(obj)) = (&body.nonce, b.as_object_mut()) {
+        obj.insert("__nonce".into(), json!(n));
+    }
+    let h = chain_hash(&r.chain, i, &body.wallet, &body.kind, &b);
+    r.chain = h.clone();
+    r.log.push(LogEntry { i, ts: now(), wallet: body.wallet.clone(), kind: body.kind.clone(), body: b, h: h.clone() });
+    HttpResponse::Ok().json(json!({"room": id, "i": i, "h": h, "stored": true, "head": r.log.len(), "chain": r.chain}))
+}
+
+#[derive(Deserialize)]
+pub struct AfterQ { pub after: Option<u64> }
+
+async fn get_log(path: web::Path<String>, q: web::Query<AfterQ>) -> HttpResponse {
+    let id = path.into_inner();
+    let after = q.after.unwrap_or(0) as usize;
+    let mut map = ROOMS.lock().unwrap();
+    let Some(r) = map.get_mut(&id) else {
+        return HttpResponse::NotFound().json(json!({"error":"no such room"}));
+    };
+    r.touched_at = now();
+    let entries: Vec<&LogEntry> = r.log.iter().skip(after).collect();
+    HttpResponse::Ok().json(json!({
+        "room": id,
+        "after": after,
+        "head": r.log.len(),
+        "chain": r.chain,
+        "entries": entries
+    }))
+}
+
 // ---------- wiring ----------
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
@@ -276,6 +386,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/room/{id}/start", web::post().to(start_room))
             .route("/room/{id}/move", web::post().to(post_move))
             .route("/room/{id}/moves", web::get().to(get_moves))
+            .route("/room/{id}/append", web::post().to(append_log))   // v2: relay-assigned order
+            .route("/room/{id}/log", web::get().to(get_log))          // v2: dense, hash-chained
             .route("/room/{id}", web::get().to(room_info)),
     );
 }
