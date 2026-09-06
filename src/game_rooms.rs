@@ -66,6 +66,11 @@ struct Room {
     log: Vec<LogEntry>,
     #[serde(skip)]
     chain: String,
+    // v52 turn gate
+    #[serde(skip)]
+    rules: Option<TurnOrderReq>,
+    #[serde(skip)]
+    last_rr_seat: Option<u8>,
 }
 
 #[derive(Serialize, Clone)]
@@ -110,6 +115,20 @@ pub struct JoinReq {
 #[derive(Deserialize)]
 pub struct StartReq {
     pub roster: Vec<String>, // ordered wallets; index+1 = seat; same list broadcast to every node
+    #[serde(default)]
+    pub turn_order: Option<TurnOrderReq>, // v52: optional turn gate config
+}
+
+// v52: turn-gate rules -- entirely client-defined so the relay stays game-agnostic.
+#[derive(Deserialize, Serialize, Clone)]
+pub struct TurnOrderReq {
+    pub seats: u8,                 // total seats including bots
+    #[serde(default)]
+    pub round_robin: Vec<String>,  // actions that rotate seats in order (e.g. ["roll"])
+    #[serde(default)]
+    pub follow: Vec<String>,       // actions allowed only from the last round-robin seat (e.g. ["buy","pass"])
+    #[serde(default)]
+    pub exempt: Vec<String>,       // actions never gated (e.g. ["first"])
 }
 
 #[derive(Deserialize)]
@@ -163,6 +182,8 @@ async fn create_room(body: web::Json<CreateReq>) -> HttpResponse {
         moves: BTreeMap::new(),
         log: Vec::new(),
         chain: String::from("genesis"),
+        rules: None,
+        last_rr_seat: None,
     });
     HttpResponse::Ok().json(json!({"room": body.room, "seat": 1}))
 }
@@ -217,6 +238,9 @@ async fn start_room(path: web::Path<String>, body: web::Json<StartReq>) -> HttpR
         joined_at: t,
     }).collect();
     r.started = true;
+    if let Some(t) = body.turn_order.clone() {
+        if t.seats >= 1 && t.seats <= 8 { r.rules = Some(t); }
+    }
     HttpResponse::Ok().json(json!({"room": id, "started": true, "players": r.players}))
 }
 
@@ -342,6 +366,36 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
                 .map(|s| format!("{}|{}|{}", e.wallet, e.kind, s) == key)
                 .unwrap_or(false)) {
             return HttpResponse::Ok().json(json!({"room": id, "i": e.i, "h": e.h, "stored": false, "head": r.log.len(), "chain": r.chain}));
+        }
+    }
+    // ---- v52 turn gate (only when the game configured one at /start) ----
+    if body.kind == "move" {
+        if let Some(rules) = r.rules.clone() {
+            let a = body.body.get("a").and_then(|v| v.as_str()).unwrap_or("");
+            let sv = body.body.get("s").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+            let exempt = rules.exempt.iter().any(|x| x == a);
+            if !exempt && rules.round_robin.iter().any(|x| x == a) {
+                if let Some(last) = r.last_rr_seat {
+                    let expect = (last % rules.seats) + 1;
+                    if sv != expect {
+                        return HttpResponse::Ok().json(json!({
+                            "room": id, "stored": false, "reason": "not_your_turn",
+                            "expect": expect, "head": r.log.len(), "chain": r.chain
+                        }));
+                    }
+                }
+                r.last_rr_seat = Some(sv);
+            } else if !exempt && rules.follow.iter().any(|x| x == a) {
+                match r.last_rr_seat {
+                    Some(last) if last == sv => {}
+                    _ => {
+                        return HttpResponse::Ok().json(json!({
+                            "room": id, "stored": false, "reason": "not_the_roller",
+                            "expect": r.last_rr_seat, "head": r.log.len(), "chain": r.chain
+                        }));
+                    }
+                }
+            }
         }
     }
     let i = r.log.len() as u64;
