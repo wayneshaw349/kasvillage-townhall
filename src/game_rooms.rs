@@ -131,6 +131,8 @@ pub struct TurnOrderReq {
     pub exempt: Vec<String>,       // actions never gated (e.g. ["first"])
     #[serde(default)]
     pub seed: Vec<String>,         // v53: actions that declare the opener (e.g. ["opener"])
+    #[serde(default)]
+    pub derive_opener_from: Option<String>, // v54: derive the opener from these entries (e.g. "first")
 }
 
 #[derive(Deserialize)]
@@ -339,6 +341,36 @@ fn chain_hash(prev: &str, i: u64, wallet: &str, kind: &str, body: &serde_json::V
     hex::encode(hz.finalize())
 }
 
+// v54: replay the opener contest from the chain itself.
+// Rounds of one value per active seat (arrival order); keep the max-value seats;
+// repeat until a single seat remains. Incomplete round -> None.
+fn derive_opener(log: &Vec<LogEntry>, first_action: &str, seats: u8) -> Option<u8> {
+    let mut seq: Vec<(u8, i64)> = Vec::new();
+    for e in log {
+        if e.kind != "move" { continue; }
+        let a = e.body.get("a").and_then(|v| v.as_str()).unwrap_or("");
+        if a != first_action { continue; }
+        let sv = e.body.get("s").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+        let vv = e.body.get("v").and_then(|v| v.as_i64()).unwrap_or(0);
+        if sv >= 1 && sv <= seats { seq.push((sv, vv)); }
+    }
+    let mut active: Vec<u8> = (1..=seats).collect();
+    let mut idx = 0usize;
+    loop {
+        if active.len() == 1 { return Some(active[0]); }
+        let mut vals: HashMap<u8, i64> = HashMap::new();
+        while idx < seq.len() && vals.len() < active.len() {
+            let (sv, vv) = seq[idx];
+            idx += 1;
+            if active.contains(&sv) && !vals.contains_key(&sv) { vals.insert(sv, vv); }
+        }
+        if vals.len() < active.len() { return None; }
+        let m = *vals.values().max()?;
+        active.retain(|sv| vals.get(sv) == Some(&m));
+        if active.is_empty() { return None; }
+    }
+}
+
 async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> HttpResponse {
     let id = path.into_inner();
     if body.kind.is_empty() || body.kind.len() > 24
@@ -378,10 +410,34 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
             let exempt = rules.exempt.iter().any(|x| x == a);
             if rules.seed.iter().any(|x| x == a) {
                 // v53: a seed action declares the opener -- its seat becomes expected-next
+                // v54: when the chain can derive the opener, the declaration must match it
+                if let Some(fa) = rules.derive_opener_from.as_deref() {
+                    if let Some(open) = derive_opener(&r.log, fa, rules.seats) {
+                        if sv != open {
+                            return HttpResponse::Ok().json(json!({
+                                "room": id, "stored": false, "reason": "opener_mismatch",
+                                "expect": open, "head": r.log.len(), "chain": r.chain
+                            }));
+                        }
+                    }
+                }
                 let n = rules.seats.max(2) as u16;
                 let v16 = sv as u16;
                 r.last_rr_seat = Some((((v16 + n - 2) % n) + 1) as u8);
             } else if !exempt && rules.round_robin.iter().any(|x| x == a) {
+                // v54: no rotation state yet -> the chain's derived opener goes first
+                if r.last_rr_seat.is_none() {
+                    if let Some(fa) = rules.derive_opener_from.as_deref() {
+                        if let Some(open) = derive_opener(&r.log, fa, rules.seats) {
+                            if sv != open {
+                                return HttpResponse::Ok().json(json!({
+                                    "room": id, "stored": false, "reason": "not_the_opener",
+                                    "expect": open, "head": r.log.len(), "chain": r.chain
+                                }));
+                            }
+                        }
+                    }
+                }
                 if let Some(last) = r.last_rr_seat {
                     let expect = (last % rules.seats) + 1;
                     if sv != expect {
