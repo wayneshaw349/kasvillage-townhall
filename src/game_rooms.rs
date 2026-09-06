@@ -129,6 +129,8 @@ pub struct TurnOrderReq {
     pub follow: Vec<String>,       // actions allowed only from the last round-robin seat (e.g. ["buy","pass"])
     #[serde(default)]
     pub exempt: Vec<String>,       // actions never gated (e.g. ["first"])
+    #[serde(default)]
+    pub seed: Vec<String>,         // v53: actions that declare the opener (e.g. ["opener"])
 }
 
 #[derive(Deserialize)]
@@ -374,7 +376,12 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
             let a = body.body.get("a").and_then(|v| v.as_str()).unwrap_or("");
             let sv = body.body.get("s").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
             let exempt = rules.exempt.iter().any(|x| x == a);
-            if !exempt && rules.round_robin.iter().any(|x| x == a) {
+            if rules.seed.iter().any(|x| x == a) {
+                // v53: a seed action declares the opener -- its seat becomes expected-next
+                let n = rules.seats.max(2) as u16;
+                let v16 = sv as u16;
+                r.last_rr_seat = Some((((v16 + n - 2) % n) + 1) as u8);
+            } else if !exempt && rules.round_robin.iter().any(|x| x == a) {
                 if let Some(last) = r.last_rr_seat {
                     let expect = (last % rules.seats) + 1;
                     if sv != expect {
