@@ -133,6 +133,8 @@ pub struct TurnOrderReq {
     pub seed: Vec<String>,         // v53: actions that declare the opener (e.g. ["opener"])
     #[serde(default)]
     pub derive_opener_from: Option<String>, // v54: derive the opener from these entries (e.g. "first")
+    #[serde(default)]
+    pub dice: Vec<String>,         // v55: actions whose dice the relay derives from the seed (e.g. ["roll"])
 }
 
 #[derive(Deserialize)]
@@ -341,6 +343,17 @@ fn chain_hash(prev: &str, i: u64, wallet: &str, kind: &str, body: &serde_json::V
     hex::encode(hz.finalize())
 }
 
+// v55: deterministic 2d6 from the room seed commitment and the entry index.
+// Pure function of public inputs: any node or client derives identical dice.
+fn derive_dice(seed: &str, i: u64) -> (u8, u8) {
+    let mut hz = Sha256::new();
+    hz.update(seed.as_bytes());
+    hz.update(b"dice");
+    hz.update(i.to_le_bytes());
+    let d = hz.finalize();
+    (1 + (d[0] % 6), 1 + (d[1] % 6))
+}
+
 // v54: replay the opener contest from the chain itself.
 // Rounds of one value per active seat (arrival order); keep the max-value seats;
 // repeat until a single seat remains. Incomplete round -> None.
@@ -462,18 +475,55 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
         }
     }
     let i = r.log.len() as u64;
+    // ---- v55: relay-derived dice are authoritative for configured actions ----
+    let mut dice_out: Option<(u8, u8)> = None;
+    if body.kind == "move" {
+        if let Some(rules) = &r.rules {
+            let a = body.body.get("a").and_then(|v| v.as_str()).unwrap_or("");
+            if rules.dice.iter().any(|x| x == a) {
+                dice_out = Some(derive_dice(&r.seed_commit, i));
+            }
+        }
+    }
     let mut b = body.body.clone();
+    if let (Some((d1, d2)), Some(obj)) = (dice_out, b.as_object_mut()) {
+        obj.insert("d1".into(), json!(d1));
+        obj.insert("d2".into(), json!(d2));
+        obj.insert("v".into(), json!((d1 as i64) + (d2 as i64)));
+    }
     if let (Some(n), Some(obj)) = (&body.nonce, b.as_object_mut()) {
         obj.insert("__nonce".into(), json!(n));
     }
     let h = chain_hash(&r.chain, i, &body.wallet, &body.kind, &b);
     r.chain = h.clone();
     r.log.push(LogEntry { i, ts: now(), wallet: body.wallet.clone(), kind: body.kind.clone(), body: b, h: h.clone() });
-    HttpResponse::Ok().json(json!({"room": id, "i": i, "h": h, "stored": true, "head": r.log.len(), "chain": r.chain}))
+    let mut resp = json!({"room": id, "i": i, "h": h, "stored": true, "head": r.log.len(), "chain": r.chain});
+    if let (Some((d1, d2)), Some(obj)) = (dice_out, resp.as_object_mut()) {
+        obj.insert("d1".into(), json!(d1));
+        obj.insert("d2".into(), json!(d2));
+        obj.insert("v".into(), json!((d1 as i64) + (d2 as i64)));
+    }
+    HttpResponse::Ok().json(resp)
 }
 
 #[derive(Deserialize)]
 pub struct AfterQ { pub after: Option<u64> }
+
+#[derive(Deserialize)]
+pub struct DiceQ { pub i: Option<u64> }
+
+// v55: expose the derivation so clients can pre-pin their own rolls.
+async fn get_dice(path: web::Path<String>, q: web::Query<DiceQ>) -> HttpResponse {
+    let id = path.into_inner();
+    let mut map = ROOMS.lock().unwrap();
+    let Some(r) = map.get_mut(&id) else {
+        return HttpResponse::NotFound().json(json!({"error":"no such room"}));
+    };
+    r.touched_at = now();
+    let i = q.i.unwrap_or(r.log.len() as u64);
+    let (d1, d2) = derive_dice(&r.seed_commit, i);
+    HttpResponse::Ok().json(json!({"room": id, "i": i, "d1": d1, "d2": d2, "v": (d1 as i64)+(d2 as i64), "head": r.log.len()}))
+}
 
 async fn get_log(path: web::Path<String>, q: web::Query<AfterQ>) -> HttpResponse {
     let id = path.into_inner();
@@ -505,6 +555,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/room/{id}/moves", web::get().to(get_moves))
             .route("/room/{id}/append", web::post().to(append_log))   // v2: relay-assigned order
             .route("/room/{id}/log", web::get().to(get_log))          // v2: dense, hash-chained
+            .route("/room/{id}/dice", web::get().to(get_dice))        // v55: derived dice
             .route("/room/{id}", web::get().to(room_info)),
     );
 }
