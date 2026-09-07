@@ -474,6 +474,20 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
             }
         }
     }
+    // ---- v55b: fx sanity cap — a single move cannot mint or burn beyond the cap ----
+    if body.kind == "move" {
+        if let Some(fx) = body.body.get("fx") {
+            if let Some(cash) = fx.get("cash").and_then(|c| c.as_object()) {
+                let total: i64 = cash.values().filter_map(|v| v.as_i64()).map(|v| v.abs()).sum();
+                if total > 5000 {
+                    return HttpResponse::Ok().json(json!({
+                        "room": id, "stored": false, "reason": "fx_cap",
+                        "head": r.log.len(), "chain": r.chain
+                    }));
+                }
+            }
+        }
+    }
     let i = r.log.len() as u64;
     // ---- v55: relay-derived dice are authoritative for configured actions ----
     let mut dice_out: Option<(u8, u8)> = None;
@@ -512,6 +526,35 @@ pub struct AfterQ { pub after: Option<u64> }
 #[derive(Deserialize)]
 pub struct DiceQ { pub i: Option<u64> }
 
+#[derive(Deserialize)]
+pub struct DeriveQ { pub tag: Option<String>, pub i: Option<u64> }
+
+// v55b: generic RNG oracle — H(seed | tag | i). Pure function of public inputs,
+// so every node and every client derives identical bytes. Game-agnostic: clients
+// decide what a tag means (market index, scenario pick, offer amount, ...).
+async fn get_derive(path: web::Path<String>, q: web::Query<DeriveQ>) -> HttpResponse {
+    let id = path.into_inner();
+    let tag = q.tag.clone().unwrap_or_else(|| "misc".to_string());
+    if tag.is_empty() || tag.len() > 24 || !tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return HttpResponse::BadRequest().json(json!({"error":"bad tag"}));
+    }
+    let mut map = ROOMS.lock().unwrap();
+    let Some(r) = map.get_mut(&id) else {
+        return HttpResponse::NotFound().json(json!({"error":"no such room"}));
+    };
+    r.touched_at = now();
+    let i = q.i.unwrap_or(r.log.len() as u64);
+    let mut hz = Sha256::new();
+    hz.update(r.seed_commit.as_bytes());
+    hz.update(tag.as_bytes());
+    hz.update(i.to_le_bytes());
+    let d = hz.finalize();
+    let u32s: Vec<u32> = d.chunks(4).take(8)
+        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+    HttpResponse::Ok().json(json!({"room": id, "tag": tag, "i": i, "hex": hex::encode(d), "u32s": u32s, "head": r.log.len()}))
+}
+
 // v55: expose the derivation so clients can pre-pin their own rolls.
 async fn get_dice(path: web::Path<String>, q: web::Query<DiceQ>) -> HttpResponse {
     let id = path.into_inner();
@@ -539,6 +582,8 @@ async fn get_log(path: web::Path<String>, q: web::Query<AfterQ>) -> HttpResponse
         "after": after,
         "head": r.log.len(),
         "chain": r.chain,
+        "seed_commit": r.seed_commit,
+        "started": r.started,
         "entries": entries
     }))
 }
@@ -556,6 +601,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/room/{id}/append", web::post().to(append_log))   // v2: relay-assigned order
             .route("/room/{id}/log", web::get().to(get_log))          // v2: dense, hash-chained
             .route("/room/{id}/dice", web::get().to(get_dice))        // v55: derived dice
+            .route("/room/{id}/derive", web::get().to(get_derive))    // v55b: generic RNG oracle
             .route("/room/{id}", web::get().to(room_info)),
     );
 }
