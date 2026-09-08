@@ -499,6 +499,23 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
             }
         }
     }
+    // ---- v56: transition validation against the previous chain snap (mover-scoped) ----
+    if body.kind == "move" && r.rules.is_some() {
+        let a = body.body.get("a").and_then(|v| v.as_str()).unwrap_or("");
+        let sv = body.body.get("s").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+        if let Some(next_snap) = body.body.get("snap").and_then(|v| v.as_str()) {
+            if !next_snap.is_empty() {
+                if let Some(prev_snap) = last_chain_snap(&r.log) {
+                    if let Some(why) = check_transition(&prev_snap, next_snap, a, sv, dice_out) {
+                        return HttpResponse::Ok().json(json!({
+                            "room": id, "stored": false, "reason": "bad_transition", "detail": why,
+                            "head": r.log.len(), "chain": r.chain
+                        }));
+                    }
+                }
+            }
+        }
+    }
     let mut b = body.body.clone();
     if let (Some((d1, d2)), Some(obj)) = (dice_out, b.as_object_mut()) {
         obj.insert("d1".into(), json!(d1));
@@ -525,6 +542,86 @@ pub struct AfterQ { pub after: Option<u64> }
 
 #[derive(Deserialize)]
 pub struct DiceQ { pub i: Option<u64> }
+
+// v56: parse a client snapshot "cash|pos|owners|xp" into comparable state.
+fn parse_snap(snap: &str) -> Option<(Vec<i64>, Vec<i64>, std::collections::BTreeMap<String, u8>, Vec<i64>)> {
+    let parts: Vec<&str> = snap.split('|').collect();
+    if parts.len() < 3 { return None; }
+    let cash: Vec<i64> = parts[0].split(',').filter_map(|x| x.trim().parse().ok()).collect();
+    let pos: Vec<i64> = parts[1].split(',').filter_map(|x| x.trim().parse().ok()).collect();
+    if cash.len() < 4 || pos.len() < 4 { return None; }
+    let mut own = std::collections::BTreeMap::new();
+    if !parts[2].is_empty() {
+        for e in parts[2].split(',') {
+            let kv: Vec<&str> = e.split('>').collect();
+            if kv.len() == 2 { if let Ok(o) = kv[1].parse::<u8>() { own.insert(kv[0].to_string(), o); } }
+        }
+    }
+    let xp: Vec<i64> = if parts.len() > 3 {
+        parts[3].split(',').filter_map(|x| x.trim().parse().ok()).collect()
+    } else { Vec::new() };
+    Some((cash, pos, own, xp))
+}
+
+// v56: last snap on the chain, scanning backwards.
+fn last_chain_snap(log: &Vec<LogEntry>) -> Option<String> {
+    for e in log.iter().rev() {
+        if e.kind != "move" { continue; }
+        if let Some(sn) = e.body.get("snap").and_then(|v| v.as_str()) {
+            if !sn.is_empty() { return Some(sn.to_string()); }
+        }
+    }
+    None
+}
+
+// v56: mover-scoped, table-free transition invariants. Some(reason) on violation.
+fn check_transition(prev: &str, next: &str, a: &str, sv: u8, dice: Option<(u8, u8)>) -> Option<&'static str> {
+    let (pc, pp, po, px) = match parse_snap(prev) { Some(x) => x, None => return None };
+    let (nc, np, no, nx) = match parse_snap(next) { Some(x) => x, None => return Some("snap_unparseable") };
+    if a == "roll" && sv >= 1 && sv <= 4 {
+        let p = (sv - 1) as usize;
+        let (from, to) = (pp[p], np[p]);
+        if from >= 0 && to >= 0 {
+            if let Some((d1, d2)) = dice {
+                let expect = (from + (d1 as i64) + (d2 as i64)).rem_euclid(40);
+                if to != expect && to != 10 && to != from { return Some("bad_movement"); }
+            }
+        }
+    }
+    if po != no {
+        let ok = a == "buy" || a == "p2pbuy" || a.starts_with("accept:") || a.starts_with("lapse:") || a.starts_with("mgmt:") || a.starts_with("cash:");
+        if !ok { return Some("deed_change_off_action"); }
+    }
+    let mut delta: i64 = 0;
+    for p in 0..4usize { delta += (nc[p] - pc[p]).abs(); }
+    if delta > 1500 { return Some("cash_delta_cap"); }
+    if !px.is_empty() && !nx.is_empty() && px.len() >= 4 && nx.len() >= 4 {
+        for p in 0..4usize {
+            if nx[p] < px[p] { return Some("xp_decrease"); }
+            if nx[p] - px[p] > 100 { return Some("xp_jump"); }
+        }
+    }
+    None
+}
+
+// v56: the relay answers whose turn it is, directly.
+async fn get_turn(path: web::Path<String>) -> HttpResponse {
+    let id = path.into_inner();
+    let mut map = ROOMS.lock().unwrap();
+    let Some(r) = map.get_mut(&id) else {
+        return HttpResponse::NotFound().json(json!({"error":"no such room"}));
+    };
+    r.touched_at = now();
+    let seats = r.rules.as_ref().map(|t| t.seats).unwrap_or(4).max(1);
+    let expect: Option<u8> = r.last_rr_seat.map(|last| (last % seats) + 1);
+    HttpResponse::Ok().json(json!({
+        "room": id,
+        "expect_roller": expect,
+        "last_rr_seat": r.last_rr_seat,
+        "head": r.log.len(),
+        "chain": r.chain
+    }))
+}
 
 #[derive(Deserialize)]
 pub struct DeriveQ { pub tag: Option<String>, pub i: Option<u64> }
@@ -602,6 +699,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/room/{id}/log", web::get().to(get_log))          // v2: dense, hash-chained
             .route("/room/{id}/dice", web::get().to(get_dice))        // v55: derived dice
             .route("/room/{id}/derive", web::get().to(get_derive))    // v55b: generic RNG oracle
+            .route("/room/{id}/turn", web::get().to(get_turn))        // v56: whose turn
             .route("/room/{id}", web::get().to(room_info)),
     );
 }
