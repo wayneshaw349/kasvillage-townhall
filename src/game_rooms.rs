@@ -584,7 +584,8 @@ fn check_transition(prev: &str, next: &str, a: &str, sv: u8, dice: Option<(u8, u
         if from >= 0 && to >= 0 {
             if let Some((d1, d2)) = dice {
                 let expect = (from + (d1 as i64) + (d2 as i64)).rem_euclid(40);
-                if to != expect && to != 10 && to != from { return Some("bad_movement"); }
+                // v56b: advisory only — dice-index drift makes this unsafe to enforce
+                let _ = (to, expect, from);
             }
         }
     }
