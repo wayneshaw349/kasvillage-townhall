@@ -590,7 +590,10 @@ fn check_transition(prev: &str, next: &str, a: &str, sv: u8, dice: Option<(u8, u
         }
     }
     if po != no {
-        let ok = a == "buy" || a == "p2pbuy" || a.starts_with("accept:") || a.starts_with("lapse:") || a.starts_with("mgmt:") || a.starts_with("cash:");
+        // v56c: a roll can settle a purchase in the same beat; end carries the settled turn
+        let ok = a == "buy" || a == "p2pbuy" || a == "roll" || a == "end" || a == "pass"
+            || a.starts_with("accept:") || a.starts_with("lapse:") || a.starts_with("mgmt:")
+            || a.starts_with("bid:") || a.starts_with("cash:") || a.starts_with("scn:");
         if !ok { return Some("deed_change_off_action"); }
     }
     let mut delta: i64 = 0;
