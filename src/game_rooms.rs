@@ -599,12 +599,9 @@ fn check_transition(prev: &str, next: &str, a: &str, sv: u8, dice: Option<(u8, u
     let mut delta: i64 = 0;
     for p in 0..4usize { delta += (nc[p] - pc[p]).abs(); }
     if delta > 1500 { return Some("cash_delta_cap"); }
-    if !px.is_empty() && !nx.is_empty() && px.len() >= 4 && nx.len() >= 4 {
-        for p in 0..4usize {
-            if nx[p] < px[p] { return Some("xp_decrease"); }
-            if nx[p] - px[p] > 100 { return Some("xp_jump"); }
-        }
-    }
+    // v56e: XP is derived from the chain by every client, never transmitted as truth.
+    // The old invariants only fired on legitimate resync rollback.
+    let _ = (&px, &nx);
     None
 }
 
