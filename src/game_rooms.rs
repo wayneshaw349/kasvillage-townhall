@@ -617,7 +617,17 @@ async fn get_turn(path: web::Path<String>) -> HttpResponse {
     };
     r.touched_at = now();
     let seats = r.rules.as_ref().map(|t| t.seats).unwrap_or(4).max(1);
-    let expect: Option<u8> = r.last_rr_seat.map(|last| (last % seats) + 1);
+    // v56d: before rotation starts, the chain-derived opener is the expected actor
+    let expect: Option<u8> = match r.last_rr_seat {
+        Some(last) => Some((last % seats) + 1),
+        None => {
+            let fa = r.rules.as_ref().and_then(|t| t.derive_opener_from.clone());
+            match fa {
+                Some(first_action) => derive_opener(&r.log, &first_action, seats),
+                None => None,
+            }
+        }
+    };
     HttpResponse::Ok().json(json!({
         "room": id,
         "expect_roller": expect,
