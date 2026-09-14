@@ -12,6 +12,21 @@
 // Rooms are in-memory only and expire ROOM_TTL_SECS after last touch.
 // No rule execution server-side (agreed: not viable stateless); integrity
 // comes from the per-move commitment chain exchanged between peers.
+//
+// ---- v57: THE LOG IS THE GATE ----
+// Two fixes for the split-brain games (rooms kc219edd64, kc0c51ce65):
+// (1) The turn gate no longer keeps a mutable counter (last_rr_seat).
+//     That counter advanced only on entries THIS node stored, so one
+//     refused or missed entry desynced it from this node's own log
+//     forever ("not_your_turn (expects P4)" while the log showed P3).
+//     v57 derives the rotation state from the stored log on every
+//     request — the gate can never contradict its own chain.
+// (2) Content dedup: clients re-post records after resyncs with no
+//     nonce. Follow actions (buy/pass) passed the gate twice and
+//     appended twice, inflating heads and cascading dice-index drift.
+//     v57 refuses an append whose (wallet, kind, body.hash) already
+//     sits in the recent log — reason "duplicate", returning the
+//     original entry's i and h.
 
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
@@ -30,6 +45,7 @@ const HARD_MAX_PLAYERS: usize = 8;
 const MAX_MOVES: usize = 4096;
 const MAX_MOVE_BYTES: usize = 8192;
 const MAX_ROOMS: usize = 500;
+const DEDUP_WINDOW: usize = 64; // v57: how far back an identical record is a replay
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -66,11 +82,9 @@ struct Room {
     log: Vec<LogEntry>,
     #[serde(skip)]
     chain: String,
-    // v52 turn gate
+    // v52 turn gate rules (v57: rotation STATE is derived from the log, never stored)
     #[serde(skip)]
     rules: Option<TurnOrderReq>,
-    #[serde(skip)]
-    last_rr_seat: Option<u8>,
 }
 
 #[derive(Serialize, Clone)]
@@ -189,7 +203,6 @@ async fn create_room(body: web::Json<CreateReq>) -> HttpResponse {
         log: Vec::new(),
         chain: String::from("genesis"),
         rules: None,
-        last_rr_seat: None,
     });
     HttpResponse::Ok().json(json!({"room": body.room, "seat": 1}))
 }
@@ -384,6 +397,30 @@ fn derive_opener(log: &Vec<LogEntry>, first_action: &str, seats: u8) -> Option<u
     }
 }
 
+// ---- v57: the rotation state, derived from the stored log on demand ----
+// Replays every stored seed/round_robin entry in order and returns the seat
+// whose round-robin action closed the log most recently — i.e. exactly what
+// last_rr_seat used to hold, except it can never disagree with the log.
+// A seed action (opener declaration) for seat S yields S-1 so that the
+// expected-next formula (last % seats) + 1 lands on S, matching v53.
+fn derive_rr_last(log: &Vec<LogEntry>, rules: &TurnOrderReq) -> Option<u8> {
+    let n = rules.seats.max(2) as u16;
+    let mut last: Option<u8> = None;
+    for e in log {
+        if e.kind != "move" { continue; }
+        let a = e.body.get("a").and_then(|v| v.as_str()).unwrap_or("");
+        let sv = e.body.get("s").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+        if sv < 1 { continue; }
+        if rules.seed.iter().any(|x| x == a) {
+            let v16 = sv as u16;
+            last = Some((((v16 + n - 2) % n) + 1) as u8);
+        } else if rules.round_robin.iter().any(|x| x == a) {
+            last = Some(sv);
+        }
+    }
+    last
+}
+
 async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> HttpResponse {
     let id = path.into_inner();
     if body.kind.is_empty() || body.kind.len() > 24
@@ -415,7 +452,26 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
             return HttpResponse::Ok().json(json!({"room": id, "i": e.i, "h": e.h, "stored": false, "head": r.log.len(), "chain": r.chain}));
         }
     }
+    // ---- v57: content dedup — a re-posted record is a replay, not a new entry ----
+    // Clients re-post their records after resyncs without a nonce. The record's
+    // own commitment hash (body.hash) is unique per record, so an entry from the
+    // same wallet+kind with the same hash in the recent log is the same record.
+    if let Some(hh) = body.body.get("hash").and_then(|v| v.as_str()) {
+        if !hh.is_empty() {
+            let from = r.log.len().saturating_sub(DEDUP_WINDOW);
+            if let Some(e) = r.log[from..].iter().find(|e|
+                e.wallet == body.wallet && e.kind == body.kind &&
+                e.body.get("hash").and_then(|v| v.as_str()) == Some(hh)) {
+                return HttpResponse::Ok().json(json!({
+                    "room": id, "i": e.i, "h": e.h, "stored": false, "reason": "duplicate",
+                    "head": r.log.len(), "chain": r.chain
+                }));
+            }
+        }
+    }
     // ---- v52 turn gate (only when the game configured one at /start) ----
+    // v57: every check reads derive_rr_last(&r.log, rules) — the stored log is
+    // the only rotation state, so the gate cannot contradict this node's chain.
     if body.kind == "move" {
         if let Some(rules) = r.rules.clone() {
             let a = body.body.get("a").and_then(|v| v.as_str()).unwrap_or("");
@@ -434,12 +490,11 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
                         }
                     }
                 }
-                let n = rules.seats.max(2) as u16;
-                let v16 = sv as u16;
-                r.last_rr_seat = Some((((v16 + n - 2) % n) + 1) as u8);
+                // v57: no counter to set — storing this entry IS the state change
             } else if !exempt && rules.round_robin.iter().any(|x| x == a) {
+                let last = derive_rr_last(&r.log, &rules);
                 // v54: no rotation state yet -> the chain's derived opener goes first
-                if r.last_rr_seat.is_none() {
+                if last.is_none() {
                     if let Some(fa) = rules.derive_opener_from.as_deref() {
                         if let Some(open) = derive_opener(&r.log, fa, rules.seats) {
                             if sv != open {
@@ -451,7 +506,7 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
                         }
                     }
                 }
-                if let Some(last) = r.last_rr_seat {
+                if let Some(last) = last {
                     let expect = (last % rules.seats) + 1;
                     if sv != expect {
                         return HttpResponse::Ok().json(json!({
@@ -460,14 +515,14 @@ async fn append_log(path: web::Path<String>, body: web::Json<AppendReq>) -> Http
                         }));
                     }
                 }
-                r.last_rr_seat = Some(sv);
+                // v57: no counter to set — storing this entry IS the state change
             } else if !exempt && rules.follow.iter().any(|x| x == a) {
-                match r.last_rr_seat {
+                match derive_rr_last(&r.log, &rules) {
                     Some(last) if last == sv => {}
-                    _ => {
+                    other => {
                         return HttpResponse::Ok().json(json!({
                             "room": id, "stored": false, "reason": "not_the_roller",
-                            "expect": r.last_rr_seat, "head": r.log.len(), "chain": r.chain
+                            "expect": other, "head": r.log.len(), "chain": r.chain
                         }));
                     }
                 }
@@ -606,6 +661,7 @@ fn check_transition(prev: &str, next: &str, a: &str, sv: u8, dice: Option<(u8, u
 }
 
 // v56: the relay answers whose turn it is, directly.
+// v57: derived from the stored log — never a counter.
 async fn get_turn(path: web::Path<String>) -> HttpResponse {
     let id = path.into_inner();
     let mut map = ROOMS.lock().unwrap();
@@ -614,9 +670,10 @@ async fn get_turn(path: web::Path<String>) -> HttpResponse {
     };
     r.touched_at = now();
     let seats = r.rules.as_ref().map(|t| t.seats).unwrap_or(4).max(1);
+    let last = r.rules.as_ref().and_then(|rules| derive_rr_last(&r.log, rules));
     // v56d: before rotation starts, the chain-derived opener is the expected actor
-    let expect: Option<u8> = match r.last_rr_seat {
-        Some(last) => Some((last % seats) + 1),
+    let expect: Option<u8> = match last {
+        Some(l) => Some((l % seats) + 1),
         None => {
             let fa = r.rules.as_ref().and_then(|t| t.derive_opener_from.clone());
             match fa {
@@ -628,7 +685,7 @@ async fn get_turn(path: web::Path<String>) -> HttpResponse {
     HttpResponse::Ok().json(json!({
         "room": id,
         "expect_roller": expect,
-        "last_rr_seat": r.last_rr_seat,
+        "last_rr_seat": last,
         "head": r.log.len(),
         "chain": r.chain
     }))
