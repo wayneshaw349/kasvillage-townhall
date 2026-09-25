@@ -8473,6 +8473,7 @@ async fn main() -> std::io::Result<()> {
                 App::new()
                     .app_data(web::Data::new(client.clone()))
                     .app_data(web::Data::new(config.clone()))
+                    .app_data(web::JsonConfig::default().limit(16 * 1024 * 1024))   // [KV] 16 MB JSON for game verify
                     .wrap(Logger::default())
                     .wrap(Cors::permissive())
                     .configure(configure_ingress_routes)
@@ -8515,6 +8516,7 @@ async fn main() -> std::io::Result<()> {
             HttpServer::new(move || {
                 App::new()
                     .app_data(web::Data::new(state.clone()))
+                    .app_data(web::JsonConfig::default().limit(16 * 1024 * 1024))   // [KV] 16 MB JSON for game verify
                     .wrap(Logger::default())
                     .wrap(Cors::permissive())
                     .configure(configure_routes_v3)
