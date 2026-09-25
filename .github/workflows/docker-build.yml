@@ -21,6 +21,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: wayneshaw349/kasvillage-townhall:latest,wayneshaw349/kasvillage-townhall:v60
+          tags: wayneshaw349/kasvillage-townhall:latest,wayneshaw349/kasvillage-townhall:v61
           
           no-cache: true
