@@ -16,6 +16,9 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, ActivityIndicator, TouchableOpacity, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { fetchHtmlPage } from './html_chunks';
+import { fetchGamePuzzle, TRUSTED_GAMES, GameManifest } from './game_chunks';
+import { KV_WNET_INJECT, handleKvNetMessage } from './kv_net_bridge';
+import { useRef } from 'react';
 
 export interface OnChainPageViewProps {
   storeAddress: string;
@@ -29,6 +32,8 @@ export interface OnChainPageViewProps {
   /** kv://page/<hash> -> navigate to another on-chain page at same address. */
   onPage?: (hash: string) => void;
   onClose?: () => void;
+  /** Chain GAME mode: solve the hash-chained puzzle instead of a single page. */
+  game?: { manifestAddress: string; manifestHash: string; head: string };
 }
 
 // Injected before page scripts run. Belt-and-braces: even if a link slipped the
@@ -68,13 +73,18 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
+  const webRef = useRef<any>(null);
 
   useEffect(() => {
     let alive = true;
     setHtml(null);
     setError(null);
     (async () => {
-      const res = await fetchHtmlPage(storeAddress, pageHash, network);
+      const res = props.game
+        ? await fetchGamePuzzle(props.game.manifestAddress, props.game.manifestHash, props.game.head, network,
+            (have, total) => { if (alive) setProgress('solving puzzle ' + have + '/' + total); })
+        : await fetchHtmlPage(storeAddress, pageHash, network);
       if (!alive) return;
       if (res.html) setHtml(injectCsp(res.html));
       else setError(res.error || 'page unavailable');
@@ -102,6 +112,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   }, [ownerPubkey, props]);
 
   const onMessage = useCallback((event: any) => {
+    if (handleKvNetMessage(event.nativeEvent.data, (js) => webRef.current?.injectJavaScript(js))) return;
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.kv) handleKvLink(msg.kv);
@@ -136,7 +147,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
-        <Text style={styles.loading}>Rebuilding page from chain…</Text>
+        <Text style={styles.loading}>{progress || 'Rebuilding page from chain…'}</Text>
       </View>
     );
   }
@@ -146,7 +157,8 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       <WebView
         source={{ html }}
         originWhitelist={[]}
-        injectedJavaScriptBeforeContentLoaded={BRIDGE}
+        ref={webRef}
+        injectedJavaScriptBeforeContentLoaded={BRIDGE + KV_WNET_INJECT}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         javaScriptEnabled

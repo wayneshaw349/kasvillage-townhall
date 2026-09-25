@@ -454,7 +454,7 @@ export async function lamportAttest(params: {
 export {
   buildAns104DataItem,
   uploadToIrys,
-  lamportAttest,
+  // lamportAttest is exported at its declaration (line ~404)
   ARWEAVE_GATEWAY,
   IRYS_UPLOAD_URL,
 };

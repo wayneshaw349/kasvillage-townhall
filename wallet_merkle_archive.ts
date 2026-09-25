@@ -571,7 +571,7 @@ export async function uploadPerTxProof(params: {
     // Fetch global Kaspa state (MuHash + block header) at time of TX
     let blockAnchor: CapturedBlockHeader | null = null;
     try {
-      blockAnchor = await fetchTipBlockHeader(params.network === 'mainnet' ? 'mainnet' : 'testnet-10');
+      blockAnchor = await fetchTipBlockHeader(params.network === 'mainnet' ? 'mainnet' : 'testnet');
     } catch (e) { console.warn('[MerkleArchive] Block header fetch failed:', e); }
 
     const proof = {
@@ -580,7 +580,7 @@ export async function uploadPerTxProof(params: {
       txIndex: params.txIndex,
       amount: params.amountSompi.toString(),
       scriptPubKey: params.scriptPubKey,
-      daaScore: blockAnchor?.daaScore || params.daaScore,
+      daaScore: blockAnchor?.daa_score || params.daaScore,
       txType: params.txType,
       // Global Kaspa L1 state at time of TX
       kaspa_block_hash: blockAnchor?.block_hash || null,
