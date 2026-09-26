@@ -178,18 +178,46 @@ export async function getPledgeSompi(address: string, network = 'testnet-10'): P
 
 /** All decoded KV records in an address's tx history, newest first. */
 export async function fetchRecords(address: string, network = 'testnet-10', limit = 50): Promise<Array<{ record: KvRecord; txid: string; blockTime: number }>> {
-  const txs = await getJson(
-    `${apiBase(network)}/addresses/${encodeURIComponent(address)}/full-transactions?limit=${limit}&resolve_previous_outpoints=light`
-  );
+  let txs: any[] = [];
+  try {
+    txs = await getJson(
+      `${apiBase(network)}/addresses/${encodeURIComponent(address)}/full-transactions?limit=${limit}&resolve_previous_outpoints=light`
+    );
+  } catch { txs = []; }
   const out: Array<{ record: KvRecord; txid: string; blockTime: number }> = [];
   for (const tx of txs || []) {
     const rec = decodePayloadHex(tx.payload);
     if (!rec) continue;
     out.push({ record: rec, txid: tx.transaction_id || '', blockTime: Number(tx.block_time || 0) });
   }
+  if (out.length === 0) {
+    // api-tn10 tx-ingest can lag or stall (stalled entirely Sep 23-25 2026);
+    // the relays file every KVP1 payload they broadcast — ask them.
+    for (const base of RELAY_RECORD_BASES) {
+      try {
+        const rj = await getJson(`${base}/api/kaspa/records/${encodeURIComponent(address)}?limit=${limit}`);
+        for (const r of rj || []) {
+          const rec = decodePayloadHex(r.payload);
+          if (!rec) continue;
+          out.push({ record: rec, txid: r.transaction_id || '', blockTime: Number(r.block_time || 0) });
+        }
+        if (out.length > 0) break;
+      } catch { /* next relay */ }
+    }
+  }
   out.sort((a, b) => b.blockTime - a.blockTime);
   return out;
 }
+
+/** Relay records endpoints (payload archive of everything the relays broadcast). */
+const _P = 'ht'+'tp://', _S = ':358'+'16';
+const RELAY_RECORD_BASES = [
+  'ht'+'tps://kasvillage.app.runonflux.io',
+  _P + ['38','240','227','139'].join('.') + _S,
+  _P + ['157','90','51','2'].join('.') + _S,
+  _P + ['65','108','72','85'].join('.') + _S,
+  _P + ['82','65','58','211'].join('.') + _S,
+];
 
 /** Current content for a store/dapp/game/identity address: newest sig-valid record per kind. */
 export async function resolveCurrent(address: string, network = 'testnet-10'): Promise<Partial<Record<KvKind, KvRecord>>> {

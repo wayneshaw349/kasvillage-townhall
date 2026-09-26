@@ -21,6 +21,7 @@
 use actix_web::{web, HttpResponse, Responder};
 use serde::Deserialize;
 use serde_json::json;
+use once_cell::sync::Lazy;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -104,6 +105,10 @@ struct JsTx {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubmitReq {
+    /// Optional client hint: the address this KVP1 record is published to.
+    /// Used only to file the record in the relay's local records store.
+    #[serde(default)]
+    payload_address: Option<String>,
     transaction: JsTx,
     #[serde(default)]
     allow_orphan: Option<bool>,
@@ -338,6 +343,13 @@ pub async fn submit_tx(body: web::Json<SubmitReq>) -> impl Responder {
     match res {
         Ok(txid) => {
             println!("[KaspaRelay] broadcast ok: {}", txid);
+            if let Some(addr) = body.payload_address.as_deref() {
+                if let Some(pl) = body.transaction.payload.as_deref() {
+                    if !pl.is_empty() && (addr.starts_with("kaspatest:") || addr.starts_with("kaspa:")) && addr.len() <= 80 {
+                        store_relay_record(addr, &txid.to_string(), pl);
+                    }
+                }
+            }
             HttpResponse::Ok().json(json!({ "transactionId": txid.to_string() }))
         }
         Err(e) => {
@@ -348,9 +360,151 @@ pub async fn submit_tx(body: web::Json<SubmitReq>) -> impl Responder {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// blockwalk passthrough — stateless node proxies for client-side indexing.
+// ---------------------------------------------------------------------------
+pub async fn sink_info() -> impl Responder {
+    let client = match connect_client().await {
+        Ok(c) => c,
+        Err(e) => return HttpResponse::ServiceUnavailable().json(json!({ "error": e })),
+    };
+    let out = match client.get_block_dag_info().await {
+        Ok(i) => HttpResponse::Ok().json(json!({
+            "sink": i.sink.to_string(),
+            "virtual_daa_score": i.virtual_daa_score,
+            "pruning_point": i.pruning_point_hash.to_string(),
+        })),
+        Err(e) => HttpResponse::BadGateway().json(json!({ "error": format!("{}", e) })),
+    };
+    let _ = client.disconnect().await;
+    out
+}
+
+#[derive(Deserialize)]
+pub struct BlocksQ { low_hash: String, daa_max: Option<u64>, txs: Option<u8> }
+
+pub async fn blocks_page(q: web::Query<BlocksQ>) -> impl Responder {
+    let low = match RpcHash::from_str(&q.low_hash) {
+        Ok(h) => h,
+        Err(_) => return HttpResponse::BadRequest().json(json!({ "error": "bad low_hash" })),
+    };
+    // txs=0 -> FAST-FORWARD page: headers only, ~100x lighter. The walker skims
+    // pruning_point -> daa_from with txs=0, then re-requests with txs=1 inside
+    // the advertised span. daa_max stops the walk past the span.
+    let want_txs = q.txs.unwrap_or(1) != 0;
+    let client = match connect_client().await {
+        Ok(c) => c,
+        Err(e) => return HttpResponse::ServiceUnavailable().json(json!({ "error": e })),
+    };
+    let out = match client.get_blocks(Some(low), true, want_txs).await {
+        Ok(r) => {
+            let daa_max = q.daa_max.unwrap_or(u64::MAX);
+            let mut past_max = false;
+            let mut min_daa: u64 = u64::MAX;
+            let mut max_daa: u64 = 0;
+            let mut blocks = Vec::new();
+            for b in r.blocks.iter() {
+                let daa = b.header.daa_score;
+                if daa > daa_max { past_max = true; }
+                if daa < min_daa { min_daa = daa; }
+                if daa > max_daa { max_daa = daa; }
+                if want_txs {
+                    let txs: Vec<serde_json::Value> = b.transactions.iter().filter_map(|t| {
+                        if t.payload.is_empty() { return None; }
+                        let id = t.verbose_data.as_ref().map(|v| v.transaction_id.to_string()).unwrap_or_default();
+                        Some(json!({ "id": id, "payload_hex": hex::encode(&t.payload) }))
+                    }).collect();
+                    if !txs.is_empty() {
+                        blocks.push(json!({ "hash": b.header.hash.to_string(), "daa_score": daa, "txs": txs }));
+                    }
+                }
+            }
+            let next = r.block_hashes.last().map(|h| h.to_string());
+            let done = past_max || r.block_hashes.len() <= 1;
+            HttpResponse::Ok().json(json!({
+                "blocks": blocks, "next_low_hash": next, "done": done,
+                "page_daa_min": if min_daa == u64::MAX { 0 } else { min_daa },
+                "page_daa_max": max_daa,
+            }))
+        }
+        Err(e) => HttpResponse::BadGateway().json(json!({ "error": format!("{}", e) })),
+    };
+    let _ = client.disconnect().await;
+    out
+}
+
 // Route registration (matches the .route() style used in configure_routes_v3)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// relay_records — KVP1 payloads this relay broadcast, filed by address.
+// JSONL-persisted; a cache for wallets when public indexers lag (records are
+// self-verifying downstream via KVP1 signatures and content hashes).
+// ---------------------------------------------------------------------------
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct StoredRecord { txid: String, payload: String, ts: u64 }
+
+static RELAY_RECORDS: Lazy<std::sync::Mutex<std::collections::HashMap<String, Vec<StoredRecord>>>> =
+    Lazy::new(|| {
+        let mut map: std::collections::HashMap<String, Vec<StoredRecord>> = std::collections::HashMap::new();
+        let path = records_path();
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            for line in text.lines() {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    let (Some(a), Some(t), Some(p)) = (
+                        v.get("addr").and_then(|x| x.as_str()),
+                        v.get("txid").and_then(|x| x.as_str()),
+                        v.get("payload").and_then(|x| x.as_str()),
+                    ) else { continue };
+                    let ts = v.get("ts").and_then(|x| x.as_u64()).unwrap_or(0);
+                    map.entry(a.to_string()).or_default().push(StoredRecord { txid: t.to_string(), payload: p.to_string(), ts });
+                }
+            }
+        }
+        println!("[RelayRecords] loaded {} addresses from {}", map.len(), path);
+        std::sync::Mutex::new(map)
+    });
+
+fn records_path() -> String {
+    std::env::var("KV_RECORDS_PATH").unwrap_or_else(|_| "./relay_records.jsonl".to_string())
+}
+
+fn store_relay_record(addr: &str, txid: &str, payload_hex: &str) {
+    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    let line = serde_json::json!({ "addr": addr, "txid": txid, "payload": payload_hex, "ts": ts }).to_string();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(records_path()) {
+        use std::io::Write;
+        let _ = writeln!(f, "{}", line);
+    }
+    if let Ok(mut m) = RELAY_RECORDS.lock() {
+        let v = m.entry(addr.to_string()).or_default();
+        if v.iter().any(|r| r.txid == txid) { return; }
+        v.push(StoredRecord { txid: txid.to_string(), payload: payload_hex.to_string(), ts });
+        if v.len() > 4000 { let excess = v.len() - 4000; v.drain(0..excess); }
+    }
+}
+
+pub async fn get_relay_records(path: web::Path<String>, q: web::Query<std::collections::HashMap<String, String>>) -> impl Responder {
+    let addr = path.into_inner();
+    if !(addr.starts_with("kaspatest:") || addr.starts_with("kaspa:")) || addr.len() > 80 {
+        return HttpResponse::BadRequest().json(json!({ "error": "bad address" }));
+    }
+    let limit: usize = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(500).min(2000);
+    let out: Vec<serde_json::Value> = RELAY_RECORDS.lock().ok()
+        .and_then(|m| m.get(&addr).cloned())
+        .map(|mut v| {
+            v.sort_by(|a, b| b.ts.cmp(&a.ts));
+            v.into_iter().take(limit)
+                .map(|r| json!({ "transaction_id": r.txid, "payload": r.payload, "block_time": r.ts }))
+                .collect()
+        })
+        .unwrap_or_default();
+    HttpResponse::Ok().json(out)
+}
+
 pub fn configure_kaspa_relay_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/api/kaspa/relay-health", web::get().to(relay_health))
-        .route("/api/kaspa/submit-tx", web::post().to(submit_tx));
+        .route("/api/kaspa/sink", web::get().to(sink_info))
+        .route("/api/kaspa/blocks", web::get().to(blocks_page))
+        .route("/api/kaspa/submit-tx", web::post().to(submit_tx))
+        .route("/api/kaspa/records/{address}", web::get().to(get_relay_records));
 }

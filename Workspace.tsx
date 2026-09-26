@@ -784,6 +784,107 @@ const inputStyles = StyleSheet.create({
 });
 
 // ============================================================================
+
+// ============================================================================
+// [KV-CHAIN-GAME v2] owner-gated UNIVERSAL publisher: any pinned chain game
+// ============================================================================
+const KV_PUBLISHER_ADDR = 'kaspatest:qp7592kfylul443ee5950xe7jgv4rkgrv87ju8s96xz0sy3t79cnxmdmtcusz';
+const KvChainGamePublish: React.FC = () => {
+  const [myAddr, setMyAddr] = useState('');
+  const [glog, setGlog] = useState<string[]>([]);
+  const [gbusy, setGbusy] = useState('');
+  const [triple, setTriple] = useState('');
+  useEffect(() => { (async () => {
+    setMyAddr((await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '');
+  })(); }, []);
+  const gadd = (l: string) => setGlog((p) => [...p.slice(-150), l]);
+  const GAMES: Record<string, { bundle: any; head: string; nonceBase: number }> = require('./games_to_publish.js');
+  const runPublish = async (gameId: string) => {
+    if (gbusy) return;
+    setGbusy(gameId); setGlog([]); setTriple('');
+    try {
+      const entry = GAMES[gameId];
+      const { publishGamePuzzle, fetchGamePuzzle, TRUSTED_GAMES } = require('./game_chunks');
+      const { deriveStoreKeys } = require('./payload_publish');
+      const { _kvResolvePrivHex } = require('./proposal_share');
+      if (TRUSTED_GAMES[gameId] !== entry.head || entry.bundle.manifest.head !== entry.head) {
+        gadd('ERROR: ' + gameId + ' HEAD is not pinned in TRUSTED_GAMES — verify with TownHall first'); setGbusy(''); return;
+      }
+      const priv = await _kvResolvePrivHex();
+      if (!priv || !myAddr) { gadd('ERROR: wallet keys unavailable'); setGbusy(''); return; }
+      const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+      const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: 'testnet-10' as any };
+      try {
+        const led = require('./utxo_ledger');
+        const lt = await led.getLockedTotals();
+        gadd('owner ' + myAddr);
+        const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(myAddr) + '/utxos');
+        const uj = await ur.json();
+        const tot = (Array.isArray(uj) ? uj : []).reduce((a: bigint, u: any) => a + BigInt(u.utxoEntry?.amount || u.amount || '0'), 0n);
+        gadd('visible UTXOs ' + (Number(tot) / 1e8).toFixed(4) + ' KAS in ' + (Array.isArray(uj) ? uj.length : 0) + ' coins');
+        gadd('ledger locks: collateral ' + (Number(lt.collateral) / 1e8) + ' + IOU ' + (Number(lt.iou) / 1e8) + ' = ' + (Number(lt.total) / 1e8) + ' KAS');
+        if (lt.total > 0n) gadd('?? locks > 0 while summary shows 0 -> press RELEASE STALE LOCKS first');
+      } catch (pf: any) { gadd('preflight warn: ' + String(pf?.message || pf)); }
+      const m = entry.bundle.manifest;
+      const slots = Math.max(...m.frags.map((f: any) => f.slot)) + 1;
+      const slotAddresses = Array.from({ length: slots }, (_, i) => deriveStoreKeys(priv, entry.nonceBase + i, owner.network).address);
+      const manifestAddress = deriveStoreKeys(priv, entry.nonceBase + 86, owner.network).address;
+      slotAddresses.forEach((a: string, i: number) => gadd('slot ' + i + ' ' + a));
+      gadd('manifest ' + manifestAddress);
+      gadd(entry.bundle.frags.length + ' fragments -> publishing (keep this screen open)…');
+      const t0 = Date.now();
+      const res = await publishGamePuzzle(owner, m, entry.bundle.frags, slotAddresses, manifestAddress,
+        (done: number, total: number) => gadd('fragment ' + done + '/' + total + ' (' + Math.round((Date.now() - t0) / 1000) + 's)'));
+      if (!res.success) { gadd('PUBLISH FAILED: ' + res.error); setGbusy(''); return; }
+      gadd('manifest published, hash ' + res.manifestHash);
+      gadd('verifying: solving the puzzle back from chain…');
+      const back = await fetchGamePuzzle(manifestAddress, res.manifestHash, m.head, owner.network);
+      gadd(back.html ? 'ROUND-TRIP OK (' + back.html.length + ' bytes)' : 'ROUND-TRIP FAILED: ' + back.error);
+      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head });
+      setTriple(t);
+      await Clipboard.setStringAsync(t);
+      gadd('LAUNCH TRIPLE copied to clipboard.');
+    } catch (e: any) {
+      gadd('ERROR: ' + String(e?.message || e));
+    } finally { setGbusy(''); }
+  };
+  if (myAddr !== KV_PUBLISHER_ADDR) return null;   // owner gate
+  return (
+    <View style={{ backgroundColor: '#141210', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#6a5a34' }}>
+      <Text style={{ color: '#f0c860', fontWeight: '900', fontFamily: 'monospace', fontSize: 14 }}>?? PUBLISH CHAIN GAMES</Text>
+      <Text style={{ color: '#9a8f78', fontFamily: 'monospace', fontSize: 10, marginVertical: 6 }}>owner-only · pinned HEADs only · sequential txs</Text>
+      <TouchableOpacity disabled={!!gbusy} onPress={async () => {
+        try {
+          const led = require('./utxo_ledger');
+          const c = await led.releaseOrphanCollateral([]);
+          const i = await led.releaseOrphanIOUs([]);
+          const lt = await led.getLockedTotals();
+          gadd('released ' + c + ' collateral + ' + i + ' IOU orphan entries; locks now ' + (Number(lt.total) / 1e8) + ' KAS');
+        } catch (e: any) { gadd('release failed: ' + String(e?.message || e)); }
+      }} style={{ backgroundColor: '#1d2a18', borderWidth: 1, borderColor: '#3f5a34', borderRadius: 8, padding: 8, alignItems: 'center', marginBottom: 6 }}>
+        <Text style={{ color: '#9fd98a', fontFamily: 'monospace', fontSize: 11 }}>?? RELEASE STALE LOCKS (ledger cleanup)</Text>
+      </TouchableOpacity>
+      {Object.entries(GAMES).map(([id, e]: any) => (
+        <TouchableOpacity key={id} disabled={!!gbusy} onPress={() => runPublish(id)}
+          style={{ backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 8, padding: 10, alignItems: 'center', marginBottom: 6, opacity: gbusy && gbusy !== id ? 0.4 : 1 }}>
+          <Text style={{ color: '#f0c860', fontFamily: 'monospace', fontWeight: '700', fontSize: 12 }}>
+            {gbusy === id ? 'PUBLISHING ' + id + '…' : 'PUBLISH ' + id + ' (' + e.bundle.frags.length + ' frags)'}
+          </Text>
+        </TouchableOpacity>
+      ))}
+      <TouchableOpacity onPress={() => Clipboard.setStringAsync(glog.join(String.fromCharCode(10)))}
+        style={{ alignSelf: 'flex-start', backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 6, paddingVertical: 4, paddingHorizontal: 10, marginTop: 6 }}>
+        <Text style={{ color: '#f0c860', fontFamily: 'monospace', fontSize: 10 }}>?? COPY LOG</Text>
+      </TouchableOpacity>
+      <View style={{ height: 300, marginTop: 4 }}>
+        <ScrollView nestedScrollEnabled>
+          {glog.map((l, i) => <Text key={i} selectable style={{ color: l.indexOf('FAILED') >= 0 || l.indexOf('ERROR') >= 0 ? '#e06c5a' : '#e8ddc8', fontSize: 10, fontFamily: 'monospace' }}>{l}</Text>)}
+        </ScrollView>
+      </View>
+      {triple ? <Text selectable style={{ color: '#3fc1b0', fontSize: 10, fontFamily: 'monospace', marginTop: 6 }}>{triple}</Text> : null}
+    </View>
+  );
+};
 // DAPP QUALITY GATE MODAL
 // ============================================================================
 interface QualityGateModalProps {
@@ -4133,6 +4234,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         {/* DApps Tab */}
         {activeView === 'dapps' && (
           <SectionCard title="DApp & Game Management">
+            <KvChainGamePublish />
             <Text style={wsStyles.sectionSubtitle}>
               DApps are posted by YOU directly to Arweave. KasVillage verifies for display visibility only.
             </Text>
