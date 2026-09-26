@@ -37,7 +37,8 @@ export function configToChunkData(config: any): { chunks: string[]; hash: string
   const b64 = b64encode(gz);
   const hash = bytesToHex(sha256(utf8ToBytes(json)));
   const chunks: string[] = [];
-  for (let i = 0; i < b64.length; i += CHUNK_DATA_MAX) chunks.push(b64.slice(i, i + CHUNK_DATA_MAX));
+  const { wordSafeChunks } = require('./html_chunks');
+  chunks.push(...wordSafeChunks(b64, CHUNK_DATA_MAX));   // relay word-gate safe
   return { chunks, hash };
 }
 

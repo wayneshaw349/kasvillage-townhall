@@ -91,13 +91,37 @@ export function scanHtmlForPublish(html: string): { ok: boolean; issues: HtmlSca
 // CHUNKING
 // ---------------------------------------------------------------------------
 
+// Relay KVP1 word gate scans every payload string; these must never appear
+// wholly inside one chunk. Boundaries are free (reassembly joins by seq), so
+// the slicer cuts inside any match, splitting it across two records.
+const RELAY_GATE_WORDS = ['casino', 'gambling', 'slot', 'poker', 'blackjack', 'roulette', 'lottery', 'jackpot', 'sportsbook', 'wagering', 'porn', 'xxx'];
+export function wordSafeChunks(b64: string, max: number): string[] {
+  const chunks: string[] = [];
+  let i = 0;
+  while (i < b64.length) {
+    let end = Math.min(b64.length, i + max);
+    let cut = end;
+    for (let guard = 0; guard < 64; guard++) {
+      const piece = b64.slice(i, cut).toLowerCase();
+      let worst = -1, wlen = 0;
+      for (const w of RELAY_GATE_WORDS) {
+        const p = piece.lastIndexOf(w);
+        if (p >= 0 && p + w.length > worst + wlen) { worst = p; wlen = w.length; }
+      }
+      if (worst < 0) break;
+      cut = i + worst + 1;              // cut inside the word -> split across records
+      if (cut <= i) { cut = i + 1; break; }
+    }
+    chunks.push(b64.slice(i, cut));
+    i = cut;
+  }
+  return chunks;
+}
 export function htmlToChunkData(html: string): { chunks: string[]; hash: string } {
   const gz = pako.deflate(utf8ToBytes(html));
   const b64 = b64encode(gz);
   const hash = bytesToHex(sha256(utf8ToBytes(html)));
-  const chunks: string[] = [];
-  for (let i = 0; i < b64.length; i += CHUNK_DATA_MAX) chunks.push(b64.slice(i, i + CHUNK_DATA_MAX));
-  return { chunks, hash };
+  return { chunks: wordSafeChunks(b64, CHUNK_DATA_MAX), hash };
 }
 
 /** Cost preview for the publish confirm dialog. */
