@@ -123,7 +123,7 @@ export async function fetchGamePuzzle(
   try {
     const { config, error } = await fetchStoreConfig(manifestAddress, manifestHash, network);
     const m = config as GameManifest;
-    {
+    if (config) {
       const cached = await gameCacheLoad(pinnedHead, m.html_sha256);
       if (cached) { onProgress && onProgress(m.frags.length, m.frags.length); return { html: cached }; }
     }

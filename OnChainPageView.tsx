@@ -38,6 +38,15 @@ export interface OnChainPageViewProps {
 
 // Injected before page scripts run. Belt-and-braces: even if a link slipped the
 // scanners, this converts taps into postMessage instead of navigation.
+const CONSOLE_TAP = `
+(function(){
+  function post(kind, args){ try { window.ReactNativeWebView.postMessage(JSON.stringify({ kvlog: kind + ': ' + args.map(function(a){ try { return typeof a === 'string' ? a : JSON.stringify(a); } catch(e){ return String(a); } }).join(' ') })); } catch(e){} }
+  ['log','warn','error'].forEach(function(k){ var o = console[k]; console[k] = function(){ post(k, Array.prototype.slice.call(arguments)); o && o.apply(console, arguments); }; });
+  window.addEventListener('error', function(e){ post('onerror', [String(e.message || e), String(e.filename || '') + ':' + String(e.lineno || '')]); });
+  window.addEventListener('unhandledrejection', function(e){ post('unhandledrejection', [String((e.reason && e.reason.message) || e.reason)]); });
+})();
+`;
+
 const BRIDGE = `
 (function(){
   document.addEventListener('click', function(e){
@@ -63,7 +72,7 @@ const BRIDGE = `
 const CSP_META = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; media-src data:; font-src data:;">';
 function injectCsp(raw: string): string {
   if (/http-equiv=["']Content-Security-Policy["']/i.test(raw)) return raw;
-  if (/<head[^>]*>/i.test(raw)) return raw.replace(/<head([^>]*)>/i, '<head$1>' + CSP_META);
+  if (/<head(\s[^>]*)?>/i.test(raw)) return raw.replace(/<head(\s[^>]*)?>/i, (mm) => mm + CSP_META); // word-boundary: never matches JS like i<heads.length
   if (/<html[^>]*>/i.test(raw)) return raw.replace(/<html([^>]*)>/i, '<html$1><head>' + CSP_META + '</head>');
   return CSP_META + raw;
 }
@@ -86,7 +95,9 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
             (have, total) => { if (alive) setProgress('solving puzzle ' + have + '/' + total); })
         : await fetchHtmlPage(storeAddress, pageHash, network);
       if (!alive) return;
-      if (res.html) setHtml(injectCsp(res.html));
+      // Games: full inline-JS apps, verified by hash chain + scanner - the
+      // static-page CSP (default-src none, no scripts) would kill them.
+      if (res.html) setHtml(props.game ? res.html : injectCsp(res.html));
       else setError(res.error || 'page unavailable');
     })();
     return () => { alive = false; };
@@ -112,6 +123,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   }, [ownerPubkey, props]);
 
   const onMessage = useCallback((event: any) => {
+    try { const _d = JSON.parse(event?.nativeEvent?.data || '{}'); if (_d.kvlog !== undefined) { console.log('[GamePage]', _d.kvlog); return; } } catch {}
     if (handleKvNetMessage(event.nativeEvent.data, (js) => webRef.current?.injectJavaScript(js))) return;
     try {
       const msg = JSON.parse(event.nativeEvent.data);
@@ -123,7 +135,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   // Hard block: nothing navigates. kv:// is routed, everything else refused.
   const onShouldStartLoadWithRequest = useCallback((req: any) => {
     const url = String(req?.url || '');
-    if (url.startsWith('about:blank') || url === '' || url.startsWith('data:text/html')) return true;
+    if (url.startsWith('about:blank') || url === '' || url.startsWith('data:text/html') || url.startsWith('https://kv-game.local')) return true;
     if (url.startsWith('kv://')) { handleKvLink(url); return false; }
     setNotice('External links are disabled inside on-chain pages.');
     return false;
@@ -155,10 +167,10 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   return (
     <View style={styles.fill}>
       <WebView
-        source={{ html }}
-        originWhitelist={[]}
+        source={{ html, baseUrl: 'https://kv-game.local/' }}
+        originWhitelist={['https://kv-game.local']}
         ref={webRef}
-        injectedJavaScriptBeforeContentLoaded={BRIDGE + KV_WNET_INJECT}
+        injectedJavaScriptBeforeContentLoaded={CONSOLE_TAP + BRIDGE + KV_WNET_INJECT}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         javaScriptEnabled

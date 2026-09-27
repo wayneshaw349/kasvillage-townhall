@@ -798,7 +798,57 @@ const KvChainGamePublish: React.FC = () => {
     setMyAddr((await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '');
   })(); }, []);
   const gadd = (l: string) => setGlog((p) => [...p.slice(-150), l]);
-  const GAMES: Record<string, { bundle: any; head: string; nonceBase: number }> = require('./games_to_publish.js');
+  const GAMES: Record<string, { bundle: any; head: string; nonceBase: number }> = require('./games_to_publish');
+  const runAnnounceOnly = async (gameId: string) => {
+    if (gbusy) return;
+    setGbusy(gameId); setGlog([]);
+    try {
+      const entry = GAMES[gameId];
+      if (!entry) { gadd('unknown game ' + gameId); setGbusy(''); return; }
+      const m = entry.bundle.manifest;
+      const { deriveStoreKeys, announceToRegistry } = require('./payload_publish');
+      const { _kvResolvePrivHex } = require('./proposal_share');
+      const priv = await _kvResolvePrivHex();
+      if (!priv || !myAddr) { gadd('ERROR: wallet keys unavailable'); setGbusy(''); return; }
+      const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+      const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: 'testnet-10' as any };
+      const slots = Math.max(...m.frags.map((f: any) => f.slot)) + 1;
+      const slotAddresses = Array.from({ length: slots }, (_, i) => deriveStoreKeys(priv, entry.nonceBase + i, owner.network).address);
+      const manifestAddress = deriveStoreKeys(priv, entry.nonceBase + 86, owner.network).address;
+      gadd('announce-only for ' + gameId);
+      gadd('manifest ' + manifestAddress);
+      let publishAnchor = '';
+      try {
+        const sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink');
+        publishAnchor = String((await sr.json()).sink || '');
+        if (publishAnchor) gadd('walk anchor: ' + publishAnchor.slice(0, 16) + '…');
+      } catch {}
+      let daaSpan: any = {};
+      try {
+        let lo = Number.MAX_SAFE_INTEGER, hi = 0;
+        for (const sa of slotAddresses.concat([manifestAddress])) {
+          const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(sa) + '/utxos');
+          for (const u of (await ur.json()) || []) {
+            const d = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
+            if (d > 0) { if (d < lo) lo = d; if (d > hi) hi = d; }
+          }
+        }
+        if (hi > 0) daaSpan = { daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) };
+        gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to);
+      } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
+      // manifestHash is deterministic: sha256 of the manifest JSON — the exact
+      // recipe publishConfigChunks used, so this equals the published hash.
+      const _u8 = (t: string) => { const s2 = unescape(encodeURIComponent(t)); const a = new Uint8Array(s2.length); for (let i = 0; i < s2.length; i++) a[i] = s2.charCodeAt(i); return a; };
+      const manifestHash = bytesToHex(sha256(_u8(JSON.stringify({ ...m, addresses: slotAddresses }))));
+      gadd('manifestHash ' + manifestHash.slice(0, 16) + '…');
+      const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...daaSpan };
+      gadd('announcing to game registry…');
+      const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: manifestHash } as any);
+      if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '… (~1 KAS)');
+      else gadd('announce failed: ' + String((_ann && _ann.error) || 'unknown'));
+    } catch (e: any) { gadd('announce error: ' + String(e?.message || e)); }
+    setGbusy('');
+  };
   const runPublish = async (gameId: string) => {
     if (gbusy) return;
     setGbusy(gameId); setGlog([]); setTriple('');
@@ -831,6 +881,12 @@ const KvChainGamePublish: React.FC = () => {
       const manifestAddress = deriveStoreKeys(priv, entry.nonceBase + 86, owner.network).address;
       slotAddresses.forEach((a: string, i: number) => gadd('slot ' + i + ' ' + a));
       gadd('manifest ' + manifestAddress);
+      let publishAnchor = '';
+      try {
+        const sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink');
+        publishAnchor = String((await sr.json()).sink || '');
+        if (publishAnchor) gadd('walk anchor: ' + publishAnchor.slice(0, 16) + '…');
+      } catch {}
       gadd(entry.bundle.frags.length + ' fragments -> publishing (keep this screen open)…');
       const t0 = Date.now();
       const res = await publishGamePuzzle(owner, m, entry.bundle.frags, slotAddresses, manifestAddress,
@@ -840,9 +896,30 @@ const KvChainGamePublish: React.FC = () => {
       gadd('verifying: solving the puzzle back from chain…');
       const back = await fetchGamePuzzle(manifestAddress, res.manifestHash, m.head, owner.network);
       gadd(back.html ? 'ROUND-TRIP OK (' + back.html.length + ' bytes)' : 'ROUND-TRIP FAILED: ' + back.error);
-      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head });
+      let daaSpan: { daa_from?: number; daa_to?: number } = {};
+      try {
+        let lo = Number.MAX_SAFE_INTEGER, hi = 0;
+        for (const sa of slotAddresses.concat([manifestAddress])) {
+          const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(sa) + '/utxos');
+          for (const u of (await ur.json()) || []) {
+            const d = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
+            if (d > 0) { if (d < lo) lo = d; if (d > hi) hi = d; }
+          }
+        }
+        if (hi > 0) daaSpan = { daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
+        gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to);
+      } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
+      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...daaSpan });
       setTriple(t);
       await Clipboard.setStringAsync(t);
+      try {
+        gadd('announcing to game registry…');
+        const { announceToRegistry } = require('./payload_publish');
+        const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...daaSpan };
+        const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: res.manifestHash } as any);
+        if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '…');
+        else gadd('announce failed (game still live): ' + String((_ann && _ann.error) || 'unknown'));
+      } catch (e: any) { gadd('announce error (game still live): ' + String(e?.message || e)); }
       gadd('LAUNCH TRIPLE copied to clipboard.');
     } catch (e: any) {
       gadd('ERROR: ' + String(e?.message || e));
@@ -856,8 +933,20 @@ const KvChainGamePublish: React.FC = () => {
       <TouchableOpacity disabled={!!gbusy} onPress={async () => {
         try {
           const led = require('./utxo_ledger');
-          const c = await led.releaseOrphanCollateral([]);
-          const i = await led.releaseOrphanIOUs([]);
+          const { listActiveAgreements } = require('./local_agreements');
+          const live = await listActiveAgreements();
+          const liveIds = live.map((a: any) => a.agrId).filter(Boolean);
+          if (live.length > 0) {
+            gadd('GUARD: ' + live.length + ' live agreement(s) — keeping their locks:');
+            live.forEach((a: any) => gadd('  ' + String(a.agrId).slice(0, 16) + '  step=' + a.step));
+          }
+          const c = await led.releaseOrphanCollateral(liveIds);
+          let i = 0;
+          if (live.length === 0) {
+            i = await led.releaseOrphanIOUs([]);
+          } else {
+            gadd('GUARD: IOU sweep SKIPPED (live agreements present — settle them first)');
+          }
           const lt = await led.getLockedTotals();
           gadd('released ' + c + ' collateral + ' + i + ' IOU orphan entries; locks now ' + (Number(lt.total) / 1e8) + ' KAS');
         } catch (e: any) { gadd('release failed: ' + String(e?.message || e)); }
@@ -865,12 +954,20 @@ const KvChainGamePublish: React.FC = () => {
         <Text style={{ color: '#9fd98a', fontFamily: 'monospace', fontSize: 11 }}>?? RELEASE STALE LOCKS (ledger cleanup)</Text>
       </TouchableOpacity>
       {Object.entries(GAMES).map(([id, e]: any) => (
+        <React.Fragment key={id}>
+        <TouchableOpacity key={id + '-ann'} disabled={!!gbusy} onPress={() => runAnnounceOnly(id)}
+          style={{ backgroundColor: '#241f36', borderWidth: 1, borderColor: '#7c5cff', borderRadius: 8, padding: 10, marginBottom: 6 }}>
+          <Text style={{ color: '#b9a6ff', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>
+            {gbusy === id ? 'WORKING…' : 'ANNOUNCE ' + id + ' (registry only, ~1 KAS)'}
+          </Text>
+        </TouchableOpacity>
         <TouchableOpacity key={id} disabled={!!gbusy} onPress={() => runPublish(id)}
           style={{ backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 8, padding: 10, alignItems: 'center', marginBottom: 6, opacity: gbusy && gbusy !== id ? 0.4 : 1 }}>
           <Text style={{ color: '#f0c860', fontFamily: 'monospace', fontWeight: '700', fontSize: 12 }}>
             {gbusy === id ? 'PUBLISHING ' + id + '…' : 'PUBLISH ' + id + ' (' + e.bundle.frags.length + ' frags)'}
           </Text>
         </TouchableOpacity>
+        </React.Fragment>
       ))}
       <TouchableOpacity onPress={() => Clipboard.setStringAsync(glog.join(String.fromCharCode(10)))}
         style={{ alignSelf: 'flex-start', backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 6, paddingVertical: 4, paddingHorizontal: 10, marginTop: 6 }}>

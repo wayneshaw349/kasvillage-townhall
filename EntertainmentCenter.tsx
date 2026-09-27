@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import EngineHost from './EngineHost';
+import OnChainPageView from './OnChainPageView';
 import { SCENE_ENGINE_HTML } from './scene_engine_html';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -392,6 +393,32 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
   const [activeBoard, setActiveBoard] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [dapps, setDapps] = useState<DApp[]>(mockDApps);
+  const [playingChain, setPlayingChain] = useState<any>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const AS = require('@react-native-async-storage/async-storage').default;
+        const raw = await AS.getItem('kv_installed_games');
+        const inst = raw ? JSON.parse(raw) : [];
+        if (!inst.length) return;
+        const cards: DApp[] = inst.map((g: any) => ({
+          id: 'chain-' + (g.head || g.id),
+          name: g.name || g.id,
+          category: 'On-Chain',
+          board: 'Main',
+          url: '',
+          stakeKas: 0, // installed locally; no stake concept
+          lockStart: '', lockEnd: '',
+          trustScore: 0,
+          ownerApt: '',
+          verified: true,
+          price: 0,
+          ...( { chainGame: g } as any ),
+        } as any));
+        setDapps((prev) => [...cards, ...prev.filter((d) => !String(d.id).startsWith('chain-'))]);
+      } catch (e) { console.warn('[EC] installed games load failed:', e); }
+    })();
+  }, []);
   const [bookshelf, setBookshelf] = useState<BookshelfItem[]>(mockBookshelf);
   const [selectedDApp, setSelectedDApp] = useState<DApp | null>(null);
   // In-app engine player. null = not playing; otherwise the fetched
@@ -404,6 +431,13 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
   const launchDApp = async (dapp: DApp) => {
     if (launching) return;
     setLaunching(true);
+    const _cg = (dapp as any).chainGame;
+    if (_cg && _cg.manifestAddress && _cg.head) {
+      // Installed chain game: OnChainPageView solves cache-first + verifies.
+      setPlayingChain(_cg);
+      setLaunching(false);
+      return;
+    }
     try {
       const _gh = (dapp as any).gameHash || '';
       if (_gh) {
@@ -468,6 +502,17 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
 
   // Full-screen player takes over the Entertainment Center while a game
   // is running; closing returns to the directory exactly where it was.
+  if (playingChain) {
+    return (
+      <OnChainPageView
+        storeAddress={playingChain.manifestAddress}
+        pageHash={playingChain.manifestHash}
+        network={'testnet-10'}
+        game={{ manifestAddress: playingChain.manifestAddress, manifestHash: playingChain.manifestHash, head: playingChain.head }}
+        onClose={() => setPlayingChain(null)}
+      />
+    );
+  }
   if (playingGame) {
     return (
       <EngineHost

@@ -140,7 +140,7 @@ const COLORS = {
 // ============================================================================
 // SECTION TYPES
 // ============================================================================
-type Section = 'dapps' | 'storefronts' | 'coupons' | 'academics' | 'services';
+type Section = 'dapps' | 'storefronts' | 'coupons' | 'academics' | 'services' | 'games';
 
 const SECTION_CONFIG: { key: Section; label: string; icon: string; color: string }[] = [
   { key: 'dapps', label: 'DApps', icon: '🎮', color: COLORS.purple600 },
@@ -148,6 +148,7 @@ const SECTION_CONFIG: { key: Section; label: string; icon: string; color: string
   { key: 'coupons', label: 'Coupons', icon: '🎟️', color: COLORS.amber600 },
   { key: 'academics', label: 'Academics', icon: '🎓', color: COLORS.indigo600 },
   { key: 'services', label: 'Services', icon: '🔧', color: COLORS.green600 },
+  { key: 'games', label: 'Games', icon: '🕹️', color: COLORS.purple600 },
 ];
 
 // ============================================================================
@@ -338,6 +339,20 @@ const errorStyles = StyleSheet.create({
 // ============================================================================
 // EMPTY STATE
 // ============================================================================
+function GameRegistryCard({ item, onInstall, installing }: any) {
+  return (
+    <View style={cardStyles.storefrontCard}>
+      <Text style={{ fontSize: 22 }}>🕹️</Text>
+      <Text style={{ fontWeight: '700', marginTop: 4 }} numberOfLines={1}>{item.name}</Text>
+      <Text style={{ color: '#666', fontSize: 11 }} numberOfLines={1}>{item.category || 'Game'} · on-chain · verified by hash</Text>
+      <TouchableOpacity onPress={() => onInstall(item)} disabled={!!installing}
+        style={{ marginTop: 8, backgroundColor: installing ? '#999' : '#7c3aed', borderRadius: 8, paddingVertical: 6, alignItems: 'center' }}>
+        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{installing ? 'DOWNLOADING…' : 'DOWNLOAD'}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 function EmptyState({ section }: { section: Section }) {
   const messages: Record<Section, { icon: string; title: string; subtitle: string }> = {
     dapps: { icon: '🎮', title: 'No DApps Yet', subtitle: 'Verified DApps will appear here' },
@@ -345,6 +360,7 @@ function EmptyState({ section }: { section: Section }) {
     coupons: { icon: '🎟️', title: 'No Coupons', subtitle: 'Active coupons will appear here' },
     academics: { icon: '🎓', title: 'No Academics', subtitle: 'DKIM-verified researchers will appear here' },
     services: { icon: '🔧', title: 'No Services', subtitle: 'Verified service providers will appear here' },
+    games: { icon: '🕹️', title: 'No Games Found', subtitle: 'Search a game name — on-chain games appear here' },
   };
   const msg = messages[section];
 
@@ -612,6 +628,8 @@ export default function VillageMailbox() {
   const [coupons, setCoupons] = useState<CouponEntry[]>([]);
   const [academics, setAcademics] = useState<AcademicEntry[]>([]);
   const [services, setServices] = useState<ServiceEntry[]>([]);
+  const [games, setGames] = useState<any[]>([]);
+  const [installingGame, setInstallingGame] = useState<string>('');
   
   // Pagination
   const [cursors, setCursors] = useState<Record<Section, string | undefined>>({
@@ -677,6 +695,31 @@ export default function VillageMailbox() {
           result.items = result.items.filter((s: ServiceEntry) => s.townhall.verified);
           setServices(isRefresh ? result.items : [...services, ...result.items]);
           break;
+        case 'games': {
+          // Deterministic game registry, read through the relay-fallback rail.
+          const pp = require('./payload_publish');
+          const kp = require('./kaspa_payload');
+          const regAddr = pp.registryAddress('game', 'testnet-10');
+          const fetchR = kp.fetchRecords || kp.fetchPayloadRecords || kp.fetchAddressRecords;
+          const rows: any[] = (await fetchR(regAddr, 'testnet-10')) || [];
+          const h2s = (hx: string) => { let o = ''; for (let i = 0; i < hx.length; i += 2) o += String.fromCharCode(parseInt(hx.substr(i, 2), 16)); try { return decodeURIComponent(escape(o)); } catch { return o; } };
+          const items: any[] = [];
+          const seen = new Set<string>();
+          for (const row of rows) {
+            let r: any = (row && row.record) ? row.record : row;
+            if (r && !r.k && typeof r.payload === 'string') { try { const raw = h2s(r.payload); r = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw); } catch { continue; } }
+            if (!r || r.k !== 'registry' || !r.d) continue;
+            let quad: any = null; try { quad = r.d.primaryLink ? JSON.parse(r.d.primaryLink) : null; } catch {}
+            if (!quad || !quad.head || !quad.manifestAddress || !quad.manifestHash) continue;
+            if (seen.has(quad.head)) continue;
+            seen.add(quad.head);
+            items.push({ name: r.d.name || quad.game, category: r.d.category || 'Game', t: r.t || 0, quad });
+          }
+          items.sort((a, b) => b.t - a.t);
+          result = { items, nextCursor: undefined, hasMore: false } as any;
+          setGames(items);
+          break;
+        }
       }
 
       setCursors(prev => ({ ...prev, [section]: result.nextCursor }));
@@ -705,7 +748,27 @@ export default function VillageMailbox() {
       case 'coupons': return coupons;
       case 'academics': return academics;
       case 'services': return services;
+      case 'games': return games;
     }
+  };
+
+  const installGame = async (item: any) => {
+    const q = item.quad;
+    if (!q || installingGame) return;
+    setInstallingGame(q.head);
+    try {
+      const gc = require('./game_chunks');
+      const r = await gc.fetchGamePuzzle(q.manifestAddress, q.manifestHash, q.head, 'testnet-10');
+      if (!r || !r.html) throw new Error((r && r.error) || 'download failed');
+      const AS = require('@react-native-async-storage/async-storage').default;
+      const raw = await AS.getItem('kv_installed_games');
+      const list = raw ? JSON.parse(raw) : [];
+      const next = [{ id: q.game || item.name, name: item.name || q.game, installedAt: Date.now(), ...q },
+        ...list.filter((g: any) => g.head !== q.head)];
+      await AS.setItem('kv_installed_games', JSON.stringify(next));
+      Alert.alert('Installed ✓', (item.name || q.game) + ' downloaded and hash-verified. Open it from the Entertainment Center.');
+    } catch (e: any) { Alert.alert('Install failed', String(e?.message || e)); }
+    setInstallingGame('');
   };
 
   // Filter by query
@@ -713,13 +776,23 @@ export default function VillageMailbox() {
     const data = getCurrentData();
     if (!query.trim()) return []; // search-first: no auto-populated feed
     
-    const q = query.toLowerCase();
+    let q = query.toLowerCase();
+    // Time tiers: "shoes week" / "kascity 30 hours" / "dapp 2 days" -> cutoff
+    let cutoff = 0;
+    const tm = q.match(/(?:last\s+)?(\d+)?\s*(hour|day|week|month)s?\b/);
+    if (tm) {
+      const nN = tm[1] ? parseInt(tm[1], 10) : 1;
+      const unit: any = { hour: 3600e3, day: 86400e3, week: 604800e3, month: 2592000e3 };
+      cutoff = Date.now() - nN * unit[tm[2]];
+      q = q.replace(tm[0], '').trim();
+    }
     return data.filter((item: any) => {
+      if (cutoff && item.t && item.t < cutoff) return false;
       const searchable = [
         item.name, item.title, item.storeName, item.description, 
         item.category, item.institution, item.field
       ].filter(Boolean).join(' ').toLowerCase();
-      return searchable.includes(q);
+      return q ? searchable.includes(q) : true;
     });
   }, [section, dapps, storefronts, coupons, academics, services, query]);
 
@@ -794,6 +867,7 @@ export default function VillageMailbox() {
       case 'coupons': return <CouponCard item={item} onPress={onPress} />;
       case 'academics': return <AcademicCard item={item} onPress={onPress} />;
       case 'services': return <ServiceCard item={item} onPress={onPress} />;
+      case 'games': return <GameRegistryCard item={item} onInstall={installGame} installing={installingGame === (item.quad && item.quad.head)} />;
     }
   };
 
