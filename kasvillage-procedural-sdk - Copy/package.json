@@ -1,0 +1,50 @@
+{
+  "name": "kasvillage-procedural-sdk",
+  "version": "2.0.0",
+  "description": "KasVillage Procedural Generation SDK - Constrained avatar and background generation with no realistic faces",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "prepublishOnly": "npm run build",
+    "test": "vitest",
+    "lint": "eslint src/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kasvillage/procedural-sdk.git"
+  },
+  "keywords": [
+    "kasvillage",
+    "procedural",
+    "avatar",
+    "generation",
+    "svg",
+    "blockchain",
+    "kaspa"
+  ],
+  "author": "KasVillage",
+  "license": "MIT",
+  "peerDependencies": {
+    "@noble/hashes": "^1.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "eslint": "^8.55.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}

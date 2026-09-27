@@ -339,7 +339,7 @@ const errorStyles = StyleSheet.create({
 // ============================================================================
 // EMPTY STATE
 // ============================================================================
-function GameRegistryCard({ item, onInstall, installing }: any) {
+function GameRegistryCard({ item, onInstall, installing, onTip }: any) {
   const R = require('react');
   const [xp, setXp] = R.useState(null as number | null);
   const [tr, setTr] = R.useState(null as any);
@@ -384,6 +384,12 @@ function GameRegistryCard({ item, onInstall, installing }: any) {
         style={{ marginTop: 8, backgroundColor: installing ? '#999' : (item.warn ? '#b91c1c' : '#7c3aed'), borderRadius: 8, paddingVertical: 6, alignItems: 'center' }}>
         <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{installing ? 'DOWNLOADING…' : 'DOWNLOAD'}</Text>
       </TouchableOpacity>
+      {item.quad && item.quad.tip_addr && onTip ? (
+        <TouchableOpacity onPress={() => onTip(item)}
+          style={{ marginTop: 6, borderColor: '#7c3aed', borderWidth: 1, borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}>
+          <Text style={{ color: '#b9a6ff', fontWeight: '700', fontSize: 12 }}>{'💜 TIP THE DEV'}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -835,6 +841,40 @@ export default function VillageMailbox() {
     }
   };
 
+  const [tipT, setTipT] = useState<any>(null);
+  const [tipAmt, setTipAmt] = useState('');
+  const [tipBusy, setTipBusy] = useState(false);
+  const tipDev = (item: any) => {
+    const addr = item && item.quad && item.quad.tip_addr;
+    if (!addr || !(String(addr).startsWith('kaspatest:') || String(addr).startsWith('kaspa:'))) return;
+    setTipAmt(''); setTipT(item);
+  };
+  const doTip = async () => {
+    const addr = tipT && tipT.quad && tipT.quad.tip_addr;
+    const kas = Number(tipAmt || '0');
+    if (!addr) return;
+    if (!(kas > 0) || kas > 5000) { Alert.alert('Invalid amount', 'Enter between 0 and 5000 KAS.'); return; }
+    setTipBusy(true);
+    try {
+      const ps = require('./proposal_share');
+      const SS = require('expo-secure-store');
+      const sender = await SS.getItemAsync('kaspa_address');
+      const priv = await ps._kvResolvePrivHex();
+      if (!sender || !priv) throw new Error('wallet identity unavailable');
+      const { sendKaspaViaRest } = require('./kaspa_rest_tx');
+      const r: any = await sendKaspaViaRest({
+        senderAddress: sender, recipientAddress: String(addr),
+        amountSompi: BigInt(Math.round(kas * 1e8)),
+        privateKeyHex: priv, network: 'testnet-10' as any,
+      });
+      if (r && r.success && (r.txId || r.transactionId)) {
+        setTipT(null);
+        Alert.alert('Tip sent \u2713', kas + ' KAS \u2192 ' + String(r.txId || r.transactionId).slice(0, 18) + '\u2026');
+      } else { Alert.alert('Tip failed', String((r && r.error) || 'unknown')); }
+    } catch (e: any) { Alert.alert('Tip failed', String(e?.message || e)); }
+    setTipBusy(false);
+  };
+
   const installGame = async (item: any) => {
     const q = item.quad;
     if (!q || installingGame) return;
@@ -951,7 +991,7 @@ export default function VillageMailbox() {
       case 'coupons': return <CouponCard item={item} onPress={onPress} />;
       case 'academics': return <AcademicCard item={item} onPress={onPress} />;
       case 'services': return <ServiceCard item={item} onPress={onPress} />;
-      case 'games': return <GameRegistryCard item={item} onInstall={installGame} installing={installingGame === (item.quad && item.quad.head)} />;
+      case 'games': return <GameRegistryCard item={item} onInstall={installGame} installing={installingGame === (item.quad && item.quad.head)} onTip={tipDev} />;
     }
   };
 
@@ -1065,6 +1105,36 @@ export default function VillageMailbox() {
       </View>
 
       {/* Game generator - descriptor fetched from L1, hash verified, rendered on-device */}
+      <Modal visible={!!tipT} animationType="fade" transparent onRequestClose={() => setTipT(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', padding: 22 }}>
+          <View style={{ backgroundColor: '#15151f', borderRadius: 14, padding: 18, borderColor: '#7c3aed', borderWidth: 1 }}>
+            <Text style={{ color: '#b9a6ff', fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>{'\U0001F49C TIP THE DEV'}</Text>
+            <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', marginTop: 6 }}>{(tipT && tipT.name) || 'dev'}</Text>
+            <Text style={{ color: '#8a8aa0', fontSize: 10, marginTop: 8 }}>TO (declared by dev in their announce)</Text>
+            <Text style={{ color: '#ddd', fontSize: 10, fontFamily: 'monospace', marginTop: 2 }} selectable>
+              {(tipT && tipT.quad && tipT.quad.tip_addr) || ''}
+            </Text>
+            <TextInput value={tipAmt} onChangeText={setTipAmt} keyboardType="decimal-pad" placeholder="0.0"
+              placeholderTextColor="#555" editable={!tipBusy}
+              style={{ marginTop: 14, backgroundColor: '#0b0b12', color: '#fff', borderRadius: 9, paddingHorizontal: 12,
+                paddingVertical: 10, fontSize: 22, fontWeight: '700', borderColor: '#333', borderWidth: 1 }} />
+            <Text style={{ color: '#6f6f85', fontSize: 9, marginTop: 8, lineHeight: 13 }}>
+              {'Sent straight from your wallet to the dev. KasVillage never holds or fees it. Never send KAS to an address typed inside a game or page \u2014 only through sheets like this one.'}
+            </Text>
+            <View style={{ flexDirection: 'row', marginTop: 14, gap: 8 }}>
+              <TouchableOpacity onPress={() => setTipT(null)} disabled={tipBusy}
+                style={{ flex: 1, paddingVertical: 11, borderRadius: 9, borderColor: '#444', borderWidth: 1, alignItems: 'center' }}>
+                <Text style={{ color: '#aaa', fontWeight: '700', fontSize: 12 }}>CANCEL</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={doTip} disabled={tipBusy}
+                style={{ flex: 2, paddingVertical: 11, borderRadius: 9, backgroundColor: tipBusy ? '#555' : '#7c3aed', alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>{tipBusy ? 'SENDING\u2026' : 'SEND TIP'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={!!gameView} animationType="slide" transparent onRequestClose={() => setGameView(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(28,25,23,0.85)', justifyContent: 'center', padding: rs.s(20) }}>
           <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(18), maxHeight: '88%' }}>

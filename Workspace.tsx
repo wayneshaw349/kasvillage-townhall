@@ -793,6 +793,23 @@ const KvChainGamePublish: React.FC = () => {
   const [myAddr, setMyAddr] = useState('');
   const [glog, setGlog] = useState<string[]>([]);
   const [gbusy, setGbusy] = useState('');
+  // Tips are OPT-IN. tip_addr enters the announced quad only while this is on,
+  // and cards render a TIP button only when a quad declares one. Off by
+  // default; the choice persists per device.
+  const [tipOn, setTipOn] = useState(false);
+  useEffect(() => { (async () => {
+    try {
+      const AS = require('@react-native-async-storage/async-storage').default;
+      setTipOn((await AS.getItem('kv_tip_optin')) === '1');
+    } catch {}
+  })(); }, []);
+  const toggleTip = async (v: boolean) => {
+    setTipOn(v);
+    try {
+      const AS = require('@react-native-async-storage/async-storage').default;
+      await AS.setItem('kv_tip_optin', v ? '1' : '0');
+    } catch {}
+  };
   const [triple, setTriple] = useState('');
   useEffect(() => { (async () => {
     setMyAddr((await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '');
@@ -845,7 +862,7 @@ const KvChainGamePublish: React.FC = () => {
       const _u8 = (t: string) => { const s2 = unescape(encodeURIComponent(t)); const a = new Uint8Array(s2.length); for (let i = 0; i < s2.length; i++) a[i] = s2.charCodeAt(i); return a; };
       const manifestHash = bytesToHex(sha256(_u8(JSON.stringify({ ...m, addresses: slotAddresses }))));
       gadd('manifestHash ' + manifestHash.slice(0, 16) + '…');
-      const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...daaSpan };
+      const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...daaSpan };
       gadd('announcing to game registry…');
       const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: manifestHash } as any);
       if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '… (~1 KAS)');
@@ -918,13 +935,13 @@ const KvChainGamePublish: React.FC = () => {
         if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
         gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to + ' | pledge ' + (daaSpan.pledge_kas || 0) + ' KAS');
       } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
-      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...daaSpan });
+      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...daaSpan });
       setTriple(t);
       await Clipboard.setStringAsync(t);
       try {
         gadd('announcing to game registry…');
         const { announceToRegistry } = require('./payload_publish');
-        const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...daaSpan };
+        const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...daaSpan };
         const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: res.manifestHash } as any);
         if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '…');
         else gadd('announce failed (game still live): ' + String((_ann && _ann.error) || 'unknown'));
@@ -961,6 +978,25 @@ const KvChainGamePublish: React.FC = () => {
         } catch (e: any) { gadd('release failed: ' + String(e?.message || e)); }
       }} style={{ backgroundColor: '#1d2a18', borderWidth: 1, borderColor: '#3f5a34', borderRadius: 8, padding: 8, alignItems: 'center', marginBottom: 6 }}>
         <Text style={{ color: '#9fd98a', fontFamily: 'monospace', fontSize: 11 }}>?? RELEASE STALE LOCKS (ledger cleanup)</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => toggleTip(!tipOn)} activeOpacity={0.8}
+        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: tipOn ? '#241f36' : '#17171f',
+          borderWidth: 1, borderColor: tipOn ? '#7c5cff' : '#333', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+        <View style={{ width: 20, height: 20, borderRadius: 4, borderWidth: 2, marginRight: 10,
+          borderColor: tipOn ? '#7c5cff' : '#555', backgroundColor: tipOn ? '#7c5cff' : 'transparent',
+          alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '900' }}>{tipOn ? '\u2713' : ''}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: tipOn ? '#b9a6ff' : '#888', fontFamily: 'monospace', fontWeight: '800', fontSize: 12 }}>
+            {'\U0001F49C ACCEPT TIPS' + (tipOn ? '' : '  (off)')}
+          </Text>
+          <Text style={{ color: '#6f6f85', fontSize: 9, marginTop: 3, lineHeight: 12 }}>
+            {tipOn
+              ? 'Your address goes into the announced quad. Players see a TIP button; KAS goes wallet-to-wallet, never through KasVillage.'
+              : 'No tip address is published and no TIP button is shown. Turn on BEFORE announcing to take effect.'}
+          </Text>
+        </View>
       </TouchableOpacity>
       {Object.entries(GAMES).map(([id, e]: any) => (
         <React.Fragment key={id}>
