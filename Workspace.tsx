@@ -3573,6 +3573,13 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         }
       }
       setPubStage('Anchoring pledge on Kaspa L1...');
+      // Anchor BEFORE the first chunk tx, so the walk starts just ahead of the
+      // content instead of crawling from the pruning point.
+      let _stAnchor = '';
+      try {
+        const _sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink');
+        _stAnchor = String((await _sr.json()).sink || '');
+      } catch {}
       const _pub: any = await publishContent(_owner, 'store', {
         name: brandName,
         category: storeCategory,
@@ -3618,7 +3625,19 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         try {
           setPubStage('Announcing to registry...');
           const _annHash = _ck.success ? _ck.hash : _cfgHash;
-          const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _annHash });
+          let _stCoords: any = undefined;
+          try {
+            let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
+            const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(_pub.storeAddress) + '/utxos');
+            for (const u of (await ur.json()) || []) {
+              const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
+              if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
+              pl += Number(u.utxoEntry?.amount || u.amount || 0);
+            }
+            if (hi > 0) _stCoords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(_stAnchor ? { anchor_hash: _stAnchor } : {}) };
+            console.log('[Workspace] store coords', _stCoords);
+          } catch (de) { console.warn('[Workspace] store daa span skipped:', de); }
+          const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _annHash, coords: _stCoords });
           if (!_ann || _ann.success === false) console.warn('[Workspace] registry announce failed (store still live):', _ann && _ann.error);
           else console.log('[Workspace] announced to registry:', _ann.registryAddr, 'cfgHash:', _annHash.slice(0, 16));
         } catch (e) { console.warn('[Workspace] registry announce error (store still live):', e); }
@@ -4462,13 +4481,29 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                         return;
                       }
                     }
+                    let _dpAnchor = '';
+                    try {
+                      const _sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink');
+                      _dpAnchor = String((await _sr.json()).sink || '');
+                    } catch {}
                     const _pub: any = await publishContent(_owner, 'dapp', { name: _gname, category: 'GameGrid', contentHash: _cHash }, 1, 500_000_000n);
                     if (!_pub || _pub.success === false) throw new Error('dapp publish failed: ' + (_pub && _pub.error));
                     setGameStage('Publishing descriptor...');
                     const _ck: any = await publishConfigChunks(_owner, _pub.storeAddress, v.game);
                     if (!_ck.success) throw new Error('descriptor chunks failed: ' + _ck.error);
                     setGameStage('Announcing...');
-                    const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, _gname, 'GameGrid', 'dapp', { configHash: _ck.hash });
+                    let _dpCoords: any = undefined;
+                    try {
+                      let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
+                      const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(_pub.storeAddress) + '/utxos');
+                      for (const u of (await ur.json()) || []) {
+                        const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
+                        if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
+                        pl += Number(u.utxoEntry?.amount || u.amount || 0);
+                      }
+                      if (hi > 0) _dpCoords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(_dpAnchor ? { anchor_hash: _dpAnchor } : {}) };
+                    } catch (de) { console.warn('[Game] dapp daa span skipped:', de); }
+                    const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, _gname, 'GameGrid', 'dapp', { configHash: _ck.hash, coords: _dpCoords });
                     if (!_ann || _ann.success === false) console.warn('[Game] announce failed:', _ann && _ann.error);
                     Alert.alert('Game Published!', _gname + ' is live on Kaspa L1.\nDescriptor hash: ' + _ck.hash.slice(0, 16) + '...');
                     console.log('[Game] published - addr:', _pub.storeAddress, 'hash:', _ck.hash.slice(0, 16));

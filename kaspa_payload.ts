@@ -288,10 +288,15 @@ export async function rebuildDirectory(category: string, registryAddress: string
 
 /** Announce record for a registry address. Sign, then buildPayloadHex, then
  *  the sender sends dust to the registry address with this payload. */
-export function makeRegistryAnnounce(ownerPubkey: string, storeAddress: string, name: string, category: string, extra?: { primaryLink?: string; configHash?: string }): KvRecord {
+export function makeRegistryAnnounce(ownerPubkey: string, storeAddress: string, name: string, category: string, extra?: { primaryLink?: string; configHash?: string; coords?: any }): KvRecord {
   const d: any = { storeAddress, name, category };
   if (extra?.primaryLink) d.primaryLink = extra.primaryLink;
   if (extra?.configHash) d.configHash = extra.configHash;
+  // Coordinates: anchor_hash + daa span + pledge, same as a game quad. Stores
+  // and dapps kept their chunks on chain but advertised no way to find them,
+  // so once the relay recycled they were undiscoverable. primaryLink is a real
+  // URL here, so the coords need a field of their own.
+  if (extra?.coords) d.coords = extra.coords;
   return { k: 'registry', v: 1, o: ownerPubkey, t: Date.now(), d };
 }
 

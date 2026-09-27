@@ -106,7 +106,7 @@ export async function announceToRegistry(
   name: string,
   category: string,
   kind: string = 'store', // registry is per-KIND; category is payload metadata only
-  extra?: { primaryLink?: string; configHash?: string },
+  extra?: { primaryLink?: string; configHash?: string; coords?: any },
 ) {
   const rec = signRecord(makeRegistryAnnounce(owner.pubkeyHex, storeAddress, name, category, extra), owner.privateKeyHex);
   const regAddr = registryAddress(kind, owner.network);

@@ -74,7 +74,7 @@ const CSP_META = '<meta http-equiv="Content-Security-Policy" content="default-sr
 // dimensions and rotated into the portrait viewport, so the game reflows as if
 // the phone turned - no expo-screen-orientation, no dev-client rebuild. Touch
 // coordinates map through a real CSS transform, so input keeps working.
-const KV_ROT_JS = "(function(){try{var r=__R__;var b=document.body;if(!b)return;var d=document.documentElement;if(!window.__kvFitInit){window.__kvFitInit=1;var st=document.createElement('style');st.textContent='html,body{margin:0;padding:0;overflow:hidden;}';document.head.appendChild(st);window.addEventListener('resize',function(){try{window.__kvFit(window.__kvRot||0);}catch(e){}});}window.__kvFit=function(rr){b.style.transformOrigin='0 0';b.style.transform='none';b.style.width='';b.style.height='';var cw=Math.max(b.scrollWidth,b.offsetWidth,1);var ch=Math.max(b.scrollHeight,b.offsetHeight,1);var vw=window.innerWidth,vh=window.innerHeight;var tw=rr?vh:vw,th=rr?vw:vh;var k=Math.min(tw/cw,th/ch);if(!isFinite(k)||k<=0)k=1;if(k>4)k=4;var x,y;if(rr){x=(vw+k*ch)/2;y=(vh-k*cw)/2;b.style.transform='translate('+x+'px,'+y+'px) rotate(90deg) scale('+k+')';}else{x=(vw-k*cw)/2;y=(vh-k*ch)/2;b.style.transform='translate('+x+'px,'+y+'px) scale('+k+')';}window.__kvRot=rr;try{window.dispatchEvent(new Event('resize'));}catch(e){}};window.__kvFit(r);}catch(e){}})();true;";
+const KV_ROT_JS = "(function(){try{var r=__R__,s=__S__;var b=document.body;if(!b)return;if(!window.__kvVInit){window.__kvVInit=1;var st=document.createElement('style');st.textContent='html,body{margin:0;padding:0;overflow:hidden;background:#000;}';document.head.appendChild(st);window.addEventListener('resize',function(){try{window.__kvView(window.__kvR||0,window.__kvS||1);}catch(e){}});}window.__kvView=function(rr,ss){var vw=window.innerWidth,vh=window.innerHeight;b.style.transformOrigin='0 0';b.style.transform='none';var lw=(rr?vh:vw)/ss,lh=(rr?vw:vh)/ss;b.style.width=lw+'px';b.style.height=lh+'px';b.style.transform=(rr?('translate('+vw+'px,0px) rotate(90deg) '):'')+'scale('+ss+')';window.__kvR=rr;window.__kvS=ss;try{window.dispatchEvent(new Event('resize'));}catch(e){}};window.__kvView(r,s);}catch(e){}})();true;";
 
 function injectCsp(raw: string): string {
   if (/http-equiv=["']Content-Security-Policy["']/i.test(raw)) return raw;
@@ -92,6 +92,10 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const webRef = useRef<any>(null);
   const [paySheet, setPaySheet] = useState<any>(null);
   const [rot, setRot] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const applyView = (r: boolean, z: number) => {
+    webRef.current?.injectJavaScript(KV_ROT_JS.replace('__R__', r ? '1' : '0').replace('__S__', String(z)));
+  };
   const [payBusy, setPayBusy] = useState(false);
   const [payDone, setPayDone] = useState<string | null>(null);
 
@@ -102,13 +106,28 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
     (async () => {
       const res = props.game
         ? await fetchGamePuzzle(props.game.manifestAddress, props.game.manifestHash, props.game.head, network,
-            (have, total) => { if (alive) setProgress('solving puzzle ' + have + '/' + total); })
+            (have, total) => { if (alive) setProgress('solving puzzle ' + have + '/' + total); },
+            // Coordinates must reach the fetcher here too, not only on Mailbox
+            // install. Without them the coordinate walk is skipped entirely and
+            // a recycled relay leaves an installed game unbootable.
+            ((props.game as any).anchor_hash || (props.game as any).daa_to) ? {
+              anchor_hash: (props.game as any).anchor_hash,
+              daa_from: (props.game as any).daa_from,
+              daa_to: (props.game as any).daa_to,
+            } : undefined)
         : await fetchHtmlPage(storeAddress, pageHash, network);
       if (!alive) return;
       // Games: full inline-JS apps, verified by hash chain + scanner - the
       // static-page CSP (default-src none, no scripts) would kill them.
       if (res.html) setHtml(props.game ? res.html : injectCsp(res.html));
-      else setError(res.error || 'page unavailable');
+      else {
+        const g: any = props.game || {};
+        const diag = props.game
+          ? ' [head ' + String(g.head || '').slice(0, 10) + ' · coords ' + (g.anchor_hash || g.daa_to ? 'yes' : 'NO') + ']'
+          : '';
+        try { console.log('[KV] game boot failed', { err: res.error, head: g.head, anchor: g.anchor_hash, from: g.daa_from, to: g.daa_to }); } catch {}
+        setError((res.error || 'page unavailable') + diag);
+      }
     })();
     return () => { alive = false; };
   }, [storeAddress, pageHash, network]);
@@ -250,17 +269,21 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
         style={styles.fill}
       />
       {props.game ? (
-        <TouchableOpacity
-          onPress={() => {
-            const next = !rot;
-            setRot(next);
-            webRef.current?.injectJavaScript(KV_ROT_JS.replace('__R__', next ? '1' : '0'));
-          }}
-          style={{ position: 'absolute', right: 10, bottom: 46, width: 42, height: 42, borderRadius: 21,
-            backgroundColor: rot ? '#7c3aed' : 'rgba(0,0,0,0.55)', borderWidth: 1, borderColor: '#7c5cff',
-            alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#fff', fontSize: 17 }}>{'\u27F3'}</Text>
-        </TouchableOpacity>
+        <View style={{ position: 'absolute', right: 6, top: '32%' }}>
+          {[
+            { t: '\u27F3', on: () => { const n = !rot; setRot(n); applyView(n, zoom); }, hot: rot },
+            { t: '\u2212', on: () => { const z = Math.max(0.3, Math.round((zoom - 0.15) * 100) / 100); setZoom(z); applyView(rot, z); }, hot: false },
+            { t: '+', on: () => { const z = Math.min(1.5, Math.round((zoom + 0.15) * 100) / 100); setZoom(z); applyView(rot, z); }, hot: false },
+          ].map((b, i) => (
+            <TouchableOpacity key={i} onPress={b.on}
+              style={{ width: 36, height: 36, borderRadius: 18, marginBottom: 7,
+                backgroundColor: b.hot ? '#7c3aed' : 'rgba(10,10,16,0.82)',
+                borderWidth: 1, borderColor: '#7c5cff', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{b.t}</Text>
+            </TouchableOpacity>
+          ))}
+          <Text style={{ color: '#b9a6ff', fontSize: 9, textAlign: 'center' }}>{Math.round(zoom * 100) + '%'}</Text>
+        </View>
       ) : null}
       <View style={styles.verifiedBar}>
         <Text style={styles.verifiedText}>

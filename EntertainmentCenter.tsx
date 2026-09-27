@@ -445,7 +445,7 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
           { text: 'PLAY', onPress: () => setPlayingChain(_cg) },
           { text: 'SAVE FILE (export)', onPress: async () => {
               try {
-                const FS = require('expo-file-system');
+                const FS = require('expo-file-system/legacy');
                 const uri = FS.documentDirectory + 'kv_games/' + _cg.head + '.html';
                 const info = await FS.getInfoAsync(uri);
                 if (!info.exists) { RN.Alert.alert('Not cached yet', 'Open the game once (PLAY) or re-download it in the Mailbox, then export.'); return; }
@@ -527,7 +527,8 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
         storeAddress={playingChain.manifestAddress}
         pageHash={playingChain.manifestHash}
         network={'testnet-10'}
-        game={{ manifestAddress: playingChain.manifestAddress, manifestHash: playingChain.manifestHash, head: playingChain.head }}
+        game={{ manifestAddress: playingChain.manifestAddress, manifestHash: playingChain.manifestHash, head: playingChain.head,
+          anchor_hash: (playingChain as any).anchor_hash, daa_from: (playingChain as any).daa_from, daa_to: (playingChain as any).daa_to }}
         onClose={() => setPlayingChain(null)}
       />
     );

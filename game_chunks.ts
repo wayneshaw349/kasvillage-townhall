@@ -90,7 +90,7 @@ export async function publishGamePuzzle(
 // ---- device cache: the chain is delivery, the phone is the runtime --------
 async function gameCachePath(head: string): Promise<string | null> {
   try {
-    const FS = require('expo-file-system');
+    const FS = require('expo-file-system/legacy');
     const dir = FS.documentDirectory + 'kv_games/';
     await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
     return dir + head + '.html';
@@ -98,7 +98,7 @@ async function gameCachePath(head: string): Promise<string | null> {
 }
 async function gameCacheLoad(head: string, wantSha: string): Promise<string | null> {
   try {
-    const FS = require('expo-file-system');
+    const FS = require('expo-file-system/legacy');
     const p = await gameCachePath(head);
     if (!p) return null;
     const info = await FS.getInfoAsync(p);
@@ -110,7 +110,7 @@ async function gameCacheLoad(head: string, wantSha: string): Promise<string | nu
 }
 async function gameCacheSave(head: string, html: string): Promise<void> {
   try {
-    const FS = require('expo-file-system');
+    const FS = require('expo-file-system/legacy');
     const p = await gameCachePath(head);
     if (p) {
       await FS.writeAsStringAsync(p, html);
@@ -127,7 +127,7 @@ async function gameCacheSave(head: string, html: string): Promise<void> {
 // missing sidecar (legacy cache) is backfilled from the file once.
 async function gameCacheLoadOffline(head: string): Promise<string | null> {
   try {
-    const FS = require('expo-file-system');
+    const FS = require('expo-file-system/legacy');
     const p = await gameCachePath(head);
     if (!p) return null;
     const info = await FS.getInfoAsync(p);
