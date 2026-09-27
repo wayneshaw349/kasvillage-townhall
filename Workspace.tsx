@@ -817,24 +817,28 @@ const KvChainGamePublish: React.FC = () => {
       const manifestAddress = deriveStoreKeys(priv, entry.nonceBase + 86, owner.network).address;
       gadd('announce-only for ' + gameId);
       gadd('manifest ' + manifestAddress);
+      // announce-only: NEVER stamp a fresh sink - it sits AFTER the data and
+      // is useless as a walk entry. Reuse the anchor captured at publish time.
       let publishAnchor = '';
       try {
-        const sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink');
-        publishAnchor = String((await sr.json()).sink || '');
-        if (publishAnchor) gadd('walk anchor: ' + publishAnchor.slice(0, 16) + '…');
+        const AS = require('@react-native-async-storage/async-storage').default;
+        publishAnchor = String((await AS.getItem('kv_pub_anchor_' + gameId)) || '');
+        if (publishAnchor) gadd('walk anchor (from original publish): ' + publishAnchor.slice(0, 16) + '…');
+        else gadd('no stored publish anchor - announcing span only');
       } catch {}
       let daaSpan: any = {};
       try {
-        let lo = Number.MAX_SAFE_INTEGER, hi = 0;
+        let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
         for (const sa of slotAddresses.concat([manifestAddress])) {
           const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(sa) + '/utxos');
           for (const u of (await ur.json()) || []) {
             const d = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
             if (d > 0) { if (d < lo) lo = d; if (d > hi) hi = d; }
+            pl += Number(u.utxoEntry?.amount || u.amount || 0);
           }
         }
-        if (hi > 0) daaSpan = { daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) };
-        gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to);
+        if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) };
+        gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to + ' | pledge ' + (daaSpan.pledge_kas || 0) + ' KAS');
       } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
       // manifestHash is deterministic: sha256 of the manifest JSON — the exact
       // recipe publishConfigChunks used, so this equals the published hash.
@@ -885,7 +889,11 @@ const KvChainGamePublish: React.FC = () => {
       try {
         const sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink');
         publishAnchor = String((await sr.json()).sink || '');
-        if (publishAnchor) gadd('walk anchor: ' + publishAnchor.slice(0, 16) + '…');
+        if (publishAnchor) {
+          gadd('walk anchor: ' + publishAnchor.slice(0, 16) + '…');
+          // persist per game so ANNOUNCE-only re-advertises the TRUE entry point
+          try { const AS = require('@react-native-async-storage/async-storage').default; await AS.setItem('kv_pub_anchor_' + gameId, publishAnchor); } catch {}
+        }
       } catch {}
       gadd(entry.bundle.frags.length + ' fragments -> publishing (keep this screen open)…');
       const t0 = Date.now();
@@ -898,16 +906,17 @@ const KvChainGamePublish: React.FC = () => {
       gadd(back.html ? 'ROUND-TRIP OK (' + back.html.length + ' bytes)' : 'ROUND-TRIP FAILED: ' + back.error);
       let daaSpan: { daa_from?: number; daa_to?: number } = {};
       try {
-        let lo = Number.MAX_SAFE_INTEGER, hi = 0;
+        let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
         for (const sa of slotAddresses.concat([manifestAddress])) {
           const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(sa) + '/utxos');
           for (const u of (await ur.json()) || []) {
             const d = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
             if (d > 0) { if (d < lo) lo = d; if (d > hi) hi = d; }
+            pl += Number(u.utxoEntry?.amount || u.amount || 0);
           }
         }
-        if (hi > 0) daaSpan = { daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
-        gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to);
+        if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
+        gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to + ' | pledge ' + (daaSpan.pledge_kas || 0) + ' KAS');
       } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
       const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...daaSpan });
       setTriple(t);

@@ -84,6 +84,9 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const webRef = useRef<any>(null);
+  const [paySheet, setPaySheet] = useState<any>(null);
+  const [payBusy, setPayBusy] = useState(false);
+  const [payDone, setPayDone] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -119,8 +122,63 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       props.onPage?.(path.slice('page/'.length));
       return;
     }
+    if (path.startsWith('pay/')) {
+      // KV PAY - the ONE sanctioned payment surface for every on-chain page,
+      // dapp and game. Format: kv://pay/<kaspa address>/<amount KAS>[?m=memo]
+      // Convention users learn: KAS only ever moves through this sheet.
+      try {
+        const rest = path.slice(4);
+        const q = rest.indexOf('?');
+        const core = q >= 0 ? rest.slice(0, q) : rest;
+        const qs = q >= 0 ? rest.slice(q + 1) : '';
+        const segs = core.split('/');
+        const addr = decodeURIComponent(segs[0] || '');
+        const kas = Number(segs[1] || '0');
+        const memo = qs.startsWith('m=') ? decodeURIComponent(qs.slice(2)).slice(0, 60) : '';
+        const okAddr = (addr.startsWith('kaspatest:') || addr.startsWith('kaspa:')) && addr.length >= 20 && addr.length <= 80;
+        if (!okAddr || !(kas > 0) || kas > 5000) { setNotice('Invalid payment request.'); return; }
+        setPayDone(null);
+        setPaySheet({ addr, kas, memo });
+      } catch { setNotice('Invalid payment request.'); }
+      return;
+    }
     setNotice('Unsupported link: ' + href.slice(0, 40));
   }, [ownerPubkey, props]);
+
+  const confirmPay = useCallback(async () => {
+    if (!paySheet || payBusy) return;
+    setPayBusy(true);
+    try {
+      const ps = require('./proposal_share');
+      const getId = ps._kvResolveIdentity || ps.resolveKvIdentity || ps.kvResolveIdentity || ps.getKvIdentity || ps.resolveIdentity;
+      let ident: any = getId ? await getId() : null;
+      if (!ident || !ident.address || !ident.privkey) {
+        const SS = require('expo-secure-store');
+        ident = { address: await SS.getItemAsync('kaspa_address'), privkey: await ps._kvResolvePrivHex(), network };
+      }
+      if (!ident || !ident.address || !ident.privkey) throw new Error('wallet identity unavailable');
+      const { sendKaspaViaRest } = require('./kaspa_rest_tx');
+      const r: any = await sendKaspaViaRest({
+        senderAddress: ident.address,
+        recipientAddress: paySheet.addr,
+        amountSompi: BigInt(Math.round(paySheet.kas * 1e8)),
+        privateKeyHex: ident.privkey,
+        network: (ident.network || network) as any,
+      });
+      if (r && r.success && (r.txId || r.transactionId)) {
+        const txid = String(r.txId || r.transactionId);
+        setPayDone(txid);
+        webRef.current?.injectJavaScript('try{window.dispatchEvent(new CustomEvent("kvpay",{detail:{ok:true,txid:"' + txid + '",kas:' + paySheet.kas + '}}))}catch(e){};true;');
+      } else {
+        setNotice('Payment failed: ' + String((r && r.error) || 'unknown'));
+        setPaySheet(null);
+      }
+    } catch (e: any) {
+      setNotice('Payment failed: ' + String(e?.message || e));
+      setPaySheet(null);
+    }
+    setPayBusy(false);
+  }, [paySheet, payBusy, network]);
 
   const onMessage = useCallback((event: any) => {
     try { const _d = JSON.parse(event?.nativeEvent?.data || '{}'); if (_d.kvlog !== undefined) { console.log('[GamePage]', _d.kvlog); return; } } catch {}
@@ -189,6 +247,35 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
           ⛓ On-chain page · hash {pageHash.slice(0, 12)} verified
         </Text>
       </View>
+      {paySheet ? (
+        <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.78)', justifyContent: 'center', padding: 24 }}>
+          <View style={{ backgroundColor: '#17131f', borderColor: '#7c3aed', borderWidth: 2, borderRadius: 14, padding: 18 }}>
+            <Text style={{ color: '#b9a6ff', fontWeight: '900', fontSize: 16, letterSpacing: 2 }}>KV PAY</Text>
+            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 8 }}>{paySheet.kas} KAS</Text>
+            {paySheet.memo ? <Text style={{ color: '#cbb9ff', fontSize: 13, marginTop: 2 }}>{paySheet.memo}</Text> : null}
+            <Text style={{ color: '#8a8098', fontSize: 11, marginTop: 12 }}>to</Text>
+            <Text style={{ color: '#e6e0f5', fontFamily: 'monospace', fontSize: 11 }} numberOfLines={2}>{paySheet.addr}</Text>
+            <Text style={{ color: '#f0c860', fontSize: 11, marginTop: 12 }}>
+              {'Requested by this ' + (props.game ? 'game' : 'page') + '. KAS only ever moves through this sheet - never type amounts, addresses or your seed inside a page.'}
+            </Text>
+            {payDone ? (
+              <Text style={{ color: '#34d399', fontSize: 12, marginTop: 12 }} numberOfLines={1}>{'sent \u2713 ' + payDone.slice(0, 18) + '\u2026'}</Text>
+            ) : null}
+            <View style={{ flexDirection: 'row', marginTop: 16 }}>
+              <TouchableOpacity disabled={payBusy} onPress={() => { setPaySheet(null); setPayDone(null); }}
+                style={{ flex: 1, padding: 12, alignItems: 'center' }}>
+                <Text style={{ color: '#aaa', fontWeight: '700' }}>{payDone ? 'CLOSE' : 'CANCEL'}</Text>
+              </TouchableOpacity>
+              {!payDone ? (
+                <TouchableOpacity disabled={payBusy} onPress={confirmPay}
+                  style={{ flex: 1, backgroundColor: payBusy ? '#555' : '#7c3aed', borderRadius: 10, padding: 12, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ color: '#fff', fontWeight: '900' }}>{payBusy ? 'SENDING\u2026' : 'CONFIRM & SEND'}</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      ) : null}
       {notice ? (
         <TouchableOpacity style={styles.toast} onPress={() => setNotice(null)}>
           <Text style={styles.toastText}>{notice}</Text>

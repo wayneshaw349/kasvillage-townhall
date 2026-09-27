@@ -433,9 +433,28 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
     setLaunching(true);
     const _cg = (dapp as any).chainGame;
     if (_cg && _cg.manifestAddress && _cg.head) {
-      // Installed chain game: OnChainPageView solves cache-first + verifies.
-      setPlayingChain(_cg);
+      // Installed chain game: play from the verified device copy, or export
+      // that copy out of the app (Files / AirDrop / email) so the user owns
+      // the artifact - same bytes DOWNLOAD verified against HEAD.
       setLaunching(false);
+      const RN = require('react-native');
+      RN.Alert.alert(
+        dapp.name,
+        'Saved on this phone (verified vs HEAD ' + String(_cg.head).slice(0, 12) + '\u2026). Plays offline.',
+        [
+          { text: 'PLAY', onPress: () => setPlayingChain(_cg) },
+          { text: 'SAVE FILE (export)', onPress: async () => {
+              try {
+                const FS = require('expo-file-system');
+                const uri = FS.documentDirectory + 'kv_games/' + _cg.head + '.html';
+                const info = await FS.getInfoAsync(uri);
+                if (!info.exists) { RN.Alert.alert('Not cached yet', 'Open the game once (PLAY) or re-download it in the Mailbox, then export.'); return; }
+                await RN.Share.share({ url: uri, title: (dapp.name || 'game') + '.html' });
+              } catch (e: any) { RN.Alert.alert('Export failed', String(e?.message || e)); }
+            } },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
       return;
     }
     try {

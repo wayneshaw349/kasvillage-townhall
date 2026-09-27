@@ -340,13 +340,48 @@ const errorStyles = StyleSheet.create({
 // EMPTY STATE
 // ============================================================================
 function GameRegistryCard({ item, onInstall, installing }: any) {
+  const R = require('react');
+  const [xp, setXp] = R.useState(null as number | null);
+  const [tr, setTr] = R.useState(null as any);
+  R.useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const tc = require('./townhall_client');
+        const f = tc.getUserStats || tc.fetchUserStats || tc.getStats;
+        if (!f || !item.o) return;
+        const st = await f(item.o);
+        if (alive && st) {
+          if (typeof st.xp === 'number') setXp(st.xp);
+          // Bayesian trust, same formula as TownHall (main.rs):
+          // p_complete = (1+S)/(2+S+D), confidence = min(samples/10, 1)
+          const S = Number(st.successes || 0), D = Number(st.deadlocks || 0);
+          const N = Number(st.total_samples || (S + D));
+          setTr({ p: (1 + S) / (2 + S + D), c: Math.min(N / 10, 1) });
+        }
+      } catch {}
+    })();
+    return () => { alive = false; };
+  }, [item.o]);
+  const pledge = item.quad && typeof item.quad.pledge_kas === 'number' ? item.quad.pledge_kas : null;
   return (
     <View style={cardStyles.storefrontCard}>
       <Text style={{ fontSize: 22 }}>🕹️</Text>
       <Text style={{ fontWeight: '700', marginTop: 4 }} numberOfLines={1}>{item.name}</Text>
       <Text style={{ color: '#666', fontSize: 11 }} numberOfLines={1}>{item.category || 'Game'} · on-chain · verified by hash</Text>
+      <Text style={{ color: '#7c3aed', fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+        {'⛓ ' + (pledge != null ? pledge + ' KAS pledged' : 'pledge n/a') + ' · dev XP ' + (xp != null ? xp : '…')}
+      </Text>
+      {tr ? (
+        <Text style={{ color: tr.p >= 0.5 ? '#059669' : '#dc2626', fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+          {'✔ trust ' + Math.round(tr.p * 100) + '% · conf ' + Math.round(tr.c * 100) + '%' + (tr.p < 0.5 ? ' · ⚠ low' : '')}
+        </Text>
+      ) : null}
+      {item.warn ? (
+        <Text style={{ color: '#dc2626', fontSize: 10, fontWeight: '700', marginTop: 2 }}>⚠ DIFFERENT PUBLISHER than first seen</Text>
+      ) : null}
       <TouchableOpacity onPress={() => onInstall(item)} disabled={!!installing}
-        style={{ marginTop: 8, backgroundColor: installing ? '#999' : '#7c3aed', borderRadius: 8, paddingVertical: 6, alignItems: 'center' }}>
+        style={{ marginTop: 8, backgroundColor: installing ? '#999' : (item.warn ? '#b91c1c' : '#7c3aed'), borderRadius: 8, paddingVertical: 6, alignItems: 'center' }}>
         <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{installing ? 'DOWNLOADING…' : 'DOWNLOAD'}</Text>
       </TouchableOpacity>
     </View>
@@ -696,26 +731,74 @@ export default function VillageMailbox() {
           setServices(isRefresh ? result.items : [...services, ...result.items]);
           break;
         case 'games': {
-          // Deterministic game registry, read through the relay-fallback rail.
+          // 1) relay records  2) DEVICE QUAD CACHE  3) CLIENT CHAIN SCAN.
+          // The phone is the light indexer: quads seen once are cached on the
+          // device until storage is wiped, and when the relay's ephemeral
+          // records come back empty (Flux recycle) the phone walks blocks
+          // itself from its own rolling checkpoint. Read-only, hash-pinned
+          // installs unchanged - the scan adds zero trust surface.
           const pp = require('./payload_publish');
           const kp = require('./kaspa_payload');
+          const AS = require('@react-native-async-storage/async-storage').default;
           const regAddr = pp.registryAddress('game', 'testnet-10');
-          const fetchR = kp.fetchRecords || kp.fetchPayloadRecords || kp.fetchAddressRecords;
-          const rows: any[] = (await fetchR(regAddr, 'testnet-10')) || [];
+          const RELAY = 'https://kasvillage.app.runonflux.io';
           const h2s = (hx: string) => { let o = ''; for (let i = 0; i < hx.length; i += 2) o += String.fromCharCode(parseInt(hx.substr(i, 2), 16)); try { return decodeURIComponent(escape(o)); } catch { return o; } };
-          const items: any[] = [];
-          const seen = new Set<string>();
-          for (const row of rows) {
-            let r: any = (row && row.record) ? row.record : row;
-            if (r && !r.k && typeof r.payload === 'string') { try { const raw = h2s(r.payload); r = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw); } catch { continue; } }
-            if (!r || r.k !== 'registry' || !r.d) continue;
+          const parseAnn = (input: any): any | null => {
+            let r: any = (input && input.record) ? input.record : input;
+            if (r && !r.k && typeof r.payload === 'string') { try { const raw = h2s(r.payload); r = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw); } catch { return null; } }
+            if (!r || r.k !== 'registry' || !r.d) return null;
             let quad: any = null; try { quad = r.d.primaryLink ? JSON.parse(r.d.primaryLink) : null; } catch {}
-            if (!quad || !quad.head || !quad.manifestAddress || !quad.manifestHash) continue;
-            if (seen.has(quad.head)) continue;
-            seen.add(quad.head);
-            items.push({ name: r.d.name || quad.game, category: r.d.category || 'Game', t: r.t || 0, quad });
-          }
-          items.sort((a, b) => b.t - a.t);
+            if (!quad || !quad.head || !quad.manifestAddress || !quad.manifestHash) return null;
+            if (String(r.d.category || '').toLowerCase() !== 'game') return null;
+            return { name: r.d.name || quad.game, category: r.d.category || 'Game', t: r.t || 0, o: r.o || '', quad };
+          };
+          const byHead = new Map<string, any>();
+          const take = (it: any) => { if (!it) return; const prev = byHead.get(it.quad.head); if (!prev || it.t > prev.t) byHead.set(it.quad.head, it); };
+          // 2) device quad cache first - survives relay recycles until wipe
+          try { const cRaw = await AS.getItem('kv_game_registry_cache'); (cRaw ? JSON.parse(cRaw) : []).forEach(take); } catch {}
+          // 1) relay records
+          let rowsCount = 0;
+          try {
+            const fetchR = kp.fetchRecords || kp.fetchPayloadRecords || kp.fetchAddressRecords;
+            const rows: any[] = (await fetchR(regAddr, 'testnet-10')) || [];
+            rowsCount = rows.length;
+            rows.forEach((row: any) => take(parseAnn(row)));
+          } catch {}
+          // 3) client scan from the rolling checkpoint when records are empty
+          try {
+            const ckRaw = await AS.getItem('kv_reg_checkpoint');
+            const ck = ckRaw ? JSON.parse(ckRaw) : null;
+            const sink = await (await fetch(RELAY + '/api/kaspa/sink')).json();
+            if (rowsCount === 0 && ck && ck.sink) {
+              let low = ck.sink;
+              for (let p = 0; p < 240; p++) {
+                const page = await (await fetch(RELAY + '/api/kaspa/blocks?low_hash=' + low + '&txs=1')).json();
+                for (const b of page.blocks || []) for (const tx of b.txs || []) {
+                  try { const raw = h2s(tx.payload_hex); const rec = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw); take(parseAnn(rec)); } catch {}
+                }
+                if (page.done || !page.next_low_hash) break;
+                low = page.next_low_hash;
+              }
+            }
+            if (sink && sink.sink) await AS.setItem('kv_reg_checkpoint', JSON.stringify({ sink: sink.sink, at: Date.now() }));
+          } catch {}
+          const items = Array.from(byHead.values()).sort((a, b) => b.t - a.t);
+          // TOFU publisher pinning: the FIRST signer seen for a name is
+          // pinned on-device; a later announce under the same name from a
+          // different key gets a loud warning on its card.
+          try {
+            const tofuRaw = await AS.getItem('kv_pub_tofu');
+            const tofu = tofuRaw ? JSON.parse(tofuRaw) : {};
+            let dirty = false;
+            for (const it of items) {
+              const nm = String(it.name || '').toLowerCase();
+              if (!nm || !it.o) continue;
+              if (tofu[nm] && tofu[nm] !== it.o) (it as any).warn = true;
+              else if (!tofu[nm]) { tofu[nm] = it.o; dirty = true; }
+            }
+            if (dirty) await AS.setItem('kv_pub_tofu', JSON.stringify(tofu));
+          } catch {}
+          try { await AS.setItem('kv_game_registry_cache', JSON.stringify(items.slice(0, 200))); } catch {}
           result = { items, nextCursor: undefined, hasMore: false } as any;
           setGames(items);
           break;
@@ -758,7 +841,8 @@ export default function VillageMailbox() {
     setInstallingGame(q.head);
     try {
       const gc = require('./game_chunks');
-      const r = await gc.fetchGamePuzzle(q.manifestAddress, q.manifestHash, q.head, 'testnet-10');
+      const r = await gc.fetchGamePuzzle(q.manifestAddress, q.manifestHash, q.head, 'testnet-10', undefined,
+        { anchor_hash: q.anchor_hash, daa_from: q.daa_from, daa_to: q.daa_to });
       if (!r || !r.html) throw new Error((r && r.error) || 'download failed');
       const AS = require('@react-native-async-storage/async-storage').default;
       const raw = await AS.getItem('kv_installed_games');
