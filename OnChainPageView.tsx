@@ -70,6 +70,12 @@ const BRIDGE = `
 // tracking pixel leaks the viewer's IP to the page author. A restrictive CSP in
 // <head> closes the channel entirely: no network, inline style + data: only.
 const CSP_META = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; media-src data:; font-src data:;">';
+// Landscape without a native dependency. The body is laid out at swapped
+// dimensions and rotated into the portrait viewport, so the game reflows as if
+// the phone turned - no expo-screen-orientation, no dev-client rebuild. Touch
+// coordinates map through a real CSS transform, so input keeps working.
+const KV_ROT_JS = "(function(){try{var r=__R__;var b=document.body;if(!b)return;var d=document.documentElement;if(!window.__kvFitInit){window.__kvFitInit=1;var st=document.createElement('style');st.textContent='html,body{margin:0;padding:0;overflow:hidden;}';document.head.appendChild(st);window.addEventListener('resize',function(){try{window.__kvFit(window.__kvRot||0);}catch(e){}});}window.__kvFit=function(rr){b.style.transformOrigin='0 0';b.style.transform='none';b.style.width='';b.style.height='';var cw=Math.max(b.scrollWidth,b.offsetWidth,1);var ch=Math.max(b.scrollHeight,b.offsetHeight,1);var vw=window.innerWidth,vh=window.innerHeight;var tw=rr?vh:vw,th=rr?vw:vh;var k=Math.min(tw/cw,th/ch);if(!isFinite(k)||k<=0)k=1;if(k>4)k=4;var x,y;if(rr){x=(vw+k*ch)/2;y=(vh-k*cw)/2;b.style.transform='translate('+x+'px,'+y+'px) rotate(90deg) scale('+k+')';}else{x=(vw-k*cw)/2;y=(vh-k*ch)/2;b.style.transform='translate('+x+'px,'+y+'px) scale('+k+')';}window.__kvRot=rr;try{window.dispatchEvent(new Event('resize'));}catch(e){}};window.__kvFit(r);}catch(e){}})();true;";
+
 function injectCsp(raw: string): string {
   if (/http-equiv=["']Content-Security-Policy["']/i.test(raw)) return raw;
   if (/<head(\s[^>]*)?>/i.test(raw)) return raw.replace(/<head(\s[^>]*)?>/i, (mm) => mm + CSP_META); // word-boundary: never matches JS like i<heads.length
@@ -85,6 +91,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const [progress, setProgress] = useState<string | null>(null);
   const webRef = useRef<any>(null);
   const [paySheet, setPaySheet] = useState<any>(null);
+  const [rot, setRot] = useState(false);
   const [payBusy, setPayBusy] = useState(false);
   const [payDone, setPayDone] = useState<string | null>(null);
 
@@ -242,6 +249,19 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
         setSupportMultipleWindows={false}
         style={styles.fill}
       />
+      {props.game ? (
+        <TouchableOpacity
+          onPress={() => {
+            const next = !rot;
+            setRot(next);
+            webRef.current?.injectJavaScript(KV_ROT_JS.replace('__R__', next ? '1' : '0'));
+          }}
+          style={{ position: 'absolute', right: 10, bottom: 46, width: 42, height: 42, borderRadius: 21,
+            backgroundColor: rot ? '#7c3aed' : 'rgba(0,0,0,0.55)', borderWidth: 1, borderColor: '#7c5cff',
+            alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: '#fff', fontSize: 17 }}>{'\u27F3'}</Text>
+        </TouchableOpacity>
+      ) : null}
       <View style={styles.verifiedBar}>
         <Text style={styles.verifiedText}>
           ⛓ On-chain page · hash {pageHash.slice(0, 12)} verified

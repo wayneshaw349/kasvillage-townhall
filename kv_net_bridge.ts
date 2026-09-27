@@ -70,6 +70,54 @@ export const KV_WNET_INJECT = `(function(){
   };
 })(); true;`;
 
+// ---------------------------------------------------------------------------
+// SESSION DIGEST - move-log hash + timing, captured from traffic already
+// passing through this bridge. The game does not cooperate and cannot opt out
+// or forge it: every move POST is hashed in order, client-side.
+//
+// Timing is the part that distinguishes a human from a script. Human gaps
+// scatter widely (high coefficient of variation); scripted play clusters
+// tight. We publish the stats, not a verdict - anyone can recompute them from
+// the committed hash chain and draw their own conclusion.
+// ---------------------------------------------------------------------------
+import { sha256 as _kvSha } from '@noble/hashes/sha256';
+import { utf8ToBytes as _kvU8, bytesToHex as _kvHex } from '@noble/hashes/utils';
+
+let _kvSess: { head: string; h: string; n: number; last: number; gaps: number[] } | null = null;
+
+export function kvSessionStart(gameHead: string) {
+  _kvSess = { head: String(gameHead || ''), h: '0'.repeat(64), n: 0, last: 0, gaps: [] };
+}
+
+function _kvSessNote(url: string, body: string | null) {
+  if (!_kvSess) return;
+  const now = Date.now();
+  if (_kvSess.last) _kvSess.gaps.push(now - _kvSess.last);
+  if (_kvSess.gaps.length > 500) _kvSess.gaps.shift();
+  _kvSess.last = now;
+  _kvSess.n += 1;
+  _kvSess.h = _kvHex(_kvSha(_kvU8(_kvSess.h + '|' + url + '|' + (body || ''))));
+}
+
+/** Move-log commitment + timing stats for the session. Null if none started. */
+export function kvSessionDigest(): null | {
+  head: string; moves: number; moveHash: string;
+  meanGapMs: number; cvGap: number; spanMs: number;
+} {
+  if (!_kvSess || _kvSess.n === 0) return null;
+  const g = _kvSess.gaps;
+  const mean = g.length ? g.reduce((a, b2) => a + b2, 0) / g.length : 0;
+  const varr = g.length > 1 ? g.reduce((a, b2) => a + (b2 - mean) * (b2 - mean), 0) / (g.length - 1) : 0;
+  const cv = mean > 0 ? Math.sqrt(varr) / mean : 0;
+  return {
+    head: _kvSess.head, moves: _kvSess.n, moveHash: _kvSess.h,
+    meanGapMs: Math.round(mean), cvGap: Math.round(cv * 1000) / 1000,
+    spanMs: g.reduce((a, b2) => a + b2, 0),
+  };
+}
+
+export function kvSessionEnd() { _kvSess = null; }
+
 /** Returns true if the message was a KV_WNET message (handled here). */
 export function handleKvNetMessage(raw: string, inject: (js: string) => void, allow = KV_WNET_ALLOW): boolean {
   let m: any;
@@ -90,6 +138,8 @@ export function handleKvNetMessage(raw: string, inject: (js: string) => void, al
   if (!kvNetAllowed(String(m.url), allow)) { reply({ error: 'blocked host: ' + String(m.url).slice(0, 80) }); return true; }
   if (method !== 'GET' && method !== 'POST') { reply({ error: 'method not allowed' }); return true; }
   if (m.body != null && (typeof m.body !== 'string' || m.body.length > MAX_BODY)) { reply({ error: 'body too large' }); return true; }
+
+  if (method === 'POST') { try { _kvSessNote(String(m.url), typeof m.body === 'string' ? m.body : null); } catch {} }
 
   (async () => {
     const c = new AbortController();
