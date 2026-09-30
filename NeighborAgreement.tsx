@@ -3289,8 +3289,12 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
               frostR: await (async () => { try { const saved = await SecureStore.getItemAsync('kv_frost_nonce_' + agrId); if (saved) { const n = JSON.parse(saved); console.log('[FROST-R] Including R in Accepted inscription:', n.R_hex?.slice(0,20)); return n.R_hex; } } catch {} return ''; })(),
             });
             console.log('[Neighbor] Acceptance inscribed to Arweave');
-            // Post R to TownHall (after accept, so party_b exists)
-            try { const saved = await SecureStore.getItemAsync('kv_frost_nonce_' + agrId); if (saved) { const n = JSON.parse(saved); await postFrostR({ agreementId: agrId, pubkey: myPubkey, frostR: n.R_hex }); console.log('[FROST-R] R posted to TownHall after accept'); } } catch(e) { console.warn('[FROST-R] TownHall R post failed:', e); }
+            // postFrostR REMOVED. R already travels two ways that the flow
+            // actually uses: embedded in the Accepted inscription (frostR field
+            // a few lines up) and via the clipboard exchange. This standalone
+            // TownHall post was a third copy that nothing ever read back -
+            // getFrostR has zero call sites anywhere in the app. An unread
+            // write on every accept was pure latency in a working signing flow.
             // Add to active FROST list
             addToFrostList({
               agrId: agrId,
