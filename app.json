@@ -3,7 +3,6 @@
     "name": "KasVillage",
     "slug": "kasvillage-mobile",
     "version": "1.0.0",
-    "sdkVersion": "54.0.0",
     "platforms": [
       "ios",
       "android"
@@ -26,7 +25,10 @@
         {
           "color": "#D4AF37"
         }
-      ]
+      ],
+      "expo-router",
+      "expo-splash-screen",
+      "expo-status-bar"
     ],
     "ios": {
       "bundleIdentifier": "com.kasvillage.mobile",
