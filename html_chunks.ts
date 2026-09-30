@@ -179,17 +179,101 @@ export async function publishHtmlChunks(
 // FETCH (viewer side)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// PAGE RETRIEVAL LADDER - the same three tiers games use.
+//   1. device cache   (offline, instant, survives everything but a data wipe)
+//   2. relay records  (fast when api-tn10's index is current and the relay
+//                      instance you reached happens to hold them)
+//   3. coordinate walk (anchor_hash -> daa_to, straight off raw blocks)
+// Tier 3 is what makes a store survive a relay rotation, exactly as it does
+// for a game. It needs the coords the announce now carries.
+// ---------------------------------------------------------------------------
+const KV_PAGE_WALK_RELAY = 'https://kasvillage.app.runonflux.io';
+
+async function pageCacheGet(hash: string): Promise<string | null> {
+  try {
+    const AS = require('@react-native-async-storage/async-storage').default;
+    const html = await AS.getItem('kv_page_' + hash);
+    if (!html) return null;
+    // Self-verifying: the key IS the content hash, so a match proves integrity
+    // without needing the network or the announce.
+    if (bytesToHex(sha256(utf8ToBytes(html))) !== hash) { await AS.removeItem('kv_page_' + hash); return null; }
+    return html;
+  } catch { return null; }
+}
+
+async function pageCachePut(hash: string, html: string): Promise<void> {
+  try {
+    const AS = require('@react-native-async-storage/async-storage').default;
+    await AS.setItem('kv_page_' + hash, html);
+  } catch {}
+}
+
+async function fetchHtmlPageViaWalk(
+  expectedHash: string,
+  coords: { anchor_hash?: string; daa_from?: number; daa_to?: number },
+): Promise<{ html: string | null; error?: string }> {
+  try {
+    if (!coords || !coords.anchor_hash || !coords.daa_to) return { html: null, error: 'no coordinates' };
+    const sink = await (await fetch(KV_PAGE_WALK_RELAY + '/api/kaspa/sink')).json();
+    const vdaa = Number(sink.virtual_daa_score || 0);
+    const daaTo = Number(coords.daa_to);
+    if (vdaa && vdaa - daaTo > 1100000) return { html: null, error: 'publish window (~30h) closed - needs a republish' };
+    const store: Record<number, { t: number; tot: number; c: string }> = {};
+    let low = String(coords.anchor_hash);
+    let pages = 0, retries = 0;
+    while (pages < 450) {
+      let page: any;
+      try { page = await (await fetch(KV_PAGE_WALK_RELAY + '/api/kaspa/blocks?low_hash=' + low + '&daa_max=' + (daaTo + 600) + '&txs=1')).json(); }
+      catch { if (++retries > 20) return { html: null, error: 'walk: node unreachable' }; await new Promise((r) => setTimeout(r, 1500)); continue; }
+      pages++;
+      for (const b of page.blocks || []) for (const tx of b.txs || []) {
+        try {
+          const hx = String(tx.payload_hex || '');
+          let raw = '';
+          for (let i = 0; i < hx.length; i += 2) raw += String.fromCharCode(parseInt(hx.substr(i, 2), 16));
+          try { raw = decodeURIComponent(escape(raw)); } catch {}
+          const rec = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw);
+          const d = rec && rec.d;
+          if (!d || rec.k !== 'cfg') continue;
+          if (d.ty === 'html' && d.h === expectedHash && typeof d.seq === 'number') {
+            if (!store[d.seq] || (rec.t || 0) > store[d.seq].t) store[d.seq] = { t: rec.t || 0, tot: d.tot, c: d.c };
+          }
+        } catch {}
+      }
+      if (page.done || !page.next_low_hash) break;
+      low = page.next_low_hash;
+    }
+    const first = store[0];
+    if (!first) return { html: null, error: 'walk found no page chunks in span' };
+    let b64 = '';
+    for (let i = 0; i < first.tot; i++) { const c = store[i]; if (!c) return { html: null, error: 'walk missing chunk ' + i }; b64 += c.c; }
+    const html = new TextDecoder().decode(pako.inflate(b64decode(b64)));
+    if (bytesToHex(sha256(utf8ToBytes(html))) !== expectedHash) return { html: null, error: 'walked page hash mismatch' };
+    const scan = scanHtmlForPublish(html);
+    if (!scan.ok) return { html: null, error: 'page failed safety scan: ' + scan.issues.map(i => i.code).join(',') };
+    return { html };
+  } catch (e: any) { return { html: null, error: 'walk: ' + String(e?.message || e) }; }
+}
+
 export async function fetchHtmlPage(
   storeAddress: string,
   expectedHash: string,
   network = 'testnet-10',
+  coords?: { anchor_hash?: string; daa_from?: number; daa_to?: number },
 ): Promise<{ html: string | null; error?: string }> {
   try {
+    const cachedPage = await pageCacheGet(expectedHash);
+    if (cachedPage) return { html: cachedPage };
     const wrapped: any[] = await fetchRecords(storeAddress, network, 400);
     // fetchRecords returns { record, txid, blockTime } wrappers - unwrap first
     const recs: any[] = wrapped.map(w => (w && w.record) ? w.record : w);
     const pageRecs = recs.filter(r => r && r.k === 'cfg' && r.d && r.d.ty === 'html' && r.d.h === expectedHash);
-    if (pageRecs.length === 0) return { html: null, error: 'no page chunks found' };
+    if (pageRecs.length === 0) {
+      const w = await fetchHtmlPageViaWalk(expectedHash, coords || {});
+      if (w.html) { await pageCachePut(expectedHash, w.html); return w; }
+      return { html: null, error: 'no page chunks found; walk: ' + (w.error || 'failed') };
+    }
     const tot = pageRecs[0].d.tot;
     const bySeq = new Map<number, any>();
     for (const r of pageRecs) {
@@ -209,6 +293,7 @@ export async function fetchHtmlPage(
     // Second gate: re-scan what actually came off chain before it reaches a WebView.
     const scan = scanHtmlForPublish(html);
     if (!scan.ok) return { html: null, error: 'page failed safety scan: ' + scan.issues.map(i => i.code).join(',') };
+    await pageCachePut(expectedHash, html);
     return { html };
   } catch (e: any) {
     return { html: null, error: String(e?.message || e) };

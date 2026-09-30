@@ -478,8 +478,42 @@ function DAppCard({ item, onPress }: { item: DAppEntry; onPress: () => void }) {
 
 // Storefront Card
 function StorefrontCard({ item, onPress }: { item: StorefrontEntry; onPress: () => void }) {
+  const tipAddr = (item as any)?.coords?.tip_addr;
+  const doTip = () => {
+    if (!tipAddr) return;
+    Alert.alert(
+      'Tip ' + (item.storeName || 'this store'),
+      'Send 1 KAS straight to the address this store declared in its announce?\n\n' + String(tipAddr)
+        + '\n\nNever send KAS to an address typed inside a page \u2014 only through prompts like this.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Send 1 KAS', onPress: async () => {
+            try {
+              const ps = require('./proposal_share');
+              const SS = require('expo-secure-store');
+              const sender = await SS.getItemAsync('kaspa_address');
+              const priv = await ps._kvResolvePrivHex();
+              if (!sender || !priv) throw new Error('wallet identity unavailable');
+              const { sendKaspaViaRest } = require('./kaspa_rest_tx');
+              const r: any = await sendKaspaViaRest({
+                senderAddress: sender, recipientAddress: String(tipAddr),
+                amountSompi: 100000000n, privateKeyHex: priv, network: 'testnet-10' as any,
+              });
+              if (r && r.success) Alert.alert('Tip sent \u2713');
+              else Alert.alert('Tip failed', String((r && r.error) || 'unknown'));
+            } catch (e: any) { Alert.alert('Tip failed', String(e?.message || e)); }
+          } },
+      ],
+    );
+  };
   return (
     <TouchableOpacity style={cardStyles.storefrontCard} onPress={onPress} activeOpacity={0.8}>
+      {tipAddr ? (
+        <TouchableOpacity onPress={doTip}
+          style={{ position: 'absolute', right: 6, bottom: 6, zIndex: 20, borderColor: '#7c3aed', borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+          <Text style={{ color: '#b9a6ff', fontSize: 10, fontWeight: '700' }}>{'\U0001F49C TIP'}</Text>
+        </TouchableOpacity>
+      ) : null}
       <View style={cardStyles.badgeContainer}>
         {item.townhall.verified ? <VerifiedBadge /> : <UnverifiedBadge />}
       </View>
@@ -762,6 +796,11 @@ export default function VillageMailbox() {
           const take = (it: any) => { if (!it) return; const prev = byHead.get(it.quad.head); if (!prev || it.t > prev.t) byHead.set(it.quad.head, it); };
           // 2) device quad cache first - survives relay recycles until wipe
           try { const cRaw = await AS.getItem('kv_game_registry_cache'); (cRaw ? JSON.parse(cRaw) : []).forEach(take); } catch {}
+          // PAINT NOW. Those quads are already on this device, but the lane
+          // waited for the relay AND up to 240 block-scan round trips before
+          // its single setGames - minutes of blank cards over data we had all
+          // along. Render what we know, then let the network refine it.
+          if (byHead.size) { try { setGames(Array.from(byHead.values()) as any); } catch {} }
           // 1) relay records
           let rowsCount = 0;
           try {

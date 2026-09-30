@@ -80,17 +80,92 @@ export async function publishConfigChunks(
 }
 
 /** Buyer side: rebuild + verify a store's config from chain. */
+// ---------------------------------------------------------------------------
+// Dapps and storefront configs get the ladder games and pages already have:
+// device cache -> relay records -> coordinate walk. Relay-only meant a dapp
+// went dark the moment the archive rotated - which is exactly why dapps were
+// not persistent while games were.
+// ---------------------------------------------------------------------------
+const KV_CFG_WALK_RELAY = 'https://kasvillage.app.runonflux.io';
+
+async function cfgCacheGet(hash: string): Promise<any | null> {
+  try {
+    const AS = require('@react-native-async-storage/async-storage').default;
+    const raw = await AS.getItem('kv_cfg_' + hash);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+async function cfgCachePut(hash: string, cfg: any): Promise<void> {
+  try {
+    const AS = require('@react-native-async-storage/async-storage').default;
+    await AS.setItem('kv_cfg_' + hash, JSON.stringify(cfg));
+  } catch {}
+}
+
+async function fetchStoreConfigViaWalk(
+  expectedHash: string,
+  coords: { anchor_hash?: string; daa_to?: number },
+): Promise<{ config: any | null; error?: string }> {
+  try {
+    if (!coords || !coords.anchor_hash || !coords.daa_to) return { config: null, error: 'no coordinates' };
+    const sink = await (await fetch(KV_CFG_WALK_RELAY + '/api/kaspa/sink')).json();
+    const vdaa = Number(sink.virtual_daa_score || 0);
+    const daaTo = Number(coords.daa_to);
+    if (vdaa && vdaa - daaTo > 1100000) return { config: null, error: 'publish window (~30h) closed - needs a republish' };
+    const store: Record<number, { t: number; tot: number; c: string }> = {};
+    let low = String(coords.anchor_hash);
+    let pages = 0, retries = 0;
+    while (pages < 450) {
+      let page: any;
+      try { page = await (await fetch(KV_CFG_WALK_RELAY + '/api/kaspa/blocks?low_hash=' + low + '&daa_max=' + (daaTo + 600) + '&txs=1')).json(); }
+      catch { if (++retries > 20) return { config: null, error: 'walk: node unreachable' }; await new Promise((r) => setTimeout(r, 1500)); continue; }
+      pages++;
+      for (const b of page.blocks || []) for (const tx of b.txs || []) {
+        try {
+          const hx = String(tx.payload_hex || '');
+          let raw = '';
+          for (let i = 0; i < hx.length; i += 2) raw += String.fromCharCode(parseInt(hx.substr(i, 2), 16));
+          try { raw = decodeURIComponent(escape(raw)); } catch {}
+          const rec = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw);
+          const d = rec && rec.d;
+          if (!d || rec.k !== 'cfg' || d.ty === 'html') continue;
+          if (d.h === expectedHash && typeof d.seq === 'number') {
+            if (!store[d.seq] || (rec.t || 0) > store[d.seq].t) store[d.seq] = { t: rec.t || 0, tot: d.tot, c: d.c };
+          }
+        } catch {}
+      }
+      if (page.done || !page.next_low_hash) break;
+      low = page.next_low_hash;
+    }
+    const first = store[0];
+    if (!first) return { config: null, error: 'walk found no config chunks in span' };
+    let b64 = '';
+    for (let i = 0; i < first.tot; i++) { const c = store[i]; if (!c) return { config: null, error: 'walk missing chunk ' + i }; b64 += c.c; }
+    const json = new TextDecoder().decode(pako.inflate(b64decode(b64)));
+    if (bytesToHex(sha256(utf8ToBytes(json))) !== expectedHash) return { config: null, error: 'walked config hash mismatch' };
+    return { config: JSON.parse(json) };
+  } catch (e: any) { return { config: null, error: 'walk: ' + String(e?.message || e) }; }
+}
+
 export async function fetchStoreConfig(
   storeAddress: string,
   expectedHash: string,
   network = 'testnet-10',
+  coords?: { anchor_hash?: string; daa_to?: number },
 ): Promise<{ config: any | null; error?: string }> {
   try {
+    const hit = await cfgCacheGet(expectedHash);
+    if (hit) return { config: hit };
     const wrapped: any[] = await fetchRecords(storeAddress, network, 200);
     // fetchRecords returns { record, txid, blockTime } wrappers - unwrap to the KvRecord
     const recs: any[] = wrapped.map(w => (w && w.record) ? w.record : w);
     const cfgRecs = recs.filter(r => r && r.k === 'cfg' && r.d && r.d.h === expectedHash);
-    if (cfgRecs.length === 0) return { config: null, error: 'no config chunks found' };
+    if (cfgRecs.length === 0) {
+      const w = await fetchStoreConfigViaWalk(expectedHash, coords || {});
+      if (w.config) { await cfgCachePut(expectedHash, w.config); return w; }
+      return { config: null, error: 'no config chunks found; walk: ' + (w.error || 'failed') };
+    }
     const tot = cfgRecs[0].d.tot;
     // newest record per seq wins (config updates re-publish all chunks)
     const bySeq = new Map<number, any>();

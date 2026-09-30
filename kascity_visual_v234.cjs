@@ -1,0 +1,49 @@
+// kascity_visual_v234.cjs - phone-fit the board HUD.
+//
+// ROOT CAUSE of the cramped board. The four seat cards are position:fixed at a
+// hardcoded 158px:
+//   var spots = { 1:"left:8px;top:8px;", 2:"right:8px;top:8px;", ... }
+//   card.style.cssText = "position:fixed;" + spots[p] + "width:158px;..."
+// Two columns of 158px consume 316px of a 390px phone, leaving ~74px of clear
+// board down the middle. That is the squeeze in the screenshots - not the
+// canvas, which already sizes itself from innerWidth/innerHeight.
+//
+// v234:
+//  - card width from the viewport: 27%% portrait, 16%% landscape, floor 78px
+//  - font and avatar scale with the card, padding tightened
+//  - bottom row anchored to 17%% of height instead of a flat 120px, so it
+//    clears the ROLL bar on short screens
+//  - cards re-fit on resize/rotate (they were sized once at build time)
+//  - popup clamps made proportional: innerWidth-250 left 140px of usable
+//    width on a phone, crushing every tooltip into the left third
+//
+// Patches in place with a .bak. Republish after checking it in a browser.
+// Run from layer1 root:  node src\\kascity_visual_v234.cjs
+const fs = require("fs");
+const TARGETS = ["showcase_kascity414_chain.html", "showcase_kascity414_chain_dev.html"];
+const EDITS = [
+  ["seat-metrics", "var spots = { 1: \"left:8px;top:8px;\", 2: \"right:8px;top:8px;\", 3: \"left:8px;bottom:120px;\", 4: \"right:8px;bottom:120px;\" };", "var KVM = function(){\n    var W = window.innerWidth, H = window.innerHeight, land = W > H;\n    // Two 158px cards ate 316px of a 390px phone, leaving ~74px of board.\n    // Size them off the viewport instead, and give landscape a tighter ratio\n    // since vertical room is what is scarce there.\n    var cw = Math.max(78, Math.min(158, Math.round(W * (land ? 0.16 : 0.27))));\n    var bot = Math.max(48, Math.min(120, Math.round(H * 0.17)));\n    return { cw: cw, bot: bot, fs: cw < 108 ? 9 : (cw < 134 ? 10 : 11), av: cw < 108 ? 26 : (cw < 134 ? 32 : 40), land: land };\n  };\n  var kvm = KVM();\n  var spots = { 1: \"left:6px;top:6px;\", 2: \"right:6px;top:6px;\", 3: \"left:6px;bottom:\" + kvm.bot + \"px;\", 4: \"right:6px;bottom:\" + kvm.bot + \"px;\" };"],
+  ["card-style", "card.style.cssText = \"position:fixed;\" + spots[p] + \"width:158px;z-index:50;background:rgba(20,16,12,0.82);\" +\n      \"border:1px solid #5a4a3a;border-radius:6px;padding:6px;color:#f4e4c1;font:11px monospace;", "card.setAttribute(\"data-kvseat\", String(p));\n      card.style.cssText = \"position:fixed;\" + spots[p] + \"width:\" + kvm.cw + \"px;z-index:50;background:rgba(20,16,12,0.82);\" +\n      \"border:1px solid #5a4a3a;border-radius:6px;padding:5px;color:#f4e4c1;font:\" + kvm.fs + \"px monospace;"],
+  ["refit-on-resize", "var names = { 1: \"P1 (you)\", 2: \"P2\", 3: \"P3\", 4: \"P4\" };", "var names = { 1: \"P1 (you)\", 2: \"P2\", 3: \"P3\", 4: \"P4\" };\n  // Re-fit on rotate / resize. W and H were read once at build time, so the\n  // cards kept desktop proportions after an orientation change.\n  window.addEventListener(\"resize\", function(){\n    try {\n      var m = KVM();\n      var sp = { 1: \"left:6px;top:6px;\", 2: \"right:6px;top:6px;\", 3: \"left:6px;bottom:\" + m.bot + \"px;\", 4: \"right:6px;bottom:\" + m.bot + \"px;\" };\n      var all = document.querySelectorAll(\"[data-kvseat]\");\n      for (var i = 0; i < all.length; i++) {\n        var el = all[i], s = el.getAttribute(\"data-kvseat\");\n        el.style.cssText = \"position:fixed;\" + sp[s] + \"width:\" + m.cw + \"px;z-index:50;background:rgba(20,16,12,0.82);\" +\n          \"border:1px solid #5a4a3a;border-radius:6px;padding:5px;color:#f4e4c1;font:\" + m.fs + \"px monospace;\";\n        var cnv = el.querySelector(\"canvas\");\n        if (cnv) { cnv.style.width = m.av + \"px\"; cnv.style.height = Math.round(m.av * 1.1) + \"px\"; }\n      }\n    } catch (e) {}\n  });"],
+  ["avatar-scale", "cv.style.cssText = \"width:40px;height:44px;image-rendering:pixelated;float:left;margin-right:6px;\";", "cv.style.cssText = \"width:\" + kvm.av + \"px;height:\" + Math.round(kvm.av * 1.1) + \"px;image-rendering:pixelated;float:left;margin-right:5px;\";"],
+  ["popup-x-clamp", "var gx=Math.min(Math.max(pad, ev.clientX+pad), window.innerWidth-250);", "var gx=Math.min(Math.max(pad, ev.clientX+pad), window.innerWidth-Math.min(250, Math.round(window.innerWidth*0.45)));"],
+  ["popup-y-clamp", "var gy=Math.min(Math.max(pad, ev.clientY+pad), window.innerHeight-bar-240);", "var gy=Math.min(Math.max(pad, ev.clientY+pad), window.innerHeight-Math.min(bar+240, Math.round(window.innerHeight*0.55)));"],
+];
+let touched = 0;
+for (const P of TARGETS) {
+  if (!fs.existsSync(P)) { console.log("skip (absent)  [" + P + "]"); continue; }
+  let s = fs.readFileSync(P, "utf8");
+  if (s.includes("data-kvseat")) { console.log("already patched  [" + P + "]"); continue; }
+  let ok = true;
+  for (const [name, a] of EDITS) {
+    const n = s.split(a).length - 1;
+    if (n !== 1) { console.error("  ABORT [" + P + " / " + name + "]: found " + n + ", expected 1"); ok = false; }
+  }
+  if (!ok) { process.exitCode = 1; continue; }
+  for (const [name, a, b] of EDITS) s = s.split(a).join(b);
+  fs.writeFileSync(P + ".bak", fs.readFileSync(P));
+  fs.writeFileSync(P, s);
+  console.log("ok  [" + P + "] 6 edits  (backup: " + P + ".bak)");
+  touched++;
+}
+console.log("\n" + touched + " file(s) phone-fitted. Open one in a browser and narrow the window to check.");

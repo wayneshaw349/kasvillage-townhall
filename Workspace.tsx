@@ -854,7 +854,7 @@ const KvChainGamePublish: React.FC = () => {
             pl += Number(u.utxoEntry?.amount || u.amount || 0);
           }
         }
-        if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) };
+        if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) };
         gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to + ' | pledge ' + (daaSpan.pledge_kas || 0) + ' KAS');
       } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
       // manifestHash is deterministic: sha256 of the manifest JSON — the exact
@@ -932,7 +932,7 @@ const KvChainGamePublish: React.FC = () => {
             pl += Number(u.utxoEntry?.amount || u.amount || 0);
           }
         }
-        if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
+        if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
         gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to + ' | pledge ' + (daaSpan.pledge_kas || 0) + ' KAS');
       } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
       const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...daaSpan });
@@ -3495,6 +3495,41 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   };
   
   // v2: TownHall verification + Arweave upload flow
+  // ANNOUNCE-only for stores. Games had this; stores did not, so the only way
+  // to re-advertise a store whose announce had aged out was a full republish -
+  // every chunk again. This re-stamps a fresh registry entry from the stored
+  // publish details for the price of one announce (~1 KAS).
+  const handleAnnounceStore = async () => {
+    try {
+      setPubStage('Announcing to registry...');
+      const AS = require('@react-native-async-storage/async-storage').default;
+      const raw = await AS.getItem('kv_store_pub_' + hostId);
+      if (!raw) { Alert.alert('Nothing to announce', 'Publish this storefront once first - announce re-advertises an existing on-chain store.'); setPubStage(''); return; }
+      const st = JSON.parse(raw);
+      const { announceToRegistry } = require('./payload_publish');
+      const { _kvResolvePrivHex } = require('./proposal_share');
+      const _priv = await _kvResolvePrivHex();
+      const _addr2 = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
+      const _owner2 = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr2, network: 'testnet-10' as any };
+      let coords: any = undefined;
+      try {
+        let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
+        const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(st.storeAddress) + '/utxos');
+        for (const u of (await ur.json()) || []) {
+          const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
+          if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
+          pl += Number(u.utxoEntry?.amount || u.amount || 0);
+        }
+        const tipOn2 = (await AS.getItem('kv_tip_optin')) === '1';
+        if (hi > 0) coords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(st.anchor ? { anchor_hash: st.anchor } : {}), ...(tipOn2 && _addr2 ? { tip_addr: _addr2 } : {}) };
+      } catch {}
+      const ann: any = await announceToRegistry(_owner2 as any, st.storeAddress, st.name, st.category, 'store', { primaryLink: st.primaryLink, configHash: st.cfgHash, coords });
+      setPubStage('');
+      if (ann && ann.success !== false) Alert.alert('Announced \u2713', 'Re-advertised to the registry for ~1 KAS. Chunks untouched.');
+      else Alert.alert('Announce failed', String((ann && ann.error) || 'unknown'));
+    } catch (e: any) { setPubStage(''); Alert.alert('Announce failed', String(e?.message || e)); }
+  };
+
   const handlePublishStorefront = async () => {
     // Validate
     if (containsProhibitedText(brandName) || containsProhibitedText(storeDescription)) {
@@ -3634,7 +3669,21 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
               pl += Number(u.utxoEntry?.amount || u.amount || 0);
             }
-            if (hi > 0) _stCoords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(_stAnchor ? { anchor_hash: _stAnchor } : {}) };
+            let _tipOn = false;
+            try {
+              const AS = require('@react-native-async-storage/async-storage').default;
+              _tipOn = (await AS.getItem('kv_tip_optin')) === '1';
+            } catch {}
+            if (hi > 0) _stCoords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(_stAnchor ? { anchor_hash: _stAnchor } : {}), ...(_tipOn && _addr ? { tip_addr: _addr } : {}) };
+            // Stash what ANNOUNCE-only needs, so re-advertising later costs ~1
+            // KAS instead of a full republish of every chunk.
+            try {
+              const AS = require('@react-native-async-storage/async-storage').default;
+              await AS.setItem('kv_store_pub_' + hostId, JSON.stringify({
+                storeAddress: _pub.storeAddress, cfgHash: _annHash, anchor: _stAnchor,
+                name: brandName, category: storeCategory, primaryLink,
+              }));
+            } catch {}
             console.log('[Workspace] store coords', _stCoords);
           } catch (de) { console.warn('[Workspace] store daa span skipped:', de); }
           const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _annHash, coords: _stCoords });
@@ -3749,6 +3798,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           }}>
             <Eye size={rs.s(14)} color="#fff" />
             <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(12) }}>Visit Storefront</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: rs.s(4), borderColor: '#7c5cff', borderWidth: 1, borderRadius: rs.s(10), paddingVertical: rs.s(10), paddingHorizontal: rs.s(10) }} onPress={handleAnnounceStore} disabled={isPublishing}>
+            <Text style={{ color: '#b9a6ff', fontWeight: 'bold', fontSize: rs.font(11) }}>Announce</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: rs.s(6), backgroundColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(10) }} onPress={handlePublishStorefront} disabled={isPublishing}>
             {isPublishing ? <ActivityIndicator color="#fff" size="small" /> : <><Save size={rs.s(14)} color="#fff" /><Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(12) }}>Publish</Text></>}
@@ -4501,7 +4553,12 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                         if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
                         pl += Number(u.utxoEntry?.amount || u.amount || 0);
                       }
-                      if (hi > 0) _dpCoords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, lo - 600), daa_to: hi + 600, ...(_dpAnchor ? { anchor_hash: _dpAnchor } : {}) };
+                      let _dpTip = false;
+                      try {
+                        const AS = require('@react-native-async-storage/async-storage').default;
+                        _dpTip = (await AS.getItem('kv_tip_optin')) === '1';
+                      } catch {}
+                      if (hi > 0) _dpCoords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(_dpAnchor ? { anchor_hash: _dpAnchor } : {}), ...(_dpTip && _owner.address ? { tip_addr: _owner.address } : {}) };
                     } catch (de) { console.warn('[Game] dapp daa span skipped:', de); }
                     const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, _gname, 'GameGrid', 'dapp', { configHash: _ck.hash, coords: _dpCoords });
                     if (!_ann || _ann.success === false) console.warn('[Game] announce failed:', _ann && _ann.error);

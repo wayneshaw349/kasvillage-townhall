@@ -74,7 +74,20 @@ const CSP_META = '<meta http-equiv="Content-Security-Policy" content="default-sr
 // dimensions and rotated into the portrait viewport, so the game reflows as if
 // the phone turned - no expo-screen-orientation, no dev-client rebuild. Touch
 // coordinates map through a real CSS transform, so input keeps working.
-const KV_ROT_JS = "(function(){try{var r=__R__,s=__S__;var b=document.body;if(!b)return;if(!window.__kvVInit){window.__kvVInit=1;var st=document.createElement('style');st.textContent='html,body{margin:0;padding:0;overflow:hidden;background:#000;}';document.head.appendChild(st);window.addEventListener('resize',function(){try{window.__kvView(window.__kvR||0,window.__kvS||1);}catch(e){}});}window.__kvView=function(rr,ss){var vw=window.innerWidth,vh=window.innerHeight;b.style.transformOrigin='0 0';b.style.transform='none';var lw=(rr?vh:vw)/ss,lh=(rr?vw:vh)/ss;b.style.width=lw+'px';b.style.height=lh+'px';b.style.transform=(rr?('translate('+vw+'px,0px) rotate(90deg) '):'')+'scale('+ss+')';window.__kvR=rr;window.__kvS=ss;try{window.dispatchEvent(new Event('resize'));}catch(e){}};window.__kvView(r,s);}catch(e){}})();true;";
+const KV_ROT_JS = "(function(){try{var r=__R__,s=__S__;var b=document.body;if(!b)return;if(!window.__kvVInit){window.__kvVInit=1;var st=document.createElement('style');st.textContent='html{background:#000;}html,body{margin:0;padding:0;overflow:hidden;}';document.head.appendChild(st);window.addEventListener('resize',function(){try{window.__kvView(window.__kvR||0,window.__kvS||0);}catch(e){}});}window.__kvNat=function(){var t=b.style.transform;b.style.transform='none';var w=1,h=1,i,c=b.children;for(i=0;i<c.length;i++){var q=c[i].getBoundingClientRect();if(q.width>w)w=q.width;if(q.bottom>h)h=q.bottom;}w=Math.max(w,b.scrollWidth,1);h=Math.max(h,b.scrollHeight,1);b.style.transform=t;return{w:w,h:h};};window.__kvView=function(rr,ss){b.style.transformOrigin='0 0';var vw=window.innerWidth,vh=window.innerHeight;var n=window.__kvNat();if(!ss){var tw=rr?vh:vw,th=rr?vw:vh;ss=Math.min(tw/n.w,th/n.h)*0.88;if(!isFinite(ss)||ss<=0)ss=1;ss=Math.round(ss*100)/100;}var x,y;if(rr){x=(vw+ss*n.h)/2;y=(vh-ss*n.w)/2;b.style.transform='translate('+x+'px,'+y+'px) rotate(90deg) scale('+ss+')';}else{x=(vw-ss*n.w)/2;if(x<0)x=0;y=(vh-ss*n.h)/2;if(y<0)y=0;b.style.transform='translate('+x+'px,'+y+'px) scale('+ss+')';}window.__kvR=rr;window.__kvS=ss;try{window.ReactNativeWebView.postMessage(JSON.stringify({kvview:1,scale:ss,w:n.w,h:n.h}));}catch(e){}};window.__kvView(r,s);}catch(e){}})();true;";
+
+// iOS suspends a Web Audio AudioContext during inactivity. The game's
+// sequencer loops correctly (step % 64, driven by setInterval) - but it
+// schedules against ctx.currentTime, and a suspended context's clock STOPS.
+// So `while (nt < ctx.currentTime + .12)` schedules nothing, the music goes
+// silent with no error, and only a gesture plus resume() revives it. Which is
+// why it always died while waiting on someone else's turn: that is exactly
+// when nobody is touching the screen.
+//
+// The context is a closure local, so we wrap the constructor BEFORE the page
+// loads, keep every instance, and resume any that fall asleep. The game is on
+// chain and immutable; this fixes it from outside without a republish.
+const KV_AUDIO_KEEP = "(function(){try{var C=window.AudioContext||window.webkitAudioContext;if(!C)return;var made=[];function W(){var c=new C();made.push(c);return c;}W.prototype=C.prototype;try{window.AudioContext=W;}catch(e){}try{window.webkitAudioContext=W;}catch(e){}function kick(){for(var i=0;i<made.length;i++){var c=made[i];if(c&&c.state==='suspended'){try{c.resume();}catch(e){}}}}setInterval(kick,1500);document.addEventListener('touchstart',kick,true);document.addEventListener('touchend',kick,true);document.addEventListener('visibilitychange',kick);window.__kvAudioKick=kick;}catch(e){}})();true;";
 
 function injectCsp(raw: string): string {
   if (/http-equiv=["']Content-Security-Policy["']/i.test(raw)) return raw;
@@ -93,9 +106,34 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const [paySheet, setPaySheet] = useState<any>(null);
   const [rot, setRot] = useState(false);
   const [zoom, setZoom] = useState(1);
+  // Remember how this person likes to view THIS game. Rebuilding the board
+  // smaller would mean 66 fragments and ~77 KAS for a preference; a stored
+  // zoom costs nothing and is per-player rather than baked in for everyone.
+  const viewKey = 'kv_view_' + String((props.game && (props.game as any).head) || 'page').slice(0, 16);
   const applyView = (r: boolean, z: number) => {
     webRef.current?.injectJavaScript(KV_ROT_JS.replace('__R__', r ? '1' : '0').replace('__S__', String(z)));
+    try {
+      const AS = require('@react-native-async-storage/async-storage').default;
+      AS.setItem(viewKey, JSON.stringify({ r, z })).catch(() => {});
+    } catch {}
   };
+  useEffect(() => {
+    if (!props.game || !html) return;
+    let alive = true;
+    (async () => {
+      try {
+        const AS = require('@react-native-async-storage/async-storage').default;
+        const raw = await AS.getItem(viewKey);
+        const v = raw ? JSON.parse(raw) : null;
+        if (!alive) return;
+        // No stored preference: auto-fit once (scale 0 = measure and fit).
+        const r = v ? !!v.r : false, z = v ? Number(v.z) || 0 : 0;
+        setRot(r); setZoom(z);
+        setTimeout(() => applyView(r, z), 350);
+      } catch {}
+    })();
+    return () => { alive = false; };
+  }, [html]);
   const [payBusy, setPayBusy] = useState(false);
   const [payDone, setPayDone] = useState<string | null>(null);
 
@@ -115,7 +153,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
               daa_from: (props.game as any).daa_from,
               daa_to: (props.game as any).daa_to,
             } : undefined)
-        : await fetchHtmlPage(storeAddress, pageHash, network);
+        : await fetchHtmlPage(storeAddress, pageHash, network, (props as any).coords);
       if (!alive) return;
       // Games: full inline-JS apps, verified by hash chain + scanner - the
       // static-page CSP (default-src none, no scripts) would kill them.
@@ -254,7 +292,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
         source={{ html, baseUrl: 'https://kv-game.local/' }}
         originWhitelist={['https://kv-game.local']}
         ref={webRef}
-        injectedJavaScriptBeforeContentLoaded={CONSOLE_TAP + BRIDGE + KV_WNET_INJECT}
+        injectedJavaScriptBeforeContentLoaded={CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '')}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         javaScriptEnabled
@@ -263,7 +301,16 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
         sharedCookiesEnabled={false}
         allowFileAccess={false}
         allowUniversalAccessFromFileURLs={false}
-        allowsInlineMediaPlayback={false}
+        // Games need inline audio. With allowsInlineMediaPlayback false, iOS
+        // forces media out of inline playback entirely, and with the default
+        // mediaPlaybackRequiresUserAction=true, anything that interrupts the
+        // track needs a FRESH user gesture to resume - which never comes while
+        // you are sitting watching someone else's turn. KV_MUSIC.loop was
+        // already true; the loop was never the problem.
+        // Both stay locked down for ordinary pages, which have no business
+        // autoplaying anything.
+        allowsInlineMediaPlayback={!!props.game}
+        mediaPlaybackRequiresUserAction={!props.game}
         cacheEnabled={false}
         setSupportMultipleWindows={false}
         style={styles.fill}
@@ -271,7 +318,8 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       {props.game ? (
         <View style={{ position: 'absolute', right: 6, top: '32%' }}>
           {[
-            { t: '\u27F3', on: () => { const n = !rot; setRot(n); applyView(n, zoom); }, hot: rot },
+            { t: '\u27F3', on: () => { const n = !rot; setRot(n); applyView(n, 0); }, hot: rot },
+            { t: '\u25A3', on: () => { setZoom(0); applyView(rot, 0); }, hot: false },
             { t: '\u2212', on: () => { const z = Math.max(0.3, Math.round((zoom - 0.15) * 100) / 100); setZoom(z); applyView(rot, z); }, hot: false },
             { t: '+', on: () => { const z = Math.min(1.5, Math.round((zoom + 0.15) * 100) / 100); setZoom(z); applyView(rot, z); }, hot: false },
           ].map((b, i) => (

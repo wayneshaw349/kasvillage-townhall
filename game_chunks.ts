@@ -27,7 +27,7 @@ const ZERO = '0'.repeat(64);
 
 // HEAD per released build. Only a manifest that solves to a pinned HEAD runs.
 export const TRUSTED_GAMES: Record<string, string> = {
-  'kascity-414-chain': 'ef0c3a6ff34488044747589b3ee301c238879f496f60bf7bfb6c9fa7292ff63a',
+  'kascity-414-chain': '976b8c49712ee5fd1e00a33e1042f6fd5ac24f3c135b4e1fca3a80010e476805',
 };
 
 export interface FragRef { i: number; h: string; link: string; bytes: number; chunks: number; slot: number }
