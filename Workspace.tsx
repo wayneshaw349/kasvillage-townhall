@@ -863,6 +863,7 @@ const KvChainGamePublish: React.FC = () => {
       const manifestHash = bytesToHex(sha256(_u8(JSON.stringify({ ...m, addresses: slotAddresses }))));
       gadd('manifestHash ' + manifestHash.slice(0, 16) + '…');
       const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...daaSpan };
+      try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
       gadd('announcing to game registry…');
       const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: manifestHash } as any);
       if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '… (~1 KAS)');
@@ -942,6 +943,7 @@ const KvChainGamePublish: React.FC = () => {
         gadd('announcing to game registry…');
         const { announceToRegistry } = require('./payload_publish');
         const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...daaSpan };
+        try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
         const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: res.manifestHash } as any);
         if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '…');
         else gadd('announce failed (game still live): ' + String((_ann && _ann.error) || 'unknown'));

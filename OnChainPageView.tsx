@@ -98,6 +98,14 @@ function injectCsp(raw: string): string {
 
 export default function OnChainPageView(props: OnChainPageViewProps) {
   const { storeAddress, pageHash, network = 'testnet-10', ownerPubkey } = props;
+  // KV_LANDSCAPE_LOCK: real landscape for chain games (replaces the CSS-rotate simulation).
+  useEffect(() => {
+    if (!props.game) return;
+    let SO: any = null;
+    try { SO = require('expo-screen-orientation'); } catch { return; }
+    try { SO.lockAsync(SO.OrientationLock.LANDSCAPE).catch(() => {}); } catch {}
+    return () => { try { SO.lockAsync(SO.OrientationLock.PORTRAIT_UP).catch(() => {}); } catch {} };
+  }, []);
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -154,6 +162,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
               daa_to: (props.game as any).daa_to,
             } : undefined)
         : await fetchHtmlPage(storeAddress, pageHash, network, (props as any).coords);
+      try { const _q: any = props.game; if (_q && _q.head) console.log('[KV] QUAD ' + JSON.stringify({ head: _q.head, anchor_hash: _q.anchor_hash, daa_from: _q.daa_from, daa_to: _q.daa_to, manifestAddress: _q.manifestAddress, manifestHash: _q.manifestHash })); } catch {}
       if (!alive) return;
       // Games: full inline-JS apps, verified by hash chain + scanner - the
       // static-page CSP (default-src none, no scripts) would kill them.
