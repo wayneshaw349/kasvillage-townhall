@@ -1,3 +1,5 @@
+// KV_PORTRAIT_DEFAULT: this binary was built with orientation "default"; pin the app back to portrait at startup.
+try { const _SO = require('expo-screen-orientation'); _SO.lockAsync(_SO.OrientationLock.PORTRAIT_UP).catch(() => {}); } catch {}
 // Polyfill crypto.getRandomValues for Hermes (React Native)
 // Must run BEFORE @noble/curves is imported anywhere
 import * as ExpoCrypto from 'expo-crypto';

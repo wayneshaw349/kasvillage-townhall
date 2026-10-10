@@ -7,7 +7,7 @@
       "ios",
       "android"
     ],
-    "orientation": "default",
+    "orientation": "portrait",
     "scheme": "kasvillage",
     "plugins": [
       "expo-secure-store",

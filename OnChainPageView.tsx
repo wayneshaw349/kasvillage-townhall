@@ -98,14 +98,6 @@ function injectCsp(raw: string): string {
 
 export default function OnChainPageView(props: OnChainPageViewProps) {
   const { storeAddress, pageHash, network = 'testnet-10', ownerPubkey } = props;
-  // KV_LANDSCAPE_LOCK: real landscape for chain games (replaces the CSS-rotate simulation).
-  useEffect(() => {
-    if (!props.game) return;
-    let SO: any = null;
-    try { SO = require('expo-screen-orientation'); } catch { return; }
-    try { SO.lockAsync(SO.OrientationLock.LANDSCAPE).catch(() => {}); } catch {}
-    return () => { try { SO.lockAsync(SO.OrientationLock.PORTRAIT_UP).catch(() => {}); } catch {} };
-  }, []);
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
