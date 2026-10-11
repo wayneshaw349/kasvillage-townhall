@@ -125,6 +125,27 @@ export async function announceToRegistry(
 // ---------------------------------------------------------------------------
 // DELIST: payload flag now; pledge withdrawal (sweep) is the hard delist.
 // ---------------------------------------------------------------------------
+// REGISTRY DELIST (games and other announce-based lanes): a signed record on
+// the registry naming the head. Readers hide the announce when the delist's
+// signer matches the announce's signer. Pledge-independent by design.
+// ---------------------------------------------------------------------------
+
+export async function delistFromRegistry(owner: OwnerKeys, head: string, kind: string = 'game') {
+  const rec = signRecord({ v: 1, k: 'delist', t: Date.now(), o: owner.pubkeyHex, d: { head } } as any, owner.privateKeyHex);
+  const regAddr = registryAddress(kind, owner.network);
+  const res = await sendKaspaViaRest({
+    senderAddress: owner.address,
+    recipientAddress: regAddr,
+    amountSompi: ANNOUNCE_SOMPI,
+    privateKeyHex: owner.privateKeyHex,
+    network: owner.network,
+    payload: buildPayloadHex(rec),
+  });
+  console.log('[Delist]', head.slice(0, 10), '-> registry', regAddr.slice(0, 24));
+  return { ...res, registryAddr: regAddr };
+}
+
+// ---------------------------------------------------------------------------
 
 export async function publishDelist(owner: OwnerKeys, kind: KvKind, storeNonce: number) {
   const store = deriveStoreKeys(owner.privateKeyHex, storeNonce, owner.network);

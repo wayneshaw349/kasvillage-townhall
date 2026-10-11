@@ -786,6 +786,7 @@ export default function VillageMailbox() {
           const parseAnn = (input: any): any | null => {
             let r: any = (input && input.record) ? input.record : input;
             if (r && !r.k && typeof r.payload === 'string') { try { const raw = h2s(r.payload); r = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw); } catch { return null; } }
+            if (r && r.k === 'delist' && r.d && r.d.head) return { delist: true, head: String(r.d.head), t: r.t || 0, o: r.o || '' }; // KV_DELIST_FILTER
             if (!r || r.k !== 'registry' || !r.d) return null;
             let quad: any = null; try { quad = r.d.primaryLink ? JSON.parse(r.d.primaryLink) : null; } catch {}
             if (!quad || !quad.head || !quad.manifestAddress || !quad.manifestHash) return null;
@@ -793,7 +794,12 @@ export default function VillageMailbox() {
             return { name: r.d.name || quad.game, category: r.d.category || 'Game', t: r.t || 0, o: r.o || '', quad };
           };
           const byHead = new Map<string, any>();
-          const take = (it: any) => { if (!it) return; const prev = byHead.get(it.quad.head); if (!prev || it.t > prev.t) byHead.set(it.quad.head, it); };
+          const delistByHead = new Map<string, any>();
+          const take = (it: any) => {
+            if (!it) return;
+            if (it.delist) { const p = delistByHead.get(it.head); if (!p || it.t > p.t) delistByHead.set(it.head, it); return; }
+            const prev = byHead.get(it.quad.head); if (!prev || it.t > prev.t) byHead.set(it.quad.head, it);
+          };
           // 2) device quad cache first - survives relay recycles until wipe
           try { const cRaw = await AS.getItem('kv_game_registry_cache'); (cRaw ? JSON.parse(cRaw) : []).forEach(take); } catch {}
           // PAINT NOW. Those quads are already on this device, but the lane
@@ -827,7 +833,11 @@ export default function VillageMailbox() {
             }
             if (sink && sink.sink) await AS.setItem('kv_reg_checkpoint', JSON.stringify({ sink: sink.sink, at: Date.now() }));
           } catch {}
-          const items = Array.from(byHead.values()).sort((a, b) => b.t - a.t);
+          const items = Array.from(byHead.values()).filter((it: any) => {
+            const d = delistByHead.get(it.quad.head);
+            if (!d) return true;
+            return !!(d.o && it.o && d.o !== it.o); // same signer (or unknown signer) -> hidden
+          }).sort((a, b) => b.t - a.t);
           // TOFU publisher pinning: the FIRST signer seen for a name is
           // pinned on-device; a later announce under the same name from a
           // different key gets a loud warning on its card.
