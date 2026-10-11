@@ -17,6 +17,12 @@ import { View, Text, ActivityIndicator, TouchableOpacity, StyleSheet } from 'rea
 import { WebView } from 'react-native-webview';
 import { fetchHtmlPage } from './html_chunks';
 import { fetchGamePuzzle, TRUSTED_GAMES, GameManifest } from './game_chunks';
+
+// KV_HEAD_SUPERSEDE: launch the pinned build even when an installed record carries a superseded head.
+const KV_HEAD_SUPERSEDE: Record<string, string> = {
+  '976b8c49712ee5fd1e00a33e1042f6fd5ac24f3c135b4e1fca3a80010e476805':
+    'ef0c3a6ff34488044747589b3ee301c238879f496f60bf7bfb6c9fa7292ff63a',
+};
 import { KV_WNET_INJECT, handleKvNetMessage } from './kv_net_bridge';
 import { useRef } from 'react';
 
@@ -143,7 +149,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
     setError(null);
     (async () => {
       const res = props.game
-        ? await fetchGamePuzzle(props.game.manifestAddress, props.game.manifestHash, props.game.head, network,
+        ? await fetchGamePuzzle(props.game.manifestAddress, props.game.manifestHash, (KV_HEAD_SUPERSEDE[props.game.head] || props.game.head), network,
             (have, total) => { if (alive) setProgress('solving puzzle ' + have + '/' + total); },
             // Coordinates must reach the fetcher here too, not only on Mailbox
             // install. Without them the coordinate walk is skipped entirely and
