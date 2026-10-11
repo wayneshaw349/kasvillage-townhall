@@ -802,11 +802,14 @@ export default function VillageMailbox() {
           };
           // 2) device quad cache first - survives relay recycles until wipe
           try { const cRaw = await AS.getItem('kv_game_registry_cache'); (cRaw ? JSON.parse(cRaw) : []).forEach(take); } catch {}
+          try { const dRaw = await AS.getItem('kv_game_delist_cache'); (dRaw ? JSON.parse(dRaw) : []).forEach(take); } catch {}
+          try { console.log('[GamesLane] run: cachedQuads=' + byHead.size + ' cachedDelists=' + delistByHead.size); } catch {}
           // PAINT NOW. Those quads are already on this device, but the lane
           // waited for the relay AND up to 240 block-scan round trips before
           // its single setGames - minutes of blank cards over data we had all
           // along. Render what we know, then let the network refine it.
-          if (byHead.size) { try { setGames(Array.from(byHead.values()) as any); } catch {} }
+          // KV_PAINT_FILTER: the instant paint honors delists too
+          if (byHead.size) { try { setGames(Array.from(byHead.values()).filter((it: any) => { const d = delistByHead.get(it.quad.head); if (!d || !(d.t > it.t)) return true; return !!(d.o && it.o && d.o !== it.o); }) as any); } catch {} }
           // 1) relay records
           let rowsCount = 0;
           try {
@@ -836,8 +839,13 @@ export default function VillageMailbox() {
           const items = Array.from(byHead.values()).filter((it: any) => {
             const d = delistByHead.get(it.quad.head);
             if (!d) return true;
-            return !!(d.o && it.o && d.o !== it.o); // same signer (or unknown signer) -> hidden
+            if (!(d.t > it.t)) { try { console.log('[GamesLane] delist OUTRANKED for ' + it.quad.head.slice(0, 8) + ' delist.t=' + d.t + ' announce.t=' + it.t); } catch {} return true; }
+            const keep = !!(d.o && it.o && d.o !== it.o);
+            try { console.log('[GamesLane] ' + (keep ? 'KEPT(signer mismatch) ' : 'HIDDEN ') + it.quad.head.slice(0, 8) + ' d.o=' + String(d.o).slice(0, 10) + ' it.o=' + String(it.o).slice(0, 10)); } catch {}
+            return keep;
           }).sort((a, b) => b.t - a.t);
+          try { console.log('[GamesLane] done: shown=' + items.length + ' delists=' + delistByHead.size + ' delistHeads=' + Array.from(delistByHead.keys()).map((h: string) => h.slice(0, 8)).join(',') + ' | allHeads=' + Array.from(byHead.keys()).map((h: string) => h.slice(0, 8)).join(',') + ' | shownHeads=' + items.map((i: any) => String(i.quad.head).slice(0, 8) + '(t=' + i.t + ',o=' + String(i.o).slice(0, 8) + ')').join(',')); } catch {}
+          try { if (delistByHead.size) await AS.setItem('kv_game_delist_cache', JSON.stringify(Array.from(delistByHead.values()))); } catch {}
           // TOFU publisher pinning: the FIRST signer seen for a name is
           // pinned on-device; a later announce under the same name from a
           // different key gets a loud warning on its card.

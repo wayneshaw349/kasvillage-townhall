@@ -816,6 +816,36 @@ const KvChainGamePublish: React.FC = () => {
   })(); }, []);
   const gadd = (l: string) => setGlog((p) => [...p.slice(-150), l]);
   const GAMES: Record<string, { bundle: any; head: string; nonceBase: number }> = require('./games_to_publish');
+  const runDelist = async (gameId: string) => {
+    if (gbusy) return;
+    const entry = GAMES[gameId];
+    if (!entry) return;
+    const head = entry.bundle.manifest.head;
+    const _heads: string[] = [head];
+    try { const { TRUSTED_GAMES } = require('./game_chunks'); const th = (TRUSTED_GAMES as any)[gameId]; if (th && th !== head) _heads.push(th); } catch {}
+    Alert.alert('Delist ' + gameId + '?', 'Posts a signed delist record (~1 KAS). New users stop seeing it in the store; installed copies keep playing.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delist', style: 'destructive', onPress: async () => {
+        setGbusy(gameId); setGlog([]);
+        try {
+          const { delistFromRegistry } = require('./payload_publish');
+          const { _kvResolvePrivHex } = require('./proposal_share');
+          const priv = await _kvResolvePrivHex();
+          if (!priv || !myAddr) { gadd('ERROR: wallet keys unavailable'); setGbusy(''); return; }
+          const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+          const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: 'testnet-10' as any };
+          let res: any = null;
+          for (const _h of _heads) {
+            res = await delistFromRegistry(owner, _h, 'game');
+            try { const _AS2 = require('@react-native-async-storage/async-storage').default; const dRaw = await _AS2.getItem('kv_game_delist_cache'); const arr = dRaw ? JSON.parse(dRaw) : []; arr.push({ delist: true, head: _h, t: Date.now(), o: pub }); await _AS2.setItem('kv_game_delist_cache', JSON.stringify(arr)); gadd('local delist echo cached ' + _h.slice(0, 8)); } catch {}
+          }
+          if (res && res.success !== false) gadd('DELISTED ' + gameId + ' (head ' + String(head).slice(0, 10) + '\u2026) -> ' + String(res.registryAddr || '').slice(0, 24) + '\u2026');
+          else gadd('delist failed: ' + String((res && res.error) || 'unknown'));
+        } catch (e: any) { gadd('delist error: ' + String(e?.message || e)); }
+        setGbusy('');
+      } },
+    ]);
+  };
   const runAnnounceOnly = async (gameId: string) => {
     if (gbusy) return;
     setGbusy(gameId); setGlog([]);
@@ -1006,6 +1036,12 @@ const KvChainGamePublish: React.FC = () => {
           style={{ backgroundColor: '#241f36', borderWidth: 1, borderColor: '#7c5cff', borderRadius: 8, padding: 10, marginBottom: 6 }}>
           <Text style={{ color: '#b9a6ff', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>
             {gbusy === id ? 'WORKING…' : 'ANNOUNCE ' + id + ' (registry only, ~1 KAS)'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity key={id + '-del'} disabled={!!gbusy} onPress={() => runDelist(id)}
+          style={{ backgroundColor: '#2d1a1a', borderWidth: 1, borderColor: '#b14b4b', borderRadius: 8, padding: 10, marginBottom: 6 }}>
+          <Text style={{ color: '#e08b8b', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>
+            {'DELIST ' + id + ' (hide from store, ~1 KAS)'}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity key={id} disabled={!!gbusy} onPress={() => runPublish(id)}
