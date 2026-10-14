@@ -1,0 +1,11 @@
+TITLE:
+Pruning-Resistant Content Persistence on BlockDAG Ledgers
+
+ABSTRACT:
+We present a protocol for persistent content discovery on high-throughput BlockDAG ledgers with aggressive pruning. Signed records are replayable by third parties, turning persistence into an incentivized market rather than a protocol obligation. Evidence of pruned transactions remains verifiable through SPV bundles anchored to proof-of-work headers. We demonstrate the design on Kaspa testnet with storefront, application, and academic publishing rails sharing one record format.
+
+REPO URL:
+https://github.com/wayneshaw349/kasvillage-townhall
+
+KEYWORDS:
+blockdag, pruning, content persistence, kaspa, spv

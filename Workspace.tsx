@@ -1749,6 +1749,16 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
   const [dkimSteps, setDkimSteps] = useState<string[]>([]);
   const [dkimError, setDkimError] = useState('');
   const [researcherProfile, setResearcherProfile] = useState<any>(null);
+  // KV_PROFILE_RESTORE: DKIM verification persists in SecureStore - restore on mount
+  React.useEffect(() => { (async () => {
+    try {
+      const _rid = await SecureStore.getItemAsync('kv_researcher_id');
+      if (!_rid) return;
+      const _dom = await SecureStore.getItemAsync('kv_dkim_domain');
+      const _dh = await SecureStore.getItemAsync('kv_researcher_domain_hash');
+      setResearcherProfile((p: any) => p || { researcher_id: _rid, email_verified: true, institution_domain: _dom || 'verified.edu', domain_hash: _dh || '', xp: 0, abstract_count: 0, questions_answered: 0, question_price: 0 });
+    } catch {}
+  })(); }, []);
   
   // Abstract submission
   const [abstractTitle, setAbstractTitle] = useState('');
@@ -2231,21 +2241,43 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       questionPrice: 0, // Researcher can set later
     };
     await saveAbstract(newAbstract);
-    // Inscribe to Arweave
+    // KV_ABSTRACT_KASPA: Kaspa rail replaces dead Arweave - pledge anchor ->
+    // abstract as config chunks -> Academic announce (DKIM stamp + coords).
+    // Non-fatal: the abstract stays saved locally if the chain publish fails.
     try {
-      const { uploadToIrys } = await import('./arweave_upload');
-      await uploadToIrys(JSON.stringify(newAbstract), [
-        { name: 'App-Name', value: 'KasVillage' },
-        { name: 'KV-Type', value: 'Abstract' },
-        { name: 'KV-AbstractId', value: newAbstract.id },
-        { name: 'KV-Domain', value: newAbstract.institutionDomain },
-        { name: 'KV-Discipline', value: abstractDiscipline },
-        { name: 'KV-VideoUrl', value: abstractVideoUrl },
-        { name: 'KV-QAChannel', value: qaChannel },
-        { name: 'Content-Type', value: 'application/json' },
-      ]);
-      console.log('[Academic] Abstract inscribed to Arweave');
-    } catch (e) { console.warn('[Academic] Arweave failed:', e); }
+      const { publishContent, announceToRegistry } = require('./payload_publish');
+      const { publishConfigChunks } = require('./config_chunks');
+      const { _kvResolvePrivHex } = require('./proposal_share');
+      const { scanObject, reasonMessage } = require('./content_filter');
+      const _scan = scanObject(newAbstract);
+      if (!_scan.ok) { setIsLoading(false); Alert.alert('Cannot publish', reasonMessage(_scan.reason)); return; }
+      const _priv = await _kvResolvePrivHex();
+      const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
+      if (!_priv || !_addr) throw new Error('wallet keys unavailable');
+      const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
+      const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: 'testnet-10' as any };
+      const _nonce = 7000 + (Math.floor(Date.now() / 1000) % 1000000); // unique per abstract; saved below for pledge withdrawal
+      const _pubRes: any = await publishContent(_owner, 'store', { name: newAbstract.title, category: 'Academic', abstractId: newAbstract.id }, _nonce, 100_000_000n);
+      if (!_pubRes || _pubRes.success === false) throw new Error('abstract publish failed: ' + (_pubRes && _pubRes.error));
+      try { const AS = require('@react-native-async-storage/async-storage').default; AS.setItem('kv_abs_nonce_' + newAbstract.id, String(_nonce)); } catch {}
+      const _ck: any = await publishConfigChunks(_owner, _pubRes.storeAddress, newAbstract);
+      if (!_ck.success) console.warn('[Academic] abstract chunks failed (announce continues):', _ck.error);
+      let _absCoords: any = undefined;
+      try {
+        let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
+        const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(_pubRes.storeAddress) + '/utxos');
+        for (const u of (await ur.json()) || []) {
+          const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
+          if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
+          pl += Number(u.utxoEntry?.amount || u.amount || 0);
+        }
+        if (hi > 0) _absCoords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600 };
+      } catch {}
+      const _dk = await SecureStore.getItemAsync('kv_dkim_domain');
+      const _ann: any = await announceToRegistry(_owner, _pubRes.storeAddress, newAbstract.title, 'Academic', 'store', { primaryLink: newAbstract.repositoryUrl, configHash: _ck.hash, coords: _absCoords, ...(_dk ? { dkim: true, dkimDomain: _dk } : {}) } as any);
+      if (!_ann || _ann.success === false) console.warn('[Academic] announce failed (abstract still local):', _ann && _ann.error);
+      else console.log('[Academic] abstract on Kaspa - addr:', _pubRes.storeAddress, 'cfgHash:', String(_ck.hash || '').slice(0, 16));
+    } catch (e) { console.warn('[Academic] Kaspa publish failed (abstract saved locally):', e); }
     
     Alert.alert('Success!', `Abstract published!\nID: ${newAbstract.id}\n\nFirst question from any user is FREE. You can set a price for follow-up questions in your profile.`);
     setAbstractTitle('');
@@ -2609,6 +2641,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                         const researcherId = 'RES_' + domainHash.slice(0, 12).toUpperCase();
                         await SecureStore.setItemAsync('kv_researcher_id', researcherId);
                         await SecureStore.setItemAsync('kv_researcher_domain_hash', domainHash);
+                        await SecureStore.setItemAsync('kv_dkim_domain', domain); // KV_DKIM_ANNOUNCE: next Academic-category announce carries this
                         await SecureStore.setItemAsync('kv_researcher_domain', domain);
                         setRawEmailHeaders(''); setMagicLink(''); setEduEmail('');
                         setResearcherProfile({ researcher_id: researcherId, email_verified: true, institution_domain: domain, domain_hash: domainHash, xp: 0, abstract_count: 0, questions_answered: 0, question_price: 0 });
@@ -3561,7 +3594,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         const tipOn2 = (await AS.getItem('kv_tip_optin')) === '1';
         if (hi > 0) coords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(st.anchor ? { anchor_hash: st.anchor } : {}), ...(tipOn2 && _addr2 ? { tip_addr: _addr2 } : {}) };
       } catch {}
-      const ann: any = await announceToRegistry(_owner2 as any, st.storeAddress, st.name, st.category, 'store', { primaryLink: st.primaryLink, configHash: st.cfgHash, coords });
+      const _dk2 = st.category === 'Academic' ? await SecureStore.getItemAsync('kv_dkim_domain') : null; // KV_DKIM_ANNOUNCE
+      const ann: any = await announceToRegistry(_owner2 as any, st.storeAddress, st.name, st.category, 'store', { primaryLink: st.primaryLink, configHash: st.cfgHash, coords, ...(_dk2 ? { dkim: true, dkimDomain: _dk2 } : {}) } as any);
       setPubStage('');
       if (ann && ann.success !== false) Alert.alert('Announced \u2713', 'Re-advertised to the registry for ~1 KAS. Chunks untouched.');
       else Alert.alert('Announce failed', String((ann && ann.error) || 'unknown'));
@@ -3724,7 +3758,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             } catch {}
             console.log('[Workspace] store coords', _stCoords);
           } catch (de) { console.warn('[Workspace] store daa span skipped:', de); }
-          const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _annHash, coords: _stCoords });
+          const _dk = storeCategory === 'Academic' ? await SecureStore.getItemAsync('kv_dkim_domain') : null; // KV_DKIM_ANNOUNCE
+          const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _annHash, coords: _stCoords, ...(_dk ? { dkim: true, dkimDomain: _dk } : {}) } as any);
           if (!_ann || _ann.success === false) console.warn('[Workspace] registry announce failed (store still live):', _ann && _ann.error);
           else console.log('[Workspace] announced to registry:', _ann.registryAddr, 'cfgHash:', _annHash.slice(0, 16));
         } catch (e) { console.warn('[Workspace] registry announce error (store still live):', e); }
@@ -3868,6 +3903,25 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 placeholder="Tell customers about your store..."
                 multiline
               />
+
+              {/* KV_STORE_CATEGORIES: category decides which mailbox lane lists this store */}
+              <Text style={{ fontSize: rs.font(9), color: '#a8a29e', marginBottom: rs.s(4), marginTop: rs.s(6), fontWeight: '700' }}>CATEGORY</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(6), marginBottom: rs.s(10) }}>
+                {['General', 'Fashion', 'Food', 'Tech', 'Art', 'Services', 'Academic'].map((cat) => (
+                  <TouchableOpacity key={cat} onPress={() => setStoreCategory(cat)}
+                    style={{ paddingHorizontal: rs.s(10), paddingVertical: rs.s(6), borderRadius: 14, borderWidth: 1,
+                      borderColor: storeCategory === cat ? '#7c5cff' : '#44403c',
+                      backgroundColor: storeCategory === cat ? '#241f36' : 'transparent' }}>
+                    <Text style={{ fontSize: rs.font(10), fontWeight: '700', color: storeCategory === cat ? '#b9a6ff' : '#a8a29e' }}>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {storeCategory === 'Services' ? (
+                <Text style={{ fontSize: rs.font(8), color: '#78716c', marginBottom: rs.s(8) }}>Listed in the Services tab. Pledge-anchored like any store.</Text>
+              ) : null}
+              {storeCategory === 'Academic' ? (
+                <Text style={{ fontSize: rs.font(8), color: '#78716c', marginBottom: rs.s(8) }}>Listed in Academics only after DKIM verification.</Text>
+              ) : null}
               
               <InputField
                 label="Logo Image URL"

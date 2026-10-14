@@ -1116,7 +1116,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
               }, 1, DAPP_PLEDGE_SOMPI); // nonce 1 = dapp slot (0 = store)
               if (_pub && _pub.success !== false) {
                 console.log('[DAppAttest] published � addr:', _pub.storeAddress);
-                try { await announceToRegistry(_owner, _pub.storeAddress, sendName, 'dapp'); } catch {}
+                try { await announceToRegistry(_owner, _pub.storeAddress, sendName, 'GameGrid', 'dapp'); } catch {} // KV_DKIM_ANNOUNCE: kind arg was missing - announce landed on the store registry
                 const _attest = {
                   kind: 'dapp_verify',
                   dappId: data.dapp_id,

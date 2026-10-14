@@ -78,11 +78,12 @@ export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<St
       category: e.category,
       arweaveTx: e.storeAddress,
       ownerPubkey: e.ownerPubkey,
-      townhall: { verified: true, verifiedAt: e.announcedAt, verificationTx: e.storeAddress },
+      townhall: { verified: false, verifiedAt: e.announcedAt, verificationTx: e.storeAddress }, // KV_HONEST_BADGE: stores are pledge-anchored, not TownHall-verified
       createdAt: e.announcedAt * 1000,
       productCount: 0,
       primaryLink: e.primaryLink || '',
       configHash: e.configHash || '',
+      coords: (e.record && e.record.d && e.record.d.coords) || null,
     } as any));
     return { items, hasMore: false, fromCache: false };
   } catch (e: any) {
@@ -150,8 +151,8 @@ export async function fetchDApps(_cursor?: string): Promise<FetchResult<DAppEntr
         board,
         arweaveTx: e.storeAddress,
         ownerPubkey: e.ownerPubkey,
-        templateVerified: attestValid || !!gameHash,
-        townhall: { verified: attestValid || !!gameHash, verifiedAt: attest?.generatedAt || e.announcedAt, verificationTx: e.storeAddress },
+        templateVerified: attestValid, // KV_HONEST_BADGE: hash presence is integrity (checked at install), not verification
+        townhall: { verified: attestValid, verifiedAt: attest?.generatedAt || e.announcedAt, verificationTx: e.storeAddress },
         createdAt: e.announcedAt * 1000,
         xpCommitment: Math.round(pledgeKas),
         gameHash,
@@ -199,10 +200,58 @@ export async function fetchCoupons(_cursor?: string): Promise<FetchResult<Coupon
   }
 }
 
-/** Academic + service categories publish on the rail later; empty-success until then. */
+/** Academic + service = CATEGORIES of the store rail (one publish path).
+ *  TownHall verification rules gate the badges: DKIM for academics (strict -
+ *  unattested entries are not listed), pledge-anchor for services. */
 export async function fetchAcademics(_cursor?: string): Promise<FetchResult<AcademicEntry>> {
-  return { items: [], hasMore: false, fromCache: false };
+  try {
+    const dir = await rebuildDirectory('store', registryAddress('store', NET), NET);
+    dir.sort(visSort as any);
+    const items: AcademicEntry[] = (dir as any[])
+      .filter((e) => String(e.category || '').toLowerCase().indexOf('academ') === 0)
+      .map((e) => {
+        const dkim = !!(e.record && e.record.d && (e.record.d.dkim === true || e.record.d.dkimDomain));
+        return {
+          id: e.storeAddress,
+          title: e.name,
+          description: '',
+          institution: String((e.record && e.record.d && e.record.d.institution) || ''),
+          field: e.category,
+          arweaveTx: e.storeAddress,
+          ownerPubkey: e.ownerPubkey,
+          dkimVerified: dkim,
+          dkimDomain: String((e.record && e.record.d && e.record.d.dkimDomain) || '') || undefined,
+          createdAt: e.announcedAt * 1000,
+          townhall: { verified: dkim, verifiedAt: e.announcedAt, verificationTx: e.storeAddress },
+        } as any;
+      });
+    return { items, hasMore: false, fromCache: false };
+  } catch (e: any) {
+    throw new MailboxError('academic scan failed: ' + String(e?.message || e), 'SCAN');
+  }
 }
 export async function fetchServices(_cursor?: string): Promise<FetchResult<ServiceEntry>> {
-  return { items: [], hasMore: false, fromCache: false };
+  try {
+    const dir = await rebuildDirectory('store', registryAddress('store', NET), NET);
+    dir.sort(visSort as any);
+    const items: ServiceEntry[] = (dir as any[])
+      .filter((e) => String(e.category || '').toLowerCase().indexOf('service') === 0)
+      .map((e) => ({
+        id: e.storeAddress,
+        title: e.name,
+        description: '',
+        category: e.category,
+        arweaveTx: e.storeAddress,
+        ownerPubkey: e.ownerPubkey,
+        priceLabel: undefined,
+        serviceArea: '',
+        townhall: { verified: true, verifiedAt: e.announcedAt, verificationTx: e.storeAddress },
+        createdAt: e.announcedAt * 1000,
+        coords: (e.record && e.record.d && e.record.d.coords) || null,
+        configHash: e.configHash || '',
+      } as any));
+    return { items, hasMore: false, fromCache: false };
+  } catch (e: any) {
+    throw new MailboxError('service scan failed: ' + String(e?.message || e), 'SCAN');
+  }
 }

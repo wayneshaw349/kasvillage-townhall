@@ -794,6 +794,8 @@ export default function VillageMailbox() {
             return { name: r.d.name || quad.game, category: r.d.category || 'Game', t: r.t || 0, o: r.o || '', quad };
           };
           const byHead = new Map<string, any>();
+          // KV_MOD_PUBKEY: moderation key - its delists apply to any head. Rotate to a dedicated key before mainnet.
+          const KV_MOD_PUBKEY = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
           const delistByHead = new Map<string, any>();
           const take = (it: any) => {
             if (!it) return;
@@ -809,7 +811,7 @@ export default function VillageMailbox() {
           // its single setGames - minutes of blank cards over data we had all
           // along. Render what we know, then let the network refine it.
           // KV_PAINT_FILTER: the instant paint honors delists too
-          if (byHead.size) { try { setGames(Array.from(byHead.values()).filter((it: any) => { const d = delistByHead.get(it.quad.head); if (!d || !(d.t > it.t)) return true; return !!(d.o && it.o && d.o !== it.o); }) as any); } catch {} }
+          if (byHead.size) { try { setGames(Array.from(byHead.values()).filter((it: any) => { const d = delistByHead.get(it.quad.head); if (!d || !(d.t > it.t)) return true; if (d.o === KV_MOD_PUBKEY) return false; return !!(d.o && it.o && d.o !== it.o); }) as any); } catch {} }
           // 1) relay records
           let rowsCount = 0;
           try {
@@ -840,7 +842,7 @@ export default function VillageMailbox() {
             const d = delistByHead.get(it.quad.head);
             if (!d) return true;
             if (!(d.t > it.t)) { try { console.log('[GamesLane] delist OUTRANKED for ' + it.quad.head.slice(0, 8) + ' delist.t=' + d.t + ' announce.t=' + it.t); } catch {} return true; }
-            const keep = !!(d.o && it.o && d.o !== it.o);
+            const keep = d.o === KV_MOD_PUBKEY ? false : !!(d.o && it.o && d.o !== it.o); // mod delist hides any head
             try { console.log('[GamesLane] ' + (keep ? 'KEPT(signer mismatch) ' : 'HIDDEN ') + it.quad.head.slice(0, 8) + ' d.o=' + String(d.o).slice(0, 10) + ' it.o=' + String(it.o).slice(0, 10)); } catch {}
             return keep;
           }).sort((a, b) => b.t - a.t);
@@ -960,7 +962,8 @@ export default function VillageMailbox() {
     let q = query.toLowerCase();
     // Time tiers: "shoes week" / "kascity 30 hours" / "dapp 2 days" -> cutoff
     let cutoff = 0;
-    const tm = q.match(/(?:last\s+)?(\d+)?\s*(hour|day|week|month)s?\b/);
+    // KV_TIER_FIX: leading \b so 'sunday'/'holiday' are not read as time tiers
+    const tm = q.match(/\b(?:last\s+)?(\d+)?\s*(hour|day|week|month)s?\b/);
     if (tm) {
       const nN = tm[1] ? parseInt(tm[1], 10) : 1;
       const unit: any = { hour: 3600e3, day: 86400e3, week: 604800e3, month: 2592000e3 };
@@ -968,7 +971,8 @@ export default function VillageMailbox() {
       q = q.replace(tm[0], '').trim();
     }
     return data.filter((item: any) => {
-      if (cutoff && item.t && item.t < cutoff) return false;
+      const _age = item.t || item.createdAt || 0; // KV_TIER_FIX: store rail carries createdAt
+      if (cutoff && _age && _age < cutoff) return false;
       const searchable = [
         item.name, item.title, item.storeName, item.description, 
         item.category, item.institution, item.field
@@ -989,7 +993,9 @@ export default function VillageMailbox() {
             console.log('[Mailbox] modal open - cfgHash:', cfgHash ? cfgHash.slice(0, 16) : 'MISSING', 'addr:', item.arweaveTx.slice(0, 24));
             if (!cfgHash) { setStoreView(sv => sv ? { ...sv, loading: false } : sv); return; }
             const { fetchStoreConfig } = await import('./config_chunks');
-            const { config, error: _cfgErr } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10');
+            const { config, error: _cfgErr } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined);
+            // KV_CFG_SCAN: config chunks (products, coupons, description) never render unscanned
+            try { if (config) { const { scanObject } = require('./content_filter'); const _sc = scanObject(config); if (!_sc.ok) { console.warn('[Mailbox] store config BLOCKED:', _sc.reason, 'at', _sc.path); setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config: null, loading: false } : sv); return; } } } catch {}
             console.log('[Mailbox] cfg fetch result:', config ? 'OK brand=' + config.brandName : 'NULL err=' + _cfgErr);
             setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config, loading: false } : sv);
           } catch (e) {

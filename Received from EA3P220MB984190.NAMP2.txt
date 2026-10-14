@@ -1,0 +1,215 @@
+Received: from EA3P220MB984190.NAMP220.PROD.OUTLOOK.COM
+ (2603:10b6:303:2c5::12) by DM8P220MB0582.NAMP220.PROD.OUTLOOK.COM with HTTPS;
+ Mon, 12 Oct 2026 22:43:49 +0000
+ARC-Seal: i=2; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=pass;
+ b=JHg9OM83X4nJwS2GxCRrwhcCaG+kEE8bdmhdf4LqB1LLC6Wofv6Pts58LL7sctbg1bdWjayAwcQMip7HDXa5N8DOi/ci48vtF5aW724u1EhRB5d27SHeDepubdYMdJKiwbCDeOM6mpQvUD58/Je2jsJ2RAaOT2CO0DKm/z7Zk80b73Ba9ZuCHBkG2fXEirxCqCUAeUzXJa71SID4/AXPtsY08B996FtkURc8geC8tDeMnM3bhI/TXU+1Z/eFffuE2O4wMjaqiV7q6JcYVuexPQ+qSVTJq7iqR6wAnoY3pB/DQKi00CDNg0SS3BCKCmM/0ZwxgHLVVFCrJed4j/nB2Q==
+ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=WCA4zl7pbJptY+RO6n3i5XR/xYlONprfY7bKs39eoM0=;
+ b=hzFxmX0687wQEuiG7Cu7a7jAukD+lMoLHs9sc9crb9Unp6gLxtx9ZHt8S4bc7ELHR8vSQf7nHsNFdMBbKN6qST+qcb7Nlwua+oDuhwqCDqrsnXB9FZ0CI3eZWYHLfEWGA/hraF84IUtaH9F0XgI6aPTZydplBJec9QKi7KZMzf9FeLwsZ7D7QhB3ARgom/DU5qAPiaJ4Amev7z+clrW/40nlKtuOAisSjcRaFWo84pWCYiWDP9hCVTJYoLqvv5VYtW+J6eQAwYaEUT08c1FnnTtgmvgcaw4j++ukSoSKZAuHEBGNSQ2GqDucrI2v7v2KeBmn3l83qat0QcOy5ZTOGw==
+ARC-Authentication-Results: i=2; mx.microsoft.com 1; spf=none (sender ip is
+ 52.101.201.80) smtp.rcpttodomain=hotmail.com
+ smtp.mailfrom=camden.rutgers.edu; dmarc=pass (p=quarantine sp=quarantine
+ pct=100) action=none header.from=camden.rutgers.edu; dkim=pass (signature was
+ verified) header.d=camden.rutgers.edu; arc=pass (0 oda=1 ltdi=1
+ spf=[1,1,smtp.mailfrom=camden.rutgers.edu]
+ dkim=[1,1,header.d=camden.rutgers.edu]
+ dmarc=[1,1,header.from=camden.rutgers.edu])
+Received: from SJ0PR13CA0182.namprd13.prod.outlook.com (2603:10b6:a03:2c3::7)
+ by EA3P220MB984190.NAMP220.PROD.OUTLOOK.COM (2603:10b6:303:2c5::12) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.21.496.23; Mon, 12 Oct
+ 2026 22:43:48 +0000
+Received: from MWH0EPF000C6184.namprd02.prod.outlook.com
+ (2603:10b6:a03:2c3:cafe::aa) by SJ0PR13CA0182.outlook.office365.com
+ (2603:10b6:a03:2c3::7) with Microsoft SMTP Server (version=TLS1_3,
+ cipher=TLS_AES_256_GCM_SHA384) id 15.21.522.4 via Frontend Transport; Mon, 12
+ Oct 2026 22:43:48 +0000
+Authentication-Results: mx.microsoft.com 1; spf=none (sender IP is
+ 52.101.201.80) smtp.mailfrom=camden.rutgers.edu; dkim=pass (signature was
+ verified) header.d=camden.rutgers.edu;dmarc=pass action=none
+ header.from=camden.rutgers.edu;compauth=pass reason=100
+Received-SPF: None (protection.outlook.com: camden.rutgers.edu does not
+ designate permitted sender hosts)
+Received: from PH7PR06CU001.outbound.protection.outlook.com (52.101.201.80) by
+ MWH0EPF000C6184.mail.protection.outlook.com (10.167.249.116) with Microsoft
+ SMTP Server (version=TLS1_3, cipher=TLS_AES_256_GCM_SHA384) id 15.21.522.6
+ via Frontend Transport; Mon, 12 Oct 2026 22:43:47 +0000
+X-IncomingTopHeaderMarker: OriginalChecksum:255E2F2C59A16D51D435A9675F1D552A23D572332397BA41DE6476043ED82F39;UpperCasedChecksum:4226F5BF24FB67FBFA70F30686BF92FFC8D6DA3353E4D951FA4FD558EEBE808D;SizeAsReceived:7664;Count:42
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=none;
+ b=XfM3NZmxrkTsDDWj1RhW1pfpeRhCadWmo3r3aMlTyn/mIbu0QfE90oiu7+c4Oy1ngZFJjsUnOafaITkz/WOeFqWaRQpf8Bhj7mJZ3IR61JiJBhWCdOLX9jGVzKBqgZOVv7x88ZxM5h4YBbAGOV+I8eAsT7/FV4b9XhRiawfHRu7vasdW7BcQtTyz25D34XrzqoAb/HXE0jMG2t/Krt6Zy2G2WJvT9y5aT1k6YaxcBtRSRYcTuATThcb5Lyynd2ECtqONRUfFoT92H8IKtwL3wjb/q8mFMe4uFnKMg04HqhG3kgt0Lb0recp00H1Zt4sgZ+WDJLrIOUMvovzRvmJe3w==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=WCA4zl7pbJptY+RO6n3i5XR/xYlONprfY7bKs39eoM0=;
+ b=xf0xDygv9Q9JDlU65Ymmo2Gl7+iNPII1g2fiVqde+Xc738ohwiw+qtT7xPvSu8vvuAexJyefCIPaFNBFnkiwJWre7976YYpRP5kMhzccziEb4NVe51kfkA5QEA4Rmvr6PBNUZ4RN6rCQOG8STZNprfYqSNOFTjt8k/HKHm8VPHiYFplR0q8aN4OLvP8I0Uxy/gnU2Pt9J8SBNTsflCuUEJxsJo9bGbT4JO5OCsd1MuQHMJEHp6uk2JX1n0UZL8ww+zlndB24dhJKumU2ra0s6bcE2wjLgAj+KkDLSO9oZ63dnIsW49mGU9nn0PXb7aEWSzh4zEVl3zYhpqgKVqahsw==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass
+ smtp.mailfrom=camden.rutgers.edu; dmarc=pass action=none
+ header.from=camden.rutgers.edu; dkim=pass header.d=camden.rutgers.edu;
+ arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=camden.rutgers.edu;
+ s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=WCA4zl7pbJptY+RO6n3i5XR/xYlONprfY7bKs39eoM0=;
+ b=CV02eqtaYcILSB0d85/F/xHLEZJJrCizMcHot7CWiW0v0IwZwnQe5k0vMrvsccoVu6qjqjWEmq7MC/umTQN6zEmkDA2emD6I+z5olnhJYbxLk4pQpBsnvzzIa0rGlOF8BguyMDo1mMNoFCDgh91a5kOpQlR5EuCvsM9kLwqxF4ZAfCKrwJVsnFIe8yVf19ZzPJ61soHWdXB4v9/Hl8Cwx/DD59qrKL6z4Dn4VSb6NP8sXxZFvMBYI9+wftnrRy7/20h+SGdOAwRZsGaiYmfdlD4ha80BYrylHKFJLW99RJ+12AkUt9sKnSgyn+ychi+GDVupOekeyrXd53VuJy15jw==
+Received: from BY1PR14MB7416.namprd14.prod.outlook.com (2603:10b6:a03:535::16)
+ by DSWPR14MB958890.namprd14.prod.outlook.com (2603:10b6:8:3a4::8) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.21.496.23; Mon, 12 Oct
+ 2026 22:43:46 +0000
+Received: from BY1PR14MB7416.namprd14.prod.outlook.com
+ ([fe80::f0f0:704:7f99:2ec3]) by BY1PR14MB7416.namprd14.prod.outlook.com
+ ([fe80::f0f0:704:7f99:2ec3%4]) with mapi id 15.21.0496.020; Mon, 12 Oct 2026
+ 22:43:46 +0000
+From: Wayne Shaw <waynehed@camden.rutgers.edu>
+To: wayne shaw <wayneshaw349@hotmail.com>
+Subject: 178001
+Thread-Topic: 178001
+Thread-Index: AQHdWpsj4NgGlqt1fUKQAM252P6QsQ==
+Date: Mon, 12 Oct 2026 22:43:46 +0000
+Message-ID: <BY1PR14MB741627C603129168D06976BBF39F2@BY1PR14MB7416.namprd14.prod.outlook.com>
+Accept-Language: en-US
+Content-Language: en-US
+X-MS-Has-Attach:
+X-MS-TNEF-Correlator:
+Authentication-Results-Original: mx.microsoft.com 1; dkim=none (message not
+ signed) header.d=none;dmarc=none action=none header.from=camden.rutgers.edu;
+x-ms-traffictypediagnostic: BY1PR14MB7416:EE_|DSWPR14MB958890:EE_|MWH0EPF000C6184:EE_|EA3P220MB984190:EE_|DM8P220MB0582:EE_
+X-MS-Office365-Filtering-Correlation-Id: 27483824-27f4-440e-4ab0-08df28b24797
+x-ru-tlsrequired: 1
+x-ms-exchange-senderadcheck: 1
+x-ms-exchange-antispam-relay: 0
+X-Microsoft-Antispam-Untrusted: BCL:0;ARA:13230040|1800799024|366016|376014|10070799003|786006|23010399003|38070700021|11063799006|56012099006|10067099003|18002099003|8096899003;
+X-Microsoft-Antispam-Message-Info-Original: FmBDs9uEhAZ3xuq2BFYSPfgzeXXnl4HkGbLHaGrdhGCI30NddLDVg9FXid4wy1IBoDXpYuXJY5uXEfd+sKmwBpMMVY1uOw7aU1tsZAXi1pRzLUyiPPpmpCT2v/e2KXNgBf5LAqGIun7MfGuCMbQu3hmYuWWFxkIGhsrnM4cTkzCwbdzeaAFELlccPgdzROWmzQsKOh4CjpyAWc3+PglNWTzFhfMjPdD6L1UJZrWZzafNZNpG8BM04V4nNHrH6Ffrs0sJsha8d5dfBF+PHV8ywhrqm54NoeQ4U/6QeYTITdCsH1lVYrSo+5fAe03fcHwQ9n4KkoACP8Q1Yu7Q51V48Y+W+i8zcyi0Y4bQWLHb5HHgjhNRDqYKzq1DLtE7kslcwWXEbG6/h8rr3eA53mQJRPYDijn1mbVoi6iVmQ2zUJ7TucLsNytGzyzpCvYyqokSZ3Yfip+xK+wtSxugX/rnuw==
+X-Forefront-Antispam-Report-Untrusted: CIP:255.255.255.255;CTRY:;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:BY1PR14MB7416.namprd14.prod.outlook.com;PTR:;CAT:NONE;SFS:(13230040)(1800799024)(366016)(376014)(10070799003)(786006)(23010399003)(38070700021)(11063799006)(56012099006)(10067099003)(18002099003)(8096899003);DIR:OUT;SFP:1102;
+X-MS-Exchange-AntiSpam-MessageData-Original-ChunkCount: 2
+X-MS-Exchange-AntiSpam-MessageData-Original-0: =?iso-8859-1?Q?LFqqqYMsz62iK1lHpD2rM+CkEVEWSgCd9LQdDSTD9E5Gw2fcBGFaPumU+B?=
+ =?iso-8859-1?Q?ujufWJuMvrSAUnzuUcnejjtJMbgiDg77N0tjPI4+wyGITmmcXxMm8XvB9w?=
+ =?iso-8859-1?Q?P4dMGRbxLBmJU0V0hSZh2I3HLjrZnibk2+wfrMvrdTsJKLIsWt3Yl1WXeC?=
+ =?iso-8859-1?Q?LU1IOxZD0GqAXTwYUbmhwinRI65c14Fc6DOejxKJU2ZsfAsgpd5ldL8QEO?=
+ =?iso-8859-1?Q?haKKfK0HXsK39Jtd7d/r66xqOEdMtZC8ILQTBKNLSRz6muAiE2vcLhcP8v?=
+ =?iso-8859-1?Q?vFhos5PddNRtpI89cHj5Xh3sWq2XNGxU7spiPY4ROctwUWWte06+jC7rYI?=
+ =?iso-8859-1?Q?/kJl9qMIlSmO7U/KchVJufTq9nwV8WnIGhwIQ1eX+0CCATRgVxVpg3MFay?=
+ =?iso-8859-1?Q?/ADKt+Ke91nber25uqc7JtZG+ha+MPpCtJUrQTHIF4PUvMWGEb5916eS4j?=
+ =?iso-8859-1?Q?cODDwagYpVi21rP177H3AxjaUVGBPeqbR1rG7Q1E303vJNK4A/0Ykf6aCi?=
+ =?iso-8859-1?Q?H+G7gAOhfADQ5o7H7OhW6AEybWQGCjXFiGbh+87KP92bLDL2XeS48708vP?=
+ =?iso-8859-1?Q?NxoF7+cbauhiOCuQtjpFrs8yVC8Pf5sf4GB+yI7h8v7lQqo3VjNjtCDY8M?=
+ =?iso-8859-1?Q?3Z581E6bu3C+b38F/EUv0z5XmdsivDy/wtYk3D+rB3SQkUV/SKvqnHJuRs?=
+ =?iso-8859-1?Q?S9RfKlMNJZim5/fbLahP9820GcKLU51gXctSlsX1L41Zsk2zzXrPnc+XmT?=
+ =?iso-8859-1?Q?CfS7uGtOQFYLB/CLHZrjqSXsVQRNb6c/uAM6axpoNVRp/4c05+5AK3QxCa?=
+ =?iso-8859-1?Q?KrebwFnO+UiFP353faG629yl/mdm4NlizbsIT6hLrdbsQRC3D0dbrhOieE?=
+ =?iso-8859-1?Q?Ali1SywbW8cLzn0HLFhHC+ViQVM07tWE7iYYRulTV1+eFXeSQ6pMMQTRUn?=
+ =?iso-8859-1?Q?2pZI8iOygqwg7UAcfOZ5I3Ncv/le41KNifGfcElfqz1JHg4imByRvB/yF7?=
+ =?iso-8859-1?Q?IWNS5UVByPhM0MlfWrsYTJ0i5yIXVC/8AIgfPSfi3DDpM0OzKfbHE63LVR?=
+ =?iso-8859-1?Q?ZrU80LJLm0aOOn4KTzChrttc9K/1SzH/Xaou6Ug34vK0utczTNdgEs53hv?=
+ =?iso-8859-1?Q?wqzXg+RV/I5W3wOcnidSpJdU7pm+n0P32Q+P3ZFLIZnPFFyLEbt8ljP9+r?=
+ =?iso-8859-1?Q?i058lFC9L/NoHrhcsRBcBy4VDFopFVPWaCyKWz6TGXSBpqzI590Vz8r9LM?=
+ =?iso-8859-1?Q?p4x0Q5rl+NSawWM4sB6VhaZWwFVgtO0TBHcM6zRGJPoRmqEyUixOmpRF/+?=
+ =?iso-8859-1?Q?0k0NGPAwyCZFCsptmoUDoClzROBegOWzk6/P9oDal8tROQBhkdIijBdM6s?=
+ =?iso-8859-1?Q?23q8PLwNSOI0AGiZhxj3aH40ekQe9h2Z1Bv91sHX91ZGWkJE/KXZQzjXwA?=
+ =?iso-8859-1?Q?CopkgpysOth8CV9yujWEu+vD886BLsIogNd/vArBfXdpBc6ckdvOuoNpUq?=
+ =?iso-8859-1?Q?yJ2UQG8o9DAyCiQNF1NsOu1SSKRXPinRx/s37JPZe7znd0+LGOLzc8xluJ?=
+ =?iso-8859-1?Q?AFTFhdsmNfrEur5qmK3ZhTjgjJg6v0RRKXm9IMRmT/+l1sF42FCU3innB7?=
+ =?iso-8859-1?Q?2KguwFY3j3bwqwfj8OuvzYqNYObykXSdyaLQoA9K1j0hxl4kOnrWO/qI6/?=
+ =?iso-8859-1?Q?6mCVmpSXJVRf2ZTjtkosrb4SOt2kQac6yXBaa61RY2dKBB/pD61Mc1OzXP?=
+ =?iso-8859-1?Q?azlnyzbn8w+iL3EzP76+yWiQXUm6Ns/xASHEn/2iq/R2abOdVYB6f3UmH2?=
+ =?iso-8859-1?Q?CRVLoYwtuqF+jkxPmf7f8o9eGVZYDGBUyn4/c62oeUxuihc5ZTelqyQGqo?=
+ =?iso-8859-1?Q?g2?=
+X-MS-Exchange-AntiSpam-MessageData-Original-1: LQltWDaQT4YOEQ==
+Content-Type: multipart/alternative;
+	boundary="_000_BY1PR14MB741627C603129168D06976BBF39F2BY1PR14MB7416namp_"
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: DSWPR14MB958890
+X-IncomingHeaderCount: 42
+Return-Path: waynehed@camden.rutgers.edu
+X-MS-Exchange-Organization-ExpirationStartTime: 12 Oct 2026 22:43:48.0286
+ (UTC)
+X-MS-Exchange-Organization-ExpirationStartTimeReason: OriginalSubmit
+X-MS-Exchange-Organization-ExpirationInterval: 1:00:00:00.0000000
+X-MS-Exchange-Organization-ExpirationIntervalReason: OriginalSubmit
+X-MS-Exchange-Organization-Network-Message-Id: 27483824-27f4-440e-4ab0-08df28b24797
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: 84df9e7f-e9f6-40af-b435-aaaaaaaaaaaa:0
+X-MS-Exchange-Organization-MessageDirectionality: Incoming
+X-MS-Exchange-Transport-CrossTenantHeadersStripped: MWH0EPF000C6184.namprd02.prod.outlook.com
+X-MS-Exchange-Transport-CrossTenantHeadersPromoted: MWH0EPF000C6184.namprd02.prod.outlook.com
+X-MS-PublicTrafficType: Email
+X-MS-Exchange-Organization-AuthSource: MWH0EPF000C6184.namprd02.prod.outlook.com
+X-MS-Exchange-Organization-AuthAs: Anonymous
+X-MS-UserLastLogonTime: 10/12/2026 10:31:42 PM
+X-MS-Office365-Filtering-Correlation-Id-Prvs: 6cdd5164-a8b5-48f2-7130-08df28b24677
+X-Sender-IP: 52.101.201.80
+X-MS-Exchange-EOPDirect: true
+X-SID-PRA: WAYNEHED@CAMDEN.RUTGERS.EDU
+X-SID-Result: PASS
+X-MS-Exchange-Organization-SCL: 1
+X-Microsoft-Antispam: BCL:0;ARA:1444111002|47200799027|50300799015|260928210016899003|29090799004|67000799015|58200799025|13020799009|11020799012|260826003000599003|3069299007|4089299007|260820164000599003|3412199025|440099028|1380799030|1360799030|1370799030|30041999003|2607281247196008;
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 12 Oct 2026 22:43:47.8698
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 27483824-27f4-440e-4ab0-08df28b24797
+X-MS-Exchange-CrossTenant-Id: 84df9e7f-e9f6-40af-b435-aaaaaaaaaaaa
+X-MS-Exchange-CrossTenant-AuthSource: MWH0EPF000C6184.namprd02.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-CrossTenant-RMS-PersistedConsumerOrg: 00000000-0000-0000-0000-000000000000
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: EA3P220MB984190
+X-MS-Exchange-Transport-EndToEndLatency: 00:00:01.6516302
+X-MS-Exchange-Processed-By-BccFoldering: 15.21.0496.018
+X-Microsoft-Antispam-Mailbox-Delivery:
+	ucf:0;jmr:0;ex:0;auth:1;dest:I;ENG:(5062000311)(920221119095)(90000117)(920221120095)(90011020)(91015020)(91040095)(9050020)(9060121)(9081003)(9100341)(944500132)(2008001181)(4810010)(4910033)(9930004)(9545005)(10172021)(9320005)(120001);
+X-Message-Delivery: Vj0xLjE7dXM9MDtsPTA7YT0wO0Q9MTtHRD0xO1NDTD0tMQ==
+X-Microsoft-Antispam-Message-Info:
+	=?iso-8859-1?Q?vDYSK+LUKZ/zWa9N39pOq0j2XEQZWgC9yBOxKIO6kcZ36w/syZPAQL7kYA?=
+ =?iso-8859-1?Q?l0o+akHXygS45LM+ObEt15UjOLz6ghQw5TzCrCimtEQuszmr0gUKpNvMGr?=
+ =?iso-8859-1?Q?ASvkcbexBSvTU/RsjvLtwyKwr7m6mQkxkMy8DUbZmPvg+CHULymoZGlGpB?=
+ =?iso-8859-1?Q?cAI9h8QmYWM/kHj+uH/tGw3pNBEWL80NFQrTLZ8C+1afgsXbaLiRGGhCaD?=
+ =?iso-8859-1?Q?uf1jZUklSxHynTCSaxeGRjZUoT0d18SRxxWAtyEn4+dwLqRhgTWAxHDjuu?=
+ =?iso-8859-1?Q?HimGuRvtwn+FdBuEGiHhB8HeLvveWqnyj1N9EJ1CUuI55e6CkJbtuVnflE?=
+ =?iso-8859-1?Q?MX3uk7lzJk3JhSEzFizx5ybs5qZVEGtL/ffXlacAlG6mxQnTpr8UpVPmJC?=
+ =?iso-8859-1?Q?4Uts0+nz+WoDEl7E8T6HedYX/CRmy/9o6ROtpxQnLKvtGZNWpKGSzMFDoW?=
+ =?iso-8859-1?Q?KvZw3bLWdpuaVL/BnkflaPnQO2lz+X74MVAhusC6FXitZqI2sI2Wlqmo8e?=
+ =?iso-8859-1?Q?mVuybsI6VqzWjSCZ6duYYduz45c8EqJrM2WZzozEDtr7qHodtECXqMvoOs?=
+ =?iso-8859-1?Q?miPZ1OBSPy4JZ5De6f/AOU7hegaY1Dp0A0BsI3+TpxLdSpD1XbEkRAJPV6?=
+ =?iso-8859-1?Q?ogw1F6R66CU0RRckL2MRzSgktzvCMxvuS17Ak6Xj15pTkjEgN2Ophnc0AZ?=
+ =?iso-8859-1?Q?7rJcHkjTiwcI9bIBXEBaIPcjBJoe8Wd+sjwB+jyYTk+5d03QIChibJUrXg?=
+ =?iso-8859-1?Q?gPhRNhOMFtZ+sC5BLL0DnljEQ2Pi/rFbS7tiewh6hJWEqlQ3V7ueavf9fZ?=
+ =?iso-8859-1?Q?WdMMg9QF+/XZ9671DRhN8/qWcGq4zTyTkVsIahXBa41UCqorv7zdFZRfQj?=
+ =?iso-8859-1?Q?i4qktlu9+qM3XcvZTiikBNbtbirsd7NQTTQ9P9e6pYcsFVtYqDXpKg5N2j?=
+ =?iso-8859-1?Q?dt4QYGZAB8zQekULchcVWyXvaMyy/e+IkDwYdEzcHPXrDriM9QmoVlnA2V?=
+ =?iso-8859-1?Q?JDO8worJH+ir5tWyYUUKbfczaFyfPd5enXrCfWNi7g7PRTgJvL2z/7gxAj?=
+ =?iso-8859-1?Q?bRclTYOIpiKbOxN0f4xNbPR7gWewIwu5mvnUZkT6rmnZKhlfRX5oQ4kah2?=
+ =?iso-8859-1?Q?KfAqXiFOWd8py+wRKQU2U9xWRormQJSCuOXQmzGiNVFyDbZlIYHKA9ZtkV?=
+ =?iso-8859-1?Q?XLvqxqKrrltAwIQwa+/apzzxDW5HIVB0f/oTZgqHsNXFyMAn+bxqZUx8bm?=
+ =?iso-8859-1?Q?SfKbddCiLpCl8iTWiCerrwn3ASvDLDbMPnG1le0JFv7WFhdkEdTZxTL00y?=
+ =?iso-8859-1?Q?9PNjkAPMXCwF5m5z5SwB7yycaa+Dr4jz6JCWKsqlItJ0wdxlgNBVgPav5i?=
+ =?iso-8859-1?Q?WFUbvlnOKO1i/8be5PH8Md2pasxPfwMSvw5GvOq9+at8gs+Ap+75rAxPNR?=
+ =?iso-8859-1?Q?X+1FK7jz/opCRxCt0Dj8aP+o5lBKr5Q43/jnKgbDe2jEc9k9istzTaf9y8?=
+ =?iso-8859-1?Q?QuxcNUxiKP9hyRMD1D4oS0WG63DHt1oOzvvovoeSrqPCUdldJxrSegFa9f?=
+ =?iso-8859-1?Q?WnIjcESkQ1GewfmxmGWgrkYxH55ck2xuYI/OReYom6w1+3Y87ZmM1G8ocE?=
+ =?iso-8859-1?Q?i15IPQzurpM6uVfYkOAO+nDbr64QqYh9a8iPbOV7B/8zaEQB7ILMX4bQHF?=
+ =?iso-8859-1?Q?GChQfv+aAwWByc0ax36QDTKF9Qb8OX1bDGlsiZf3ndQUV6lq8h0Nzh+eeF?=
+ =?iso-8859-1?Q?wSKte9QrYigL8NIuThr5gzI1qhQ11oY9+mQ3lC0cq7XDnLdqsdYhAZhL9J?=
+ =?iso-8859-1?Q?CmDn5QufhptfDX4/lggbPQ8aRyBtMtfSkd7BggUYgX14lt2n2BfSVvwbmf?=
+ =?iso-8859-1?Q?URU5HibAv6ZS8/NJhpLPQNNKNLsjSiU1/esBY=3D?=
+MIME-Version: 1.0
+
+--_000_BY1PR14MB741627C603129168D06976BBF39F2BY1PR14MB7416namp_
+Content-Type: text/plain; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+
+
+--_000_BY1PR14MB741627C603129168D06976BBF39F2BY1PR14MB7416namp_
+Content-Type: text/html; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+<html><head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Diso-8859-=
+1">
+</head>
+<body>
+<div></div>
+</body>
+</html>
+
+--_000_BY1PR14MB741627C603129168D06976BBF39F2BY1PR14MB7416namp_--

@@ -205,6 +205,14 @@ export async function fetchRecords(address: string, network = 'testnet-10', limi
       } catch { /* next relay */ }
     }
   }
+  // KV_RECORDS_CACHE: per-address device cache — survives relay recycles and
+  // the dead REST index. Saved on success, served when both rails are empty.
+  try {
+    const AS = require('@react-native-async-storage/async-storage').default;
+    const ck = 'kv_rec_cache_' + address.slice(-24);
+    if (out.length > 0) { AS.setItem(ck, JSON.stringify(out.slice(0, 300))).catch(() => {});
+    } else { const raw = await AS.getItem(ck); if (raw) { for (const r of JSON.parse(raw)) out.push(r); } }
+  } catch {}
   out.sort((a, b) => b.blockTime - a.blockTime);
   return out;
 }
@@ -260,9 +268,27 @@ export async function rebuildDirectory(category: string, registryAddress: string
     if (!r.d?.storeAddress || !r.d?.name) continue;
     if (!byOwner.has(r.o)) byOwner.set(r.o, { record: r, blockTime: a.blockTime }); // newest first already
   }
+  // KV_PROHIBITED_RENDER: reader-side enforcement - a modified client can
+  // announce anything; this wallet simply will not display it.
+  const KV_PROHIBITED = ['gambling', 'casino', 'betting', 'lottery'];
+  const KV_MOD_PUBKEY = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
+  const delistByTarget = new Map<string, any>();
+  for (const a of anns) {
+    const r: any = a.record;
+    if (r && r.k === 'delist' && r.d && r.d.head && verifyRecord(r)) {
+      const tgt = String(r.d.head);
+      const p = delistByTarget.get(tgt);
+      if (!p || (r.t || 0) > (p.t || 0)) delistByTarget.set(tgt, r);
+    }
+  }
   const entries: DirectoryEntry[] = [];
   for (const [owner, { record, blockTime }] of byOwner) {
     if (record.del) continue;
+    if (KV_PROHIBITED.indexOf(String(record.d.category || '').toLowerCase()) >= 0) continue;
+    const _dl = delistByTarget.get(String(record.d.storeAddress));
+    if (_dl && (_dl.o === owner || _dl.o === KV_MOD_PUBKEY) && (_dl.t || 0) > (record.t || 0)) continue;
+    // KV_DISPLAY_SCAN: reader-side text scan - announce fields never render unscanned
+    try { const { scanObject } = require('./content_filter'); const _sc = scanObject({ n: record.d.name, c: record.d.category, l: record.d.primaryLink }); if (!_sc.ok) { console.warn('[Directory] entry BLOCKED:', _sc.reason, String(record.d.name || '').slice(0, 24)); continue; } } catch {}
     let pledge = 0n;
     try { pledge = await getPledgeSompi(record.d.storeAddress, network); } catch {}
     if (pledge === 0n) continue; // anchor spent = pledge withdrawn = delisted
@@ -288,7 +314,7 @@ export async function rebuildDirectory(category: string, registryAddress: string
 
 /** Announce record for a registry address. Sign, then buildPayloadHex, then
  *  the sender sends dust to the registry address with this payload. */
-export function makeRegistryAnnounce(ownerPubkey: string, storeAddress: string, name: string, category: string, extra?: { primaryLink?: string; configHash?: string; coords?: any }): KvRecord {
+export function makeRegistryAnnounce(ownerPubkey: string, storeAddress: string, name: string, category: string, extra?: { primaryLink?: string; configHash?: string; coords?: any; dkim?: boolean; dkimDomain?: string }): KvRecord {
   const d: any = { storeAddress, name, category };
   if (extra?.primaryLink) d.primaryLink = extra.primaryLink;
   if (extra?.configHash) d.configHash = extra.configHash;
@@ -297,6 +323,10 @@ export function makeRegistryAnnounce(ownerPubkey: string, storeAddress: string, 
   // so once the relay recycled they were undiscoverable. primaryLink is a real
   // URL here, so the coords need a field of their own.
   if (extra?.coords) d.coords = extra.coords;
+  // KV_DKIM_ANNOUNCE: on-device DKIM verification result rides the announce;
+  // the Academics lane filters on exactly these fields.
+  if (extra?.dkim) d.dkim = true;
+  if (extra?.dkimDomain) d.dkimDomain = extra.dkimDomain;
   return { k: 'registry', v: 1, o: ownerPubkey, t: Date.now(), d };
 }
 

@@ -1,0 +1,351 @@
+Received: from DM8P220MB0533.NAMP220.PROD.OUTLOOK.COM (2603:10b6:8:3f::11) by
+ DM8P220MB0582.NAMP220.PROD.OUTLOOK.COM with HTTPS; Mon, 12 Oct 2026 20:04:13
+ +0000
+ARC-Seal: i=2; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=pass;
+ b=rrRqN9Khp1zPSPcyveG9yx7Tp+m9qdiYGPTJMjwjayHUwC3oU4SH2MKOgBx+IZxr/ZRGVK3f5PxRMw4JJpiTX7XomAsmmen6yabNDLp5YiTJ34QFQldthzksapwMuxZgNriyw6TvR7BhKath+H5Aw9350v2uKWgBbU0vhd7EtDBV9fixOhc1kIVMf9cs7JqrZivSaQOng6mm1gNZwmVP1WjvzXqITrg3U9kY3pqdE1cNZ27PeyvX15QPnqoTPXL+XnhdqzoCo6VKGE8wYkYOvn/dwNTJdYrBOCefUOVHVI25HhFu258/HAUMLA+lcvVcrpLG8pRv/AthJnZeJzO9mw==
+ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=YqufVWGjxS7W8fUWXN+Lc8FXHOqqk9lO4+q2BZKZCeQ=;
+ b=mFx/c632snUgCIfYGM87h3fxcrz8lziwomjdJyBe9rW3i27EN4LVcSGn3jePwZYT8g3748FaDb+ydZmaVJM7f6VFXwbQOuTCVtSb1l2hcrNLxqMyePrvbc0P08QyDWfPDDLKBqLdvAxoaaPs3B+Xxwplsd6KZiFitYKfxApGPCk3SMw7li8gHCplmfpnjb1nRA7zAzy9hnStVijWoWPC/OvmDj75X0lKnFx0TAz0UiRmCRfl0F7LmvIviS2leDphDIL+on9K9PKEJvqN9UhVWjoKb5eY1AVTeJ66hR6ozx/l2nu/05v5M7aE6RzKjTxQGp7hWm2TBVoZo2Zt+W1pZw==
+ARC-Authentication-Results: i=2; mx.microsoft.com 1; spf=none (sender ip is
+ 40.107.208.87) smtp.rcpttodomain=hotmail.com
+ smtp.mailfrom=camden.rutgers.edu; dmarc=pass (p=quarantine sp=quarantine
+ pct=100) action=none header.from=camden.rutgers.edu; dkim=pass (signature was
+ verified) header.d=camden.rutgers.edu; arc=pass (0 oda=1 ltdi=1
+ spf=[1,1,smtp.mailfrom=camden.rutgers.edu]
+ dkim=[1,1,header.d=camden.rutgers.edu]
+ dmarc=[1,1,header.from=camden.rutgers.edu])
+Received: from PAZP264CA0052.FRAP264.PROD.OUTLOOK.COM (2603:10a6:102:1fc::15)
+ by DM8P220MB0533.NAMP220.PROD.OUTLOOK.COM (2603:10b6:8:3f::11) with Microsoft
+ SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id
+ 15.21.496.23; Mon, 12 Oct 2026 20:04:11 +0000
+Received: from MI3PEPF00008550.eurprd05.prod.outlook.com
+ (2603:10a6:102:1fc:cafe::6b) by PAZP264CA0052.outlook.office365.com
+ (2603:10a6:102:1fc::15) with Microsoft SMTP Server (version=TLS1_3,
+ cipher=TLS_AES_256_GCM_SHA384) id 15.21.496.5 via Frontend Transport; Mon, 12
+ Oct 2026 20:04:11 +0000
+Authentication-Results: mx.microsoft.com 1; spf=none (sender IP is
+ 40.107.208.87) smtp.mailfrom=camden.rutgers.edu; dkim=pass (signature was
+ verified) header.d=camden.rutgers.edu;dmarc=pass action=none
+ header.from=camden.rutgers.edu;compauth=pass reason=100
+Received-SPF: None (protection.outlook.com: camden.rutgers.edu does not
+ designate permitted sender hosts)
+Received: from PH0PR06CU001.outbound.protection.outlook.com (40.107.208.87) by
+ MI3PEPF00008550.mail.protection.outlook.com (10.167.240.4) with Microsoft
+ SMTP Server (version=TLS1_3, cipher=TLS_AES_256_GCM_SHA384) id 15.21.522.6
+ via Frontend Transport; Mon, 12 Oct 2026 20:04:10 +0000
+X-IncomingTopHeaderMarker: OriginalChecksum:077AE18A0B9FA2E13CEC211E8D17ADB062A038616A0B3BA370F9AB63FDC74F00;UpperCasedChecksum:210831F2BD104B563E7D636F2153F8EE2C2E30E00D8288F6A6C62AAE034D167C;SizeAsReceived:8423;Count:45
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=none;
+ b=Z9ZruMosB0Uk3PHFyaOcdxILtbyzqHZmFnJUqXwNOz9nO1IBLQ0EKTjM0cb8RHy+4bemJ3iARJcwEy2lT/4w0PMqCb3ltBIfAz9wDj1b8Yx2Kgvj6+B7pm5GEK2PTXEicIuiiY5HA1GAYJvNiQfLmsfKVlcrXjt4ZoMc2/daNTcFC8B6N9tSkvpBBfnAzqlh4v/+Io7WNCf7cl4cMZ9WmKS1arEMK0gvOCxzjXYB36pqEXZeRyYwonJBspZnjKiInBu6hfJsy+OPwO1V5XLiBfg53+sbqFuv5NB3ok01JF6nsXZtJs/yS+3XpOP9YRhSPngBizYvrm1QP6+aFHPaHA==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=YqufVWGjxS7W8fUWXN+Lc8FXHOqqk9lO4+q2BZKZCeQ=;
+ b=EGPN3Tw9+YLO+GAZjxWrNbel+J2PeQvzm/ekVd/gcQ3Wn4JH1fMN74QIrLecWrCs+guegwOcSsXEAB4WA030MU0TmzjaIp4Bw7bpiYok9DnuOTqBhJYznB5u9VBQLjDsv5Ff9u+d9jq39QJwkXxHISmiehNxrEjwyA+qGRbYHpdoJkz88o25O3Kn3rxba2IZYChe8PfBai6O5VnFg6rlDZEkHMQT6Q+b/kkE55MIPpRv0LaTBPm0Xepupd8npjqRlpwDNa7ysZ2AaXMCH6ZeCHX9BmQqKNgWV1zkZVTPkMljkOT/dbN9DrfbuTsaFFIaw+7xSbo505slh5cK/RpWOA==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass
+ smtp.mailfrom=camden.rutgers.edu; dmarc=pass action=none
+ header.from=camden.rutgers.edu; dkim=pass header.d=camden.rutgers.edu;
+ arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=camden.rutgers.edu;
+ s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=YqufVWGjxS7W8fUWXN+Lc8FXHOqqk9lO4+q2BZKZCeQ=;
+ b=WtSgVU+4qWHaQQCFVMAlet2RlY69p2xV2gqwBFajAIoL3SemBy2sBueZN+WmVMK2daLPpJVu1QP1684MgcJd+Ts3mbfI/pBFDtbObPDVwi+HiFmvZw0lNn3PIADuGXtG/8LCdwbI8+967MbHQL9F5RpyCYr+0ux8iATEFvO+OPrRG1c7DP2LuubnztOdrkmDLHkiirA1dCcXqcSSBQUd7u6m49dw1RoaH9bDYalxjViXCPySPmYOisq3BDTjJODaqRIo8FCc9gwx6mdXqaUI4osgprP4cIRdU9XuKo0LpML712h2BfdXv22v1e/0p65ZTD2lB54Wf2b4NeKZk3FGTg==
+Received: from BY1PR14MB7416.namprd14.prod.outlook.com (2603:10b6:a03:535::16)
+ by SABPR14MB958921.namprd14.prod.outlook.com (2603:10b6:806:4ef::14) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.21.496.23; Mon, 12 Oct
+ 2026 20:04:08 +0000
+Received: from BY1PR14MB7416.namprd14.prod.outlook.com
+ ([fe80::f0f0:704:7f99:2ec3]) by BY1PR14MB7416.namprd14.prod.outlook.com
+ ([fe80::f0f0:704:7f99:2ec3%4]) with mapi id 15.21.0496.020; Mon, 12 Oct 2026
+ 20:04:08 +0000
+From: Wayne Shaw <waynehed@camden.rutgers.edu>
+To: wayne shaw <wayneshaw349@hotmail.com>
+Subject: Re: 575490
+Thread-Topic: 575490
+Thread-Index: AQHdWoOyEt8hCziLt0+pEU6KbJs2YLb6VJ0+
+Date: Mon, 12 Oct 2026 20:04:08 +0000
+Message-ID: <BY1PR14MB74169A5C16D0A456420A7D6DF39F2@BY1PR14MB7416.namprd14.prod.outlook.com>
+References: <DM8P220MB0582680BDFB496F2528D12F0989F2@DM8P220MB0582.NAMP220.PROD.OUTLOOK.COM>
+In-Reply-To: <DM8P220MB0582680BDFB496F2528D12F0989F2@DM8P220MB0582.NAMP220.PROD.OUTLOOK.COM>
+Accept-Language: en-US
+Content-Language: en-US
+X-MS-Has-Attach:
+X-MS-TNEF-Correlator:
+msip_labels:
+Authentication-Results-Original: mx.microsoft.com 1; dkim=none (message not
+ signed) header.d=none;dmarc=none action=none header.from=camden.rutgers.edu;
+x-ms-traffictypediagnostic: BY1PR14MB7416:EE_|SABPR14MB958921:EE_|MI3PEPF00008550:EE_|DM8P220MB0533:EE_|DM8P220MB0582:EE_
+X-MS-Office365-Filtering-Correlation-Id: 2190ea17-2b8c-4ea5-c7ab-08df289bfb25
+x-ru-tlsrequired: 1
+x-ms-exchange-senderadcheck: 1
+x-ms-exchange-antispam-relay: 0
+X-Microsoft-Antispam-Untrusted: BCL:0;ARA:13230040|376014|366016|10070799003|1800799024|786006|23010399003|11063799006|38070700021|56012099006|18002099003|22082099003|260925022911599003|260925021311599003|260925021911599003|261009223027099003|8096899003|10067099003;
+X-Microsoft-Antispam-Message-Info-Original: wJVC7uME5n7lLsQa6/VC2Vhy5AZ/0lL472nkZzasOFkgEcyiYSnkgfQRdEkSLo35v1a3bjp9EuTYYXFzYiHfK+yxPyml8/EFEMF2I4jFd9G5XyuGjNpQyOUUdv9xeA+sInY4sER6+a58VxAim0sVrh3Xa5GCTYwyx/MxPzV1qAf7ASAOQjNBzsnhYYwa85SbKP8WuWEllwn3wd+cIrcvWscW9SXLCb+sk6lKTcy0P0oRklpzxbEqZDEdqgERn8BqpzrZfmWuyGFT8p3vV/Ri32puzC+kf2EQuzcOJBDIogZENMwPbnb/louKDVAmyMjEUFpJCU7tCbx57tTrzkGZYrU39QiLtWhOruZyTQm16KM2wgOt3BnYEo8SDYWzqg/HTOfC7na02hWc60cG92w3ilfrrPL8jp85KA4OXkE/KLu6WddeXZIXMYlbVKUhKBSavh1lVSwnckpuswwR/Eh/7SepzauP/bWphMmthWVnObGNOn01HKL4vuk+PJQyCLqZZDaRi5Bb8gv6rWJjeMBYACPb7xS5Uo12sVG8HnlwchraBspq8A6O9zUn4XIGTxwb3Xif/Vgi2jhRDHZ35kj/dM9lYy7k/+z9/BKFiria5vAGtZZJvee+XCD2uU8RPgjeXjNjL95MXqhRWN/g0wyi0ePZIu//WKWYFvpZfGmbc4DunM28zvk+BfIiiwhkO9R0CHD2pYyf1eptqWLVXCQyT7CRiIlKfKRhbH/bjz9Gf9M=
+X-Forefront-Antispam-Report-Untrusted: CIP:255.255.255.255;CTRY:;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:BY1PR14MB7416.namprd14.prod.outlook.com;PTR:;CAT:NONE;SFS:(13230040)(376014)(366016)(10070799003)(1800799024)(786006)(23010399003)(11063799006)(38070700021)(56012099006)(18002099003)(22082099003)(260925022911599003)(260925021311599003)(260925021911599003)(261009223027099003)(8096899003)(10067099003);DIR:OUT;SFP:1102;
+X-MS-Exchange-AntiSpam-MessageData-Original-ChunkCount: 2
+X-MS-Exchange-AntiSpam-MessageData-Original-0: =?Windows-1252?Q?nbcJ+hJS1NUpNQDYSPF2k955Ntqs2p9wQJpSHCoHphyrohv41KkiVt2F?=
+ =?Windows-1252?Q?A0HBKkVdlKWKLgWZmDbZAPSwAhEDDi+v5Bs6XPBMwtYNsIfbZVOYZKiv?=
+ =?Windows-1252?Q?wAxo6tnHIq7ZaffaDaSNTHvOCHnWbRgvRydCisXCAv2/o4coVlKQLBCL?=
+ =?Windows-1252?Q?8ZWs2xIJRwbLyLBqOGqAu/IP2AfUOPGulCZ+R7ocHDR5wZDVjSO/f3PP?=
+ =?Windows-1252?Q?2OwX9r1UX4W7/4ncW4exNvLRdOHtvteQ9ONe4ZxxclDm/J3lEnuBJEj8?=
+ =?Windows-1252?Q?OEBTCBq9RAhp8F6a8v14k3yRBlPssGPAoqWoAqg9bZJxRT0ojvhCpHOK?=
+ =?Windows-1252?Q?uzL2mINV4ZxtZHm/OxYOh1UZctJogGZOzKGgXCqyRzo4Piu6EoT6QqvA?=
+ =?Windows-1252?Q?36KAPRWNoNxdcNd5/9bv31yhu0JokPFVFT4aQzYgZNKsV1MJhqLa1Zgi?=
+ =?Windows-1252?Q?obTiEk1BJ6VbwV2sEtyG8ubb9ZJ3dujFnrPGq8CsBxUPUL/Le8oMxKHd?=
+ =?Windows-1252?Q?MZx9F0XyW7t5dqfRFLMI292c1D9Za7EwmWVfANCW72g5xk1aB/K0uaK7?=
+ =?Windows-1252?Q?Tx1qz/80XHGRvEMs1DZsFuorbpV1YzExx+wUZ8y/MElwoqBs4654w8VJ?=
+ =?Windows-1252?Q?wMVHxAGpMXW2v0X91VSWawS1MFDu4VYmI0KfZ4j22+4kPtCeEsFIKDd9?=
+ =?Windows-1252?Q?v+pl4xLNQVRG22k/pe6/b4NNKdvOX4UI7DENC6JllyX12Wd1HQuGSJ7e?=
+ =?Windows-1252?Q?6bbuEmtCxi1AIxCnBZX0iXo5LQQqpqgfWptZlSlCivzZs1ZQ/ixSNp96?=
+ =?Windows-1252?Q?RTdBeEO5rW3P54cP129IZFuMMNG2qNdpye3SUXF1wDf4/RS0DCyrVAMz?=
+ =?Windows-1252?Q?XYWOtgOiy83BrwVKrFmsdz2R45XB4TYo5vVmVjBiFUb5PiuuWDpMBcbU?=
+ =?Windows-1252?Q?93jxVAcBS33DUTSTwLHA8KldqYJG6CKv4/LMxk4fzJ5+P0JixVBEOUPo?=
+ =?Windows-1252?Q?E5I6s4+P1EStefKQbAoKaW0dP/gPCKBGazcGnOwKHEh2WeQgaqmxIsTh?=
+ =?Windows-1252?Q?mJs/dXgUQQXxmZBJmQG88l5QjSgrizdtm7KHLoCSHoOFPMKRn4avxOAv?=
+ =?Windows-1252?Q?yugj/ySrDrhqMhFkmq5hz7fq3bqpbqP0iaFltRCjFaM23HHXJ6RgIEd8?=
+ =?Windows-1252?Q?d3Csw6fr0/6X1S0Rs+8g9AjJfP+NCxwPTuiM3cXHvA3JRw195adwk2jL?=
+ =?Windows-1252?Q?hbKsUBUX4z6VXynh8j9P563nDzAyv4EqoNQ6dcxD7v81q3t7YXN4IJDz?=
+ =?Windows-1252?Q?AQXJw7W09sKyG6lt403Pn0kuBzzK2h7chYZkAfXFrb5eZuo+1RNG+6bx?=
+ =?Windows-1252?Q?GpcncYOvyaN9x3dk/ce/+lcJGEUXD/hTzNJQEoMZD0PEDXP3eoWZScn8?=
+ =?Windows-1252?Q?ixLXqlImtMh0akggEvp41oclNVSKhfvetw6dbSmK5LIIQbNusVl6Pfo5?=
+ =?Windows-1252?Q?ONqQpTInpJpiKjvE+35nEieeWCOfARgdkAz6JU+eNnq6UBFBP8k2F+1E?=
+ =?Windows-1252?Q?YF08L4d4TVZHKRcMRGpL3d+17g5hDlViVwhl390+KeDKu0fUtfMRj2t1?=
+ =?Windows-1252?Q?OSud58G/WXEDfqLwDBiqsH6vyNplFd9dn/22uaJYC6IrjfVt3rmO/1l5?=
+ =?Windows-1252?Q?fvYYkKYR8VT6qFGP/6XQ9htzUgQe0yemymssRFhexROB7yAKB31PqA6J?=
+ =?Windows-1252?Q?xUQh1LHqjabKLizr7H+Qm5IiquVL9dn4LgzzGQxyJC6ggbDXKPbZLhd3?=
+ =?Windows-1252?Q?tGS+SgmpJb4cIXybBbyH1sY/kv0RCXz75IPsRNUzrYgyn8hJ0E537B0m?=
+ =?Windows-1252?Q?xPLyCYh2Avk5qI5Xlw+/Eul1s96rzLENqI4TpZZuh30KpvY8Sr/QANoc?=
+ =?Windows-1252?Q?C1K8fshF?=
+X-MS-Exchange-AntiSpam-MessageData-Original-1: BhWBPEWAjUn5xA==
+Content-Type: multipart/alternative;
+	boundary="_000_BY1PR14MB74169A5C16D0A456420A7D6DF39F2BY1PR14MB7416namp_"
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: SABPR14MB958921
+X-IncomingHeaderCount: 45
+Return-Path: waynehed@camden.rutgers.edu
+X-MS-Exchange-Organization-ExpirationStartTime: 12 Oct 2026 20:04:10.8498
+ (UTC)
+X-MS-Exchange-Organization-ExpirationStartTimeReason: OriginalSubmit
+X-MS-Exchange-Organization-ExpirationInterval: 1:00:00:00.0000000
+X-MS-Exchange-Organization-ExpirationIntervalReason: OriginalSubmit
+X-MS-Exchange-Organization-Network-Message-Id: 2190ea17-2b8c-4ea5-c7ab-08df289bfb25
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: 84df9e7f-e9f6-40af-b435-aaaaaaaaaaaa:0
+X-MS-Exchange-Organization-MessageDirectionality: Incoming
+X-MS-Exchange-Transport-CrossTenantHeadersStripped: MI3PEPF00008550.eurprd05.prod.outlook.com
+X-MS-Exchange-Transport-CrossTenantHeadersPromoted: MI3PEPF00008550.eurprd05.prod.outlook.com
+X-MS-PublicTrafficType: Email
+X-MS-Exchange-Organization-AuthSource: MI3PEPF00008550.eurprd05.prod.outlook.com
+X-MS-Exchange-Organization-AuthAs: Anonymous
+X-MS-UserLastLogonTime: 10/12/2026 6:09:43 PM
+X-MS-Office365-Filtering-Correlation-Id-Prvs: bfd1c9b6-541f-4a92-4b33-08df289bf99c
+X-Sender-IP: 40.107.208.87
+X-MS-Exchange-EOPDirect: true
+X-SID-PRA: WAYNEHED@CAMDEN.RUTGERS.EDU
+X-SID-Result: PASS
+X-MS-Exchange-Organization-SCL: 1
+X-Microsoft-Antispam: BCL:0;ARA:1444111002|58200799025|47200799027|13020799009|11020799012|260820164000599003|6089299003|29090799004|260826003000599003|260928210016899003|260826193500599007|67000799015|50300799015|30041999003|2607281247196008|440099028|3412199025|1380799030|1370799030|1360799030;
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 12 Oct 2026 20:04:10.4848
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 2190ea17-2b8c-4ea5-c7ab-08df289bfb25
+X-MS-Exchange-CrossTenant-Id: 84df9e7f-e9f6-40af-b435-aaaaaaaaaaaa
+X-MS-Exchange-CrossTenant-AuthSource: MI3PEPF00008550.eurprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-CrossTenant-RMS-PersistedConsumerOrg: 00000000-0000-0000-0000-000000000000
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: DM8P220MB0533
+X-MS-Exchange-Transport-EndToEndLatency: 00:00:02.5310495
+X-MS-Exchange-Processed-By-BccFoldering: 15.21.0496.018
+X-Microsoft-Antispam-Mailbox-Delivery:
+	ucf:0;jmr:0;ex:0;auth:1;dest:I;OFR:SpamFilterPass;ENG:(5062000311)(920221119095)(90000117)(920221120095)(90011020)(91015020)(91040095)(9050020)(9060121)(9081003)(9100341)(1010050)(944500132)(2008001181)(4810010)(4910033)(9920006)(9510006)(10105021)(9320005)(9230038)(120001);
+X-Message-Delivery: Vj0xLjE7dXM9MDtsPTA7YT0wO0Q9MTtHRD0xO1NDTD0tMQ==
+X-Microsoft-Antispam-Message-Info:
+	=?Windows-1252?Q?Erfo7pvOH3NoT6MJG/W/+VbzUlM6BnadvN8GKDRALASPjJIpNbLMI8Ds?=
+ =?Windows-1252?Q?JHI6lW3ktk5iohOw10uB2Fxsu5ahB4wEWMGLJD24uWQYCkmKNee4o3qZ?=
+ =?Windows-1252?Q?OeCPu/y9Q5R00LtKIIrZSS0yB5Vzvs5V22Sz3EdL2APGD8snMElcYeEf?=
+ =?Windows-1252?Q?m2s5RVf0K1KcPMAnWQpY6uUbGTu39q1EOv0y57zy0C8WUM0tyMSPtw65?=
+ =?Windows-1252?Q?whL3Tkh2C65BwpxWpNAqsbkXXFsiF7ije9AIe6GrK4oIgHhnTY5ko1ht?=
+ =?Windows-1252?Q?+EoE+mZBdkMxNomiTuJNFl1p1Ekqa/5LJh92o/ozLGUgDjPQQr1UI3VX?=
+ =?Windows-1252?Q?6/8aII5ViFeFyg5wXvZbPEnOu8lgxXNGkcnhOCSiqm5UljpHN03AcRSR?=
+ =?Windows-1252?Q?6QqBoT5T7R3c7X4IcvL3AcdInepYV8A5sWvC/Ud6fpO/Na9BujeNOrTy?=
+ =?Windows-1252?Q?yR2+fD79S1zMVQeLDLhJUjcxlvnmEWUcZsasoK9jf0cPIj2pfTjgHH7F?=
+ =?Windows-1252?Q?7LuLU1CikS3N+6ft2fnzv5uGw0Y9za51/UTN57UItza07EQU9oJ0Ubv1?=
+ =?Windows-1252?Q?if3bIIqwtmT/7pjtcbmJ5yQrCo34MxfNR9dMeEf1UwFfR5At0mp4nptR?=
+ =?Windows-1252?Q?dajtbxlj4tU97UsyX1dGfOan1NjFMVqA/GFz4xaxnsRzNxxeLFCdzSof?=
+ =?Windows-1252?Q?4/hldTm0JAZsXZ8Qir9p9rBfi76KNsYIB87RjtSOY4Fy3vXRDfUHVO6x?=
+ =?Windows-1252?Q?T/PCpLwpnoEmw1cM6YAdnLdsyzrjwc5XlQ6PWAapUL5vlVfghOBj3ZQP?=
+ =?Windows-1252?Q?3tq9Pffs/YR+1PDwN8qPp+T2U9jiPqAxXAL4CDwWFuyofxFdQQVYMi5e?=
+ =?Windows-1252?Q?3gqzc5CQz+GG8V+c9RStQhFzJ78vk3I1/LcuC4wvhXLCrwdHuuUPT0dO?=
+ =?Windows-1252?Q?k+5Ag6YhAUcGaH4S3yzwJOk0HGx9JFT8PFHDFYFwnH9+zS9nTAGTfbfX?=
+ =?Windows-1252?Q?EY/7+csgcq7Fh4MD03tvbo2vJOIQa+RmeIw9KnenmV2DSZzHjCwl/3vu?=
+ =?Windows-1252?Q?8aVOTaQoiro3PnIJXprknzruhdqdLvCxYmT6LAgQ9chIt0MDqjtiMyvN?=
+ =?Windows-1252?Q?4cHA7U3QVYkeIwIgYnFv/gu4RTS/hGC3CsNoNWb0STswvuXQMFChPJiL?=
+ =?Windows-1252?Q?eCohnuts7tNxl44y2Ad9A9QaEUEWYClYwks+92hX0fHrQ9Uskr8uN4AV?=
+ =?Windows-1252?Q?9f4s5e6cb/7S5Ys6Mk3qsNOza1mha14Hohv18zuMBSakwzfOabsZAAj4?=
+ =?Windows-1252?Q?OkEkGGSyxbOE03HHlOTfuJfHA2zATD/vEBoSI1/KNsjYt2eFgsMq9mjv?=
+ =?Windows-1252?Q?dvztJND5tVWwzOMrTWN6Rb0+O0l7mOFxv7LQ5uMRw4Mlxr2bC0Ih3o36?=
+ =?Windows-1252?Q?zBMRdP3IRp+nkHTaiI0e4y9TrkFnehHkU4prntrGujbIyZNSt1gqj9HQ?=
+ =?Windows-1252?Q?1qfjgNdUcpQh6Jilyo+41Kpm9A03dqDxOMzPkHRtz1KGM160JF0QKGNO?=
+ =?Windows-1252?Q?AZSHzmQ6p59QrIUHLQEneVnvSoSs5U8gRn6hcmy/vYNhc9HO+eFjVuig?=
+ =?Windows-1252?Q?W3G19nkGpIt6LYKllOxKrlLTDEGXwWU0662/FBnBRgpWAwS2KGIZZdUh?=
+ =?Windows-1252?Q?FbhT5ujp5HNkNuHColgDPbJj8v4YlvG7SbYrW1CEDgw3SPq15vG1FbSR?=
+ =?Windows-1252?Q?v/WfwWpv0fP0z21N2iP6L0jds2oOKO6DXx206fy3mv5CZqVxh7VXKKCC?=
+ =?Windows-1252?Q?6QOdjh84E9wlf5S3bIcT7SO6KccdjI5htaTOHTWNmG/3kgcUzw9oPDcf?=
+ =?Windows-1252?Q?00VDu9SfOxR6dIMH8VB86bAo+DF7zX7UMs+D4NMrOil72yNOEJvyAOua?=
+ =?Windows-1252?Q?cAOhZkRZyB45XbazyrbOWEm/xWnozYupcy/O5285xfeY4bZxM5OZ+avg?=
+ =?Windows-1252?Q?jFQAWyRHpaewcDJQnVfBsHAlWjknL2odnS32eATweKCkqvuICJ7/thyx?=
+ =?Windows-1252?Q?Oo73TPC3bUu65Lf5dyu0Psa8JL0DeKyoHs5W5Jl7x1OHnU2WM7OybK9a?=
+ =?Windows-1252?Q?q1AcdyQValIr+SFLYN9f6eqZVb1rZvH8ynBqDcp50kqaG37LTXVft9eP?=
+ =?Windows-1252?Q?oL44m2NGRnWozxhPSNMqi8c7946hJPFTXYS+5bMXPlcZOLBrIZfvBNNc?=
+ =?Windows-1252?Q?u24lByv0X1MY7SjibB80YNqAsDgEMPuKElHimr9EHAiwXh/uJDA1ulVH?=
+ =?Windows-1252?Q?R393oe80aBbdPq9vNK27BgVQJ5Z9AS9nbel6FteU6Qce59fPwAAJHIMv?=
+ =?Windows-1252?Q?igMDmpvOO8S3JgLDtJDOu9p4T8/uc0AQZAyur2aRSKBUbGdd+hzS6tGt?=
+ =?Windows-1252?Q?Ygzuk7gCzbR+wqzB6qzM/3b2kTzsSdvSEfj8dQLja7ZJ23FDguoiyl8i?=
+ =?Windows-1252?Q?i5wXixlC?=
+MIME-Version: 1.0
+
+--_000_BY1PR14MB74169A5C16D0A456420A7D6DF39F2BY1PR14MB7416namp_
+Content-Type: text/plain; charset="Windows-1252"
+Content-Transfer-Encoding: quoted-printable
+
+
+
+Wayne Shaw, MD
+Rutgers University =96 Camden   Student Wellness Center
+326 Penn Street
+Campus Center - Second Floor
+Camden,  NJ  08102-1508
+waynehed@camden.rutgers.edu
+phone:  856-225-6005
+Fax:   856-225-6186
+
+Rutgers University =96 Camden   Student Wellness Center
+326 Penn Street
+Campus Center - Second Floor
+Camden,  NJ  08102-1508
+waynehed@camden.rutgers.edu
+phone:  856-225-6005
+Fax:   856-225-6186
+
+________________________________
+From: wayne shaw <wayneshaw349@hotmail.com>
+Sent: Monday, October 12, 2026 3:55 PM
+To: Wayne Shaw <waynehed@camden.rutgers.edu>
+Subject: 575490
+
+
+Sent from my iPhone
+
+--_000_BY1PR14MB74169A5C16D0A456420A7D6DF39F2BY1PR14MB7416namp_
+Content-Type: text/html; charset="Windows-1252"
+Content-Transfer-Encoding: quoted-printable
+
+<html><head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3DWindows-1=
+252">
+<style type=3D"text/css" style=3D"display:none;"> P {margin-top:0;margin-bo=
+ttom:0;} </style>
+</head>
+<body dir=3D"ltr">
+<div style=3D"font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, =
+Calibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);" clas=
+s=3D"elementToProof">
+<br>
+</div>
+<div id=3D"Signature" class=3D"elementToProof">
+<div style=3D"font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, =
+Calibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"direction: ltr; text-align: left; text-indent: 0px; margin: 0=
+px; font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, H=
+elvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+Wayne Shaw, MD</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Rutgers University =96 Camden&nbsp;&nbsp; Student Wellness Center</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+326 Penn Street</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Campus Center - Second Floor</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Camden,&nbsp; NJ&nbsp; 08102-1508</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+waynehed@camden.rutgers.edu</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+phone:&nbsp; 856-225-6005</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Fax:&nbsp; &nbsp;856-225-6186</div>
+<div style=3D"direction: ltr; text-align: left; text-indent: 0px; margin: 0=
+px; font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, H=
+elvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Rutgers University =96 Camden&nbsp;&nbsp; Student Wellness Center</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+326 Penn Street</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Campus Center - Second Floor</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Camden,&nbsp; NJ&nbsp; 08102-1508</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+waynehed@camden.rutgers.edu</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+phone:&nbsp; 856-225-6005</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Fax:&nbsp; &nbsp;856-225-6186</div>
+<div style=3D"font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, =
+Calibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+</div>
+<div id=3D"appendonsend"></div>
+<hr style=3D"display:inline-block;width:98%" tabindex=3D"-1">
+<div id=3D"divRplyFwdMsg" dir=3D"ltr"><font face=3D"Calibri, sans-serif" st=
+yle=3D"font-size:11pt" color=3D"#000000"><b>From:</b> wayne shaw &lt;waynes=
+haw349@hotmail.com&gt;<br>
+<b>Sent:</b> Monday, October 12, 2026 3:55 PM<br>
+<b>To:</b> Wayne Shaw &lt;waynehed@camden.rutgers.edu&gt;<br>
+<b>Subject:</b> 575490</font>
+<div>&nbsp;</div>
+</div>
+<div class=3D"BodyFragment"><font size=3D"2"><span style=3D"font-size:11pt;=
+">
+<div class=3D"PlainText"><br>
+Sent from my iPhone<br>
+</div>
+</span></font></div>
+</body>
+</html>
+
+--_000_BY1PR14MB74169A5C16D0A456420A7D6DF39F2BY1PR14MB7416namp_--

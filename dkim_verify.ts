@@ -330,13 +330,17 @@ function canonicalizeHeaderRelaxed(name: string, value: string): string {
 }
 
 function extractHeader(rawHeaders: string, name: string): string | null {
-  // Find header by name (case-insensitive), handle multi-line folding
+  // KV_DKIM_RFC: RFC 6376 5.4.2 selects header instances bottom-up, so the
+  // LAST occurrence is the signed one - receiving servers prepend their own
+  // copies of some headers above it.
   const re = new RegExp(
     '^' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':\\s*(.*(?:\\n[ \\t]+.*)*)',
-    'im'
+    'img'
   );
-  const m = rawHeaders.match(re);
-  return m ? m[1].trim() : null;
+  let last: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(rawHeaders)) !== null) last = m;
+  return last ? last[1].trim() : null;
 }
 
 function buildSigningInput(
@@ -379,6 +383,22 @@ function buildSigningInput(
 export async function verifyDKIM(rawEmail: string): Promise<DKIMResult> {
   const steps: string[] = [];
 
+  // KV_PASTE_NORMALIZE: pasted sources arrive mangled by mail/notes apps.
+  // Line endings -> LF, NBSP -> space, zero-width chars stripped, and lines
+  // that start with whitespace followed by a header name ('Token:') are
+  // un-indented - genuine folded continuations never look like a header start.
+  rawEmail = String(rawEmail || '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n[ \t]+(?=[A-Za-z][A-Za-z0-9-]*:[ \t])/g, '\n');
+  steps.push('Normalized pasted source (' + rawEmail.length + ' chars)');
+  // KV_DKIM_RFC: signed headers live above the first blank line; never search the body.
+  const _hdrEnd = rawEmail.indexOf('\n\n');
+  const rawHeaders = _hdrEnd === -1 ? rawEmail : rawEmail.slice(0, _hdrEnd);
+  steps.push('Header block: ' + rawHeaders.length + ' chars');
+  try { const _fp = sha256(new TextEncoder().encode(rawEmail)); steps.push('Source fingerprint: ' + Array.from(_fp.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('')); } catch {}
+
   // Step 1: Parse DKIM-Signature
   steps.push('Parsing DKIM-Signature header...');
   const dkim = parseDKIMSignature(rawEmail);
@@ -417,9 +437,10 @@ export async function verifyDKIM(rawEmail: string): Promise<DKIMResult> {
   // Step 4: Build signing input
   steps.push('Canonicalizing headers...');
   const canonMethod = dkim.canonicalization.split('/')[0] || 'relaxed';
-  const signingInput = buildSigningInput(rawEmail, dkim, canonMethod);
+  const signingInput = buildSigningInput(rawHeaders, dkim, canonMethod);
   if (!signingInput) {
-    return { verified: false, domain: dkim.domain, error: 'Failed to build signing input', steps };
+    const _found = dkim.signedHeaders.filter(h => extractHeader(rawHeaders, h) !== null);
+    return { verified: false, domain: dkim.domain, error: 'Failed to build signing input - found ' + _found.length + '/' + dkim.signedHeaders.length + ' signed headers' + (_found.length ? ' (' + _found.join(', ') + ')' : '') + '. The paste may be missing the header block.', steps };
   }
 
   // Step 5: Hash and verify
@@ -439,7 +460,7 @@ export async function verifyDKIM(rawEmail: string): Promise<DKIMResult> {
     // Try the other method as fallback
     const altMethod = canonMethod === 'relaxed' ? 'simple' : 'relaxed';
     steps.push('Trying ' + altMethod + ' canonicalization...');
-    const altInput = buildSigningInput(rawEmail, dkim, altMethod);
+    const altInput = buildSigningInput(rawHeaders, dkim, altMethod);
     const altHash = sha256(new TextEncoder().encode(altInput));
     const altVerified = rsaVerifyPKCS1(sigBytes, altHash, rsaKey);
     if (altVerified) {
