@@ -34,3 +34,7 @@ kascity_preview.html
 *_test.json
 make_evil_test.cjs
 *.bak*
+
+proof.txt
+headers.txt
+*.eml

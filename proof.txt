@@ -1,2 +1,0 @@
-﻿Get-Clipboard -Raw | Set-Content proof.txt -Encoding UTF8
-$t = Get-Content proof.txt -Raw; $i = $t.IndexOf("`r`n`r`n"); if ($i -lt 0) { $i = $t.IndexOf("`n`n") }; $t.Substring(0, $i) | Set-Content headers.txt -Encoding UTF8

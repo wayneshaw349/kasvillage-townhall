@@ -44,6 +44,30 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
   const [verified, setVerified] = useState<{ valid: boolean; reason?: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
+  // KV_PHONE_LOCAL: on-phone dual-signed evidence chain (Arweave-independent)
+  const [myChain, setMyChain] = useState<any[]>([]);
+  const [chainVerdict, setChainVerdict] = useState('');
+  const [chainCopied, setChainCopied] = useState(false);
+  React.useEffect(() => {
+    if (!visible) return;
+    (async () => { try { const { loadChain } = require('./stat_records'); setMyChain(await loadChain()); } catch (e) { console.log('[PhoneProof] chain load failed:', e); } })();
+  }, [visible]);
+  const handleChainVerify = async () => {
+    try {
+      const { exportBundle, verifyBundle } = require('./stat_records');
+      const _b = await exportBundle();
+      const _pk = (await SecureStore.getItemAsync('kaspa_pubkey')) || (await SecureStore.getItemAsync('kv_public_key')) || '';
+      const _v: any = verifyBundle(_b, _pk);
+      setChainVerdict(_v && _v.valid !== false && _v.ok !== false ? 'VALID \u2713' : 'INVALID: ' + String((_v && (_v.reason || _v.error)) || 'see log'));
+    } catch (e: any) { setChainVerdict('error: ' + String(e && e.message).slice(0, 40)); }
+    setTimeout(() => setChainVerdict(''), 6000);
+  };
+  const handleChainCopy = async () => {
+    try { const { exportBundle } = require('./stat_records'); await Clipboard.setStringAsync(await exportBundle()); setChainCopied(true); setTimeout(() => setChainCopied(false), 2000); } catch (e) { console.log('[PhoneProof] bundle copy failed:', e); }
+  };
+  const handleAnchorFetch = async () => {
+    try { const { backfillAnchors, loadChain } = require('./stat_records'); const _n = await backfillAnchors(20); console.log('[PhoneProof] anchors backfilled:', _n); setMyChain(await loadChain()); } catch (e) { console.log('[PhoneProof] anchor fetch failed:', e); }
+  };
 
   const handleGenerate = async () => {
     const input = target.trim();
@@ -95,6 +119,38 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
             Tally any user's completed trades, deadlocks, and P(complete) directly from Arweave.
             No TownHall needed. Every number is backed by a re-fetchable transaction.
           </Text>
+
+          {/* KV_PHONE_LOCAL: on-phone dual-signed evidence chain */}
+          <View style={{ backgroundColor: C.card, borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(14), borderWidth: 1, borderColor: C.border }}>
+            <Text style={{ color: C.gold, fontWeight: 'bold', fontSize: rs.font(13) }}>My Evidence Chain ({myChain.length})</Text>
+            <Text style={{ color: C.muted, fontSize: rs.font(10), marginTop: rs.s(4) }}>
+              Dual-signed completions kept on this phone, hash-chained and anchored to Kaspa block headers (DAA score + MuHash snapshot of the whole chain at that moment). Survives pruning. Share the bundle and anyone can verify it on request.
+            </Text>
+            {myChain.length === 0 ? (
+              <Text style={{ color: C.muted, fontSize: rs.font(11), marginTop: rs.s(8) }}>No records yet {'\u2014'} completed agreements land here automatically.</Text>
+            ) : myChain.map((r: any, i: number) => {
+              const _a: any = r && r.anchor;
+              return (
+                <View key={i} style={{ marginTop: rs.s(8), borderTopWidth: i ? 1 : 0, borderTopColor: C.border, paddingTop: rs.s(6) }}>
+                  <Text style={{ color: C.text, fontSize: rs.font(11), fontWeight: 'bold' }}>{String(r.agrId || r.agreementId || 'record ' + (i + 1))}  <Text style={{ color: C.primary }}>{String(r.status || r.outcome || '')}</Text></Text>
+                  <Text style={{ color: C.muted, fontSize: rs.font(9), marginTop: rs.s(2) }}>
+                    {_a ? 'DAA ' + String(_a.daaScore || _a.daa || '?') + '  tx ' + String(_a.txId || _a.releaseTxId || _a.txid || '').slice(0, 16) + (_a.header ? '  MuHash \u2713' : '  header pending') : 'anchor pending'}
+                  </Text>
+                </View>
+              );
+            })}
+            <View style={{ flexDirection: 'row', gap: rs.s(8), marginTop: rs.s(10) }}>
+              <TouchableOpacity onPress={handleChainVerify} style={{ flex: 1, borderWidth: 1, borderColor: C.primary, borderRadius: rs.s(8), paddingVertical: rs.s(8), alignItems: 'center' }}>
+                <Text style={{ color: C.primary, fontSize: rs.font(11), fontWeight: 'bold' }}>{chainVerdict || 'Verify Chain'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleChainCopy} style={{ flex: 1, borderWidth: 1, borderColor: C.gold, borderRadius: rs.s(8), paddingVertical: rs.s(8), alignItems: 'center' }}>
+                <Text style={{ color: C.gold, fontSize: rs.font(11), fontWeight: 'bold' }}>{chainCopied ? 'Copied' : 'Copy Bundle'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleAnchorFetch} style={{ flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: rs.s(8), paddingVertical: rs.s(8), alignItems: 'center' }}>
+                <Text style={{ color: C.muted, fontSize: rs.font(11), fontWeight: 'bold' }}>Fetch Anchors</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           <View style={s.inputBox}>
             <Text style={s.label}>Counterparty Pubkey</Text>
