@@ -184,11 +184,11 @@ export async function fetchRecords(address: string, network = 'testnet-10', limi
       `${apiBase(network)}/addresses/${encodeURIComponent(address)}/full-transactions?limit=${limit}&resolve_previous_outpoints=light`
     );
   } catch { txs = []; }
-  const out: Array<{ record: KvRecord; txid: string; blockTime: number }> = [];
+  const out: Array<{ record: KvRecord; txid: string; blockTime: number; sender?: string }> = [];
   for (const tx of txs || []) {
     const rec = decodePayloadHex(tx.payload);
     if (!rec) continue;
-    out.push({ record: rec, txid: tx.transaction_id || '', blockTime: Number(tx.block_time || 0) });
+    out.push({ record: rec, txid: tx.transaction_id || '', blockTime: Number(tx.block_time || 0), sender: String((tx.inputs && tx.inputs[0] && tx.inputs[0].previous_outpoint_address) || '') });
   }
   if (out.length === 0) {
     // api-tn10 tx-ingest can lag or stall (stalled entirely Sep 23-25 2026);
@@ -250,6 +250,8 @@ export interface DirectoryEntry {
   configHash?: string;   // live, from UTXO set at the store address
   record: KvRecord;
   announcedAt: number;
+  repostedBy?: string; // KV_REPOST_ATTR: keeper wallet address when the announce sender != the author
+  keepers?: string[];  // KV_KEEPERS: all distinct keeper wallets in the window
 }
 
 /**
@@ -270,7 +272,7 @@ export async function rebuildDirectory(category: string, registryAddress: string
     if (!verifyRecord(r)) continue;
     if (!r.d?.storeAddress || !r.d?.name) continue;
     const _ak = String(r.d.storeAddress);
-    if (!byAddr.has(_ak)) byAddr.set(_ak, { record: r, blockTime: a.blockTime }); // newest first already
+    if (!byAddr.has(_ak)) byAddr.set(_ak, { record: r, blockTime: a.blockTime, sender: (a as any).sender || '' } as any); // newest first already
   }
   // KV_PROHIBITED_RENDER: reader-side enforcement - a modified client can
   // announce anything; this wallet simply will not display it.
@@ -285,9 +287,33 @@ export async function rebuildDirectory(category: string, registryAddress: string
       if (!p || (r.t || 0) > (p.t || 0)) delistByTarget.set(tgt, r);
     }
   }
+  // KV_KEEPERS: every distinct wallet that announced each listing in the window
+  const _keepersBy = new Map<string, string[]>();
+  for (const a of anns) {
+    const _kr: any = a.record;
+    if (!_kr || _kr.k !== 'registry' || !_kr.d || !_kr.d.storeAddress) continue;
+    const _ks = String((a as any).sender || '');
+    if (!_ks) continue;
+    const _kk = String(_kr.d.storeAddress);
+    const _karr = _keepersBy.get(_kk) || [];
+    if (_karr.indexOf(_ks) < 0) _karr.push(_ks);
+    _keepersBy.set(_kk, _karr);
+  }
   const entries: DirectoryEntry[] = [];
-  for (const [, { record, blockTime }] of byAddr) {
+  for (const [, _ent] of byAddr) {
+    const { record, blockTime } = _ent;
     const owner = record.o;
+    // KV_REPOST_ATTR: announce sender != author's own wallet => a keeper replayed it
+    let _repostedBy = '';
+    let _keepers: string[] = [];
+    try {
+      const { deriveAddress } = require('./canonical_agreement_steps');
+      const _xo = String(owner || '').length === 66 ? String(owner).slice(2) : String(owner || '');
+      const _ownAddr = deriveAddress(_xo, network as any);
+      const _snd = String((_ent as any).sender || '');
+      if (_ownAddr && _snd && _snd !== _ownAddr) _repostedBy = _snd;
+      _keepers = (_keepersBy.get(String(record.d.storeAddress)) || []).filter((_s2: string) => _s2 && _s2 !== _ownAddr);
+    } catch {}
     if (record.del) continue;
     if (KV_PROHIBITED.indexOf(String(record.d.category || '').toLowerCase()) >= 0) continue;
     const _dl = delistByTarget.get(String(record.d.storeAddress));
@@ -307,6 +333,8 @@ export async function rebuildDirectory(category: string, registryAddress: string
       configHash: record.d.configHash ? String(record.d.configHash) : '',
       record,
       announcedAt: blockTime,
+      repostedBy: _repostedBy,
+      keepers: _keepers,
     });
   }
   entries.sort((a, b) => (b.pledgeSompi > a.pledgeSompi ? 1 : b.pledgeSompi < a.pledgeSompi ? -1 : 0));

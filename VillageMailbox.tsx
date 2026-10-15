@@ -903,6 +903,110 @@ export default function VillageMailbox() {
   const [tipT, setTipT] = useState<any>(null);
   const [tipAmt, setTipAmt] = useState('');
   const [tipBusy, setTipBusy] = useState(false);
+  // KV_REPOST_UI: keeper actions - replay a listing's signed record, tip a keeper
+  const [repostBusy, setRepostBusy] = useState(false);
+  const runRepost = async (entry: any, kind: string) => {
+    const rec = entry && entry.record;
+    if (!rec) { Alert.alert('Repost', 'Original record not loaded - refresh the lane and try again.'); return; }
+    if (repostBusy) return;
+    setRepostBusy(true);
+    try {
+      const ps = require('./proposal_share');
+      const SS = require('expo-secure-store');
+      const sender = (await SS.getItemAsync('kv_kaspa_address')) || (await SS.getItemAsync('kaspa_address'));
+      const priv = await ps._kvResolvePrivHex();
+      if (!sender || !priv) throw new Error('wallet identity unavailable');
+      const { bytesToHex, hexToBytes } = require('@noble/hashes/utils');
+      const { secp256k1 } = require('@noble/curves/secp256k1');
+      const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+      const { repostRecord, repostStrip } = require('./payload_publish');
+      const _keeper = { privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any };
+      // KV_REPOST_V3: replay the CONTENT first (store record + cfg chunks) so
+      // the body survives pruning, not just the announce. fetchRecords falls
+      // back to the device cache, so this also revives content the chain has
+      // already pruned - the phone puts it back.
+      let _stripN = 0;
+      try {
+        const { fetchRecords } = require('./kaspa_payload');
+        const _addr = String(entry.arweaveTx || entry.id || '');
+        const _wrapped: any[] = _addr ? await fetchRecords(_addr, 'testnet-10', 100) : [];
+        const _seen: any = {};
+        const _strip: any[] = [];
+        for (const _w of _wrapped) {
+          const _r0: any = _w && _w.record;
+          if (!_r0 || !_r0.sig) continue;
+          if (['store', 'cfg', 'dapp', 'page', 'game'].indexOf(String(_r0.k)) < 0) continue;
+          if (entry.ownerPubkey && String(_r0.o) !== String(entry.ownerPubkey)) continue;
+          const _id0 = String(_r0.k) + '|' + String(_r0.t) + '|' + String((_r0.d && _r0.d.seq !== undefined ? _r0.d.seq : '')) + '|' + String((_r0.d && _r0.d.h) || '');
+          if (_seen[_id0]) continue;
+          _seen[_id0] = 1;
+          _strip.push(_r0);
+        }
+        if (_strip.length) { const _txs: string[] = await repostStrip(_keeper, _addr, _strip); _stripN = _txs.length; }
+        console.log('[Repost] strip:', _strip.length, 'record(s), replayed:', _stripN);
+      } catch (_e) { console.warn('[Repost] strip replay failed (announce continues):', _e); }
+      const r: any = await repostRecord(_keeper, rec, kind);
+      if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
+      Alert.alert('Reposted \u2713', 'Re-announced to the chain' + (_stripN ? ' + ' + _stripN + ' content record(s) replayed' : '') + ' (' + (1 + _stripN) + ' KAS total). Your wallet is now its keeper - tips come to you.');
+    } catch (e: any) { Alert.alert('Repost failed', String((e && e.message) || e)); }
+    setRepostBusy(false);
+  };
+  // KV_KEEPER_TIP: dedicated popup (own Modal, renders above the store view)
+  const [keeperTip, setKeeperTip] = useState<any>(null);
+  const [keeperAmt, setKeeperAmt] = useState('');
+  const [keeperBusy, setKeeperBusy] = useState(false);
+  // KV_DELIST_OWNER: publisher-key soft delist from the modal
+  const runDelistOwner = async (entry: any, kind: string) => {
+    try {
+      const ps = require('./proposal_share');
+      const SS = require('expo-secure-store');
+      const sender = (await SS.getItemAsync('kv_kaspa_address')) || (await SS.getItemAsync('kaspa_address'));
+      const priv = await ps._kvResolvePrivHex();
+      if (!sender || !priv) throw new Error('wallet identity unavailable');
+      const { bytesToHex, hexToBytes } = require('@noble/hashes/utils');
+      const { secp256k1 } = require('@noble/curves/secp256k1');
+      const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+      if (entry.ownerPubkey && String(entry.ownerPubkey) !== pub) { Alert.alert('Not your listing', 'Only the publisher key can delist. Readers ignore delists from other keys.'); return; }
+      Alert.alert('Delist this listing?', 'It disappears from every Mailbox directory (a newer announce restores it). Chain data, installs and your pledge are untouched. ~1 KAS.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delist', style: 'destructive', onPress: async () => {
+          try {
+            const { delistFromRegistry } = require('./payload_publish');
+            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, String(entry.arweaveTx || entry.id), kind);
+            if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
+            console.log('[DelistOwner]', String(entry.arweaveTx || entry.id).slice(0, 24), kind);
+            setStoreView(null);
+            Alert.alert('Delisted', 'Posted to the registry. Lanes drop it on the next refresh.');
+          } catch (e: any) { Alert.alert('Delist failed', String((e && e.message) || e)); }
+        } },
+      ]);
+    } catch (e: any) { Alert.alert('Delist failed', String((e && e.message) || e)); }
+  };
+  const tipKeeper = (entry: any, addrOverride?: string) => {
+    const addr = addrOverride || (entry && entry.repostedBy);
+    if (!addr) return;
+    setKeeperAmt(''); setKeeperTip({ addr: String(addr), name: String((entry && (entry.name || entry.storeName || entry.title)) || 'listing') });
+  };
+  const sendKeeperTip = async () => {
+    const kas = Number(keeperAmt || '0');
+    if (!keeperTip) return;
+    if (!(kas > 0) || kas > 5000) { Alert.alert('Invalid amount', 'Enter between 0 and 5000 KAS.'); return; }
+    setKeeperBusy(true);
+    try {
+      const ps = require('./proposal_share');
+      const SS = require('expo-secure-store');
+      const sender = (await SS.getItemAsync('kv_kaspa_address')) || (await SS.getItemAsync('kaspa_address'));
+      const priv = await ps._kvResolvePrivHex();
+      if (!sender || !priv) throw new Error('wallet identity unavailable');
+      const { sendKaspaViaRest } = require('./kaspa_rest_tx');
+      const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: String(keeperTip.addr), amountSompi: BigInt(Math.round(kas * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
+      if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
+      console.log('[KeeperTip]', kas, 'KAS ->', String(keeperTip.addr).slice(0, 24));
+      setKeeperTip(null);
+      Alert.alert('Tip sent \u2713', kas + ' KAS to the keeper of "' + keeperTip.name + '". Tips are what keep listings alive.');
+    } catch (e: any) { Alert.alert('Tip failed', String((e && e.message) || e)); }
+    setKeeperBusy(false);
+  };
   const tipDev = (item: any) => {
     const addr = item && item.quad && item.quad.tip_addr;
     if (!addr || !(String(addr).startsWith('kaspatest:') || String(addr).startsWith('kaspa:'))) return;
@@ -985,7 +1089,7 @@ export default function VillageMailbox() {
   const renderItem = ({ item, index }: { item: any; index: number }) => {
     const onPress = () => {
       // Route based on section type
-      if (section === 'storefronts' || section === 'academics') { // KV_ACAD_VIEW: abstracts open the same chain-config modal
+      if (section === 'storefronts' || section === 'academics' || section === 'services') { // KV_ACAD_VIEW + KV_MANAGE_TABS: store-rail listings share the chain-config modal
         setStoreView({ entry: item, config: null, loading: true });
         (async () => {
           try {
@@ -993,7 +1097,9 @@ export default function VillageMailbox() {
             console.log('[Mailbox] modal open - cfgHash:', cfgHash ? cfgHash.slice(0, 16) : 'MISSING', 'addr:', item.arweaveTx.slice(0, 24));
             if (!cfgHash) { setStoreView(sv => sv ? { ...sv, loading: false } : sv); return; }
             const { fetchStoreConfig } = await import('./config_chunks');
-            const { config, error: _cfgErr } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined);
+            let { config, error: _cfgErr } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined);
+            // KV_CFG_RETRY: one retry - a transient API miss must not read as "not on-chain"
+            if (!config) { await new Promise((r) => setTimeout(r, 1500)); const _r2: any = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined); if (_r2 && _r2.config) { config = _r2.config; _cfgErr = _r2.error; } }
             // KV_CFG_SCAN: config chunks (products, coupons, description) never render unscanned
             try { if (config) { const { scanObject } = require('./content_filter'); const _sc = scanObject(config); if (!_sc.ok) { console.warn('[Mailbox] store config BLOCKED:', _sc.reason, 'at', _sc.path); setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config: null, loading: false } : sv); return; } } } catch {}
             console.log('[Mailbox] cfg fetch result:', config ? 'OK brand=' + config.brandName : 'NULL err=' + _cfgErr);
@@ -1011,16 +1117,22 @@ export default function VillageMailbox() {
         // DApps, games, websites — video demo + live URL
         const videoLink = item.videoUrl || '';
         const appLink = item.gameUrl || item.primaryLink || '';
+        // KV_MANAGE_TABS: dapp listings manageable from the same modal
+        const _openManage = () => setStoreView({ entry: { ...item, _kvKind: 'dapp' } as any, config: null, loading: false });
         if (videoLink && appLink) {
           Alert.alert(item.name || 'App', 'Watch the demo or open the app?', [
             { text: 'Cancel', style: 'cancel' },
+            { text: 'Manage Listing', onPress: _openManage },
             { text: '🎬 Watch Demo', onPress: () => Linking.openURL(videoLink.startsWith('http') ? videoLink : 'https://' + videoLink) },
             { text: '🚀 Open App', onPress: () => Linking.openURL(appLink.startsWith('http') ? appLink : 'https://' + appLink) },
           ]);
         } else {
           const link = videoLink || appLink;
-          if (link) Linking.openURL(link.startsWith('http') ? link : 'https://' + link);
-          else Alert.alert('No Link', 'No demo or app URL set.');
+          Alert.alert(item.name || 'App', link ? 'Open the app or manage the listing?' : 'No demo or app URL set.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Manage Listing', onPress: _openManage },
+            ...(link ? [{ text: 'Open App', onPress: () => Linking.openURL(link.startsWith('http') ? link : 'https://' + link) }] : []),
+          ]);
         }
       } else if (section === 'academics') {
         const videoLink = item.videoUrl || '';
@@ -1259,6 +1371,32 @@ export default function VillageMailbox() {
       {/* Procedural storefront view - rendered from on-chain config, zero hosted images */}
       <Modal visible={!!storeView} animationType="slide" transparent onRequestClose={() => setStoreView(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(28,25,23,0.85)', justifyContent: 'flex-end' }}>
+          {/* KV_KEEPER_TIP2: overlay INSIDE the store modal - iOS cannot stack sibling Modals */}
+          {keeperTip ? (
+            <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(28,25,23,0.7)', justifyContent: 'center', padding: rs.s(24), zIndex: 999, elevation: 999 }}>
+            <View style={{ backgroundColor: '#fff', borderRadius: rs.s(16), padding: rs.s(18) }}>
+              <Text style={{ fontWeight: '900', fontSize: rs.font(14), color: '#292524' }}>Tip the keeper</Text>
+              <Text style={{ fontSize: rs.font(10), color: '#78716c', marginTop: rs.s(4) }}>{keeperTip ? 'Keeper of "' + keeperTip.name + '"' : ''}</Text>
+              <Text style={{ fontSize: rs.font(9), color: '#a8a29e', marginTop: rs.s(2) }}>{keeperTip ? String(keeperTip.addr) : ''}</Text>
+              <View style={{ flexDirection: 'row', gap: rs.s(8), marginTop: rs.s(12) }}>
+                {['1', '5', '25'].map((v) => (
+                  <TouchableOpacity key={v} onPress={() => setKeeperAmt(v)} style={{ flex: 1, borderWidth: 1, borderColor: keeperAmt === v ? '#4f46e5' : '#d6d3d1', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: rs.font(11), color: keeperAmt === v ? '#4f46e5' : '#57534e' }}>{v} KAS</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TextInput value={keeperAmt} onChangeText={setKeeperAmt} keyboardType="decimal-pad" placeholder="Custom amount (KAS)" placeholderTextColor="#a8a29e" style={{ borderWidth: 1, borderColor: '#d6d3d1', borderRadius: rs.s(10), marginTop: rs.s(10), padding: rs.s(10), color: '#292524', fontSize: rs.font(12) }} />
+              <View style={{ flexDirection: 'row', gap: rs.s(8), marginTop: rs.s(12) }}>
+                <TouchableOpacity onPress={() => setKeeperTip(null)} style={{ flex: 1, backgroundColor: '#e7e5e4', borderRadius: rs.s(10), paddingVertical: rs.s(12), alignItems: 'center' }}>
+                  <Text style={{ fontWeight: 'bold', color: '#57534e', fontSize: rs.font(12) }}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity disabled={keeperBusy} onPress={sendKeeperTip} style={{ flex: 1, backgroundColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(12), alignItems: 'center' }}>
+                  <Text style={{ fontWeight: 'bold', color: '#fff', fontSize: rs.font(12) }}>{keeperBusy ? 'Sending...' : 'Send Tip'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            </View>
+          ) : null}
           <View style={{ backgroundColor: COLORS.cardBg, borderTopLeftRadius: rs.s(24), borderTopRightRadius: rs.s(24), maxHeight: '88%', overflow: 'hidden' }}>
             {storeView && (() => {
               const cfg = storeView.config;
@@ -1313,6 +1451,23 @@ export default function VillageMailbox() {
                     {Array.isArray(cfg.keywords) && cfg.keywords.length > 0 ? <Text style={{ fontSize: rs.font(10), color: '#78716c', marginTop: rs.s(10) }}>{cfg.keywords.join(' \u00b7 ')}</Text> : null}
                     {cfg.repositoryUrl ? <TouchableOpacity onPress={() => { try { require('react-native').Linking.openURL(String(cfg.repositoryUrl)); } catch {} }} style={{ marginTop: rs.s(12) }}><Text style={{ fontSize: rs.font(11), color: '#4f46e5' }}>{cfg.repositoryUrl}</Text></TouchableOpacity> : null}
                     {_qa ? <Text style={{ fontSize: rs.font(10), color: '#57534e', marginTop: rs.s(10) }}>Questions: {_qa}</Text> : null}
+                    {(((storeView.entry as any).keepers || []) as string[]).length > 0 ? (
+                      <View style={{ marginTop: rs.s(12) }}>
+                        <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>Kept alive by {(((storeView.entry as any).keepers || []) as string[]).length} keeper(s)</Text>
+                        {(((storeView.entry as any).keepers || []) as string[]).slice(0, 5).map((_ka: string, _ki: number) => (
+                          <TouchableOpacity key={_ki} onPress={() => tipKeeper(storeView.entry, _ka)} style={{ marginTop: rs.s(6), borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
+                            <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>{_ka.slice(10, 30)}... {'\u2014'} Tip this keeper</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ) : null}
+                    <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
+                      <Text style={{ color: '#4f46e5', fontSize: rs.font(11), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (1 KAS)'}</Text>
+                    </TouchableOpacity>
+                    {/* KV_DELIST_OWNER */}
+                    <TouchableOpacity onPress={() => runDelistOwner(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#b91c1c', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
+                      <Text style={{ color: '#b91c1c', fontSize: rs.font(11), fontWeight: 'bold' }}>Delist (owner only, ~1 KAS)</Text>
+                    </TouchableOpacity>
                     {/* KV_ACAD_CLOSE_BTM */}
                     <TouchableOpacity onPress={() => setStoreView(null)} style={{ marginTop: rs.s(16), backgroundColor: '#57534e', borderRadius: rs.s(12), paddingVertical: rs.s(14), alignItems: 'center' }}>
                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>Close</Text>
@@ -1331,6 +1486,26 @@ export default function VillageMailbox() {
               const brandInitial = (cfg?.brandName || storeView.entry.storeName || '?').charAt(0).toUpperCase();
               return (
                 <View>
+                  {/* KV_REPOST_UI: keeper bar (stores) */}
+                  <View style={{ paddingHorizontal: rs.s(14), paddingTop: rs.s(10) }}>
+                    {(((storeView.entry as any).keepers || []) as string[]).length > 0 ? (
+                      <View style={{ marginBottom: rs.s(6) }}>
+                        <Text style={{ color: '#d97706', fontSize: rs.font(9), fontWeight: 'bold' }}>Kept alive by {(((storeView.entry as any).keepers || []) as string[]).length} keeper(s)</Text>
+                        {(((storeView.entry as any).keepers || []) as string[]).slice(0, 5).map((_ka: string, _ki: number) => (
+                          <TouchableOpacity key={_ki} onPress={() => tipKeeper(storeView.entry, _ka)} style={{ marginTop: rs.s(4), borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(7), alignItems: 'center' }}>
+                            <Text style={{ color: '#d97706', fontSize: rs.font(9), fontWeight: 'bold' }}>{_ka.slice(10, 30)}... {'\u2014'} Tip this keeper</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ) : null}
+                    <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
+                      <Text style={{ color: '#4f46e5', fontSize: rs.font(10), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (1 KAS)'}</Text>
+                    </TouchableOpacity>
+                    {/* KV_DELIST_OWNER store */}
+                    <TouchableOpacity onPress={() => runDelistOwner(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(6), borderWidth: 1, borderColor: '#b91c1c', borderRadius: rs.s(10), paddingVertical: rs.s(7), alignItems: 'center' }}>
+                      <Text style={{ color: '#b91c1c', fontSize: rs.font(10), fontWeight: 'bold' }}>Delist (owner only, ~1 KAS)</Text>
+                    </TouchableOpacity>
+                  </View>
                   {/* Banner: graffiti SVG when selected, else styled text */}
                   {useGraffiti ? (
                     <View style={{ backgroundColor: recipe.bgColor || '#fafaf9', paddingVertical: rs.s(8) }}>

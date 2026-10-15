@@ -96,6 +96,50 @@ export async function publishIdentity(owner: OwnerKeys, data: any) {
   });
 }
 
+/** KV_REPOST: replay someone else's ORIGINAL signed record to its registry.
+ *  The record is untouched - its signature stays valid and its original t
+ *  is preserved, so the author's newer updates and delists still win.
+ *  Attribution is the tx itself: readers see the announce sender != the
+ *  author's wallet and credit the keeper; tips go to that sender address. */
+export async function repostRecord(keeper: OwnerKeys, record: KvRecord, kind: string = 'store') {
+  const regAddr = registryAddress(String(kind), keeper.network);
+  const res = await sendKaspaViaRest({
+    senderAddress: keeper.address,
+    recipientAddress: regAddr,
+    amountSompi: ANNOUNCE_SOMPI,
+    privateKeyHex: keeper.privateKeyHex,
+    network: keeper.network,
+    payload: buildPayloadHex(record),
+  });
+  console.log('[Repost]', String(((record as any).d && (record as any).d.name) || '').slice(0, 24), '-> registry', regAddr.slice(0, 24), 'by', keeper.address.slice(0, 24));
+  return res;
+}
+
+/** KV_REPOST_STRIP: replay a listing's CONTENT records (store/dapp record +
+ *  cfg chunks) back to its store address, signatures untouched. The 1-KAS
+ *  dust per record lands at an address the AUTHOR controls - it adds to the
+ *  listing's live pledge and the author can sweep it later. */
+export async function repostStrip(keeper: OwnerKeys, storeAddress: string, records: KvRecord[]) {
+  const out: string[] = [];
+  for (const rec of records) {
+    try {
+      const res: any = await sendKaspaViaRest({
+        senderAddress: keeper.address,
+        recipientAddress: storeAddress,
+        amountSompi: ANNOUNCE_SOMPI,
+        privateKeyHex: keeper.privateKeyHex,
+        network: keeper.network,
+        payload: buildPayloadHex(rec),
+      });
+      if (res && res.success === false) throw new Error(String(res.error || 'send failed'));
+      const _t = String((res && (res.txid || res.transactionId || res.txId)) || '');
+      out.push(_t);
+      console.log('[RepostStrip]', String((rec as any).k), '->', storeAddress.slice(0, 24), _t.slice(0, 16));
+    } catch (e) { console.warn('[RepostStrip] record failed:', (rec as any).k, e); }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // ANNOUNCE: registry entry (independent search feed)
 // ---------------------------------------------------------------------------

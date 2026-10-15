@@ -84,6 +84,7 @@ export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<St
       primaryLink: e.primaryLink || '',
       configHash: e.configHash || '',
       coords: (e.record && e.record.d && e.record.d.coords) || null,
+      record: e.record, repostedBy: e.repostedBy || '', keepers: e.keepers || [], // KV_REPOST_ITEM
     } as any));
     return { items, hasMore: false, fromCache: false };
   } catch (e: any) {
@@ -156,6 +157,7 @@ export async function fetchDApps(_cursor?: string): Promise<FetchResult<DAppEntr
         createdAt: e.announcedAt * 1000,
         xpCommitment: Math.round(pledgeKas),
         gameHash,
+        record: e.record, repostedBy: e.repostedBy || '', keepers: e.keepers || [], // KV_REPOST_ITEM
       } as any;
     }));
     return { items, hasMore: false, fromCache: false };
@@ -225,6 +227,7 @@ export async function fetchAcademics(_cursor?: string): Promise<FetchResult<Acad
           configHash: e.configHash || '', coords: (e.record && e.record.d && e.record.d.coords) || null, repositoryUrl: e.primaryLink || '', // KV_ACAD_VIEW: chunks fetchable from the card
           createdAt: e.announcedAt * 1000,
           townhall: { verified: dkim, verifiedAt: e.announcedAt, verificationTx: e.storeAddress },
+          record: e.record, repostedBy: e.repostedBy || '', keepers: e.keepers || [], // KV_REPOST_ITEM
         } as any;
       });
     console.log('[Academics] matched:', items.length, items.map((i: any) => (i.title || '(untitled)') + '/' + (i.institution || '-')).join(' | '));
@@ -252,6 +255,7 @@ export async function fetchServices(_cursor?: string): Promise<FetchResult<Servi
         createdAt: e.announcedAt * 1000,
         coords: (e.record && e.record.d && e.record.d.coords) || null,
         configHash: e.configHash || '',
+        record: e.record, repostedBy: e.repostedBy || '', keepers: e.keepers || [], // KV_REPOST_ITEM svc
       } as any));
     return { items, hasMore: false, fromCache: false };
   } catch (e: any) {
