@@ -48,6 +48,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
   const [myChain, setMyChain] = useState<any[]>([]);
   const [chainVerdict, setChainVerdict] = useState('');
   const [chainCopied, setChainCopied] = useState(false);
+  const [anchorMsg, setAnchorMsg] = useState(''); // KV_PHONE_LOCAL3
   React.useEffect(() => {
     if (!visible) return;
     (async () => { try { const { loadChain } = require('./stat_records'); setMyChain(await loadChain()); } catch (e) { console.log('[PhoneProof] chain load failed:', e); } })();
@@ -66,7 +67,24 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
     try { const { exportBundle } = require('./stat_records'); await Clipboard.setStringAsync(await exportBundle()); setChainCopied(true); setTimeout(() => setChainCopied(false), 2000); } catch (e) { console.log('[PhoneProof] bundle copy failed:', e); }
   };
   const handleAnchorFetch = async () => {
-    try { const { backfillAnchors, loadChain } = require('./stat_records'); const _n = await backfillAnchors(20); console.log('[PhoneProof] anchors backfilled:', _n); setMyChain(await loadChain()); } catch (e) { console.log('[PhoneProof] anchor fetch failed:', e); }
+    try {
+      const { backfillAnchors, loadChain, fetchAnchor, setAnchor } = require('./stat_records');
+      const _n = await backfillAnchors(20);
+      // KV_PHONE_LOCAL2: complete partial anchors (txid stamped, header missing)
+      let _f = 0;
+      const _chain: any[] = await loadChain();
+      for (const _r of _chain) {
+        const _a: any = _r && _r.anchor;
+        if (_a && _a.releaseTxId && !_a.utxoCommitment) {
+          const _full = await fetchAnchor(_a.releaseTxId, _r.network === 'mainnet' ? 'mainnet' : 'testnet-10');
+          if (_full && (_full.utxoCommitment || _full.releaseDaaScore)) { await setAnchor(_r.agrId, _full); _f++; }
+        }
+      }
+      console.log('[PhoneProof] anchors backfilled:', _n, 'headers refetched:', _f);
+      setAnchorMsg((_n + _f) > 0 ? 'Anchored ' + (_n + _f) + ' \u2713' : 'All anchored \u2713');
+      setTimeout(() => setAnchorMsg(''), 4000);
+      setMyChain(await loadChain());
+    } catch (e) { console.log('[PhoneProof] anchor fetch failed:', e); }
   };
 
   const handleGenerate = async () => {
@@ -78,11 +96,23 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
     if (!pk) { setError('Could not resolve pubkey'); return; }
     setError(''); setLoading(true); setProof(null); setVerified(null);
     try {
-      const myPk = (await SecureStore.getItemAsync('kaspa_pubkey')) || 'anon';
-      const p = await generateCounterpartyProof(pk, myPk);
-      setProof(p);
+      // KV_SCAN_PROOF: chain-first background check (Arweave prover dead in RN)
+      if (!/^[0-9a-fA-F]{64,66}$/.test(pk)) throw new Error('Enter their pubkey (64/66 hex) - it is in any proposal they send you');
+      const { scanCounterparty } = require('./counterparty_scan');
+      const _scan: any = await scanCounterparty(pk, 'testnet-10', 40, false);
+      const _p: any = {
+        completed: _scan.settled,
+        deadlocks: _scan.deadlocked,
+        total_agreements: _scan.total,
+        p_complete: _scan.pSettled || 0,
+        total_volume_sompi: Number(_scan.payoutsReceived || 0),
+        evidence_hash: 'L1 scan ' + String(_scan.address || '').slice(0, 28) + (_scan.truncated ? ' (truncated - lower bound)' : ''),
+        evidence: (_scan.escrows || []).map((e: any) => ({ agrId: 'escrow ' + String(e.escrowAddr || '').slice(10, 26), status: String(e.resolution || ''), amount: Number(e.fundedTotal || 0), arweaveTx: String(e.resolutionTxId || ''), role: '' })),
+        _scan: true, _pk: pk,
+      };
+      setProof(_p);
     } catch (e: any) {
-      setError(e?.message || 'Generation failed (Arweave unreachable?)');
+      setError(e?.message || 'Chain scan failed');
     } finally { setLoading(false); }
   };
 
@@ -90,7 +120,16 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
     if (!proof) return;
     setLoading(true);
     try {
-      const r = await verifyCounterpartyProof(proof);
+      let r: any;
+      if ((proof as any)._scan) {
+        // KV_SCAN_PROOF: verify = independent re-scan of the chain, compare tallies
+        const { scanCounterparty } = require('./counterparty_scan');
+        const _re: any = await scanCounterparty((proof as any)._pk, 'testnet-10', 40, false);
+        const _match = _re.settled === proof.completed && _re.deadlocked === proof.deadlocks && _re.total === proof.total_agreements;
+        r = { valid: _match, reason: _match ? undefined : 'fresh scan differs (window moved or new activity): settled ' + _re.settled + ' vs ' + proof.completed + ', deadlocked ' + _re.deadlocked + ' vs ' + proof.deadlocks };
+      } else {
+        r = await verifyCounterpartyProof(proof);
+      }
       setVerified(r);
     } catch (e: any) {
       setVerified({ valid: false, reason: e?.message || 'Verify error' });
@@ -116,8 +155,9 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
 
         <ScrollView style={s.content}>
           <Text style={s.desc}>
-            Tally any user's completed trades, deadlocks, and P(complete) directly from Arweave.
-            No TownHall needed. Every number is backed by a re-fetchable transaction.
+            Background-check any user straight from the Kaspa chain: enter their pubkey (it is in
+            any proposal they send) and tally completed trades, deadlocks, and P(complete). No
+            cooperation needed - every number is a re-fetchable transaction in the live window.
           </Text>
 
           {/* KV_PHONE_LOCAL: on-phone dual-signed evidence chain */}
@@ -134,7 +174,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
                 <View key={i} style={{ marginTop: rs.s(8), borderTopWidth: i ? 1 : 0, borderTopColor: C.border, paddingTop: rs.s(6) }}>
                   <Text style={{ color: C.text, fontSize: rs.font(11), fontWeight: 'bold' }}>{String(r.agrId || r.agreementId || 'record ' + (i + 1))}  <Text style={{ color: C.primary }}>{String(r.status || r.outcome || '')}</Text></Text>
                   <Text style={{ color: C.muted, fontSize: rs.font(9), marginTop: rs.s(2) }}>
-                    {_a ? 'DAA ' + String(_a.daaScore || _a.daa || '?') + '  tx ' + String(_a.txId || _a.releaseTxId || _a.txid || '').slice(0, 16) + (_a.header ? '  MuHash \u2713' : '  header pending') : 'anchor pending'}
+                    {_a ? 'DAA ' + String(_a.releaseDaaScore || '?') + '  tx ' + String(_a.releaseTxId || '').slice(0, 16) + (_a.utxoCommitment ? '  MuHash \u2713' : '  header pending') : 'anchor pending'}
                   </Text>
                 </View>
               );
@@ -147,7 +187,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
                 <Text style={{ color: C.gold, fontSize: rs.font(11), fontWeight: 'bold' }}>{chainCopied ? 'Copied' : 'Copy Bundle'}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={handleAnchorFetch} style={{ flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: rs.s(8), paddingVertical: rs.s(8), alignItems: 'center' }}>
-                <Text style={{ color: C.muted, fontSize: rs.font(11), fontWeight: 'bold' }}>Fetch Anchors</Text>
+                <Text style={{ color: anchorMsg ? C.primary : C.muted, fontSize: rs.font(11), fontWeight: 'bold' }}>{anchorMsg || 'Fetch Anchors'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -205,7 +245,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
                   {verified.valid ? <CheckCircle size={rs.s(24)} color={C.green} /> : <XCircle size={rs.s(24)} color={C.red} />}
                   <View style={{ flex: 1 }}>
                     <Text style={[s.verdictText, { color: verified.valid ? C.green : C.red }]}>
-                      {verified.valid ? 'VERIFIED — recomputed from Arweave, matches' : 'INVALID'}
+                      {verified.valid ? 'VERIFIED — recomputed from the Kaspa chain, matches' : 'INVALID'}
                     </Text>
                     {verified.reason ? <Text style={s.verdictReason}>{verified.reason}</Text> : null}
                   </View>
