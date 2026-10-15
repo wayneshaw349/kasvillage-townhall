@@ -260,13 +260,17 @@ export interface DirectoryEntry {
  */
 export async function rebuildDirectory(category: string, registryAddress: string, network = 'testnet-10'): Promise<DirectoryEntry[]> {
   const anns = await fetchRecords(registryAddress, network, 100);
-  const byOwner = new Map<string, { record: KvRecord; blockTime: number }>();
+  // KV_DIR_BY_ADDR: one entry per STORE ADDRESS (newest announce wins).
+  // Dedupe by owner was wrong - it limited every publisher to a single
+  // listing across all their stores/services/abstracts.
+  const byAddr = new Map<string, { record: KvRecord; blockTime: number }>();
   for (const a of anns) {
     const r = a.record;
     if (r.k !== 'registry') continue;
     if (!verifyRecord(r)) continue;
     if (!r.d?.storeAddress || !r.d?.name) continue;
-    if (!byOwner.has(r.o)) byOwner.set(r.o, { record: r, blockTime: a.blockTime }); // newest first already
+    const _ak = String(r.d.storeAddress);
+    if (!byAddr.has(_ak)) byAddr.set(_ak, { record: r, blockTime: a.blockTime }); // newest first already
   }
   // KV_PROHIBITED_RENDER: reader-side enforcement - a modified client can
   // announce anything; this wallet simply will not display it.
@@ -282,7 +286,8 @@ export async function rebuildDirectory(category: string, registryAddress: string
     }
   }
   const entries: DirectoryEntry[] = [];
-  for (const [owner, { record, blockTime }] of byOwner) {
+  for (const [, { record, blockTime }] of byAddr) {
+    const owner = record.o;
     if (record.del) continue;
     if (KV_PROHIBITED.indexOf(String(record.d.category || '').toLowerCase()) >= 0) continue;
     const _dl = delistByTarget.get(String(record.d.storeAddress));

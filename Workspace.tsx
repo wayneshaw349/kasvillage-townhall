@@ -2291,6 +2291,47 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
     setAttestation3(false);
     setIsLoading(false);
   };
+
+  // KV_ABS_REANNOUNCE: heartbeat - re-advertise saved abstracts, chunks untouched (~1 KAS each)
+  const handleReannounceAbstracts = async () => {
+    try {
+      setIsLoading(true);
+      const AS = require('@react-native-async-storage/async-storage').default;
+      const { announceToRegistry, deriveStoreKeys } = require('./payload_publish');
+      const { _kvResolvePrivHex } = require('./proposal_share');
+      const _priv = await _kvResolvePrivHex();
+      const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
+      if (!_priv || !_addr) throw new Error('wallet keys unavailable');
+      const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
+      const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: 'testnet-10' as any };
+      const _list: any[] = JSON.parse((await SecureStore.getItemAsync('kv_abstracts')) || '[]');
+      const _dk = await SecureStore.getItemAsync('kv_dkim_domain');
+      let _ok = 0, _skip = 0;
+      for (const _a of _list) {
+        const _nS = await AS.getItem('kv_abs_nonce_' + _a.id);
+        if (!_nS) { _skip++; continue; }
+        const _st = deriveStoreKeys(_priv, parseInt(_nS, 10), _owner.network).address;
+        let _h = '';
+        try { const _cc = require('./config_chunks'); if (_cc.configToChunkData) _h = _cc.configToChunkData(_a).hash; } catch {}
+        let _c: any = undefined;
+        try {
+          let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
+          const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(_st) + '/utxos');
+          for (const u of (await ur.json()) || []) {
+            const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
+            if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
+            pl += Number(u.utxoEntry?.amount || u.amount || 0);
+          }
+          if (hi > 0) _c = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600 };
+        } catch {}
+        const _an: any = await announceToRegistry(_owner, _st, String(_a.title || '').trim(), 'Academic', 'store', { primaryLink: _a.repositoryUrl, ...(_h ? { configHash: _h } : {}), coords: _c, ...(_dk ? { dkim: true, dkimDomain: _dk } : {}) } as any);
+        if (_an && _an.success !== false) _ok++;
+        console.log('[Academic] re-announce', _a.id, '->', _st.slice(0, 24), _an && _an.success !== false ? 'OK' : 'FAIL');
+      }
+      Alert.alert('Re-announced', _ok + ' abstract(s) re-advertised' + (_skip ? ', ' + _skip + ' skipped (no pledge nonce)' : '') + '. ~1 KAS each.');
+    } catch (e: any) { Alert.alert('Re-announce failed', String(e?.message || e)); }
+    setIsLoading(false);
+  };
   
   return (
     <Modal visible={visible} animationType="slide" transparent>
@@ -2706,6 +2747,10 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     </View>
                     <TouchableOpacity style={{ backgroundColor: (attestation1 && attestation2 && attestation3) ? COLORS.amber700 : COLORS.stone300, borderRadius: 12, paddingVertical: 16, alignItems: 'center' }} onPress={handleSubmitAbstract} disabled={!attestation1 || !attestation2 || !attestation3 || isLoading}>
                       {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Submit Abstract</Text>}
+                    </TouchableOpacity>
+                    {/* KV_ABS_REANNOUNCE */}
+                    <TouchableOpacity style={{ backgroundColor: COLORS.stone600, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 8 }} onPress={handleReannounceAbstracts} disabled={isLoading}>
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Re-announce My Abstracts (~1 KAS each)</Text>
                     </TouchableOpacity>
                   </View>
                 )}

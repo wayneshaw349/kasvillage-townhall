@@ -207,6 +207,7 @@ export async function fetchAcademics(_cursor?: string): Promise<FetchResult<Acad
   try {
     const dir = await rebuildDirectory('store', registryAddress('store', NET), NET);
     dir.sort(visSort as any);
+    console.log('[Academics] KV_ACAD_DIAG dir:', dir.length, 'cats:', (dir as any[]).slice(0, 8).map((e: any) => String(e.category || '?')).join(','));
     const items: AcademicEntry[] = (dir as any[])
       .filter((e) => String(e.category || '').toLowerCase().indexOf('academ') === 0)
       .map((e) => {
@@ -215,16 +216,18 @@ export async function fetchAcademics(_cursor?: string): Promise<FetchResult<Acad
           id: e.storeAddress,
           title: e.name,
           description: '',
-          institution: String((e.record && e.record.d && e.record.d.institution) || ''),
+          institution: String((e.record && e.record.d && (e.record.d.institution || e.record.d.dkimDomain)) || ''), // KV_ACAD_INST: DKIM school is the institution
           field: e.category,
           arweaveTx: e.storeAddress,
           ownerPubkey: e.ownerPubkey,
           dkimVerified: dkim,
           dkimDomain: String((e.record && e.record.d && e.record.d.dkimDomain) || '') || undefined,
+          configHash: e.configHash || '', coords: (e.record && e.record.d && e.record.d.coords) || null, repositoryUrl: e.primaryLink || '', // KV_ACAD_VIEW: chunks fetchable from the card
           createdAt: e.announcedAt * 1000,
           townhall: { verified: dkim, verifiedAt: e.announcedAt, verificationTx: e.storeAddress },
         } as any;
       });
+    console.log('[Academics] matched:', items.length, items.map((i: any) => (i.title || '(untitled)') + '/' + (i.institution || '-')).join(' | '));
     return { items, hasMore: false, fromCache: false };
   } catch (e: any) {
     throw new MailboxError('academic scan failed: ' + String(e?.message || e), 'SCAN');

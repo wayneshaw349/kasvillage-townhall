@@ -985,7 +985,7 @@ export default function VillageMailbox() {
   const renderItem = ({ item, index }: { item: any; index: number }) => {
     const onPress = () => {
       // Route based on section type
-      if (section === 'storefronts') {
+      if (section === 'storefronts' || section === 'academics') { // KV_ACAD_VIEW: abstracts open the same chain-config modal
         setStoreView({ entry: item, config: null, loading: true });
         (async () => {
           try {
@@ -1298,6 +1298,29 @@ export default function VillageMailbox() {
                   );
                 }
               } catch {}
+              // KV_ACAD_VIEW: abstract configs (title/text) render as a paper, not a store
+              if (cfg && (cfg.text || cfg.abstractText) && !cfg.stash) {
+                const _qa = [cfg.qaChannel, cfg.qaHandle].filter(Boolean).join(': ');
+                return (
+                  <ScrollView contentContainerStyle={{ padding: rs.s(18) }}>
+                    {/* KV_ACAD_CLOSE */}
+                    <TouchableOpacity onPress={() => setStoreView(null)} style={{ alignSelf: 'flex-end', paddingHorizontal: rs.s(10), paddingVertical: rs.s(4), backgroundColor: '#e7e5e4', borderRadius: rs.s(14) }}>
+                      <Text style={{ fontSize: rs.font(13), fontWeight: 'bold', color: '#57534e' }}>{'\u2715'}</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: rs.font(16), fontWeight: '900', color: '#292524' }}>{cfg.title || (storeView.entry as any).title || (storeView.entry as any).storeName || 'Abstract'}</Text>
+                    <Text style={{ fontSize: rs.font(10), color: '#4f46e5', marginTop: rs.s(2) }}>{String(cfg.institutionDomain || '') + (cfg.researcherId ? '  \u00b7  ' + cfg.researcherId : '')}</Text>
+                    <Text style={{ fontSize: rs.font(12), color: '#44403c', marginTop: rs.s(12), lineHeight: rs.font(18) }}>{cfg.text || cfg.abstractText}</Text>
+                    {Array.isArray(cfg.keywords) && cfg.keywords.length > 0 ? <Text style={{ fontSize: rs.font(10), color: '#78716c', marginTop: rs.s(10) }}>{cfg.keywords.join(' \u00b7 ')}</Text> : null}
+                    {cfg.repositoryUrl ? <TouchableOpacity onPress={() => { try { require('react-native').Linking.openURL(String(cfg.repositoryUrl)); } catch {} }} style={{ marginTop: rs.s(12) }}><Text style={{ fontSize: rs.font(11), color: '#4f46e5' }}>{cfg.repositoryUrl}</Text></TouchableOpacity> : null}
+                    {_qa ? <Text style={{ fontSize: rs.font(10), color: '#57534e', marginTop: rs.s(10) }}>Questions: {_qa}</Text> : null}
+                    {/* KV_ACAD_CLOSE_BTM */}
+                    <TouchableOpacity onPress={() => setStoreView(null)} style={{ marginTop: rs.s(16), backgroundColor: '#57534e', borderRadius: rs.s(12), paddingVertical: rs.s(14), alignItems: 'center' }}>
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>Close</Text>
+                    </TouchableOpacity>
+                    <View style={{ height: rs.s(24) }} />
+                  </ScrollView>
+                );
+              }
               const items: any[] = cfg?.stash || [];
               const social: Record<string, string> = cfg?.socialLinks || {};
               const links = Object.entries(social).filter(([, v]) => v);
