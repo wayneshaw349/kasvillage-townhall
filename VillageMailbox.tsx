@@ -748,12 +748,16 @@ export default function VillageMailbox() {
       switch (section) {
         case 'dapps':
           result = await fetchDApps(cursor);
-          result.items = result.items.filter((d: DAppEntry) => d.townhall.verified);
+          // KV_HONEST_LANE dapps: unattested dapps show with their Unverified
+          // badge instead of being hidden. Attest still sets badge + board;
+          // installs stay hash-pinned; directory rules gate entry.
           setDapps(isRefresh ? result.items : [...dapps, ...result.items]);
           break;
         case 'storefronts':
           result = await fetchStorefronts(cursor);
-          result.items = result.items.filter((s: StorefrontEntry) => s.townhall.verified);
+          // KV_HONEST_LANE: stores are pledge-anchored (verified:false by design) -
+          // the old verified filter blanked the whole lane. Directory rules
+          // (sig, live pledge, delists, content scan) already gate entry.
           setStorefronts(isRefresh ? result.items : [...storefronts, ...result.items]);
           break;
         case 'coupons':
