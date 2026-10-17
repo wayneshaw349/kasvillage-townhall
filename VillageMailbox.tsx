@@ -1026,6 +1026,46 @@ export default function VillageMailbox() {
     setQaBusy(false);
   };
   // KV_DELIST_OWNER: publisher-key soft delist from the modal
+  // KV_FLAGS_UI: community flag (+ mod clear)
+  const runFlag = async (entry: any, kind: string) => {
+    try {
+      const ps = require('./proposal_share');
+      const SS = require('expo-secure-store');
+      const sender = (await SS.getItemAsync('kv_kaspa_address')) || (await SS.getItemAsync('kaspa_address'));
+      const priv = await ps._kvResolvePrivHex();
+      if (!sender || !priv) throw new Error('wallet identity unavailable');
+      const { bytesToHex, hexToBytes } = require('@noble/hashes/utils');
+      const { secp256k1 } = require('@noble/curves/secp256k1');
+      const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+      const head = String(entry.arweaveTx || entry.id);
+      if (entry.ownerPubkey && String(entry.ownerPubkey) === pub) { Alert.alert('Your listing', 'You cannot flag your own listing.'); return; }
+      const keys = { privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any };
+      const send = async (reason: string) => {
+        try {
+          const { flagListing } = require('./payload_publish');
+          const r: any = await flagListing(keys, head, reason, kind);
+          if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
+          Alert.alert('Flag posted', 'Your flag counts if you have a listing of your own. 3 flags from different publishers hide this listing in every wallet.');
+        } catch (e: any) { Alert.alert('Flag failed', String((e && e.message) || e)); }
+      };
+      const btns: any[] = [
+        { text: 'Scam / fraud', onPress: () => send('fraud') },
+        { text: 'Prohibited / illegal', onPress: () => send('prohibited') },
+        { text: 'Spam / fake', onPress: () => send('spam') },
+      ];
+      // KV_NO_FLAG_CLEAR: no clear option - 3 flags delist automatically, nobody arbitrates
+      if (false) btns.push({ text: 'Mod: clear all flags', onPress: async () => {
+        try {
+          const { clearFlags } = require('./payload_publish');
+          const r: any = await clearFlags(keys, head, kind);
+          if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
+          Alert.alert('Flags cleared', 'Older flags on this listing no longer count.');
+        } catch (e: any) { Alert.alert('Clear failed', String((e && e.message) || e)); }
+      } });
+      btns.push({ text: 'Cancel', style: 'cancel' });
+      Alert.alert('Flag this listing? (0.1 KAS)', 'Flags are public, signed by your key, and counted by every wallet.', btns);
+    } catch (e: any) { Alert.alert('Flag failed', String((e && e.message) || e)); }
+  };
   const runDelistOwner = async (entry: any, kind: string) => {
     try {
       const ps = require('./proposal_share');
@@ -1594,6 +1634,10 @@ export default function VillageMailbox() {
                     <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
                       <Text style={{ color: '#4f46e5', fontSize: rs.font(11), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.1 KAS)'}</Text>
                     </TouchableOpacity>
+                    {/* KV_FLAG_BTN */}
+                    <TouchableOpacity onPress={() => runFlag(storeView.entry as any, 'store')} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
+                      <Text style={{ color: '#d97706', fontSize: rs.font(11), fontWeight: 'bold' }}>Flag this listing (0.1 KAS)</Text>
+                    </TouchableOpacity>
                     {/* KV_DELIST_OWNER */}
                     <TouchableOpacity onPress={() => runDelistOwner(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#b91c1c', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
                       <Text style={{ color: '#b91c1c', fontSize: rs.font(11), fontWeight: 'bold' }}>Delist (owner only, ~1 KAS)</Text>
@@ -1639,6 +1683,10 @@ export default function VillageMailbox() {
                     ) : null}
                     <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
                       <Text style={{ color: '#4f46e5', fontSize: rs.font(10), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.1 KAS)'}</Text>
+                    </TouchableOpacity>
+                    {/* KV_FLAG_BTN store */}
+                    <TouchableOpacity onPress={() => runFlag(storeView.entry as any, 'store')} style={{ marginTop: rs.s(6), borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(7), alignItems: 'center' }}>
+                      <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>Flag this listing (0.1 KAS)</Text>
                     </TouchableOpacity>
                     {/* KV_DELIST_OWNER store */}
                     <TouchableOpacity onPress={() => runDelistOwner(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(6), borderWidth: 1, borderColor: '#b91c1c', borderRadius: rs.s(10), paddingVertical: rs.s(7), alignItems: 'center' }}>

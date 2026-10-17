@@ -214,6 +214,38 @@ export async function delistFromRegistry(owner: OwnerKeys, head: string, kind: s
   return { ...res, registryAddr: regAddr };
 }
 
+// KV_FLAGS_SEND: community flag (counted by readers if the signer is a listed publisher)
+export async function flagListing(owner: OwnerKeys, head: string, reason: string, kind: string = 'store') {
+  const rec = signRecord({ v: 1, k: 'flag', t: Date.now(), o: owner.pubkeyHex, d: { head, reason } } as any, owner.privateKeyHex);
+  const regAddr = registryAddress(kind, owner.network);
+  const res = await sendKaspaViaRest({
+    senderAddress: owner.address,
+    recipientAddress: regAddr,
+    amountSompi: REPOST_SOMPI, // KV_FLAG_DUST: 0.1 KAS - cheap to report
+    privateKeyHex: owner.privateKeyHex,
+    network: owner.network,
+    payload: buildPayloadHex(rec),
+  });
+  console.log('[Flag]', head.slice(0, 24), reason, '-> registry', regAddr.slice(0, 24));
+  return { ...res, registryAddr: regAddr };
+}
+
+// Mod clear: flags older than this record stop counting (readers honor the mod key only)
+export async function clearFlags(owner: OwnerKeys, head: string, kind: string = 'store') {
+  const rec = signRecord({ v: 1, k: 'flagclear', t: Date.now(), o: owner.pubkeyHex, d: { head } } as any, owner.privateKeyHex);
+  const regAddr = registryAddress(kind, owner.network);
+  const res = await sendKaspaViaRest({
+    senderAddress: owner.address,
+    recipientAddress: regAddr,
+    amountSompi: ANNOUNCE_SOMPI,
+    privateKeyHex: owner.privateKeyHex,
+    network: owner.network,
+    payload: buildPayloadHex(rec),
+  });
+  console.log('[FlagClear]', head.slice(0, 24), '-> registry', regAddr.slice(0, 24));
+  return { ...res, registryAddr: regAddr };
+}
+
 // ---------------------------------------------------------------------------
 
 export async function publishDelist(owner: OwnerKeys, kind: KvKind, storeNonce: number) {

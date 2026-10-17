@@ -304,6 +304,29 @@ export async function rebuildDirectory(category: string, registryAddress: string
   // announce anything; this wallet simply will not display it.
   const KV_PROHIBITED = ['gambling', 'casino', 'betting', 'lottery'];
   const KV_MOD_PUBKEY = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
+  // KV_FLAGS_TALLY: every wallet counts flags itself - no server, no single judge.
+  const KV_FLAG_THRESHOLD = 3;
+  const _kvFlagMod = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
+  const _kvPublishers = new Set<string>();
+  for (const a of anns) { const r: any = a.record; if (r && r.k === 'registry' && r.o && (r._bv || verifyRecord(r))) _kvPublishers.add(String(r.o)); }
+  const _kvClearT = new Map<string, number>();
+  for (const a of anns) {
+    const r: any = a.record;
+    if (r && r.k === 'flagclear' && r.o === _kvFlagMod && r.d && r.d.head && verifyRecord(r)) {
+      const h = String(r.d.head); _kvClearT.set(h, Math.max(_kvClearT.get(h) || 0, r.t || 0));
+    }
+  }
+  const _kvFlagsBy = new Map<string, Map<string, string>>(); // head -> flagger -> reason
+  for (const a of anns) {
+    const r: any = a.record;
+    if (!r || r.k !== 'flag' || !r.d || !r.d.head || !r.o) continue;
+    const h = String(r.d.head);
+    // KV_NO_FLAG_CLEAR: flags cannot be cleared - no arbitration
+    if (!_kvPublishers.has(String(r.o))) continue;          // reputation gate: flagger must be a listed publisher
+    if (!verifyRecord(r)) continue;
+    let m = _kvFlagsBy.get(h); if (!m) { m = new Map(); _kvFlagsBy.set(h, m); }
+    m.set(String(r.o), String(r.d.reason || ''));
+  }
   const delistByTarget = new Map<string, any>();
   for (const a of anns) {
     const r: any = a.record;
@@ -344,6 +367,12 @@ export async function rebuildDirectory(category: string, registryAddress: string
     if (KV_PROHIBITED.indexOf(String(record.d.category || '').toLowerCase()) >= 0) continue;
     const _dl = delistByTarget.get(String(record.d.storeAddress));
     if (_dl && (_dl.o === owner || _dl.o === KV_MOD_PUBKEY) && (_dl.t || 0) > (record.t || 0)) continue;
+    const _kvFl = _kvFlagsBy.get(String(record.d.storeAddress));
+    if (_kvFl) {
+      _kvFl.delete(String(owner)); // owner's own flags never count
+      if (_kvFl.size >= KV_FLAG_THRESHOLD) { console.warn('[Directory] hidden by', _kvFl.size, 'flags:', String(record.d.name || '').slice(0, 24), Array.from(_kvFl.values()).join(',')); continue; }
+      if (_kvFl.size) console.log('[Directory] flags', _kvFl.size + '/' + KV_FLAG_THRESHOLD, String(record.d.name || '').slice(0, 24));
+    }
     // KV_DISPLAY_SCAN: reader-side text scan - announce fields never render unscanned
     try { const { scanObject } = require('./content_filter'); const _sc = scanObject({ n: record.d.name, c: record.d.category, l: record.d.primaryLink }); if (!_sc.ok) { console.warn('[Directory] entry BLOCKED:', _sc.reason, String(record.d.name || '').slice(0, 24)); continue; } } catch {}
     let pledge = 0n;
