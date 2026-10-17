@@ -1134,7 +1134,7 @@ export default function VillageMailbox() {
         const _note = (reason: string) => setTimeout(() => {
           const RN = require('react-native');
           if (RN.Platform.OS === 'ios' && (RN.Alert as any).prompt) {
-            (RN.Alert as any).prompt('Evidence note (private)', 'Describe the evidence or file reference. Only its hash goes on chain.', [
+            (RN.Alert as any).prompt(reason === 'legal' ? 'Legal request reference (private)' : 'Evidence note (private)', reason === 'legal' ? 'Agency + case or subpoena number. Only its hash goes on chain; keep the original document.' : 'Describe the evidence or file reference. Only its hash goes on chain.', [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Delist', style: 'destructive', onPress: (t: string) => _fin(reason, t || '') },
             ], 'plain-text');
@@ -1144,6 +1144,7 @@ export default function VillageMailbox() {
           { text: 'Prohibited category', onPress: () => _note('prohibited') },
           { text: 'Scam / fraud', onPress: () => _note('fraud') },
           { text: 'Illegal content', onPress: () => _note('illegal') },
+          { text: 'Legal request', onPress: () => _note('legal') }, // KV_MOD_LEGAL
           { text: 'Cancel', style: 'cancel' },
         ]);
         return;

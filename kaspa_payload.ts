@@ -419,6 +419,8 @@ export async function rebuildDirectory(category: string, registryAddress: string
     if (record.del) continue;
     if (KV_PROHIBITED.indexOf(String(record.d.category || '').toLowerCase()) >= 0) continue;
     const _dl = delistByTarget.get(String(record.d.storeAddress));
+    // KV_MOD_OWNER_INFO: remember moderator removals so the owner is told why
+    if (_dl && _dl.o === KV_MOD_PUBKEY && _dl.o !== owner && (_dl.t || 0) > (record.t || 0)) { try { const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map(); _g.__kvFlagInfo.set(String(record.d.storeAddress), { n: 0, reasons: [], owner: String(owner), name: String(record.d.name || ''), hidden: true, mod: true, modReason: String((_dl.d && _dl.d.reason) || 'unspecified') }); } catch {} }
     if (_dl && (_dl.o === owner || _dl.o === KV_MOD_PUBKEY) && (_dl.t || 0) > (record.t || 0)) continue;
     const _kvFl = _kvFlagsBy.get(String(record.d.storeAddress));
     if (_kvFl) {

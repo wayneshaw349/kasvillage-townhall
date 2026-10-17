@@ -141,10 +141,12 @@ export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<St
         const msgs: string[] = [];
         for (const [h, fi] of (g.__kvFlagInfo || new Map())) {
           if (!fi || fi.owner !== me) continue;
-          const key = fi.n + (fi.hidden ? ':h' : '');
+          const key = fi.n + (fi.hidden ? ':h' : '') + (fi.mod ? ':m' : ''); // KV_MOD_OWNER_WARN
           if (seen[h] === key) continue;
           seen[h] = key;
-          msgs.push(fi.hidden
+          msgs.push(fi.mod
+            ? '"' + fi.name + '" was removed by the moderator. Reason: ' + (fi.modReason === 'legal' ? 'legal request' : fi.modReason) + '. The reason and an evidence hash are public on the Kaspa chain.'
+            : fi.hidden
             ? '"' + fi.name + '" was delisted by ' + fi.n + ' community flags (' + fi.reasons.join(', ') + '). Flags expire with chain pruning (~30-40h); fix the issue before re-announcing.'
             : '"' + fi.name + '" has ' + fi.n + '/3 flags (' + fi.reasons.join(', ') + '). At 3 it is delisted in every wallet.');
         }
