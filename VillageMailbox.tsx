@@ -1015,10 +1015,11 @@ export default function VillageMailbox() {
       else if (ch.indexOf('telegram') >= 0) url = 'https://t.me/' + hd;
       else if (ch.indexOf('whatsapp') >= 0) url = 'https://wa.me/' + hd.replace(/\D/g, '') + '?text=' + encodeURIComponent(msg);
       else if (ch.indexOf('twitter') >= 0 || ch === 'x' || ch.indexOf('x ') === 0) url = 'https://x.com/' + hd;
+      if (!url && !rawHandle && cfg && cfg.repositoryUrl) url = String(cfg.repositoryUrl); // KV_QA_ALWAYS: no DM listed -> repo page
       try { Clipboard.setString(msg); } catch {}
       setQaText('');
       console.log('[QA] question #' + n, 'ref', h.slice(0, 16), '->', url || '(copy only)');
-      Alert.alert(n === 1 ? 'Question ready (free)' : 'Follow-up #' + n + ' ready', 'Message copied. ' + (url ? 'Opening ' + (cfg.qaChannel || 'their channel') + ' - paste it into the DM.' : 'Paste it into ' + (cfg.qaChannel || 'their channel') + ': ' + rawHandle), [
+      Alert.alert(n === 1 ? 'Question ready (free)' : 'Follow-up #' + n + ' ready', 'Message copied. ' + (url ? 'Opening ' + (cfg.qaChannel || 'their channel') + ' - paste it into the DM.' : (rawHandle ? 'Paste it into ' + (cfg.qaChannel || 'their channel') + ': ' + rawHandle : 'This researcher has not listed a DM channel yet - keep the copied message for when they do.')), [
         { text: 'OK', onPress: () => { if (url) { try { Linking.openURL(url); } catch {} } } },
       ]);
     } catch (e: any) { Alert.alert('Question failed', String((e && e.message) || e)); }
@@ -1520,7 +1521,7 @@ export default function VillageMailbox() {
                     {Array.isArray(cfg.keywords) && cfg.keywords.length > 0 ? <Text style={{ fontSize: rs.font(10), color: '#78716c', marginTop: rs.s(10) }}>{cfg.keywords.join(' \u00b7 ')}</Text> : null}
                     {cfg.repositoryUrl ? <TouchableOpacity onPress={() => { try { require('react-native').Linking.openURL(String(cfg.repositoryUrl)); } catch {} }} style={{ marginTop: rs.s(12) }}><Text style={{ fontSize: rs.font(11), color: '#4f46e5' }}>{cfg.repositoryUrl}</Text></TouchableOpacity> : null}
                     {_qa ? <Text style={{ fontSize: rs.font(10), color: '#57534e', marginTop: rs.s(10) }}>Questions: {_qa}</Text> : null}
-                    {_qa ? ( /* KV_QA_DM */
+                    {true ? ( /* KV_QA_DM KV_QA_ALWAYS */
                       <View style={{ marginTop: rs.s(10), borderWidth: 1, borderColor: '#e7e5e4', borderRadius: rs.s(10), padding: rs.s(10) }}>
                         <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: '#292524' }}>Ask the researcher</Text>
                         <Text style={{ fontSize: rs.font(9), color: '#78716c', marginTop: rs.s(2) }}>First question free{Number(cfg.questionPrice || 0) > 0 ? ' \u00b7 follow-ups ' + cfg.questionPrice + ' KAS' : ''} \u00b7 delivered to their {String(cfg.qaChannel || 'DM')}</Text>
