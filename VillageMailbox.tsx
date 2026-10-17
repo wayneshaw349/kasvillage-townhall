@@ -790,6 +790,9 @@ export default function VillageMailbox() {
           const parseAnn = (input: any): any | null => {
             let r: any = (input && input.record) ? input.record : input;
             if (r && !r.k && typeof r.payload === 'string') { try { const raw = h2s(r.payload); r = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw); } catch { return null; } }
+            // KV_GAME_FLAGS: delists + flags must carry a valid signature (no forged owner/mod keys)
+            if (r && (r.k === 'delist' || r.k === 'flag') && typeof kp.verifyRecord === 'function') { try { if (!kp.verifyRecord(r)) return null; } catch { return null; } }
+            if (r && r.k === 'flag' && r.d && r.d.head) return { flag: true, head: String(r.d.head), reason: String(r.d.reason || ''), t: r.t || 0, o: r.o || '' };
             if (r && r.k === 'delist' && r.d && r.d.head) return { delist: true, head: String(r.d.head), t: r.t || 0, o: r.o || '' }; // KV_DELIST_FILTER
             if (!r || r.k !== 'registry' || !r.d) return null;
             let quad: any = null; try { quad = r.d.primaryLink ? JSON.parse(r.d.primaryLink) : null; } catch {}
@@ -801,8 +804,10 @@ export default function VillageMailbox() {
           // KV_MOD_PUBKEY: moderation key - its delists apply to any head. Rotate to a dedicated key before mainnet.
           const KV_MOD_PUBKEY = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
           const delistByHead = new Map<string, any>();
+          const flagsByHead = new Map<string, Map<string, string>>(); // head -> flagger -> reason
           const take = (it: any) => {
             if (!it) return;
+            if (it.flag) { let m = flagsByHead.get(it.head); if (!m) { m = new Map(); flagsByHead.set(it.head, m); } m.set(String(it.o), it.reason); return; }
             if (it.delist) { const p = delistByHead.get(it.head); if (!p || it.t > p.t) delistByHead.set(it.head, it); return; }
             const prev = byHead.get(it.quad.head); if (!prev || it.t > prev.t) byHead.set(it.quad.head, it);
           };
@@ -842,6 +847,20 @@ export default function VillageMailbox() {
             }
             if (sink && sink.sink) await AS.setItem('kv_reg_checkpoint', JSON.stringify({ sink: sink.sink, at: Date.now() }));
           } catch {}
+          // KV_GAME_FLAGS tally: 3 qualified flaggers (pledge or settled trade, not the owner) = hidden
+          try {
+            const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map();
+            for (const [h, m] of flagsByHead) {
+              const it = byHead.get(h); if (!it) continue;
+              m.delete(String(it.o));
+              const ok: string[] = [];
+              for (const [fk, why] of m) { try { if (await kp.kvFlaggerQualifies(fk, 'testnet-10')) ok.push(why); } catch {} }
+              const info = { n: ok.length, reasons: Array.from(new Set(ok)), owner: String(it.o), name: String(it.name || '') };
+              if (ok.length >= 3) { _g.__kvFlagInfo.set(h, { ...info, hidden: true }); byHead.delete(h); console.warn('[GamesLane] hidden by', ok.length, 'flags:', h.slice(0, 8), info.reasons.join(',')); }
+              else if (ok.length) { _g.__kvFlagInfo.set(h, info); console.log('[GamesLane] flags', ok.length + '/3', h.slice(0, 8)); }
+              else _g.__kvFlagInfo.delete(h);
+            }
+          } catch (e) { console.warn('[GamesLane] flag tally error', e); }
           const items = Array.from(byHead.values()).filter((it: any) => {
             const d = delistByHead.get(it.quad.head);
             if (!d) return true;
@@ -1471,6 +1490,13 @@ export default function VillageMailbox() {
                 <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, textAlign: 'center', marginTop: 2, marginBottom: rs.s(12) }}>
                   descriptor {gameView.hash.slice(0, 16)}... on Kaspa L1
                 </Text>
+                {/* KV_GAME_FLAG_BTN */}
+                {(() => { const _fi = ((globalThis as any).__kvFlagInfo || new Map()).get(String(gameView.addr)); return _fi && _fi.n ? (
+                  <Text style={{ color: '#92400e', backgroundColor: '#fef3c7', fontSize: rs.font(10), fontWeight: 'bold', textAlign: 'center', borderRadius: rs.s(8), padding: rs.s(6), marginBottom: rs.s(8) }}>{'\u2691 Flagged ' + _fi.n + '/3 \u2014 ' + _fi.reasons.join(', ')}</Text>
+                ) : null; })()}
+                <TouchableOpacity onPress={() => runFlag({ arweaveTx: gameView.addr, id: gameView.addr, name: gameView.name } as any, 'dapp')} style={{ alignSelf: 'center', borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(5), paddingHorizontal: rs.s(12), marginBottom: rs.s(10) }}>
+                  <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>Flag this game (0.1 KAS)</Text>
+                </TouchableOpacity>
                 {gameView.game ? (
                   gameView.game.engine === 'scene'
                         ? <SceneGameEngine game={gameView.game} />

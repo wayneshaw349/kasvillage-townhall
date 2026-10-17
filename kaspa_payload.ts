@@ -495,3 +495,41 @@ export function makeDelist(kind: KvKind, ownerPubkey: string): KvRecord {
 // record which sizes the node accepts and what the mass/fee cost is. Games
 // chunking (one board per tx) is designed assuming ~1KB is safe.
 // ---------------------------------------------------------------------------
+
+// KV_FLAGGER_QUALIFIES: shared reputation gate for flags (games lane; stores tally inline)
+export async function kvFlaggerQualifies(pubkey: string, network: string = 'testnet-10'): Promise<boolean> {
+  const g: any = globalThis as any;
+  const qc = g.__kvQualCache || (g.__kvQualCache = new Map());
+  const hit = qc.get(pubkey);
+  if (hit && Date.now() - hit.t < 600000) return hit.ok;
+  let ok = false;
+  try {
+    // (a) live pledge >= 10 KAS at one of their store addresses
+    if (!g.__kvStoreRegRecs || Date.now() - g.__kvStoreRegRecs.t > 600000) {
+      const reg = require('./payload_publish').registryAddress('store', network);
+      g.__kvStoreRegRecs = { t: Date.now(), rows: (await (fetchRecords as any)(reg, network, 100, 5)) || [] };
+    }
+    const addrs: string[] = [];
+    for (const a of g.__kvStoreRegRecs.rows) {
+      const r: any = a && a.record;
+      if (!r || r.k !== 'registry' || r.o !== pubkey || !r.d) continue;
+      const its: any[] = Array.isArray(r.d.batch) ? r.d.batch : [r.d];
+      for (const it of its) if (it && it.storeAddress && addrs.indexOf(String(it.storeAddress)) < 0) addrs.push(String(it.storeAddress));
+    }
+    const api = String(network).indexOf('testnet') >= 0 ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+    for (const addr of addrs.slice(0, 5)) {
+      try {
+        const j: any = await (await fetch(api + '/addresses/' + addr + '/balance')).json();
+        if (Number((j && j.balance) || 0) >= 1_000_000_000) { ok = true; break; }
+      } catch {}
+    }
+    // (b) at least one settled escrow trade
+    if (!ok) {
+      const { scanCounterparty } = require('./counterparty_scan');
+      const sr: any = await scanCounterparty(pubkey, network, 40, true);
+      ok = Number((sr && sr.settled) || 0) >= 1;
+    }
+  } catch { ok = false; }
+  qc.set(pubkey, { ok, t: Date.now() });
+  return ok;
+}
