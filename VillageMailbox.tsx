@@ -1052,6 +1052,7 @@ export default function VillageMailbox() {
         { text: 'Scam / fraud', onPress: () => send('fraud') },
         { text: 'Prohibited / illegal', onPress: () => send('prohibited') },
         { text: 'Spam / fake', onPress: () => send('spam') },
+        { text: 'Stolen / copied', onPress: () => send('stolen') },
       ];
       // KV_NO_FLAG_CLEAR: no clear option - 3 flags delist automatically, nobody arbitrates
       if (false) btns.push({ text: 'Mod: clear all flags', onPress: async () => {
