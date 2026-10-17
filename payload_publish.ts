@@ -29,6 +29,8 @@ import {
 // Announce dust: 1 KAS. Small enough to be cheap, large enough to dodge the
 // storage-mass blowup tiny outputs cause (C/amount term).
 export const ANNOUNCE_SOMPI = 100_000_000n;
+// Keeper replays: probed on TN10 (accepted down to 0.05 KAS); 0.1 = 2x margin.
+export const REPOST_SOMPI = 10_000_000n;
 
 export interface OwnerKeys {
   privateKeyHex: string;  // owner wallet key (signs txs AND records)
@@ -106,7 +108,7 @@ export async function repostRecord(keeper: OwnerKeys, record: KvRecord, kind: st
   const res = await sendKaspaViaRest({
     senderAddress: keeper.address,
     recipientAddress: regAddr,
-    amountSompi: ANNOUNCE_SOMPI,
+    amountSompi: REPOST_SOMPI,
     privateKeyHex: keeper.privateKeyHex,
     network: keeper.network,
     payload: buildPayloadHex(record),
@@ -126,7 +128,7 @@ export async function repostStrip(keeper: OwnerKeys, storeAddress: string, recor
       const res: any = await sendKaspaViaRest({
         senderAddress: keeper.address,
         recipientAddress: storeAddress,
-        amountSompi: ANNOUNCE_SOMPI,
+        amountSompi: REPOST_SOMPI,
         privateKeyHex: keeper.privateKeyHex,
         network: keeper.network,
         payload: buildPayloadHex(rec),
@@ -136,6 +138,28 @@ export async function repostStrip(keeper: OwnerKeys, storeAddress: string, recor
       out.push(_t);
       console.log('[RepostStrip]', String((rec as any).k), '->', storeAddress.slice(0, 24), _t.slice(0, 16));
     } catch (e) { console.warn('[RepostStrip] record failed:', (rec as any).k, e); }
+  }
+  return out;
+}
+
+/** KV_BATCH_ANNOUNCE: one registry tx announces up to 4 listings -
+ *  1 KAS per batch instead of per listing. Readers verify the batch
+ *  signature once and expand it into one directory entry per item. */
+export async function announceBatch(owner: OwnerKeys, kind: string, items: any[]) {
+  const out: any[] = [];
+  const regAddr = registryAddress(String(kind), owner.network);
+  for (let i = 0; i < items.length; i += 4) {
+    const rec = signRecord({ k: 'registry', v: 1, o: owner.pubkeyHex, t: Date.now(), d: { batch: items.slice(i, i + 4) } } as any, owner.privateKeyHex);
+    const res: any = await sendKaspaViaRest({
+      senderAddress: owner.address,
+      recipientAddress: regAddr,
+      amountSompi: ANNOUNCE_SOMPI,
+      privateKeyHex: owner.privateKeyHex,
+      network: owner.network,
+      payload: buildPayloadHex(rec),
+    });
+    console.log('[AnnounceBatch]', Math.min(4, items.length - i), 'listing(s) ->', regAddr.slice(0, 24));
+    out.push(res);
   }
   return out;
 }

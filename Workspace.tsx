@@ -2292,6 +2292,45 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
     setIsLoading(false);
   };
 
+  // KV_NONCE_RECOVER: rebuild lost kv_abs_nonce_<id> from the abstract's mint time
+  const kvRecoverAbsNonces = async (_priv: string, _list: any[]) => {
+    try {
+      const AS = require('@react-native-async-storage/async-storage').default;
+      const { deriveStoreKeys, registryAddress } = require('./payload_publish');
+      const { fetchRecords, getPledgeSompi } = require('./kaspa_payload');
+      const missing: any[] = [];
+      for (const _a of _list) { if (!(await AS.getItem('kv_abs_nonce_' + _a.id))) missing.push(_a); }
+      if (!missing.length) return;
+      const myPub = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
+      const mine = new Set<string>();
+      try {
+        const recs: any[] = await fetchRecords(registryAddress('store', 'testnet-10'), 'testnet-10', 100, 5);
+        for (const w of recs) {
+          const r: any = w && w.record;
+          if (!r || r.k !== 'registry' || String(r.o) !== myPub || !r.d) continue;
+          if (r.d.storeAddress) mine.add(String(r.d.storeAddress));
+          if (Array.isArray(r.d.batch)) for (const it of r.d.batch) if (it && it.storeAddress) mine.add(String(it.storeAddress));
+        }
+      } catch {}
+      for (const _a of missing) {
+        const ms = Number(String(_a.id || '').replace(/^ABS_/, ''));
+        if (!(ms > 0)) continue;
+        const base = Math.floor(ms / 1000);
+        let found = -1;
+        for (let d = 0; d <= 90 && found < 0; d++) {
+          const n = 7000 + ((base + d) % 1000000);
+          if (mine.has(deriveStoreKeys(_priv, n, 'testnet-10').address)) found = n;
+        }
+        for (let d = 0; d <= 20 && found < 0; d++) {
+          const n = 7000 + ((base + d) % 1000000);
+          try { if ((await getPledgeSompi(deriveStoreKeys(_priv, n, 'testnet-10').address, 'testnet-10')) > 0n) found = n; } catch {}
+        }
+        if (found >= 0) { await AS.setItem('kv_abs_nonce_' + _a.id, String(found)); console.log('[Academic] nonce RECOVERED', _a.id, '->', found); }
+        else console.log('[Academic] nonce not recoverable', _a.id, '(announce pruned and no live pledge)');
+      }
+    } catch (e) { console.log('[Academic] nonce recovery failed:', e); }
+  };
+
   // KV_ABS_REANNOUNCE: heartbeat - re-advertise saved abstracts, chunks untouched (~1 KAS each)
   const handleReannounceAbstracts = async () => {
     try {
@@ -2305,10 +2344,14 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
       const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: 'testnet-10' as any };
       const _list: any[] = JSON.parse((await SecureStore.getItemAsync('kv_abstracts')) || '[]');
+      await kvRecoverAbsNonces(_priv, _list);
       const _dk = await SecureStore.getItemAsync('kv_dkim_domain');
       let _ok = 0, _skip = 0;
+      const _batch: any[] = []; // KV_BATCH_REANNOUNCE
+      console.log('[Academic] KV_REANNOUNCE_DIAG list:', _list.length);
       for (const _a of _list) {
         const _nS = await AS.getItem('kv_abs_nonce_' + _a.id);
+        console.log('[Academic] diag', _a.id, 'title:', JSON.stringify(String(_a.title || '').slice(0, 30)), 'nonce:', _nS || 'NONE');
         if (!_nS) { _skip++; continue; }
         const _st = deriveStoreKeys(_priv, parseInt(_nS, 10), _owner.network).address;
         let _h = '';
@@ -2324,11 +2367,16 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
           }
           if (hi > 0) _c = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600 };
         } catch {}
-        const _an: any = await announceToRegistry(_owner, _st, String(_a.title || '').trim(), 'Academic', 'store', { primaryLink: _a.repositoryUrl, ...(_h ? { configHash: _h } : {}), coords: _c, ...(_dk ? { dkim: true, dkimDomain: _dk } : {}) } as any);
-        if (_an && _an.success !== false) _ok++;
-        console.log('[Academic] re-announce', _a.id, '->', _st.slice(0, 24), _an && _an.success !== false ? 'OK' : 'FAIL');
+        if (!String(_a.title || '').trim()) { _skip++; continue; }
+        _batch.push({ storeAddress: _st, name: String(_a.title).trim(), category: 'Academic', ...(_a.repositoryUrl ? { primaryLink: _a.repositoryUrl } : {}), ...(_h ? { configHash: _h } : {}), ...(_c ? { coords: _c } : {}), ...(_dk ? { dkim: true, dkimDomain: _dk } : {}) });
+        console.log('[Academic] batched', _a.id, '->', _st.slice(0, 24));
       }
-      Alert.alert('Re-announced', _ok + ' abstract(s) re-advertised' + (_skip ? ', ' + _skip + ' skipped (no pledge nonce)' : '') + '. ~1 KAS each.');
+      if (_batch.length) {
+        const { announceBatch } = require('./payload_publish');
+        const _rs: any[] = await announceBatch(_owner, 'store', _batch);
+        for (let _bi = 0; _bi < _rs.length; _bi++) { if (_rs[_bi] && _rs[_bi].success !== false) _ok += Math.min(4, _batch.length - _bi * 4); }
+      }
+      Alert.alert('Re-announced', _ok + ' abstract(s) in ' + Math.ceil(_batch.length / 4) + ' batch tx(s)' + (_skip ? ', ' + _skip + ' skipped' : '') + '. ~1 KAS per batch.');
     } catch (e: any) { Alert.alert('Re-announce failed', String(e?.message || e)); }
     setIsLoading(false);
   };
@@ -2346,6 +2394,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
       const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: 'testnet-10' as any };
       const _list: any[] = JSON.parse((await SecureStore.getItemAsync('kv_abstracts')) || '[]');
+      await kvRecoverAbsNonces(_priv, _list);
       let _ok = 0, _skip = 0;
       for (const _a of _list) {
         if (String(_a.title || '').trim()) { _skip++; continue; } // titled listings are never touched
@@ -2358,6 +2407,33 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       }
       Alert.alert('Pledges swept', _ok + ' untitled abstract(s) hard-delisted - pledge back in your wallet. ' + _skip + ' kept.');
     } catch (e: any) { Alert.alert('Withdraw failed', String(e?.message || e)); }
+    setIsLoading(false);
+  };
+
+  // KV_DUST_PROBE: smallest repost amount TN10 accepts (self-sends: only fees spent)
+  const handleDustProbe = async () => {
+    try {
+      setIsLoading(true);
+      const { _kvResolvePrivHex } = require('./proposal_share');
+      const { signRecord, buildPayloadHex } = require('./kaspa_payload');
+      const { sendKaspaViaRest } = require('./kaspa_rest_tx');
+      const _priv = await _kvResolvePrivHex();
+      const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
+      if (!_priv || !_addr) throw new Error('wallet keys unavailable');
+      const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
+      const _rec = signRecord({ k: 'probe', v: 1, o: _pub2, t: Date.now(), d: { pad: '0123456789'.repeat(32) } } as any, _priv);
+      const _hex = buildPayloadHex(_rec);
+      const _rows: string[] = [];
+      for (const _kas of [0.5, 0.3, 0.2, 0.1, 0.05]) {
+        try {
+          const _r: any = await sendKaspaViaRest({ senderAddress: _addr, recipientAddress: _addr, amountSompi: BigInt(Math.round(_kas * 1e8)), privateKeyHex: _priv, network: 'testnet-10' as any, payload: _hex });
+          const _tx = String((_r && (_r.txid || _r.transactionId || _r.txId)) || '');
+          _rows.push(_kas + ' KAS: ' + (_r && _r.success === false ? 'REJECTED ' + String(_r.error || '').slice(0, 60) : (_tx ? 'OK ' + _tx.slice(0, 10) : 'no txid')));
+        } catch (_e: any) { _rows.push(_kas + ' KAS: ERROR ' + String((_e && _e.message) || _e).slice(0, 70)); }
+        console.log('[DustProbe]', _rows[_rows.length - 1]);
+      }
+      Alert.alert('Repost amount probe', _rows.join('\n') + '\n\nSelf-sends - only fees spent. Fee per amount is in Metro ([REST-TX] Fee lines).');
+    } catch (e: any) { Alert.alert('Probe failed', String(e?.message || e)); }
     setIsLoading(false);
   };
   
@@ -2783,6 +2859,10 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     {/* KV_ABS_WITHDRAW */}
                     <TouchableOpacity style={{ backgroundColor: '#7f1d1d', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 8 }} onPress={handleWithdrawUntitled} disabled={isLoading}>
                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Clean Up Untitled Abstracts (withdraw pledges)</Text>
+                    </TouchableOpacity>
+                    {/* KV_DUST_PROBE (dev) */}
+                    <TouchableOpacity style={{ backgroundColor: '#44403c', borderRadius: 12, paddingVertical: 10, alignItems: 'center', marginTop: 8 }} onPress={handleDustProbe} disabled={isLoading}>
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Probe Repost Amounts (dev, fees only)</Text>
                     </TouchableOpacity>
                   </View>
                 )}

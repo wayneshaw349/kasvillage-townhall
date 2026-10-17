@@ -910,7 +910,7 @@ export default function VillageMailbox() {
   // KV_REPOST_UI: keeper actions - replay a listing's signed record, tip a keeper
   const [repostBusy, setRepostBusy] = useState(false);
   const runRepost = async (entry: any, kind: string) => {
-    const rec = entry && entry.record;
+    const rec = entry && entry.record && ((entry.record as any)._parent || entry.record); // KV_BATCH_REPOST: replay the original signed batch
     if (!rec) { Alert.alert('Repost', 'Original record not loaded - refresh the lane and try again.'); return; }
     if (repostBusy) return;
     setRepostBusy(true);
@@ -951,7 +951,7 @@ export default function VillageMailbox() {
       } catch (_e) { console.warn('[Repost] strip replay failed (announce continues):', _e); }
       const r: any = await repostRecord(_keeper, rec, kind);
       if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
-      Alert.alert('Reposted \u2713', 'Re-announced to the chain' + (_stripN ? ' + ' + _stripN + ' content record(s) replayed' : '') + ' (' + (1 + _stripN) + ' KAS total). Your wallet is now its keeper - tips come to you.');
+      Alert.alert('Reposted \u2713', 'Re-announced to the chain' + (_stripN ? ' + ' + _stripN + ' content record(s) replayed' : '') + ' (' + ((1 + _stripN) * 0.1).toFixed(1) + ' KAS total). Your wallet is now its keeper - tips come to you.');
     } catch (e: any) { Alert.alert('Repost failed', String((e && e.message) || e)); }
     setRepostBusy(false);
   };
@@ -959,6 +959,71 @@ export default function VillageMailbox() {
   const [keeperTip, setKeeperTip] = useState<any>(null);
   const [keeperAmt, setKeeperAmt] = useState('');
   const [keeperBusy, setKeeperBusy] = useState(false);
+  // KV_QA_DM: ask-the-researcher via their chosen DM channel
+  const [qaText, setQaText] = useState('');
+  const [qaBusy, setQaBusy] = useState(false);
+  const askQuestion = async (entry: any, cfg: any) => {
+    const q = String(qaText || '').trim();
+    if (q.length < 5) { Alert.alert('Question', 'Type your question first.'); return; }
+    if (qaBusy) return;
+    setQaBusy(true);
+    try {
+      const AS = require('@react-native-async-storage/async-storage').default;
+      const { sha256 } = require('@noble/hashes/sha256');
+      const { bytesToHex, utf8ToBytes } = require('@noble/hashes/utils');
+      const absKey = String(entry.arweaveTx || entry.id || '');
+      const chainKey = 'kv_qa_chain_' + absKey.slice(-24);
+      const chain: any[] = JSON.parse((await AS.getItem(chainKey)) || '[]');
+      const n = chain.length + 1;
+      const price = Number((cfg && cfg.questionPrice) || 0);
+      const title = String((cfg && cfg.title) || entry.title || 'your abstract');
+      let payTx = '';
+      if (n >= 2 && price > 0) {
+        const go = await new Promise<boolean>((res) => Alert.alert('Follow-up question #' + n, 'Your first question was free. This researcher charges ' + price + ' KAS per follow-up, paid straight to their wallet.', [
+          { text: 'Cancel', style: 'cancel', onPress: () => res(false) },
+          { text: 'Pay ' + price + ' KAS', onPress: () => res(true) },
+        ]));
+        if (!go) { setQaBusy(false); return; }
+        const ps = require('./proposal_share');
+        const SS = require('expo-secure-store');
+        const sender = (await SS.getItemAsync('kv_kaspa_address')) || (await SS.getItemAsync('kaspa_address'));
+        const priv = await ps._kvResolvePrivHex();
+        if (!sender || !priv) throw new Error('wallet identity unavailable');
+        const { deriveAddress } = require('./canonical_agreement_steps');
+        const _o = String(entry.ownerPubkey || '');
+        const authorAddr = deriveAddress(_o.length === 66 ? _o.slice(2) : _o, 'testnet-10' as any);
+        const { sendKaspaViaRest } = require('./kaspa_rest_tx');
+        const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: authorAddr, amountSompi: BigInt(Math.round(price * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
+        if (r && r.success === false) throw new Error(String(r.error || 'payment failed'));
+        payTx = String((r && (r.txid || r.transactionId || r.txId)) || '');
+        console.log('[QA] paid', price, 'KAS ->', authorAddr.slice(0, 24), payTx.slice(0, 16));
+      }
+      const prev = chain.length ? String(chain[chain.length - 1].h) : '0'.repeat(64);
+      const h = bytesToHex(sha256(utf8ToBytes(prev + '|' + absKey + '|' + q + '|' + Date.now())));
+      chain.push({ h, prev, n, t: Date.now(), paid: payTx || undefined });
+      await AS.setItem(chainKey, JSON.stringify(chain));
+      const msg = n === 1
+        ? 'Hi! I saw your abstract "' + title + '" on KasVillage and have a question (my first - free):\n\n' + q + '\n\nRef: ' + h.slice(0, 16)
+        : 'Hi! A follow-up on your abstract "' + title + '" - question #' + n + (payTx ? ', paid ' + price + ' KAS (tx ' + payTx + ')' : '') + ':\n\n' + q + '\n\nChain ref: ' + h.slice(0, 16) + ' (prev ' + prev.slice(0, 16) + ')';
+      const rawHandle = String((cfg && cfg.qaHandle) || '').trim();
+      const ch = String((cfg && cfg.qaChannel) || '').toLowerCase();
+      const hd = rawHandle.replace(/^@/, '');
+      let url = '';
+      if (/^https?:\/\//i.test(rawHandle)) url = rawHandle;
+      else if (ch.indexOf('mail') >= 0 || (rawHandle.indexOf('@') > 0 && rawHandle.indexOf('.') > 0)) url = 'mailto:' + rawHandle + '?subject=' + encodeURIComponent('Question about "' + title + '"') + '&body=' + encodeURIComponent(msg);
+      else if (ch.indexOf('insta') >= 0) url = 'https://ig.me/m/' + hd;
+      else if (ch.indexOf('telegram') >= 0) url = 'https://t.me/' + hd;
+      else if (ch.indexOf('whatsapp') >= 0) url = 'https://wa.me/' + hd.replace(/\D/g, '') + '?text=' + encodeURIComponent(msg);
+      else if (ch.indexOf('twitter') >= 0 || ch === 'x' || ch.indexOf('x ') === 0) url = 'https://x.com/' + hd;
+      try { Clipboard.setString(msg); } catch {}
+      setQaText('');
+      console.log('[QA] question #' + n, 'ref', h.slice(0, 16), '->', url || '(copy only)');
+      Alert.alert(n === 1 ? 'Question ready (free)' : 'Follow-up #' + n + ' ready', 'Message copied. ' + (url ? 'Opening ' + (cfg.qaChannel || 'their channel') + ' - paste it into the DM.' : 'Paste it into ' + (cfg.qaChannel || 'their channel') + ': ' + rawHandle), [
+        { text: 'OK', onPress: () => { if (url) { try { Linking.openURL(url); } catch {} } } },
+      ]);
+    } catch (e: any) { Alert.alert('Question failed', String((e && e.message) || e)); }
+    setQaBusy(false);
+  };
   // KV_DELIST_OWNER: publisher-key soft delist from the modal
   const runDelistOwner = async (entry: any, kind: string) => {
     try {
@@ -1455,6 +1520,25 @@ export default function VillageMailbox() {
                     {Array.isArray(cfg.keywords) && cfg.keywords.length > 0 ? <Text style={{ fontSize: rs.font(10), color: '#78716c', marginTop: rs.s(10) }}>{cfg.keywords.join(' \u00b7 ')}</Text> : null}
                     {cfg.repositoryUrl ? <TouchableOpacity onPress={() => { try { require('react-native').Linking.openURL(String(cfg.repositoryUrl)); } catch {} }} style={{ marginTop: rs.s(12) }}><Text style={{ fontSize: rs.font(11), color: '#4f46e5' }}>{cfg.repositoryUrl}</Text></TouchableOpacity> : null}
                     {_qa ? <Text style={{ fontSize: rs.font(10), color: '#57534e', marginTop: rs.s(10) }}>Questions: {_qa}</Text> : null}
+                    {_qa ? ( /* KV_QA_DM */
+                      <View style={{ marginTop: rs.s(10), borderWidth: 1, borderColor: '#e7e5e4', borderRadius: rs.s(10), padding: rs.s(10) }}>
+                        <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: '#292524' }}>Ask the researcher</Text>
+                        <Text style={{ fontSize: rs.font(9), color: '#78716c', marginTop: rs.s(2) }}>First question free{Number(cfg.questionPrice || 0) > 0 ? ' \u00b7 follow-ups ' + cfg.questionPrice + ' KAS' : ''} \u00b7 delivered to their {String(cfg.qaChannel || 'DM')}</Text>
+                        <TextInput value={qaText} onChangeText={setQaText} multiline placeholder="Type your question..." placeholderTextColor="#a8a29e" style={{ borderWidth: 1, borderColor: '#d6d3d1', borderRadius: rs.s(8), marginTop: rs.s(8), padding: rs.s(8), minHeight: rs.s(60), color: '#292524', fontSize: rs.font(12), textAlignVertical: 'top' }} />
+                        <TouchableOpacity disabled={qaBusy} onPress={() => askQuestion(storeView.entry, cfg)} style={{ marginTop: rs.s(8), backgroundColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(12) }}>{qaBusy ? 'Preparing...' : 'Ask via ' + String(cfg.qaChannel || 'DM')}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                    {(() => { // KV_LISTING_CLOCK
+                      const _ca = Number((storeView.entry as any).createdAt || 0);
+                      if (!_ca) return null;
+                      const _ah = Math.max(0, (Date.now() - _ca) / 3600000);
+                      const _left = Math.max(0, 30 - _ah);
+                      const _col = _ah < 18 ? '#16a34a' : _ah < 26 ? '#d97706' : '#b91c1c';
+                      const _msg = _ah < 18 ? 'fresh - no repost needed' : _ah < 26 ? 'renew soon' : 'expiring - repost to keep it alive';
+                      return <Text style={{ color: _col, fontSize: rs.font(10), fontWeight: 'bold', marginTop: rs.s(12), textAlign: 'center' }}>Last announced {_ah < 1 ? '<1' : Math.floor(_ah)}h ago {'\u00b7'} ~{Math.floor(_left)}h+ left {'\u00b7'} {_msg}</Text>;
+                    })()}
                     {(((storeView.entry as any).keepers || []) as string[]).length > 0 ? (
                       <View style={{ marginTop: rs.s(12) }}>
                         <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>Kept alive by {(((storeView.entry as any).keepers || []) as string[]).length} keeper(s)</Text>
@@ -1466,7 +1550,7 @@ export default function VillageMailbox() {
                       </View>
                     ) : null}
                     <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
-                      <Text style={{ color: '#4f46e5', fontSize: rs.font(11), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (1 KAS)'}</Text>
+                      <Text style={{ color: '#4f46e5', fontSize: rs.font(11), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.1 KAS)'}</Text>
                     </TouchableOpacity>
                     {/* KV_DELIST_OWNER */}
                     <TouchableOpacity onPress={() => runDelistOwner(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#b91c1c', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
@@ -1492,6 +1576,15 @@ export default function VillageMailbox() {
                 <View>
                   {/* KV_REPOST_UI: keeper bar (stores) */}
                   <View style={{ paddingHorizontal: rs.s(14), paddingTop: rs.s(10) }}>
+                    {(() => { // KV_LISTING_CLOCK
+                      const _ca = Number((storeView.entry as any).createdAt || 0);
+                      if (!_ca) return null;
+                      const _ah = Math.max(0, (Date.now() - _ca) / 3600000);
+                      const _left = Math.max(0, 30 - _ah);
+                      const _col = _ah < 18 ? '#16a34a' : _ah < 26 ? '#d97706' : '#b91c1c';
+                      const _msg = _ah < 18 ? 'fresh - no repost needed' : _ah < 26 ? 'renew soon' : 'expiring - repost to keep it alive';
+                      return <Text style={{ color: _col, fontSize: rs.font(10), fontWeight: 'bold', marginTop: rs.s(0), textAlign: 'center' }}>Last announced {_ah < 1 ? '<1' : Math.floor(_ah)}h ago {'\u00b7'} ~{Math.floor(_left)}h+ left {'\u00b7'} {_msg}</Text>;
+                    })()}
                     {(((storeView.entry as any).keepers || []) as string[]).length > 0 ? (
                       <View style={{ marginBottom: rs.s(6) }}>
                         <Text style={{ color: '#d97706', fontSize: rs.font(9), fontWeight: 'bold' }}>Kept alive by {(((storeView.entry as any).keepers || []) as string[]).length} keeper(s)</Text>
@@ -1503,7 +1596,7 @@ export default function VillageMailbox() {
                       </View>
                     ) : null}
                     <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
-                      <Text style={{ color: '#4f46e5', fontSize: rs.font(10), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (1 KAS)'}</Text>
+                      <Text style={{ color: '#4f46e5', fontSize: rs.font(10), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.1 KAS)'}</Text>
                     </TouchableOpacity>
                     {/* KV_DELIST_OWNER store */}
                     <TouchableOpacity onPress={() => runDelistOwner(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(6), borderWidth: 1, borderColor: '#b91c1c', borderRadius: rs.s(10), paddingVertical: rs.s(7), alignItems: 'center' }}>

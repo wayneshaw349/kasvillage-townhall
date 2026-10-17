@@ -177,13 +177,24 @@ export async function getPledgeSompi(address: string, network = 'testnet-10'): P
 }
 
 /** All decoded KV records in an address's tx history, newest first. */
-export async function fetchRecords(address: string, network = 'testnet-10', limit = 50): Promise<Array<{ record: KvRecord; txid: string; blockTime: number }>> {
+export async function fetchRecords(address: string, network = 'testnet-10', limit = 50, maxPages = 1): Promise<Array<{ record: KvRecord; txid: string; blockTime: number }>> {
   let txs: any[] = [];
   try {
     txs = await getJson(
       `${apiBase(network)}/addresses/${encodeURIComponent(address)}/full-transactions?limit=${limit}&resolve_previous_outpoints=light`
     );
-  } catch { txs = []; }
+    // KV_PAGE_BY_TIME: keep paging while pages are full and still inside the window
+    const _seenTx = new Set<string>((txs || []).map((t: any) => String(t.transaction_id || '')));
+    for (let _pg = 1; _pg < maxPages && (txs || []).length >= limit * _pg; _pg++) {
+      const _oldest = Math.min(...(txs || []).map((t: any) => Number(t.block_time || Date.now())));
+      if (Date.now() - _oldest > 48 * 3600 * 1000) break;
+      const _more: any[] = await getJson(`${apiBase(network)}/addresses/${encodeURIComponent(address)}/full-transactions?limit=${limit}&offset=${limit * _pg}&resolve_previous_outpoints=light`);
+      const _fresh = (_more || []).filter((t: any) => !_seenTx.has(String(t.transaction_id || '')));
+      if (!_fresh.length) break;
+      for (const t of _fresh) _seenTx.add(String(t.transaction_id || ''));
+      txs = txs.concat(_fresh);
+    }
+  } catch { txs = txs || []; }
   const out: Array<{ record: KvRecord; txid: string; blockTime: number; sender?: string }> = [];
   for (const tx of txs || []) {
     const rec = decodePayloadHex(tx.payload);
@@ -261,7 +272,20 @@ export interface DirectoryEntry {
  * from counterparty_scan on the owner key).
  */
 export async function rebuildDirectory(category: string, registryAddress: string, network = 'testnet-10'): Promise<DirectoryEntry[]> {
-  const anns = await fetchRecords(registryAddress, network, 100);
+  // KV_BATCH_READ: page by time, then expand signed batch announces (verified once)
+  const _annsRaw = await fetchRecords(registryAddress, network, 100, 5);
+  const anns: any[] = [];
+  const _senderCount = new Map<string, number>();
+  for (const _a0 of _annsRaw) {
+    const _r0: any = _a0.record;
+    if (_r0 && _r0.k === 'registry' && _r0.d && Array.isArray(_r0.d.batch)) {
+      if (!verifyRecord(_r0)) continue;
+      for (const _it of _r0.d.batch.slice(0, 12)) {
+        if (!_it || !_it.storeAddress) continue;
+        anns.push({ ..._a0, record: { ..._r0, d: _it, _bv: 1, _parent: _r0 } });
+      }
+    } else anns.push(_a0);
+  }
   // KV_DIR_BY_ADDR: one entry per STORE ADDRESS (newest announce wins).
   // Dedupe by owner was wrong - it limited every publisher to a single
   // listing across all their stores/services/abstracts.
@@ -269,7 +293,9 @@ export async function rebuildDirectory(category: string, registryAddress: string
   for (const a of anns) {
     const r = a.record;
     if (r.k !== 'registry') continue;
-    if (!verifyRecord(r)) continue;
+    if (!(r as any)._bv && !verifyRecord(r)) continue;
+    // KV_SENDER_CAP: one wallet cannot occupy the directory scan
+    { const _sk = String((a as any).sender || r.o || ''); const _sc = (_senderCount.get(_sk) || 0) + 1; _senderCount.set(_sk, _sc); if (_sc > 30) continue; }
     if (!r.d?.storeAddress || !r.d?.name) continue;
     const _ak = String(r.d.storeAddress);
     if (!byAddr.has(_ak)) byAddr.set(_ak, { record: r, blockTime: a.blockTime, sender: (a as any).sender || '' } as any); // newest first already
@@ -332,7 +358,7 @@ export async function rebuildDirectory(category: string, registryAddress: string
       primaryLink: record.d.primaryLink ? String(record.d.primaryLink) : '',
       configHash: record.d.configHash ? String(record.d.configHash) : '',
       record,
-      announcedAt: blockTime,
+      announcedAt: blockTime > 1e12 ? Math.floor(blockTime / 1000) : blockTime, // KV_TS_MS: API block_time is ms
       repostedBy: _repostedBy,
       keepers: _keepers,
     });
