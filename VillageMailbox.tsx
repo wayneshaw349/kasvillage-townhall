@@ -384,6 +384,16 @@ function GameRegistryCard({ item, onInstall, installing, onTip }: any) {
         style={{ marginTop: 8, backgroundColor: installing ? '#999' : (item.warn ? '#b91c1c' : '#7c3aed'), borderRadius: 8, paddingVertical: 6, alignItems: 'center' }}>
         <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{installing ? 'DOWNLOADING…' : 'DOWNLOAD'}</Text>
       </TouchableOpacity>
+      {/* KV_GAME_CARD_FLAG */}
+      {(() => { const _fi = item.quad ? ((globalThis as any).__kvFlagInfo || new Map()).get(String(item.quad.head)) : null; return _fi && _fi.n ? (
+        <Text style={{ marginTop: 6, color: '#92400e', backgroundColor: '#fef3c7', fontSize: 10, fontWeight: '700', borderRadius: 6, padding: 4, textAlign: 'center' }}>{'\u2691 Flagged ' + _fi.n + '/3 \u2014 ' + _fi.reasons.join(', ')}</Text>
+      ) : null; })()}
+      {item.quad ? (
+        <TouchableOpacity onPress={() => { const f = (globalThis as any).__kvRunFlag; if (f) f({ arweaveTx: String(item.quad.head), id: String(item.quad.head), ownerPubkey: item.o || '', name: item.name || '' }, 'game'); }}
+          style={{ marginTop: 6, borderColor: '#d97706', borderWidth: 1, borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}>
+          <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 11 }}>Flag (0.1 KAS)</Text>
+        </TouchableOpacity>
+      ) : null}
       {item.quad && item.quad.tip_addr && onTip ? (
         <TouchableOpacity onPress={() => onTip(item)}
           style={{ marginTop: 6, borderColor: '#7c3aed', borderWidth: 1, borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}>
@@ -1086,6 +1096,7 @@ export default function VillageMailbox() {
       Alert.alert('Flag this listing? (0.1 KAS)', 'Flags are public, signed by your key, and counted by every wallet.', btns);
     } catch (e: any) { Alert.alert('Flag failed', String((e && e.message) || e)); }
   };
+  (globalThis as any).__kvRunFlag = runFlag; // KV_GAME_CARD_FLAG: game cards (separate component) reach runFlag
   const runDelistOwner = async (entry: any, kind: string) => {
     try {
       const ps = require('./proposal_share');
