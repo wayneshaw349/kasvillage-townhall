@@ -370,9 +370,18 @@ export async function rebuildDirectory(category: string, registryAddress: string
     const _kvFl = _kvFlagsBy.get(String(record.d.storeAddress));
     if (_kvFl) {
       _kvFl.delete(String(owner)); // owner's own flags never count
+      // KV_FLAG_HIDDEN_INFO: remember auto-delisted heads so the owner can be told
+      if (_kvFl.size >= KV_FLAG_THRESHOLD) { try { const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map(); _g.__kvFlagInfo.set(String(record.d.storeAddress), { n: _kvFl.size, reasons: Array.from(new Set(Array.from(_kvFl.values()))), owner: String(owner), name: String(record.d.name || ''), hidden: true }); } catch {} }
       if (_kvFl.size >= KV_FLAG_THRESHOLD) { console.warn('[Directory] hidden by', _kvFl.size, 'flags:', String(record.d.name || '').slice(0, 24), Array.from(_kvFl.values()).join(',')); continue; }
       if (_kvFl.size) console.log('[Directory] flags', _kvFl.size + '/' + KV_FLAG_THRESHOLD, String(record.d.name || '').slice(0, 24));
     }
+    // KV_FLAG_INFO: expose counts to the UI (badge + owner warning)
+    try {
+      const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map();
+      const _hk = String(record.d.storeAddress);
+      if (_kvFl && _kvFl.size) _g.__kvFlagInfo.set(_hk, { n: _kvFl.size, reasons: Array.from(new Set(Array.from(_kvFl.values()))), owner: String(owner), name: String(record.d.name || '') });
+      else _g.__kvFlagInfo.delete(_hk);
+    } catch {}
     // KV_DISPLAY_SCAN: reader-side text scan - announce fields never render unscanned
     try { const { scanObject } = require('./content_filter'); const _sc = scanObject({ n: record.d.name, c: record.d.category, l: record.d.primaryLink }); if (!_sc.ok) { console.warn('[Directory] entry BLOCKED:', _sc.reason, String(record.d.name || '').slice(0, 24)); continue; } } catch {}
     let pledge = 0n;

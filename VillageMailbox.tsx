@@ -1634,6 +1634,16 @@ export default function VillageMailbox() {
                     <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
                       <Text style={{ color: '#4f46e5', fontSize: rs.font(11), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.1 KAS)'}</Text>
                     </TouchableOpacity>
+{(() => { // KV_FLAG_BADGE
+                      const _fi = ((globalThis as any).__kvFlagInfo || new Map()).get(String((storeView.entry as any).arweaveTx || (storeView.entry as any).id));
+                      if (!_fi || !_fi.n) return null;
+                      return (
+                        <View style={{ marginTop: rs.s(8), backgroundColor: '#fef3c7', borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), padding: rs.s(8) }}>
+                          <Text style={{ color: '#92400e', fontSize: rs.font(11), fontWeight: 'bold' }}>{'\u2691 Flagged ' + _fi.n + '/3 \u2014 ' + _fi.reasons.join(', ')}</Text>
+                          <Text style={{ color: '#92400e', fontSize: rs.font(10), marginTop: rs.s(2) }}>At 3 flags from different publishers this listing is delisted in every wallet. Flags are public on the Kaspa chain.</Text>
+                        </View>
+                      );
+                    })()}
                     {/* KV_FLAG_BTN */}
                     <TouchableOpacity onPress={() => runFlag(storeView.entry as any, 'store')} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
                       <Text style={{ color: '#d97706', fontSize: rs.font(11), fontWeight: 'bold' }}>Flag this listing (0.1 KAS)</Text>
@@ -1684,6 +1694,16 @@ export default function VillageMailbox() {
                     <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
                       <Text style={{ color: '#4f46e5', fontSize: rs.font(10), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.1 KAS)'}</Text>
                     </TouchableOpacity>
+{(() => { // KV_FLAG_BADGE
+                      const _fi = ((globalThis as any).__kvFlagInfo || new Map()).get(String((storeView.entry as any).arweaveTx || (storeView.entry as any).id));
+                      if (!_fi || !_fi.n) return null;
+                      return (
+                        <View style={{ marginTop: rs.s(6), backgroundColor: '#fef3c7', borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), padding: rs.s(8) }}>
+                          <Text style={{ color: '#92400e', fontSize: rs.font(11), fontWeight: 'bold' }}>{'\u2691 Flagged ' + _fi.n + '/3 \u2014 ' + _fi.reasons.join(', ')}</Text>
+                          <Text style={{ color: '#92400e', fontSize: rs.font(10), marginTop: rs.s(2) }}>At 3 flags from different publishers this listing is delisted in every wallet. Flags are public on the Kaspa chain.</Text>
+                        </View>
+                      );
+                    })()}
                     {/* KV_FLAG_BTN store */}
                     <TouchableOpacity onPress={() => runFlag(storeView.entry as any, 'store')} style={{ marginTop: rs.s(6), borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(7), alignItems: 'center' }}>
                       <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>Flag this listing (0.1 KAS)</Text>

@@ -123,6 +123,37 @@ export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<St
     console.log('[Mailbox] store scan -> registry', registryAddress('store', NET).slice(0, 30));
     const dir = await rebuildDirectory('store', registryAddress('store', NET), NET);
     console.log('[Mailbox] store scan found', dir.length, 'entries:', dir.map((e: any) => e.name).join(', '));
+    // KV_FLAG_OWNER_WARN: tell the owner when their listing is flagged / auto-delisted (once per change)
+    (async () => {
+      try {
+        const g: any = globalThis as any;
+        if (!g.__kvMyPub) {
+          const ps = require('./proposal_share');
+          const priv = await ps._kvResolvePrivHex();
+          if (!priv) return;
+          const { bytesToHex, hexToBytes } = require('@noble/hashes/utils');
+          const { secp256k1 } = require('@noble/curves/secp256k1');
+          g.__kvMyPub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+        }
+        const me = g.__kvMyPub;
+        const AS = require('@react-native-async-storage/async-storage').default;
+        const seen = JSON.parse((await AS.getItem('kv_flag_warned')) || '{}');
+        const msgs: string[] = [];
+        for (const [h, fi] of (g.__kvFlagInfo || new Map())) {
+          if (!fi || fi.owner !== me) continue;
+          const key = fi.n + (fi.hidden ? ':h' : '');
+          if (seen[h] === key) continue;
+          seen[h] = key;
+          msgs.push(fi.hidden
+            ? '"' + fi.name + '" was delisted by ' + fi.n + ' community flags (' + fi.reasons.join(', ') + '). Flags expire with chain pruning (~30-40h); fix the issue before re-announcing.'
+            : '"' + fi.name + '" has ' + fi.n + '/3 flags (' + fi.reasons.join(', ') + '). At 3 it is delisted in every wallet.');
+        }
+        if (msgs.length) {
+          await AS.setItem('kv_flag_warned', JSON.stringify(seen));
+          require('react-native').Alert.alert('Your listing was flagged', msgs.join('\n\n'));
+        }
+      } catch (e) { console.warn('[FlagWarn]', e); }
+    })();
     dir.sort(visSort as any);
     const items: StorefrontEntry[] = dir.map((e: any) => ({
       id: e.storeAddress,
