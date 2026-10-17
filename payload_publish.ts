@@ -198,8 +198,9 @@ export async function announceToRegistry(
 // signer matches the announce's signer. Pledge-independent by design.
 // ---------------------------------------------------------------------------
 
-export async function delistFromRegistry(owner: OwnerKeys, head: string, kind: string = 'game') {
-  const rec = signRecord({ v: 1, k: 'delist', t: Date.now(), o: owner.pubkeyHex, d: { head } } as any, owner.privateKeyHex);
+// KV_MOD_EXTRA: optional { reason, evidenceHash, mod } on moderator delists
+export async function delistFromRegistry(owner: OwnerKeys, head: string, kind: string = 'game', extra?: Record<string, any>) {
+  const rec = signRecord({ v: 1, k: 'delist', t: Date.now(), o: owner.pubkeyHex, d: { head, ...(extra || {}) } } as any, owner.privateKeyHex);
   const regAddr = registryAddress(kind, owner.network);
   const res = await sendKaspaViaRest({
     senderAddress: owner.address,

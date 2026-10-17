@@ -1036,6 +1036,47 @@ export default function VillageMailbox() {
       const { bytesToHex, hexToBytes } = require('@noble/hashes/utils');
       const { secp256k1 } = require('@noble/curves/secp256k1');
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+      // KV_MOD_REASON: moderator path (mod key, not the owner) - reason + evidence hash on chain
+      const _KV_MOD = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
+      if (entry.ownerPubkey && String(entry.ownerPubkey) !== pub && pub === _KV_MOD) {
+        const _head = String(entry.arweaveTx || entry.id);
+        const _fin = async (reason: string, note: string) => {
+          try {
+            const { utf8ToBytes } = require('@noble/hashes/utils');
+            let _sha: any; try { _sha = require('@noble/hashes/sha256').sha256; } catch (_) { _sha = require('@noble/hashes/sha2').sha256; }
+            const pre = JSON.stringify({ head: _head, reason, note: note || '', title: String(entry.title || entry.name || ''), owner: String(entry.ownerPubkey || ''), t: Date.now() });
+            const evidenceHash = bytesToHex(_sha(utf8ToBytes(pre)));
+            const { delistFromRegistry } = require('./payload_publish');
+            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, _head, kind, { reason, evidenceHash, mod: 1 });
+            if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
+            try {
+              const AS = require('@react-native-async-storage/async-storage').default;
+              const old = JSON.parse((await AS.getItem('kv_mod_log')) || '[]');
+              old.push({ pre, evidenceHash, kind, txid: (r && (r.txid || r.transactionId)) || null });
+              await AS.setItem('kv_mod_log', JSON.stringify(old));
+            } catch (_) {}
+            console.log('[ModDelist]', _head.slice(0, 24), reason, evidenceHash, 'preimage:', pre);
+            setStoreView(null);
+            Alert.alert('Moderator delist posted', 'Reason: ' + reason + '\nEvidence hash: ' + evidenceHash.slice(0, 16) + '...\nPreimage saved on this phone (kv_mod_log). The owner can see the reason on chain.');
+          } catch (e: any) { Alert.alert('Mod delist failed', String((e && e.message) || e)); }
+        };
+        const _note = (reason: string) => setTimeout(() => {
+          const RN = require('react-native');
+          if (RN.Platform.OS === 'ios' && (RN.Alert as any).prompt) {
+            (RN.Alert as any).prompt('Evidence note (private)', 'Describe the evidence or file reference. Only its hash goes on chain.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delist', style: 'destructive', onPress: (t: string) => _fin(reason, t || '') },
+            ], 'plain-text');
+          } else { _fin(reason, ''); }
+        }, 350);
+        Alert.alert('Moderator delist', 'Not your listing - acting as moderator. Pick a reason; it is recorded on chain with an evidence hash (~1 KAS).', [
+          { text: 'Prohibited category', onPress: () => _note('prohibited') },
+          { text: 'Scam / fraud', onPress: () => _note('fraud') },
+          { text: 'Illegal content', onPress: () => _note('illegal') },
+          { text: 'Cancel', style: 'cancel' },
+        ]);
+        return;
+      }
       if (entry.ownerPubkey && String(entry.ownerPubkey) !== pub) { Alert.alert('Not your listing', 'Only the publisher key can delist. Readers ignore delists from other keys.'); return; }
       Alert.alert('Delist this listing?', 'It disappears from every Mailbox directory (a newer announce restores it). Chain data, installs and your pledge are untouched. ~1 KAS.', [
         { text: 'Cancel', style: 'cancel' },
