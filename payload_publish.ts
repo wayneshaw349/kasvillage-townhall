@@ -349,3 +349,15 @@ export async function sendBoard(dev: OwnerKeys, toPub: string, game: string, ite
   console.log('[SendBoard]', game, item, '->', toAddr.slice(0, 24));
   return { ...res, toAddr };
 }
+
+// KV_MOD_LIFT: generic mod record (undelist) signed by the cold key; dust paid by the wallet
+export async function postModRecord(owner: OwnerKeys, k: string, head: string, kind: string, signer: { privateKeyHex: string; pubkeyHex: string }, extra?: Record<string, any>) {
+  const rec = signRecord({ v: 1, k, t: Date.now(), o: signer.pubkeyHex, d: { head, ...(extra || {}) } } as any, signer.privateKeyHex);
+  const regAddr = registryAddress(kind, owner.network);
+  const res = await sendKaspaViaRest({
+    senderAddress: owner.address, recipientAddress: regAddr, amountSompi: ANNOUNCE_SOMPI,
+    privateKeyHex: owner.privateKeyHex, network: owner.network, payload: buildPayloadHex(rec),
+  });
+  console.log('[ModRecord]', k, head.slice(0, 24), '-> registry', regAddr.slice(0, 24));
+  return { ...res, registryAddr: regAddr };
+}

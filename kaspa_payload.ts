@@ -389,6 +389,41 @@ export async function rebuildDirectory(category: string, registryAddress: string
       if (!p || (r.t || 0) > (p.t || 0)) delistByTarget.set(tgt, r);
     }
   }
+  // KV_MOD_STICKY: latest cold-key action per store address (delist / undelist), cached on device
+  const _kvModHeads = new Set<string>();
+  try {
+    const _mk = 'kv_mod_actions_' + String(registryAddress).slice(-16);
+    const _act: Record<string, { t: number; del: boolean }> = JSON.parse((await require('@react-native-async-storage/async-storage').default.getItem(_mk)) || '{}');
+    for (const a of anns) {
+      const r: any = a.record;
+      if (!r || r.o !== KV_MOD_PUBKEY || (r.k !== 'delist' && r.k !== 'undelist') || !r.d || !r.d.head || !verifyRecord(r)) continue;
+      const h = String(r.d.head); const cur = _act[h];
+      if (!cur || (r.t || 0) > cur.t) _act[h] = { t: r.t || 0, del: r.k === 'delist' };
+    }
+    await require('@react-native-async-storage/async-storage').default.setItem(_mk, JSON.stringify(_act));
+    for (const h of Object.keys(_act)) if (_act[h].del) _kvModHeads.add(h);
+  } catch {}
+  // KV_MOD_NOTE: cold-key "removed in error" acknowledgments (never reinstate), cached on device
+  const _kvModNotes = new Map<string, string>();
+  try {
+    const _nk = 'kv_mod_notes_' + String(registryAddress).slice(-16);
+    const _nn: Record<string, string> = JSON.parse((await require('@react-native-async-storage/async-storage').default.getItem(_nk)) || '{}');
+    for (const a of anns) { const r: any = a.record; if (r && r.k === 'modnote' && r.o === KV_MOD_PUBKEY && r.d && r.d.head && verifyRecord(r)) _nn[String(r.d.head)] = String(r.d.note || 'removed in error'); }
+    await require('@react-native-async-storage/async-storage').default.setItem(_nk, JSON.stringify(_nn));
+    for (const h of Object.keys(_nn)) _kvModNotes.set(h, _nn[h]);
+  } catch {}
+  // KV_STORE_DELIST_CACHE: delists survive pruning on this device (re-verified every load)
+  try {
+    const _DAS = require('@react-native-async-storage/async-storage').default;
+    const _dck = 'kv_store_delist_cache_' + String(registryAddress).slice(-16);
+    const _old: any[] = JSON.parse((await _DAS.getItem(_dck)) || '[]');
+    for (const r of _old) {
+      if (!r || r.k !== 'delist' || !r.d || !r.d.head || !verifyRecord(r)) continue;
+      const tgt = String(r.d.head); const p = delistByTarget.get(tgt);
+      if (!p || (r.t || 0) > (p.t || 0)) delistByTarget.set(tgt, r);
+    }
+    await _DAS.setItem(_dck, JSON.stringify(Array.from(delistByTarget.values())));
+  } catch {}
   // KV_KEEPERS: every distinct wallet that announced each listing in the window
   const _keepersBy = new Map<string, string[]>();
   for (const a of anns) {
@@ -418,6 +453,10 @@ export async function rebuildDirectory(category: string, registryAddress: string
     } catch {}
     if (record.del) continue;
     if (KV_PROHIBITED.indexOf(String(record.d.category || '').toLowerCase()) >= 0) continue;
+    if (_kvModHeads.has(String(record.d.storeAddress))) { // KV_MOD_STICKY: cold-key removal sticks (owner still told why)
+      try { const _md: any = delistByTarget.get(String(record.d.storeAddress)); const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map(); _g.__kvFlagInfo.set(String(record.d.storeAddress), { n: 0, reasons: [], owner: String(owner), name: String(record.d.name || ''), hidden: true, mod: true, modReason: String((_md && _md.o === KV_MOD_PUBKEY && _md.d && _md.d.reason) || 'moderator decision'), modNote: _kvModNotes.get(String(record.d.storeAddress)) || '' }); } catch {}
+      continue;
+    }
     const _dl = delistByTarget.get(String(record.d.storeAddress));
     // KV_MOD_OWNER_INFO: remember moderator removals so the owner is told why
     if (_dl && _dl.o === KV_MOD_PUBKEY && _dl.o !== owner && (_dl.t || 0) > (record.t || 0)) { try { const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map(); _g.__kvFlagInfo.set(String(record.d.storeAddress), { n: 0, reasons: [], owner: String(owner), name: String(record.d.name || ''), hidden: true, mod: true, modReason: String((_dl.d && _dl.d.reason) || 'unspecified') }); } catch {} }
@@ -551,3 +590,48 @@ export async function kvVerifyPayment(txid: string, payTo: string, network: stri
 }
 // KV_GRANTS_BOOT: saved grants are available before the Mailbox ever loads
 try { require('@react-native-async-storage/async-storage').default.getItem('kv_grants').then((v: any) => { try { if (v) (globalThis as any).__kvGrantsAll = JSON.parse(v); } catch {} }); } catch {}
+
+// KV_EVIDENCE: archive the node's own answer about a tx so it can be checked after pruning
+export async function kvFetchEvidence(txid: string, network: string = 'testnet-10'): Promise<any | null> {
+  try {
+    if (!/^[0-9a-f]{64}$/i.test(String(txid || ''))) return null;
+    const api = String(network).indexOf('testnet') >= 0 ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+    const tr = await fetch(api + '/transactions/' + txid + '?resolve_previous_outpoints=no');
+    if (!tr.ok) return null;
+    const tx: any = await tr.json();
+    const bh = Array.isArray(tx.block_hash) ? tx.block_hash[0] : tx.block_hash;
+    const ah = tx.accepting_block_hash;
+    if (!bh || !ah) return null; // not accepted yet - try again later
+    const br = await fetch(api + '/blocks/' + bh + '?includeTransactions=true');
+    const blk: any = br.ok ? await br.json() : null;
+    const ar = await fetch(api + '/blocks/' + ah + '?includeTransactions=false');
+    const acc: any = ar.ok ? await ar.json() : null;
+    if (!blk || !acc) return null;
+    const ids: string[] = (blk.verboseData && blk.verboseData.transactionIds) || (blk.transactions || []).map((t: any) => t && t.verboseData && t.verboseData.transactionId).filter(Boolean);
+    const hashes: string[] = (blk.transactions || []).map((t: any) => t && t.verboseData && t.verboseData.hash).filter(Boolean);
+    return {
+      v: 1, network, txid, sealedAt: Date.now(),
+      tx,
+      block: { hash: bh, header: blk.header || null, txIds: ids, txHashes: hashes, includesTx: ids.indexOf(txid) >= 0 },
+      accepting: { hash: ah, header: acc.header || null, verbose: acc.verboseData ? { blueScore: acc.verboseData.blueScore, selectedParentHash: acc.verboseData.selectedParentHash } : null },
+    };
+  } catch { return null; }
+}
+
+export async function kvSealEvidence(network: string = 'testnet-10'): Promise<{ sealed: number; pending: number }> {
+  let sealed = 0, pending = 0;
+  try {
+    const AS = require('@react-native-async-storage/async-storage').default;
+    const want: string[] = [];
+    try { for (const e of JSON.parse((await AS.getItem('kv_sales_log')) || '[]')) if (e && e.grantTx) want.push(String(e.grantTx)); } catch {}
+    try { const sr = require('./stat_records'); for (const r of (await sr.loadChain()) || []) if (r && r.anchor && r.anchor.releaseTxId) want.push(String(r.anchor.releaseTxId)); } catch {}
+    for (const t of Array.from(new Set(want))) {
+      if (await AS.getItem('kv_evidence_' + t)) continue;
+      const ev = await kvFetchEvidence(t, network);
+      if (ev) { await AS.setItem('kv_evidence_' + t, JSON.stringify(ev)); sealed++; } else pending++;
+    }
+    if (sealed || pending) console.log('[Evidence] sealed ' + sealed + ', pending ' + pending + ' (pending = not accepted yet, or already pruned)');
+  } catch (e) { console.warn('[Evidence]', e); }
+  return { sealed, pending };
+}
+try { setTimeout(() => { kvSealEvidence().catch(() => {}); }, 20000); } catch {}

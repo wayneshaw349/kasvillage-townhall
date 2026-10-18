@@ -141,10 +141,12 @@ export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<St
         const msgs: string[] = [];
         for (const [h, fi] of (g.__kvFlagInfo || new Map())) {
           if (!fi || fi.owner !== me) continue;
-          const key = fi.n + (fi.hidden ? ':h' : '') + (fi.mod ? ':m' : ''); // KV_MOD_OWNER_WARN
+          const key = fi.n + (fi.hidden ? ':h' : '') + (fi.mod ? ':m' : '') + (fi.modNote ? ':e' : ''); // KV_MOD_OWNER_WARN KV_MOD_NOTE_WARN
           if (seen[h] === key) continue;
           seen[h] = key;
-          msgs.push(fi.mod
+          msgs.push(fi.mod && fi.modNote
+            ? '"' + fi.name + '" was removed by the moderator - and the moderator has publicly acknowledged it was an ERROR. The removal is final for that store, so open a new store; your record shows the error was not yours.'
+            : fi.mod
             ? '"' + fi.name + '" was removed by the moderator. Reason: ' + (fi.modReason === 'legal' ? 'legal request' : fi.modReason) + '. The reason and an evidence hash are public on the Kaspa chain.'
             : fi.hidden
             ? '"' + fi.name + '" was delisted by ' + fi.n + ' community flags (' + fi.reasons.join(', ') + '). Flags expire with chain pruning (~30-40h); fix the issue before re-announcing.'

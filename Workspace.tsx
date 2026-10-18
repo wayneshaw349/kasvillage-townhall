@@ -895,6 +895,51 @@ const KvChainGamePublish: React.FC = () => {
       }, gameId);
     });
   };
+  // KV_MOD_NOTE_UI: cold-key "removed in error" note (does not reinstate)
+  const modErrorNote = () => {
+    const kvP = require('./kv_prompt').kvPrompt;
+    kvP('Moderator error note - target', 'Store address (kaspatest:...) or game head of the listing you removed by mistake.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Next', onPress: (head: string) => {
+      head = String(head || '').trim(); if (!/^kaspa(test)?:[a-z0-9]{40,}$/.test(head) && !/^[0-9a-f]{64}$/i.test(head)) { Alert.alert('Bad target', 'Paste the full store address or the 64-hex game head.'); return; }
+      setTimeout(() => kvP('Registry', 'store (stores, services, academics), dapp, or game', [{ text: 'Next', onPress: (kind: string) => {
+        kind = /game/i.test(String(kind || '')) ? 'game' : /dapp/i.test(String(kind || '')) ? 'dapp' : 'store';
+        setTimeout(() => kvP('Cold mod key', 'The removal stays final. This only publishes that it was a moderator error. Key used once, never stored.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Post note', onPress: async (t: string) => {
+          try {
+            const k = String(t || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase();
+            const mp = bytesToHex(secp256k1.getPublicKey(hexToBytes(k), true));
+            if (mp !== '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4') { Alert.alert('Wrong key', 'That key does not match the moderation public key.'); return; }
+            const { _kvResolvePrivHex } = require('./proposal_share');
+            const priv = await _kvResolvePrivHex(); if (!priv || !myAddr) throw new Error('wallet keys unavailable');
+            const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+            const { postModRecord } = require('./payload_publish');
+            const r: any = await postModRecord({ privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: 'testnet-10' as any }, 'modnote', head, kind, { privateKeyHex: k, pubkeyHex: mp }, { note: 'removed in error' });
+            if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
+            Alert.alert('Error note posted', 'The removal stays final. The owner is told it was a moderator error.');
+          } catch (e: any) { Alert.alert('Note failed', String((e && e.message) || e)); }
+        } }], 'secure-text'), 450);
+      } }], 'plain-text', 'store'), 450);
+    } }], 'plain-text');
+  };
+  // KV_SALES_EXPORT: signed sales report for publishers / studios
+  const exportSales = async () => {
+    try {
+      const kp = require('./kaspa_payload');
+      gadd('sealing proofs\u2026');
+      const sr: any = await kp.kvSealEvidence('testnet-10');
+      const _AS4 = require('@react-native-async-storage/async-storage').default;
+      const log: any[] = JSON.parse((await _AS4.getItem('kv_sales_log')) || '[]');
+      const sales: any[] = [];
+      for (const e of log) { let ev = null; try { ev = JSON.parse((await _AS4.getItem('kv_evidence_' + e.grantTx)) || 'null'); } catch {} sales.push({ ...e, evidence: ev }); }
+      const { _kvResolvePrivHex } = require('./proposal_share');
+      const priv = await _kvResolvePrivHex();
+      if (!priv) throw new Error('wallet key unavailable');
+      const { schnorr } = require('@noble/curves/secp256k1');
+      const body = { v: 1, kind: 'kasvillage-sales', network: 'testnet-10', devPub: bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true)), generatedAt: Date.now(), count: sales.length, buyers: Array.from(new Set(sales.map((x: any) => x.buyer))).length, sales };
+      const msg = sha256(new TextEncoder().encode(JSON.stringify(body)));
+      const report = { ...body, sig: bytesToHex(schnorr.sign(msg, hexToBytes(priv))) };
+      gadd('sales export: ' + sales.length + ' deliveries, ' + body.buyers + ' unique buyers, ' + sales.filter((x: any) => x.evidence).length + ' with sealed evidence (' + sr.pending + ' pending)');
+      await require('react-native').Share.share({ message: JSON.stringify(report) });
+    } catch (e: any) { Alert.alert('Export failed', String((e && e.message) || e)); }
+  };
   const runDelist = async (gameId: string) => {
     if (gbusy) return;
     const entry = GAMES[gameId];
@@ -1165,6 +1210,8 @@ const KvChainGamePublish: React.FC = () => {
                 {(() => { const { KvPromptHost } = require('./kv_prompt'); return <KvPromptHost />; })()}
                 <TouchableOpacity onPress={() => runSendBoard(id)} style={{ borderWidth: 1, borderColor: '#16a34a', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#16a34a', fontWeight: '700', fontSize: 11 }}>SEND BOARD</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => setUnlisted(!unlisted)} style={{ borderWidth: 1, borderColor: unlisted ? '#b45309' : '#a8a29e', backgroundColor: unlisted ? '#fef3c7' : 'transparent', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: unlisted ? '#b45309' : '#78716c', fontWeight: '700', fontSize: 11 }}>{unlisted ? 'UNLISTED \u2713' : 'UNLISTED'}</Text></TouchableOpacity>
+                <TouchableOpacity onPress={modErrorNote} style={{ borderWidth: 1, borderColor: '#b91c1c', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#b91c1c', fontWeight: '700', fontSize: 11 }}>MOD: ERROR NOTE</Text></TouchableOpacity>
+                <TouchableOpacity onPress={exportSales} style={{ borderWidth: 1, borderColor: '#7c3aed', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#7c3aed', fontWeight: '700', fontSize: 11 }}>EXPORT SALES</Text></TouchableOpacity>
                 <TouchableOpacity onPress={setMyContact} style={{ borderWidth: 1, borderColor: '#64748b', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#64748b', fontWeight: '700', fontSize: 11 }}>MY CONTACT</Text></TouchableOpacity>
                 <TouchableOpacity key={id + '-del'} disabled={!!gbusy} onPress={() => runDelist(id)}
           style={{ backgroundColor: '#2d1a1a', borderWidth: 1, borderColor: '#b14b4b', borderRadius: 8, padding: 10, marginBottom: 6 }}>

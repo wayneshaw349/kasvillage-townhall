@@ -824,6 +824,7 @@ export default function VillageMailbox() {
             let r: any = (input && input.record) ? input.record : input;
             if (r && !r.k && typeof r.payload === 'string') { try { const raw = h2s(r.payload); r = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw); } catch { return null; } }
             // KV_GAME_FLAGS: delists + flags must carry a valid signature (no forged owner/mod keys)
+            if (r && r.k === 'undelist' && r.d && r.d.head) { try { if (typeof kp.verifyRecord === 'function' && !kp.verifyRecord(r)) return null; } catch { return null; } return { undelist: true, head: String(r.d.head), t: r.t || 0, o: r.o || '' }; } // KV_MOD_STICKY_GAMES
             if (r && (r.k === 'delist' || r.k === 'flag') && typeof kp.verifyRecord === 'function') { try { if (!kp.verifyRecord(r)) return null; } catch { return null; } }
             if (r && r.k === 'grant' && r.d && r.d.game && r.d.to) { try { if (typeof kp.verifyRecord === 'function' && !kp.verifyRecord(r)) return null; } catch { return null; } return { grant: true, rec: r }; } // KV_GRANTS_LANE
             if (r && r.k === 'flag' && r.d && r.d.head) return { flag: true, head: String(r.d.head), reason: String(r.d.reason || ''), t: r.t || 0, o: r.o || '' };
@@ -840,10 +841,13 @@ export default function VillageMailbox() {
           const delistByHead = new Map<string, any>();
           const flagsByHead = new Map<string, Map<string, string>>(); // head -> flagger -> reason
           const grantRecs: any[] = [];
+          const modHeadsG = new Map<string, number>(); const modLiftG = new Map<string, number>();
           const take = (it: any) => {
             if (!it) return;
             if (it.grant) { grantRecs.push(it.rec); return; }
             if (it.flag) { let m = flagsByHead.get(it.head); if (!m) { m = new Map(); flagsByHead.set(it.head, m); } m.set(String(it.o), it.reason); return; }
+            if (it.undelist) { if (it.o === KV_MOD_PUBKEY) modLiftG.set(it.head, Math.max(modLiftG.get(it.head) || 0, it.t)); return; }
+            if (it.delist && it.o === KV_MOD_PUBKEY) modHeadsG.set(it.head, Math.max(modHeadsG.get(it.head) || 0, it.t));
             if (it.delist) { const p = delistByHead.get(it.head); if (!p || it.t > p.t) delistByHead.set(it.head, it); return; }
             const prev = byHead.get(it.quad.head); if (!prev || it.t > prev.t) byHead.set(it.quad.head, it);
           };
@@ -976,6 +980,14 @@ export default function VillageMailbox() {
               else _g.__kvFlagInfo.delete(h);
             }
           } catch (e) { console.warn('[GamesLane] flag tally error', e); }
+          // KV_MOD_STICKY games: cold-key delists stick to the head; only a cold-key undelist lifts
+          try {
+            const _ga: any = JSON.parse((await AS.getItem('kv_game_mod_actions')) || '{}');
+            for (const [h, t] of modHeadsG) if (!_ga[h] || t > _ga[h].t) _ga[h] = { t, del: true };
+            for (const [h, t] of modLiftG) if (!_ga[h] || t > _ga[h].t) _ga[h] = { t, del: false };
+            await AS.setItem('kv_game_mod_actions', JSON.stringify(_ga));
+            for (const h of Object.keys(_ga)) if (_ga[h].del && byHead.has(h)) { byHead.delete(h); console.log('[GamesLane] mod-removed (sticky) ' + h.slice(0, 8)); }
+          } catch {}
           const items = Array.from(byHead.values()).filter((it: any) => {
             const d = delistByHead.get(it.quad.head);
             if (!d) return true;
@@ -1216,14 +1228,21 @@ export default function VillageMailbox() {
       const _KV_MOD = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
       const _modFlow = (_mPriv: string, _mPub: string) => { // KV_COLD_MOD
         const _head = String(entry.arweaveTx || entry.id);
-        const _fin = async (reason: string, note: string) => {
+        const _fin = (reason: string, note: string) => { // KV_MOD_CONFIRM: type DELIST before the cold key signs
+          setTimeout(() => require('./kv_prompt').kvPrompt('Confirm moderator delist',
+            'Store: ' + String(entry.title || entry.name || '(untitled)') + '\nAddress: ' + _head + '\nOwner: ' + String(entry.ownerPubkey || '?').slice(0, 20) + '\u2026\nReason: ' + reason + '\n\nFINAL for this address - it cannot be undone. Type DELIST to confirm.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Confirm', style: 'destructive', onPress: (t: string) => { if (String(t || '').trim().toUpperCase() !== 'DELIST') { Alert.alert('Not confirmed', 'Nothing was posted.'); return; } setTimeout(() => _finGo(reason, note), 400); } },
+          ], 'plain-text'), 450);
+        };
+        const _finGo = async (reason: string, note: string) => {
           try {
             const { utf8ToBytes } = require('@noble/hashes/utils');
             let _sha: any; try { _sha = require('@noble/hashes/sha256').sha256; } catch (_) { _sha = require('@noble/hashes/sha2').sha256; }
             const pre = JSON.stringify({ head: _head, reason, note: note || '', title: String(entry.title || entry.name || ''), owner: String(entry.ownerPubkey || ''), t: Date.now() });
             const evidenceHash = bytesToHex(_sha(utf8ToBytes(pre)));
             const { delistFromRegistry } = require('./payload_publish');
-            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, _head, kind, { reason, evidenceHash, mod: 1 }, { privateKeyHex: _mPriv, pubkeyHex: _mPub });
+            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, _head, kind, { reason, evidenceHash, mod: 1, owner: String(entry.ownerPubkey || '') }, { privateKeyHex: _mPriv, pubkeyHex: _mPub });
             if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
             try {
               const AS = require('@react-native-async-storage/async-storage').default;
