@@ -228,3 +228,38 @@ export function reasonMessage(reason?: string): string {
     default: return 'This content did not pass review.';
   }
 }
+
+// KV_FILTER_STRICT: extra reader-side rules on top of scanObject (word-boundary, leet-normalized)
+const KV_LEET: Record<string, string> = { '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', '$': 's', '!': 'i' };
+function kvNormalize(t: string): string {
+  return String(t || '').toLowerCase().replace(/[013457@$!]/g, (c) => KV_LEET[c] || c).replace(/[^a-z0-9\s]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+const KV_STRICT_RULES: Array<[string, RegExp]> = [
+  ['adult', /\b(porn|porno|xxx|nsfw|escort service|escorts|hookup|nude pics|sex cam|cam girl|onlyfans leak)\b/],
+  ['weapons', /\b(ghost gun|auto sear|glock switch|unregistered (firearm|gun)s?|untraceable (firearm|gun)s?|explosives for sale|buy explosives|pipe bomb|grenades?|full auto conversion)\b/],
+  ['scam', /\b(send \d+(\.\d+)? ?kas get \d+|double your (kas|crypto|money)|guaranteed (returns?|profit)|seed phrase|recovery phrase|private key|airdrop claim|giveaway send)\b/],
+  ['illegal_trade', /\b(cocaine|coke|heroin|meth|crystal meth|fentanyl|mdma|ecstasy|molly|xanax|oxy|oxycodone|percocet|percs|ketamine|lsd|shrooms)\b[^.!?]{0,25}\b(deals?|plug|menu|connect|wholesale|by the (gram|oz|ounce|pound)|grams?|zips?)\b/],
+  ['gambling', /\b(casino|sportsbook|roulette|sports betting|bet now|online betting|slot machines?|lottery tickets?)\b/],
+];
+function kvWalkStrings(o: any, path: string, out: Array<[string, string]>, depth: number = 0) {
+  if (depth > 8 || o == null) return;
+  if (typeof o === 'string') { out.push([path, o]); return; }
+  if (Array.isArray(o)) { o.forEach((v, i) => kvWalkStrings(v, path + '[' + i + ']', out, depth + 1)); return; }
+  if (typeof o === 'object') for (const k of Object.keys(o)) kvWalkStrings(o[k], path + '.' + k, out, depth + 1);
+}
+export function scanObjectStrict(obj: any): any {
+  const base: any = scanObject(obj);
+  if (!base || base.ok === false) return base;
+  const strs: Array<[string, string]> = [];
+  kvWalkStrings(obj, '', strs);
+  for (const [p, s] of strs) {
+    const n = kvNormalize(s);
+    if (n !== String(s).toLowerCase()) {
+      try { const r2: any = (scanText as any)(n); if (r2 && r2.ok === false) return { ...r2, path: p, leet: true }; } catch {}
+    }
+    const raw = String(s).toLowerCase().replace(/\s+/g, ' '); // keeps digits (leet map would turn 100 into ioo)
+    const nL = kvNormalize(String(s).replace(/1/g, 'l')); // '1' can stand for l as well as i
+    for (const [reason, re] of KV_STRICT_RULES) if (re.test(n) || re.test(nL) || re.test(raw)) return { ok: false, reason, path: p };
+  }
+  return base;
+}

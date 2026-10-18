@@ -1444,7 +1444,7 @@ export default function VillageMailbox() {
             // KV_CFG_RETRY: one retry - a transient API miss must not read as "not on-chain"
             if (!config) { await new Promise((r) => setTimeout(r, 1500)); const _r2: any = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined); if (_r2 && _r2.config) { config = _r2.config; _cfgErr = _r2.error; } }
             // KV_CFG_SCAN: config chunks (products, coupons, description) never render unscanned
-            try { if (config) { const { scanObject } = require('./content_filter'); const _sc = scanObject(config); if (!_sc.ok) { console.warn('[Mailbox] store config BLOCKED:', _sc.reason, 'at', _sc.path); setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config: null, loading: false } : sv); return; } } } catch {}
+            try { if (config) { const _cfm = require('./content_filter'); const scanObject = _cfm.scanObjectStrict || _cfm.scanObject; const _sc = scanObject(config); if (!_sc.ok) { console.warn('[Mailbox] store config BLOCKED:', _sc.reason, 'at', _sc.path); setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config: null, loading: false } : sv); return; } } } catch {}
             console.log('[Mailbox] cfg fetch result:', config ? 'OK brand=' + config.brandName : 'NULL err=' + _cfgErr);
             setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config, loading: false } : sv);
           } catch (e) {

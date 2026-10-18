@@ -477,7 +477,7 @@ export async function rebuildDirectory(category: string, registryAddress: string
       else _g.__kvFlagInfo.delete(_hk);
     } catch {}
     // KV_DISPLAY_SCAN: reader-side text scan - announce fields never render unscanned
-    try { const { scanObject } = require('./content_filter'); const _sc = scanObject({ n: record.d.name, c: record.d.category, l: record.d.primaryLink }); if (!_sc.ok) { console.warn('[Directory] entry BLOCKED:', _sc.reason, String(record.d.name || '').slice(0, 24)); continue; } } catch {}
+    try { const _cfm = require('./content_filter'); const scanObject = _cfm.scanObjectStrict || _cfm.scanObject; const _sc = scanObject({ n: record.d.name, c: record.d.category, l: record.d.primaryLink }); if (!_sc.ok) { console.warn('[Directory] entry BLOCKED:', _sc.reason, String(record.d.name || '').slice(0, 24)); continue; } } catch {}
     let pledge = 0n;
     try { pledge = await getPledgeSompi(record.d.storeAddress, network); } catch {}
     if (pledge === 0n) continue; // anchor spent = pledge withdrawn = delisted
