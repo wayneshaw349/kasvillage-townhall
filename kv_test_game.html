@@ -1,0 +1,13 @@
+﻿<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tap Rush</title>
+<style>body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#141022;color:#f0e6ff;font-family:system-ui}
+#b{width:180px;height:180px;border-radius:50%;border:0;background:#7c5cff;color:#fff;font-size:28px;font-weight:800}
+#s{font-size:22px;margin:18px}#t{opacity:.7}</style></head>
+<body><div id="t">Tap Rush - board 1 (free)</div><div id="s">0 taps</div><button id="b">TAP</button>
+<script>
+var n=0,best=+(localStorage.getItem('tr_best')||0);
+var owned=((window.KV_GRANTS||{})['tap-rush'])||[];
+document.getElementById('t').textContent='Tap Rush - board 1 (free)'+(owned.indexOf('board2')>=0?' + board 2 unlocked':'');
+document.getElementById('b').onclick=function(){n++;if(n>best){best=n;localStorage.setItem('tr_best',best);}document.getElementById('s').textContent=n+' taps (best '+best+')';};
+</script></body></html>
