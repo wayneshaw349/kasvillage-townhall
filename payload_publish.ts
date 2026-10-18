@@ -330,3 +330,22 @@ export async function grantAccess(dev: OwnerKeys, toPub: string, game: string, i
   console.log('[Grant]', game, item, '->', toPub.slice(0, 12), 'txid', String(txid).slice(0, 10));
   return { ...res, registryAddr: regAddr };
 }
+
+// KV_SEND_BOARD: deliver a board privately - rebate dust to the buyer's address + render instructions
+export async function sendBoard(dev: OwnerKeys, toPub: string, game: string, item: string, quad: any, proof: string = '') {
+  const { deriveAddress } = require('./canonical_agreement_steps');
+  const xo = String(toPub || '').replace(/^0[23]/, '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(xo)) throw new Error('bad buyer pubkey');
+  const toAddr = deriveAddress(xo, dev.network as any);
+  const rec = signRecord({ v: 1, k: 'grant', t: Date.now(), o: dev.pubkeyHex, d: { game, item, to: toPub, quad, txid: proof } } as any, dev.privateKeyHex);
+  const res: any = await sendKaspaViaRest({
+    senderAddress: dev.address,
+    recipientAddress: toAddr,
+    amountSompi: REPOST_SOMPI,
+    privateKeyHex: dev.privateKeyHex,
+    network: dev.network,
+    payload: buildPayloadHex(rec),
+  });
+  console.log('[SendBoard]', game, item, '->', toAddr.slice(0, 24));
+  return { ...res, toAddr };
+}

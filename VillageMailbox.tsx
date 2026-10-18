@@ -920,6 +920,48 @@ export default function VillageMailbox() {
               if (changed) { _g.__kvGrantsAll = all; await AS.setItem('kv_grants', JSON.stringify(all)); await AS.setItem('kv_purchase_proofs', JSON.stringify(proofs)); }
             }
           } catch (e) { console.warn('[Grants]', e); }
+          // KV_RECEIVED_BOARDS: private boards sent to THIS wallet's own address
+          try {
+            const _g: any = globalThis as any; const me = _g.__kvMyPub;
+            const _SS = require('expo-secure-store');
+            const myAddr = (await _SS.getItemAsync('kv_kaspa_address')) || (await _SS.getItemAsync('kaspa_address'));
+            const recv: any[] = JSON.parse((await AS.getItem('kv_received_boards')) || '[]');
+            if (me && myAddr) {
+              const fetchR2 = kp.fetchRecords || kp.fetchPayloadRecords || kp.fetchAddressRecords;
+              const mine: any[] = (await fetchR2(myAddr, 'testnet-10', 50, 2)) || [];
+              let ch = false;
+              for (const row of mine) {
+                const pa: any = parseAnn(row); if (!pa || !pa.grant) continue;
+                const r: any = pa.rec; const d: any = r.d || {};
+                if (String(d.to) !== me || !d.quad || !d.quad.head || !d.quad.manifestAddress) continue;
+                let impostor = false;
+                for (const it of byHead.values()) if (it.quad && String(it.quad.game) === String(d.game) && String(it.o) !== String(r.o)) impostor = true;
+                if (impostor) { console.warn('[Received] ignored - ' + d.game + ' is published by a different key'); continue; }
+                const item = String(d.item || d.game);
+                if (recv.some((x: any) => x.quad.head === d.quad.head && x.item === item)) continue;
+                // KV_RECEIVED_ACCEPT: known sender = publishes a public game here, or completed a FROST agreement with you
+                let known = false;
+                for (const it of byHead.values()) if (it.quad && !it.received && String(it.o) === String(r.o)) known = true;
+                if (!known) { try { const _sr = require('./stat_records'); const _ch: any[] = await _sr.loadChain(); const _xo = (k: string) => String(k || '').replace(/^0[23]/, '').toLowerCase(); known = (_ch || []).some((c: any) => c.outcome === 'complete' && _xo(c.cpPubkey) === _xo(String(r.o))); } catch {} }
+                recv.push({ game: String(d.game), item, quad: d.quad, dev: String(r.o), proof: String(d.txid || ''), t: r.t || Date.now(), status: known ? 'accepted' : 'pending' });
+                if (known) { const all: any = _g.__kvGrantsAll || (_g.__kvGrantsAll = {}); const l = all[d.game] || (all[d.game] = []); if (l.indexOf(item) < 0) l.push(item); }
+                ch = true;
+                console.log('[Received] board ' + d.game + '/' + item + ' from ' + String(r.o).slice(0, 12));
+              }
+              if (ch) { await AS.setItem('kv_received_boards', JSON.stringify(recv)); await AS.setItem('kv_grants', JSON.stringify(_g.__kvGrantsAll || {})); }
+            }
+            const pend: any = recv.find((x: any) => x.status === 'pending');
+            if (pend && _g.__kvPendingShown !== pend.quad.head) {
+              _g.__kvPendingShown = pend.quad.head;
+              const _save = async () => { try { await AS.setItem('kv_received_boards', JSON.stringify(recv)); } catch {} };
+              setTimeout(() => require('./kv_prompt').kvChoose('Board received', String(pend.dev).slice(0, 12) + '\u2026 sent you "' + pend.item + '" for ' + pend.game + '. You have not traded with this sender. Show it?', [
+                { text: 'Accept', onPress: async () => { pend.status = 'accepted'; const all: any = _g.__kvGrantsAll || (_g.__kvGrantsAll = {}); const l = all[pend.game] || (all[pend.game] = []); if (l.indexOf(pend.item) < 0) l.push(pend.item); await _save(); try { await AS.setItem('kv_grants', JSON.stringify(all)); } catch {} _g.__kvPendingShown = null; Alert.alert('Accepted', 'Pull to refresh Games to see it.'); } },
+                { text: 'Ignore', style: 'cancel', onPress: async () => { pend.status = 'ignored'; await _save(); _g.__kvPendingShown = null; } },
+                { text: 'Report', style: 'destructive', onPress: async () => { pend.status = 'ignored'; await _save(); _g.__kvPendingShown = null; const f = _g.__kvRunFlag; if (f) f({ arweaveTx: String(pend.quad.head), id: String(pend.quad.head), ownerPubkey: pend.dev, name: pend.game + ' ' + pend.item }, 'game'); } },
+              ]), 800);
+            }
+            for (const rb of recv) { if (rb.status === 'pending' || rb.status === 'ignored') continue; const h = String(rb.quad.head); if (!byHead.has(h)) byHead.set(h, { name: rb.game + ' \u00b7 ' + rb.item + ' (received)', category: 'Game', t: rb.t, o: rb.dev, quad: rb.quad, received: true }); }
+          } catch (e) { console.warn('[Received]', e); }
           // KV_GAME_FLAGS tally: 3 qualified flaggers (pledge or settled trade, not the owner) = hidden
           try {
             const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map();

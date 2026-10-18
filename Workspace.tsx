@@ -874,6 +874,27 @@ const KvChainGamePublish: React.FC = () => {
       });
     });
   };
+  // KV_SEND_BOARD_UI
+  const [unlisted, setUnlisted] = useState(false);
+  (globalThis as any).__kvUnlisted = unlisted;
+  const runSendBoard = (gameId: string) => {
+    const kvP = require('./kv_prompt').kvPrompt;
+    const ask = (title: string, msg: string, next: (v: string) => void, def: string = '') => kvP(title, msg, [{ text: 'Cancel', style: 'cancel' }, { text: 'Next', onPress: (t: string) => next(String(t || '').trim()) }], 'plain-text', def);
+    ask('Send board - buyer pubkey', 'The buyer\'s pubkey from their message (66 hex, starts 02 or 03).', (to) => {
+      to = to.toLowerCase().replace(/[^0-9a-f]/g, '');
+      if (!/^0[23][0-9a-f]{64}$/.test(to)) { Alert.alert('Bad pubkey', 'A pubkey is 66 hex characters starting with 02 or 03.'); return; }
+      ask('Send board - name', 'What the buyer sees, e.g. board2', (item) => {
+        if (!item) return;
+        ask('Send board - payment proof (optional)', 'txid or AGR_ agreement ID for your sales record. Leave blank for a free gift.', (proof) => {
+          const pr = /^AGR_[A-Za-z0-9]+$/.test(proof) ? proof : proof.toLowerCase().replace(/[^0-9a-f]/g, '');
+          Alert.alert('Send ' + item + '?', gameId + ' -> ' + to.slice(0, 12) + '\u2026\nPrivate delivery (0.1 KAS to the buyer). Not announced publicly.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Send', onPress: async () => { (globalThis as any).__kvSendTo = { toPub: to, item, proof: pr }; try { await runAnnounceOnly(gameId); } finally { (globalThis as any).__kvSendTo = null; } } },
+          ]);
+        });
+      }, gameId);
+    });
+  };
   const runDelist = async (gameId: string) => {
     if (gbusy) return;
     const entry = GAMES[gameId];
@@ -953,6 +974,28 @@ const KvChainGamePublish: React.FC = () => {
       const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
       try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
       gadd('announcing to game registry…');
+      // KV_SEND_GATE: SEND BOARD delivers privately; UNLISTED skips the public announce
+      if ((globalThis as any).__kvSendTo || (globalThis as any).__kvUnlisted) {
+        const _st: any = (globalThis as any).__kvSendTo;
+        (globalThis as any).__kvSendTo = null;
+        if (_st) {
+          gadd('SEND BOARD (private) -> ' + String(_st.toPub).slice(0, 12) + '\u2026');
+          const { sendBoard } = require('./payload_publish');
+          const _sb: any = await sendBoard(owner, _st.toPub, gameId, _st.item, quad, _st.proof || '');
+          if (_sb && _sb.success !== false) {
+            gadd('board delivered to ' + String(_sb.toAddr).slice(0, 24) + '\u2026 (0.1 KAS rebate + render instructions)');
+            try {
+              const _AS3 = require('@react-native-async-storage/async-storage').default;
+              const _lg = JSON.parse((await _AS3.getItem('kv_sales_log')) || '[]');
+              const _hx = (t: string) => bytesToHex(sha256(new TextEncoder().encode(t)));
+              _lg.push({ game: gameId, item: _st.item, buyer: _hx(String(_st.toPub)), grantTx: String(_sb.txid || _sb.transactionId || ''), proof: _st.proof || '', head: quad.head, t: Date.now() });
+              await _AS3.setItem('kv_sales_log', JSON.stringify(_lg));
+              gadd('sales log: ' + _lg.length + ' deliveries total');
+            } catch {}
+          } else gadd('send failed: ' + String((_sb && _sb.error) || 'unknown'));
+        } else gadd('UNLISTED - published but NOT announced. Use SEND BOARD to deliver it.');
+        setGbusy(''); return;
+      }
       const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: manifestHash } as any);
       if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '… (~1 KAS)');
       else gadd('announce failed: ' + String((_ann && _ann.error) || 'unknown'));
@@ -1032,6 +1075,28 @@ const KvChainGamePublish: React.FC = () => {
         const { announceToRegistry } = require('./payload_publish');
         const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
         try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
+        // KV_SEND_GATE: SEND BOARD delivers privately; UNLISTED skips the public announce
+        if ((globalThis as any).__kvSendTo || (globalThis as any).__kvUnlisted) {
+          const _st: any = (globalThis as any).__kvSendTo;
+          (globalThis as any).__kvSendTo = null;
+          if (_st) {
+            gadd('SEND BOARD (private) -> ' + String(_st.toPub).slice(0, 12) + '\u2026');
+            const { sendBoard } = require('./payload_publish');
+            const _sb: any = await sendBoard(owner, _st.toPub, gameId, _st.item, quad, _st.proof || '');
+            if (_sb && _sb.success !== false) {
+              gadd('board delivered to ' + String(_sb.toAddr).slice(0, 24) + '\u2026 (0.1 KAS rebate + render instructions)');
+              try {
+                const _AS3 = require('@react-native-async-storage/async-storage').default;
+                const _lg = JSON.parse((await _AS3.getItem('kv_sales_log')) || '[]');
+                const _hx = (t: string) => bytesToHex(sha256(new TextEncoder().encode(t)));
+                _lg.push({ game: gameId, item: _st.item, buyer: _hx(String(_st.toPub)), grantTx: String(_sb.txid || _sb.transactionId || ''), proof: _st.proof || '', head: quad.head, t: Date.now() });
+                await _AS3.setItem('kv_sales_log', JSON.stringify(_lg));
+                gadd('sales log: ' + _lg.length + ' deliveries total');
+              } catch {}
+            } else gadd('send failed: ' + String((_sb && _sb.error) || 'unknown'));
+          } else gadd('UNLISTED - published but NOT announced. Use SEND BOARD to deliver it.');
+          setGbusy(''); return;
+        }
         const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: res.manifestHash } as any);
         if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '…');
         else gadd('announce failed (game still live): ' + String((_ann && _ann.error) || 'unknown'));
@@ -1098,6 +1163,8 @@ const KvChainGamePublish: React.FC = () => {
         </TouchableOpacity>
         <TouchableOpacity onPress={() => runGrant(id)} style={{ borderWidth: 1, borderColor: '#0891b2', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#0891b2', fontWeight: '700', fontSize: 11 }}>GRANT</Text></TouchableOpacity>
                 {(() => { const { KvPromptHost } = require('./kv_prompt'); return <KvPromptHost />; })()}
+                <TouchableOpacity onPress={() => runSendBoard(id)} style={{ borderWidth: 1, borderColor: '#16a34a', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#16a34a', fontWeight: '700', fontSize: 11 }}>SEND BOARD</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => setUnlisted(!unlisted)} style={{ borderWidth: 1, borderColor: unlisted ? '#b45309' : '#a8a29e', backgroundColor: unlisted ? '#fef3c7' : 'transparent', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: unlisted ? '#b45309' : '#78716c', fontWeight: '700', fontSize: 11 }}>{unlisted ? 'UNLISTED \u2713' : 'UNLISTED'}</Text></TouchableOpacity>
                 <TouchableOpacity onPress={setMyContact} style={{ borderWidth: 1, borderColor: '#64748b', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#64748b', fontWeight: '700', fontSize: 11 }}>MY CONTACT</Text></TouchableOpacity>
                 <TouchableOpacity key={id + '-del'} disabled={!!gbusy} onPress={() => runDelist(id)}
           style={{ backgroundColor: '#2d1a1a', borderWidth: 1, borderColor: '#b14b4b', borderRadius: 8, padding: 10, marginBottom: 6 }}>
