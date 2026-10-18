@@ -2113,7 +2113,8 @@ static CONTENT_PATTERNS: Lazy<Vec<(Regex, &'static str, Severity)>> = Lazy::new(
     vec![
         (Regex::new(r"(?i)\bseed\s*phrase\b").unwrap(), "seed_phrase", Severity::Critical),
         (Regex::new(r"(?i)\brecovery\s*phrase\b").unwrap(), "recovery_phrase", Severity::Critical),
-        (Regex::new(r"(?i)\bmnemonic\b").unwrap(), "mnemonic", Severity::Critical),
+        (Regex::new(r"(?i)\bmnemonic\s+(phrase|words?|seed|code|backup)\b").unwrap(), "mnemonic", Severity::Critical),
+        (Regex::new(r"(?i)\b(enter|type|paste|submit|share|send)\s+(your\s+|the\s+)?mnemonic\b").unwrap(), "mnemonic_solicit", Severity::Critical),
         (Regex::new(r"(?i)\bprivate\s*key\b").unwrap(), "private_key_text", Severity::Critical),
         (Regex::new(r"(?i)\bwallet\s*(password|pin|passphrase)\b").unwrap(), "wallet_credential", Severity::Critical),
         (Regex::new(r"(?i)\benter\s+your\s+(key|phrase|password|pin)\b").unwrap(), "credential_solicit", Severity::Critical),
@@ -2127,6 +2128,13 @@ static CONTENT_PATTERNS: Lazy<Vec<(Regex, &'static str, Severity)>> = Lazy::new(
         (Regex::new(r"(?i)\bi\s+will\s+(kill|hurt|find|rape)\s+you\b").unwrap(), "directed_threat", Severity::Critical),
         (Regex::new(r"(?i)\b(child|kid|minor|underage|preteen|toddler|infant|schoolgirl|schoolboy|loli|shota)\b[^.!?]{0,40}\b(sex|sexual|nude|naked|porn|erotic|rape|molest|strip)\b").unwrap(), "child_safety", Severity::Critical),
         (Regex::new(r"(?i)\b(sex|sexual|nude|naked|porn|erotic|rape|molest|strip)\b[^.!?]{0,40}\b(child|kid|minor|underage|preteen|toddler|infant|schoolgirl|schoolboy|loli|shota)\b").unwrap(), "child_safety", Severity::Critical),
+        // KV_RELAY_STRICT: same categories as content_filter.ts scanObjectStrict
+        (Regex::new(r"(?i)\b((child|children|kid|kids|minor|minors|human|people|baby|babies|organ)\s+(trafficking|smuggling|trade)|human\s+smuggling|people\s+smuggling|forced\s+(labor|labour|prostitution|marriage)|debt\s+bondage|slaves?\s+(for\s+sale|trade|market|auction)|(buy|buying|purchase)\s+(a\s+)?(slave|slaves|bride|wife)\b|(child|children|kid|kids|baby|babies|girl|girls|boy|boys|woman|women|wife|wives|bride|brides|person|people|human|humans|slave|slaves|worker|workers|maid|maids)\s+(for\s+sale|for\s+sell|available\s+for\s+purchase))").unwrap(), "trafficking_kv", Severity::Critical),
+        (Regex::new(r"(?i)\b(porn|porno|nsfw|escort\s+service|escorts|nude\s+pics|sex\s+cam|cam\s+girl|onlyfans\s+leak)\b").unwrap(), "adult", Severity::Critical),
+        (Regex::new(r"(?i)\b(ghost\s*guns?|auto\s+sear|glock\s+switch(es)?|unregistered\s+(firearm|gun)s?|untraceable\s+(firearm|gun)s?|explosives\s+for\s+sale|buy\s+explosives|pipe\s+bombs?|full\s+auto\s+conversion)\b").unwrap(), "weapons", Severity::Critical),
+        (Regex::new(r"(?i)\b(send\s+\d+(\.\d+)?\s*kas\s+get\s+\d+|double\s+your\s+(kas|crypto|money)|guaranteed\s+(returns?|profit)|giveaway\s+send)\b").unwrap(), "scam", Severity::Critical),
+        (Regex::new(r"(?i)\b(cocaine|coke|heroin|meth|crystal\s+meth|fentanyl|mdma|ecstasy|molly|xanax|oxy|oxycodone|percocet|percs|ketamine|lsd|shrooms)\b[^.!?]{0,25}\b(deals?|plug|menu|connect|wholesale|by\s+the\s+(gram|oz|ounce|pound)|grams?|zips?)\b").unwrap(), "illegal_trade", Severity::Critical),
+        (Regex::new(r"(?i)\b(casino|sportsbook|roulette|sports\s+betting|bet\s+now|online\s+betting|slot\s+machines?|lottery\s+tickets?)\b").unwrap(), "gambling", Severity::Critical),
     ]
 });
 

@@ -940,6 +940,70 @@ const KvChainGamePublish: React.FC = () => {
       await require('react-native').Share.share({ message: JSON.stringify(report) });
     } catch (e: any) { Alert.alert('Export failed', String((e && e.message) || e)); }
   };
+  // KV_PUBLISH_ANY: universal publishing - any HTML game/app by URL
+  const [gamesTick, setGamesTick] = useState(0);
+  try {
+    const _g: any = globalThis as any;
+    if (!_g.__kvMyGamesLoaded) {
+      _g.__kvMyGamesLoaded = 1;
+      require('@react-native-async-storage/async-storage').default.getItem('kv_my_games').then((v: any) => {
+        try {
+          const m = JSON.parse(v || '{}'); const { TRUSTED_GAMES } = require('./game_chunks');
+          for (const id of Object.keys(m)) {
+            if (!(GAMES as any)[id]) (GAMES as any)[id] = { bundle: { manifest: m[id].manifest, frags: [] }, head: m[id].head, nonceBase: m[id].nonceBase, url: m[id].url };
+            (TRUSTED_GAMES as any)[id] = m[id].head;
+          }
+          setGamesTick((x: number) => x + 1);
+        } catch {}
+      });
+    }
+  } catch {}
+  const kvFetchBuild = async (url: string, id: string) => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('could not fetch the page (' + r.status + ')');
+    const html = await r.text();
+    const { buildChainBundle } = require('./kv_build_chain');
+    return buildChainBundle(html, id);
+  };
+  const runPublishAny = () => {
+    const kvP = require('./kv_prompt').kvPrompt;
+    kvP('Publish any HTML - link', 'Link to the finished .html (GitHub raw, your own site...). The wallet fetches it, makes the chain edition and scans it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Next', onPress: (url: string) => {
+      url = String(url || '').trim();
+      if (!/^https:\/\/\S+$/i.test(url)) { Alert.alert('Bad link', 'Use a full https:// link to the .html file.'); return; }
+      const guess = (url.split('?')[0].split('/').pop() || 'game').replace(/\.html?$/i, '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'game';
+      setTimeout(() => kvP('Game id', 'a-z, 0-9 and - only. Names the listing and its on-chain addresses.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Build', onPress: async (id: string) => {
+        id = String(id || '').trim().toLowerCase();
+        if (gbusy) return;
+        setGbusy(id); setGlog([]);
+        try {
+          const prevE: any = (GAMES as any)[id];
+          if (prevE && !prevE.url) throw new Error('"' + id + '" is a built-in game id - pick another');
+          gadd('fetching ' + url);
+          const b: any = await kvFetchBuild(url, id);
+          if (!b.ok) { b.issues.forEach((x: string) => gadd('BLOCKED: ' + x)); setGbusy(''); Alert.alert('Not publishable', b.issues.slice(0, 6).join('\n') + (b.issues.length > 6 ? '\n\u2026' : '')); return; }
+          gadd('built ' + b.bundle.frags.length + ' fragments | HEAD ' + b.head.slice(0, 16) + '\u2026 | ' + b.chunks + ' chunks (~' + b.estKas + ' KAS)');
+          const { _kvResolvePrivHex } = require('./proposal_share');
+          const priv = await _kvResolvePrivHex(); if (!priv) throw new Error('wallet keys unavailable');
+          const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+          const { nonceBaseFor } = require('./kv_build_chain');
+          const nonceBase = (prevE && prevE.nonceBase) || nonceBaseFor(pub, id);
+          (GAMES as any)[id] = { bundle: b.bundle, head: b.head, nonceBase, url };
+          const { TRUSTED_GAMES } = require('./game_chunks'); (TRUSTED_GAMES as any)[id] = b.head;
+          const _A = require('@react-native-async-storage/async-storage').default;
+          const saved = JSON.parse((await _A.getItem('kv_my_games')) || '{}');
+          saved[id] = { url, head: b.head, nonceBase, manifest: b.bundle.manifest, savedAt: Date.now() };
+          await _A.setItem('kv_my_games', JSON.stringify(saved));
+          setGamesTick((x: number) => x + 1);
+          setGbusy('');
+          const unl = !!(globalThis as any).__kvUnlisted;
+          Alert.alert('Ready: ' + id, b.bundle.frags.length + ' fragments, about ' + b.estKas + ' KAS to publish.\nIt has its own row now. PUBLISH puts it on chain' + (unl ? ' (UNLISTED is on: no public announce).' : ' and announces it.'), [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Publish now', onPress: () => runPublish(id) },
+          ]);
+        } catch (e: any) { gadd('ERROR: ' + String((e && e.message) || e)); setGbusy(''); Alert.alert('Publish any failed', String((e && e.message) || e)); }
+      } }], 'plain-text', guess), 450);
+    } }], 'plain-text', 'https://');
+  };
   const runDelist = async (gameId: string) => {
     if (gbusy) return;
     const entry = GAMES[gameId];
@@ -1053,6 +1117,12 @@ const KvChainGamePublish: React.FC = () => {
     try {
       const entry = GAMES[gameId];
       const { publishGamePuzzle, fetchGamePuzzle, TRUSTED_GAMES } = require('./game_chunks');
+      if (entry && (entry as any).url && (!entry.bundle.frags || !entry.bundle.frags.length)) { // KV_PUBLISH_ANY rebuild from the link
+        gadd('rebuilding from ' + (entry as any).url);
+        const rb: any = await kvFetchBuild((entry as any).url, gameId);
+        if (!rb.ok || rb.head !== entry.head) { gadd('ERROR: the page at the link changed or is blocked - use PUBLISH ANY HTML again (' + (rb.issues || []).slice(0, 2).join('; ') + ')'); setGbusy(''); return; }
+        entry.bundle = rb.bundle;
+      }
       const { deriveStoreKeys } = require('./payload_publish');
       const { _kvResolvePrivHex } = require('./proposal_share');
       if (TRUSTED_GAMES[gameId] !== entry.head || entry.bundle.manifest.head !== entry.head) {
@@ -1198,6 +1268,9 @@ const KvChainGamePublish: React.FC = () => {
           </Text>
         </View>
       </TouchableOpacity>
+      <TouchableOpacity disabled={!!gbusy} onPress={runPublishAny} style={{ backgroundColor: '#13261f', borderWidth: 1, borderColor: '#16a34a', borderRadius: 8, padding: 10, marginBottom: 8, alignItems: 'center' }}>
+        <Text style={{ color: '#4ade80', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>{'\uFF0B PUBLISH ANY HTML GAME (by link)'}</Text>
+      </TouchableOpacity>
       {Object.entries(GAMES).map(([id, e]: any) => (
         <React.Fragment key={id}>
         <TouchableOpacity key={id + '-ann'} disabled={!!gbusy} onPress={() => runAnnounceOnly(id)}
@@ -1222,7 +1295,7 @@ const KvChainGamePublish: React.FC = () => {
         <TouchableOpacity key={id} disabled={!!gbusy} onPress={() => runPublish(id)}
           style={{ backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 8, padding: 10, alignItems: 'center', marginBottom: 6, opacity: gbusy && gbusy !== id ? 0.4 : 1 }}>
           <Text style={{ color: '#f0c860', fontFamily: 'monospace', fontWeight: '700', fontSize: 12 }}>
-            {gbusy === id ? 'PUBLISHING ' + id + '…' : 'PUBLISH ' + id + ' (' + e.bundle.frags.length + ' frags)'}
+            {gbusy === id ? 'PUBLISHING ' + id + '…' : 'PUBLISH ' + id + ' (' + (e.bundle.frags.length || (e.bundle.manifest && e.bundle.manifest.frags ? e.bundle.manifest.frags.length : 0)) + ' frags)'}
           </Text>
         </TouchableOpacity>
         </React.Fragment>
@@ -2423,7 +2496,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const { publishContent, announceToRegistry } = require('./payload_publish');
       const { publishConfigChunks } = require('./config_chunks');
       const { _kvResolvePrivHex } = require('./proposal_share');
-      const { scanObject, reasonMessage } = require('./content_filter');
+      const { scanObjectStrict: scanObject, reasonMessage } = require('./content_filter');
       const _scan = scanObject(newAbstract);
       if (!_scan.ok) { setIsLoading(false); Alert.alert('Cannot publish', reasonMessage(_scan.reason)); return; }
       const _priv = await _kvResolvePrivHex();
@@ -3781,7 +3854,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     if (!isAllowed && url.startsWith('http')) { Alert.alert('Whitelist Only', 'Links must be from: Instagram, Pinterest, Etsy, TikTok, Facebook, YouTube, or eBay'); return; }
     
     const contentErr = validateContentText(itemForm.name) || validateContentText(itemForm.description); if (contentErr) { Alert.alert('Blocked', contentErr); return; }
-    try { const { scanText, reasonMessage } = require('./content_filter'); const _h = [scanText(itemForm.name), scanText(itemForm.description)].find((r) => !r.ok); if (_h) { Alert.alert('Blocked', reasonMessage(_h.reason)); return; } } catch {}
+    try { const { scanTextStrict: scanText, reasonMessage } = require('./content_filter'); const _h = [scanText(itemForm.name), scanText(itemForm.description)].find((r) => !r.ok); if (_h) { Alert.alert('Blocked', reasonMessage(_h.reason)); return; } } catch {}
     const item = {
       id: editingItem?.id || 'item_' + Date.now(),
       name: itemForm.name.trim(),
@@ -3997,7 +4070,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       const STORE_PLEDGE_SOMPI = 500_000_000n; // 5 KAS default stake
       const _cfgHash = bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(storefrontConfig))));
       {
-        const { scanObject, scanText, reasonMessage } = require('./content_filter');
+        const { scanObjectStrict: scanObject, scanTextStrict: scanText, reasonMessage } = require('./content_filter');
         const _hits = [
           scanText(brandName),
           scanText(storeCategory),

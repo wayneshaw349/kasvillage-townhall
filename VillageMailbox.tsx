@@ -1792,7 +1792,7 @@ export default function VillageMailbox() {
               // Display-side gate on fetched store configs. Same exposure the
               // game rail had: anyone can write to the registry directly.
               try {
-                const { scanObject, reasonMessage } = require('./content_filter');
+                const { scanObjectStrict: scanObject, reasonMessage } = require('./content_filter'); // KV_PUB_STRICT_MB
                 const _sc = scanObject(cfg);
                 if (!_sc.ok) {
                   console.warn('[Store] content rejected:', _sc.reason, _sc.path || '');

@@ -213,8 +213,12 @@ export function scanObject(obj: any, maxDepth = 24): ScanResult {
 }
 
 /** Convenience wrapper for game descriptors. Same walk, clearer call site. */
+// KV_PUBLISH_STRICT: publish + launch use the strict layer
 export function scanDescriptor(game: any): ScanResult {
-  return scanObject(game);
+  return scanObjectStrict(game);
+}
+export function scanTextStrict(raw: string): ScanResult {
+  return scanObjectStrict({ text: String(raw || '') });
 }
 
 /** Human-facing message. Deliberately vague on child_safety: never echo the match. */
@@ -227,6 +231,11 @@ export function reasonMessage(reason?: string): string {
     case 'real_money_gambling': return 'Real-money gambling content is not permitted.';
     case 'mixed_script': return 'This content mixes character sets within a word, a signature of spoofed text.';
     case 'slur': return 'This content contains prohibited language.';
+    case 'adult': return 'Adult content is not permitted.';
+    case 'weapons': return 'Weapons sales and conversions are not permitted.';
+    case 'scam': return 'This looks like a scam (giveaway, doubling, or key request).';
+    case 'gambling': return 'Gambling content is not permitted.';
+    case 'trafficking': return 'This content cannot be published or displayed.';
     default: return 'This content did not pass review.';
   }
 }
@@ -241,6 +250,8 @@ const KV_STRICT_RULES: Array<[string, RegExp]> = [
   ['weapons', /\b(ghost guns?|auto sears?|glock switch(es)?|unregistered (firearm|gun)s?|untraceable (firearm|gun)s?|explosives for sale|buy explosives|pipe bombs?|grenades?|full auto conversion)\b/],
   ['scam', /\b(send \d+(\.\d+)? ?kas get \d+|double your (kas|crypto|money)|guaranteed (returns?|profit)|seed phrase|recovery phrase|private key|airdrop claim|giveaway send)\b/],
   ['illegal_trade', /\b(cocaine|coke|heroin|meth|crystal meth|fentanyl|mdma|ecstasy|molly|xanax|oxy|oxycodone|percocet|percs|ketamine|lsd|shrooms)\b[^.!?]{0,25}\b(deals?|plug|menu|connect|wholesale|by the (gram|oz|ounce|pound)|grams?|zips?)\b/],
+  // KV_TRAFFICKING
+  ['trafficking', /\b((child|children|kid|kids|minor|minors|human|people|baby|babies|organ)\s+(trafficking|smuggling|trade)|human\s+smuggling|people\s+smuggling|forced\s+(labor|labour|prostitution|marriage)|debt\s+bondage|slaves?\s+(for\s+sale|trade|market|auction)|(buy|buying|purchase)\s+(a\s+)?(slave|slaves|bride|wife)\b|(child|children|kid|kids|baby|babies|girl|girls|boy|boys|woman|women|wife|wives|bride|brides|person|people|human|humans|slave|slaves|worker|workers|maid|maids)\s+(for\s+sale|for\s+sell|available\s+for\s+purchase)|(sex|slave|traffic)\s*(child|minor|girl|boy|teen|kid)s?\b|(child|minor|teen|kid)\s*(sex|slave|traffic|bride|groom)s?\b)/],
   ['gambling', /\b(casino|sportsbook|roulette|sports betting|bet now|online betting|slot machines?|lottery tickets?)\b/],
 ];
 function kvSquash(n: string): string {
