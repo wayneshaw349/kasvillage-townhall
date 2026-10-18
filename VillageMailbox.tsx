@@ -394,6 +394,27 @@ function GameRegistryCard({ item, onInstall, installing, onTip }: any) {
           <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 11 }}>Flag (0.1 KAS)</Text>
         </TouchableOpacity>
       ) : null}
+      {item.quad && item.quad.contact ? (
+        <TouchableOpacity onPress={async () => { // KV_DEV_CONTACT
+          try {
+            const g: any = globalThis as any; let me = g.__kvMyPub || '';
+            if (!me) { try { const ps = require('./proposal_share'); const pk = await ps._kvResolvePrivHex(); const { bytesToHex, hexToBytes } = require('@noble/hashes/utils'); const { secp256k1 } = require('@noble/curves/secp256k1'); me = bytesToHex(secp256k1.getPublicKey(hexToBytes(pk), true)); g.__kvMyPub = me; } catch {} }
+            const msg = 'Hi! I play ' + (item.name || item.quad.game) + ' on KasVillage and would like the next board. My pubkey: ' + me;
+            try { await require('expo-clipboard').setStringAsync(msg); } catch { try { require('react-native').Clipboard.setString(msg); } catch {} }
+            const c = String(item.quad.contact).trim(); const RN = require('react-native');
+            let url = c;
+            if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(c)) url = 'mailto:' + c + '?subject=' + encodeURIComponent('KasVillage board') + '&body=' + encodeURIComponent(msg);
+            else if (/^@?[A-Za-z0-9_]{3,}$/.test(c)) url = 'https://t.me/' + c.replace(/^@/, '');
+            else if (!/^https?:\/\//i.test(c)) url = 'https://' + c;
+            RN.Alert.alert('Contact developer', 'Your message with your pubkey is copied - paste it in the chat.\n\nPay ONLY the address on this game card' + (item.quad.tip_addr ? ' (' + String(item.quad.tip_addr).slice(0, 20) + '\u2026)' : '') + '. Never pay an address sent to you in a DM.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open chat', onPress: () => { RN.Linking.openURL(url).catch(() => {}); } },
+            ]);
+          } catch {}
+        }} style={{ marginTop: 6, borderColor: '#0891b2', borderWidth: 1, borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}>
+          <Text style={{ color: '#0891b2', fontWeight: '700', fontSize: 11 }}>Contact developer</Text>
+        </TouchableOpacity>
+      ) : null}
       {item.quad && item.quad.tip_addr && onTip ? (
         <TouchableOpacity onPress={() => onTip(item)}
           style={{ marginTop: 6, borderColor: '#7c3aed', borderWidth: 1, borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}>
@@ -701,6 +722,7 @@ export default function VillageMailbox() {
   // UI state
   const [section, setSection] = useState<Section>('dapps');
   const [storeView, setStoreView] = useState<{ entry: StorefrontEntry; config: any | null; loading: boolean } | null>(null);
+  const [coldScan, setColdScan] = useState<{ onKey: (t: string) => void } | null>(null); // KV_COLD_SCAN
   const [gameView, setGameView] = useState<{ name: string; addr: string; hash: string; loading: boolean; game: KvGameDescriptor | null; error: string } | null>(null);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -802,6 +824,7 @@ export default function VillageMailbox() {
             if (r && !r.k && typeof r.payload === 'string') { try { const raw = h2s(r.payload); r = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw); } catch { return null; } }
             // KV_GAME_FLAGS: delists + flags must carry a valid signature (no forged owner/mod keys)
             if (r && (r.k === 'delist' || r.k === 'flag') && typeof kp.verifyRecord === 'function') { try { if (!kp.verifyRecord(r)) return null; } catch { return null; } }
+            if (r && r.k === 'grant' && r.d && r.d.game && r.d.to) { try { if (typeof kp.verifyRecord === 'function' && !kp.verifyRecord(r)) return null; } catch { return null; } return { grant: true, rec: r }; } // KV_GRANTS_LANE
             if (r && r.k === 'flag' && r.d && r.d.head) return { flag: true, head: String(r.d.head), reason: String(r.d.reason || ''), t: r.t || 0, o: r.o || '' };
             if (r && r.k === 'delist' && r.d && r.d.head) return { delist: true, head: String(r.d.head), t: r.t || 0, o: r.o || '' }; // KV_DELIST_FILTER
             if (!r || r.k !== 'registry' || !r.d) return null;
@@ -812,11 +835,13 @@ export default function VillageMailbox() {
           };
           const byHead = new Map<string, any>();
           // KV_MOD_PUBKEY: moderation key - its delists apply to any head. Rotate to a dedicated key before mainnet.
-          const KV_MOD_PUBKEY = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
+          const KV_MOD_PUBKEY = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
           const delistByHead = new Map<string, any>();
           const flagsByHead = new Map<string, Map<string, string>>(); // head -> flagger -> reason
+          const grantRecs: any[] = [];
           const take = (it: any) => {
             if (!it) return;
+            if (it.grant) { grantRecs.push(it.rec); return; }
             if (it.flag) { let m = flagsByHead.get(it.head); if (!m) { m = new Map(); flagsByHead.set(it.head, m); } m.set(String(it.o), it.reason); return; }
             if (it.delist) { const p = delistByHead.get(it.head); if (!p || it.t > p.t) delistByHead.set(it.head, it); return; }
             const prev = byHead.get(it.quad.head); if (!prev || it.t > prev.t) byHead.set(it.quad.head, it);
@@ -857,6 +882,33 @@ export default function VillageMailbox() {
             }
             if (sink && sink.sink) await AS.setItem('kv_reg_checkpoint', JSON.stringify({ sink: sink.sink, at: Date.now() }));
           } catch {}
+          // KV_GRANTS: board grants for THIS wallet, only if signed by that game's publisher
+          try {
+            const _g: any = globalThis as any;
+            if (!_g.__kvMyPub) { try { const ps = require('./proposal_share'); const pk = await ps._kvResolvePrivHex(); const { bytesToHex, hexToBytes } = require('@noble/hashes/utils'); const { secp256k1 } = require('@noble/curves/secp256k1'); if (pk) _g.__kvMyPub = bytesToHex(secp256k1.getPublicKey(hexToBytes(pk), true)); } catch {} }
+            const me = _g.__kvMyPub;
+            if (me && grantRecs.length) {
+              const pubOf = new Map<string, string>(); const payTo = new Map<string, string>();
+              for (const it of byHead.values()) { if (it.quad && it.quad.game) { pubOf.set(String(it.quad.game), String(it.o)); if (it.quad.tip_addr) payTo.set(String(it.quad.game), String(it.quad.tip_addr)); } }
+              const all: any = _g.__kvGrantsAll || {};
+              const proofs: any[] = JSON.parse((await AS.getItem('kv_purchase_proofs')) || '[]');
+              let changed = false;
+              for (const r of grantRecs) {
+                const d = r.d || {}; const game = String(d.game || ''); const item = String(d.item || '');
+                if (String(d.to) !== me || !game || !item || pubOf.get(game) !== String(r.o)) continue;
+                const list = all[game] || (all[game] = []);
+                if (list.indexOf(item) < 0) { list.push(item); changed = true; }
+                if (!proofs.some((p: any) => p.game === game && p.item === item && p.txid === String(d.txid || ''))) {
+                  let v: any = { ok: false, amountKas: 0 };
+                  try { v = await kp.kvVerifyPayment(String(d.txid || ''), payTo.get(game) || '', 'testnet-10'); } catch {}
+                  proofs.push({ game, item, txid: String(d.txid || ''), dev: String(r.o), verified: !!v.ok, amountKas: v.amountKas || 0, grant: r, savedAt: Date.now() });
+                  changed = true;
+                  console.log('[Grants] ' + game + '/' + item + ' granted' + (v.ok ? ' - payment VERIFIED ' + v.amountKas + ' KAS' : ' - payment not verified'));
+                }
+              }
+              if (changed) { _g.__kvGrantsAll = all; await AS.setItem('kv_grants', JSON.stringify(all)); await AS.setItem('kv_purchase_proofs', JSON.stringify(proofs)); }
+            }
+          } catch (e) { console.warn('[Grants]', e); }
           // KV_GAME_FLAGS tally: 3 qualified flaggers (pledge or settled trade, not the owner) = hidden
           try {
             const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map();
@@ -1093,7 +1145,7 @@ export default function VillageMailbox() {
         } catch (e: any) { Alert.alert('Clear failed', String((e && e.message) || e)); }
       } });
       btns.push({ text: 'Cancel', style: 'cancel' });
-      Alert.alert('Flag this listing? (0.1 KAS)', 'Flags are public, signed by your key, and counted by every wallet.', btns);
+      require('./kv_prompt').kvChoose('Flag this listing? (0.1 KAS)', 'Flags are public, signed by your key, and counted by every wallet.', btns);
     } catch (e: any) { Alert.alert('Flag failed', String((e && e.message) || e)); }
   };
   (globalThis as any).__kvRunFlag = runFlag; // KV_GAME_CARD_FLAG: game cards (separate component) reach runFlag
@@ -1108,8 +1160,8 @@ export default function VillageMailbox() {
       const { secp256k1 } = require('@noble/curves/secp256k1');
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
       // KV_MOD_REASON: moderator path (mod key, not the owner) - reason + evidence hash on chain
-      const _KV_MOD = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
-      if (entry.ownerPubkey && String(entry.ownerPubkey) !== pub && pub === _KV_MOD) {
+      const _KV_MOD = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
+      const _modFlow = (_mPriv: string, _mPub: string) => { // KV_COLD_MOD
         const _head = String(entry.arweaveTx || entry.id);
         const _fin = async (reason: string, note: string) => {
           try {
@@ -1118,7 +1170,7 @@ export default function VillageMailbox() {
             const pre = JSON.stringify({ head: _head, reason, note: note || '', title: String(entry.title || entry.name || ''), owner: String(entry.ownerPubkey || ''), t: Date.now() });
             const evidenceHash = bytesToHex(_sha(utf8ToBytes(pre)));
             const { delistFromRegistry } = require('./payload_publish');
-            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, _head, kind, { reason, evidenceHash, mod: 1 });
+            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, _head, kind, { reason, evidenceHash, mod: 1 }, { privateKeyHex: _mPriv, pubkeyHex: _mPub });
             if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
             try {
               const AS = require('@react-native-async-storage/async-storage').default;
@@ -1133,23 +1185,59 @@ export default function VillageMailbox() {
         };
         const _note = (reason: string) => setTimeout(() => {
           const RN = require('react-native');
-          if (RN.Platform.OS === 'ios' && (RN.Alert as any).prompt) {
-            (RN.Alert as any).prompt(reason === 'legal' ? 'Legal request reference (private)' : 'Evidence note (private)', reason === 'legal' ? 'Agency + case or subpoena number. Only its hash goes on chain; keep the original document.' : 'Describe the evidence or file reference. Only its hash goes on chain.', [
+          if (true) {
+            require('./kv_prompt').kvPrompt(reason === 'legal' ? 'Legal request reference (private)' : 'Evidence note (private)', reason === 'legal' ? 'Agency + case or subpoena number. Only its hash goes on chain; keep the original document.' : 'Describe the evidence or file reference. Only its hash goes on chain.', [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Delist', style: 'destructive', onPress: (t: string) => _fin(reason, t || '') },
             ], 'plain-text');
           } else { _fin(reason, ''); }
         }, 350);
-        Alert.alert('Moderator delist', 'Not your listing - acting as moderator. Pick a reason; it is recorded on chain with an evidence hash (~1 KAS).', [
+        require('./kv_prompt').kvChoose('Moderator delist', 'Not your listing - acting as moderator. Pick a reason; it is recorded on chain with an evidence hash (~1 KAS).', [
           { text: 'Prohibited category', onPress: () => _note('prohibited') },
           { text: 'Scam / fraud', onPress: () => _note('fraud') },
           { text: 'Illegal content', onPress: () => _note('illegal') },
           { text: 'Legal request', onPress: () => _note('legal') }, // KV_MOD_LEGAL
           { text: 'Cancel', style: 'cancel' },
         ]);
+      };
+      if (entry.ownerPubkey && String(entry.ownerPubkey) !== pub && pub === _KV_MOD) { _modFlow(priv, pub); return; }
+      if (entry.ownerPubkey && String(entry.ownerPubkey) !== pub) {
+        // cold-key moderation: key pasted at use, verified against _KV_MOD, never stored
+        const RN = require('react-native');
+        const _useKey = (t: string) => {
+          try {
+            const k = String(t || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase();
+            const mp = bytesToHex(secp256k1.getPublicKey(hexToBytes(k), true));
+            if (mp !== _KV_MOD) { Alert.alert('Wrong key', 'That key does not match the moderation public key.'); return; }
+            _modFlow(k, mp);
+          } catch (e: any) { Alert.alert('Bad key', String((e && e.message) || e)); }
+        };
+        const _scanCold = async () => {
+          try {
+            const ec = require('expo-camera');
+            const reqP = (ec.Camera && ec.Camera.requestCameraPermissionsAsync) || ec.requestCameraPermissionsAsync;
+            const p: any = reqP ? await reqP() : { granted: true };
+            if (!p || !p.granted) { Alert.alert('Camera needed', 'Allow camera access to scan the cold key QR.'); return; }
+            setStoreView(null); // iOS can't stack a Modal on an open Modal
+            (globalThis as any).__kvScanLock = false;
+            setTimeout(() => setColdScan({ onKey: _useKey }), 600);
+          } catch (e: any) { Alert.alert('Scanner error', String((e && e.message) || e)); }
+        };
+        const _askCold = () => {
+          if (true) {
+            require('./kv_prompt').kvPrompt('Cold mod key', 'Paste the moderator private key (64 hex). Used once to sign, never stored.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Unlock', onPress: (t: string) => _useKey(t) },
+            ], 'secure-text');
+          } else { Alert.alert('iOS only', 'Cold-key moderation uses the iOS secure prompt for now.'); }
+        };
+        Alert.alert('Not your listing', 'Only the publisher key can delist - or the moderator, with the cold key.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Scan cold key (QR)', onPress: _scanCold },
+          { text: 'Type cold key\u2026', onPress: _askCold },
+        ]);
         return;
       }
-      if (entry.ownerPubkey && String(entry.ownerPubkey) !== pub) { Alert.alert('Not your listing', 'Only the publisher key can delist. Readers ignore delists from other keys.'); return; }
       Alert.alert('Delist this listing?', 'It disappears from every Mailbox directory (a newer announce restores it). Chain data, installs and your pledge are untouched. ~1 KAS.', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delist', style: 'destructive', onPress: async () => {
@@ -1493,6 +1581,25 @@ export default function VillageMailbox() {
         </View>
       </Modal>
 
+{(() => { const { KvPromptHost } = require('./kv_prompt'); return <KvPromptHost />; })()}
+      {/* KV_COLD_SCAN scanner */}
+      <Modal visible={!!coldScan} animationType="slide" onRequestClose={() => setColdScan(null)}>
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          {coldScan ? (() => { const { CameraView } = require('expo-camera'); return (
+            <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={(ev: any) => {
+                const g: any = globalThis as any; if (g.__kvScanLock) return; g.__kvScanLock = true;
+                const cs = coldScan; setColdScan(null);
+                const d = String((ev && ev.data) || '');
+                setTimeout(() => { if (cs) cs.onKey(d); }, 500);
+              }} />
+          ); })() : null}
+          <Text style={{ position: 'absolute', top: 70, alignSelf: 'center', color: '#fff', fontWeight: '700', fontSize: 16 }}>Point at the cold-key QR</Text>
+          <TouchableOpacity onPress={() => setColdScan(null)} style={{ position: 'absolute', bottom: 50, alignSelf: 'center', backgroundColor: '#fff', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 32 }}>
+            <Text style={{ fontWeight: '700', fontSize: 15 }}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
       <Modal visible={!!gameView} animationType="slide" transparent onRequestClose={() => setGameView(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(28,25,23,0.85)', justifyContent: 'center', padding: rs.s(20) }}>
           <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(18), maxHeight: '88%' }}>

@@ -303,10 +303,10 @@ export async function rebuildDirectory(category: string, registryAddress: string
   // KV_PROHIBITED_RENDER: reader-side enforcement - a modified client can
   // announce anything; this wallet simply will not display it.
   const KV_PROHIBITED = ['gambling', 'casino', 'betting', 'lottery'];
-  const KV_MOD_PUBKEY = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
+  const KV_MOD_PUBKEY = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
   // KV_FLAGS_TALLY: every wallet counts flags itself - no server, no single judge.
   const KV_FLAG_THRESHOLD = 3;
-  const _kvFlagMod = '037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133';
+  const _kvFlagMod = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
   const _kvPublishers = new Set<string>();
   for (const a of anns) { const r: any = a.record; if (r && r.k === 'registry' && r.o && (r._bv || verifyRecord(r))) _kvPublishers.add(String(r.o)); }
   const _kvClearT = new Map<string, number>();
@@ -535,3 +535,19 @@ export async function kvFlaggerQualifies(pubkey: string, network: string = 'test
   qc.set(pubkey, { ok, t: Date.now() });
   return ok;
 }
+
+// KV_GRANT_VERIFY: did this tx pay the dev's SIGNED address? (check soon after grant - pruning)
+export async function kvVerifyPayment(txid: string, payTo: string, network: string = 'testnet-10'): Promise<{ ok: boolean; amountKas: number; found: boolean }> {
+  try {
+    if (!/^[0-9a-f]{64}$/i.test(String(txid || ''))) return { ok: false, amountKas: 0, found: false };
+    const api = String(network).indexOf('testnet') >= 0 ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+    const r = await fetch(api + '/transactions/' + txid);
+    if (!r.ok) return { ok: false, amountKas: 0, found: false };
+    const j: any = await r.json();
+    let amt = 0;
+    for (const o of (j.outputs || [])) if (payTo && String(o.script_public_key_address) === String(payTo)) amt += Number(o.amount || 0);
+    return { ok: amt > 0, amountKas: amt / 1e8, found: true };
+  } catch { return { ok: false, amountKas: 0, found: false }; }
+}
+// KV_GRANTS_BOOT: saved grants are available before the Mailbox ever loads
+try { require('@react-native-async-storage/async-storage').default.getItem('kv_grants').then((v: any) => { try { if (v) (globalThis as any).__kvGrantsAll = JSON.parse(v); } catch {} }); } catch {}

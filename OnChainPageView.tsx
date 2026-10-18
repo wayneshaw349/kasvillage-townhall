@@ -299,7 +299,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
         source={{ html, baseUrl: 'https://kv-game.local/' }}
         originWhitelist={['https://kv-game.local']}
         ref={webRef}
-        injectedJavaScriptBeforeContentLoaded={CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '')}
+        injectedJavaScriptBeforeContentLoaded={CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? ('try{window.KV_GRANTS=' + JSON.stringify((globalThis as any).__kvGrantsAll || {}) + ';}catch(e){};') : '') /* KV_GRANTS */}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         javaScriptEnabled

@@ -199,8 +199,9 @@ export async function announceToRegistry(
 // ---------------------------------------------------------------------------
 
 // KV_MOD_EXTRA: optional { reason, evidenceHash, mod } on moderator delists
-export async function delistFromRegistry(owner: OwnerKeys, head: string, kind: string = 'game', extra?: Record<string, any>) {
-  const rec = signRecord({ v: 1, k: 'delist', t: Date.now(), o: owner.pubkeyHex, d: { head, ...(extra || {}) } } as any, owner.privateKeyHex);
+// KV_COLD_SIGNER: optional signer - record signed by the cold mod key, dust paid by the wallet
+export async function delistFromRegistry(owner: OwnerKeys, head: string, kind: string = 'game', extra?: Record<string, any>, signer?: { privateKeyHex: string; pubkeyHex: string }) {
+  const rec = signRecord({ v: 1, k: 'delist', t: Date.now(), o: (signer && signer.pubkeyHex) || owner.pubkeyHex, d: { head, ...(extra || {}) } } as any, (signer && signer.privateKeyHex) || owner.privateKeyHex);
   const regAddr = registryAddress(kind, owner.network);
   const res = await sendKaspaViaRest({
     senderAddress: owner.address,
@@ -312,4 +313,20 @@ export async function probePayloadLimit(owner: OwnerKeys, sizes: number[] = [500
   }
   console.log('[Probe] summary:', JSON.stringify(results.map(r => ({ size: r.size, ok: r.ok }))));
   return results;
+}
+
+// KV_GRANT_SEND: board/item grant, signed by the game's publisher key (0.1 KAS)
+export async function grantAccess(dev: OwnerKeys, toPub: string, game: string, item: string, txid: string) {
+  const rec = signRecord({ v: 1, k: 'grant', t: Date.now(), o: dev.pubkeyHex, d: { game, item, to: toPub, txid } } as any, dev.privateKeyHex);
+  const regAddr = registryAddress('game', dev.network);
+  const res = await sendKaspaViaRest({
+    senderAddress: dev.address,
+    recipientAddress: regAddr,
+    amountSompi: REPOST_SOMPI,
+    privateKeyHex: dev.privateKeyHex,
+    network: dev.network,
+    payload: buildPayloadHex(rec),
+  });
+  console.log('[Grant]', game, item, '->', toPub.slice(0, 12), 'txid', String(txid).slice(0, 10));
+  return { ...res, registryAddr: regAddr };
 }

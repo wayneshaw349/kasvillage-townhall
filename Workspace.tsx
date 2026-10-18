@@ -816,6 +816,50 @@ const KvChainGamePublish: React.FC = () => {
   })(); }, []);
   const gadd = (l: string) => setGlog((p) => [...p.slice(-150), l]);
   const GAMES: Record<string, { bundle: any; head: string; nonceBase: number }> = require('./games_to_publish');
+  // KV_GRANT_UI: dev grants a board to a buyer (buyer ID + board + payment txid as proof)
+  try { const _g: any = globalThis as any; if (!_g.__kvDevContactLoaded) { _g.__kvDevContactLoaded = 1; require('@react-native-async-storage/async-storage').default.getItem('kv_dev_contact').then((v: any) => { if (v) _g.__kvDevContact = v; }); } } catch {}
+  const setMyContact = () => {
+    const RN = require('react-native');
+    
+    require('./kv_prompt').kvPrompt('My contact (for buyers)', 'Telegram @handle, email, or a link (ig.me/..., wa.me/...). Goes into your next ANNOUNCE so buyers can reach you.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Save', onPress: async (t: string) => { const v = String(t || '').trim(); (globalThis as any).__kvDevContact = v; try { await require('@react-native-async-storage/async-storage').default.setItem('kv_dev_contact', v); } catch {} Alert.alert('Saved', v ? 'Re-ANNOUNCE the game so the contact reaches the card.' : 'Contact cleared.'); } },
+    ], 'plain-text', String((globalThis as any).__kvDevContact || ''));
+  };
+  const runGrant = (gameId: string) => {
+    const RN = require('react-native');
+    
+    const ask = (title: string, msg: string, next: (v: string) => void) => require('./kv_prompt').kvPrompt(title, msg, [{ text: 'Cancel', style: 'cancel' }, { text: 'Next', onPress: (t: string) => next(String(t || '').trim()) }], 'plain-text');
+    ask('Grant - buyer pubkey', 'Paste the buyer\'s pubkey (from their message: 66 hex, starts 02 or 03).', (to) => {
+      to = to.toLowerCase().replace(/[^0-9a-f]/g, '');
+      if (!/^0[23][0-9a-f]{64}$/.test(to)) { Alert.alert('Bad pubkey', 'A pubkey is 66 hex characters starting with 02 or 03.'); return; }
+      ask('Grant - board', 'Board / item name your game checks, e.g. board2', (item) => {
+        if (!item) return;
+        ask('Grant - payment txid', 'The buyer\'s payment transaction id (proof it was paid).', (txid) => {
+          txid = txid.toLowerCase().replace(/[^0-9a-f]/g, '');
+          if (!/^[0-9a-f]{64}$/.test(txid)) { Alert.alert('Bad txid', 'A transaction id is 64 hex characters.'); return; }
+          Alert.alert('Grant ' + item + '?', 'To ' + to.slice(0, 12) + '\u2026 for ' + gameId + ' (0.1 KAS, signed by your key).', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Grant', onPress: async () => {
+              try {
+                const ps = require('./proposal_share'); const SS = require('expo-secure-store');
+                const sender = (await SS.getItemAsync('kv_kaspa_address')) || (await SS.getItemAsync('kaspa_address'));
+                const priv = await ps._kvResolvePrivHex();
+                if (!sender || !priv) throw new Error('wallet identity unavailable');
+                const { bytesToHex, hexToBytes } = require('@noble/hashes/utils'); const { secp256k1 } = require('@noble/curves/secp256k1');
+                const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+                const { grantAccess } = require('./payload_publish');
+                const r: any = await grantAccess({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, to, gameId, item, txid);
+                if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
+                gadd('GRANTED ' + item + ' of ' + gameId + ' -> ' + to.slice(0, 12) + '\u2026');
+                Alert.alert('Granted', 'The buyer\'s wallet unlocks ' + item + ' on its next Games refresh and saves the payment proof.');
+              } catch (e: any) { Alert.alert('Grant failed', String((e && e.message) || e)); }
+            } },
+          ]);
+        });
+      });
+    });
+  };
   const runDelist = async (gameId: string) => {
     if (gbusy) return;
     const entry = GAMES[gameId];
@@ -892,7 +936,7 @@ const KvChainGamePublish: React.FC = () => {
       const _u8 = (t: string) => { const s2 = unescape(encodeURIComponent(t)); const a = new Uint8Array(s2.length); for (let i = 0; i < s2.length; i++) a[i] = s2.charCodeAt(i); return a; };
       const manifestHash = bytesToHex(sha256(_u8(JSON.stringify({ ...m, addresses: slotAddresses }))));
       gadd('manifestHash ' + manifestHash.slice(0, 16) + '…');
-      const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...daaSpan };
+      const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...daaSpan };
       try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
       gadd('announcing to game registry…');
       const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: manifestHash } as any);
@@ -966,13 +1010,13 @@ const KvChainGamePublish: React.FC = () => {
         if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
         gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to + ' | pledge ' + (daaSpan.pledge_kas || 0) + ' KAS');
       } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
-      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...daaSpan });
+      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...daaSpan });
       setTriple(t);
       await Clipboard.setStringAsync(t);
       try {
         gadd('announcing to game registry…');
         const { announceToRegistry } = require('./payload_publish');
-        const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...daaSpan };
+        const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...daaSpan };
         try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
         const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: res.manifestHash } as any);
         if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '…');
@@ -1038,7 +1082,10 @@ const KvChainGamePublish: React.FC = () => {
             {gbusy === id ? 'WORKING…' : 'ANNOUNCE ' + id + ' (registry only, ~1 KAS)'}
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity key={id + '-del'} disabled={!!gbusy} onPress={() => runDelist(id)}
+        <TouchableOpacity onPress={() => runGrant(id)} style={{ borderWidth: 1, borderColor: '#0891b2', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#0891b2', fontWeight: '700', fontSize: 11 }}>GRANT</Text></TouchableOpacity>
+                {(() => { const { KvPromptHost } = require('./kv_prompt'); return <KvPromptHost />; })()}
+                <TouchableOpacity onPress={setMyContact} style={{ borderWidth: 1, borderColor: '#64748b', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#64748b', fontWeight: '700', fontSize: 11 }}>MY CONTACT</Text></TouchableOpacity>
+                <TouchableOpacity key={id + '-del'} disabled={!!gbusy} onPress={() => runDelist(id)}
           style={{ backgroundColor: '#2d1a1a', borderWidth: 1, borderColor: '#b14b4b', borderRadius: 8, padding: 10, marginBottom: 6 }}>
           <Text style={{ color: '#e08b8b', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>
             {'DELIST ' + id + ' (hide from store, ~1 KAS)'}

@@ -1,0 +1,1986 @@
+// KasVillage Expo App - Complete Self-Contained Marketplace
+// ALL FEATURES RUN ON PHONE - No backend except Town Hall verification
+//
+// Phone handles:
+// - Wallet (keys, biometric, enclave)
+// - Search (queries Arweave GraphQL directly)
+// - Store/Coupon/DApp/Academic creation
+// - Direct Arweave publish via Bundlr/Irys
+// - Content moderation (NSFW.js, toxicity)
+// - Stats display, marketplace browsing
+//
+// Town Hall (kasvillage.com/townhall) ONLY does:
+// - SNARK proof verification
+// - Input APT/store/DApp ID → Output verified/not
+//
+// This architecture means KasVillage is NOT an MSB or marketplace operator.
+// We only provide a verification service. Users interact peer-to-peer.
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { 
+  View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, 
+  ScrollView, TextInput, Platform, Dimensions, Image, PixelRatio, 
+  Modal, FlatList, RefreshControl, Keyboard
+} from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as Crypto from 'expo-crypto';
+import * as Device from 'expo-device';
+import * as Clipboard from 'expo-clipboard';
+import * as ImagePicker from 'expo-image-picker';
+import * as Cellular from 'expo-cellular';
+import { WebView } from 'react-native-webview';
+
+// ============================================================================
+// RESPONSIVE SCALING
+// ============================================================================
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const BASE_WIDTH = 393;
+const scale = SCREEN_WIDTH / BASE_WIDTH;
+const rs = {
+  s: (size: number) => Math.round(size * scale),
+  font: (size: number) => Math.round(size * scale * (PixelRatio.getFontScale() > 1 ? 0.9 : 1)),
+  screenWidth: SCREEN_WIDTH,
+  screenHeight: SCREEN_HEIGHT,
+};
+
+// ============================================================================
+// CONSTANTS - NO BACKEND EXCEPT TOWN HALL
+// ============================================================================
+const ARWEAVE_GATEWAY = 'https://arweave.net';
+const ARWEAVE_GRAPHQL = 'https://arweave.net/graphql';
+const BUNDLR_NODE = 'https://node1.bundlr.network';
+const TOWN_HALL_API = 'https://kasvillage.com/townhall'; // ONLY verification
+
+const APP_TAG = 'KasVillage';
+const TAG_STORE = 'Store';
+const TAG_COUPON = 'Coupon';
+const TAG_DAPP = 'DApp';
+const TAG_ACADEMIC = 'Academic';
+const TAG_SERVICE = 'Service';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+interface WalletState {
+  initialized: boolean;
+  publicKey: string | null;
+  kaspaAddress: string | null;
+  aptAlias: string | null;
+  authenticated: boolean;
+  xp: number;
+  pComplete: number;
+  deadlocks: number;
+  inSnailMode: boolean;
+}
+
+interface ArweaveItem {
+  txId: string;
+  ownerPubkey: string;
+  type: string;
+  createdAt: number;
+  data: any;
+  verified?: boolean;
+}
+
+interface StoreItem {
+  id: string;
+  name: string;
+  description: string;
+  dollarPrice: number;
+  kasDiscountPercent: number;
+  imageUri?: string;
+  hiddenUsdValue: number;
+}
+
+interface Coupon {
+  id: string;
+  storeId: string;
+  storeName: string;
+  displayText: string;
+  discountPercent: number;
+  dollarPrice: number;
+  kasDiscountPercent: number;
+  imageUri?: string;
+  hiddenUsdValue: number;
+  ownerPubkey: string;
+}
+
+// ============================================================================
+// ARWEAVE DIRECT CLIENT (Phone queries Arweave directly)
+// ============================================================================
+const ArweaveClient = {
+  // Search all KasVillage content by type
+  search: async (contentType: string, query?: string): Promise<ArweaveItem[]> => {
+    const gql = `
+      query {
+        transactions(
+          tags: [
+            { name: "App-Name", values: ["${APP_TAG}"] },
+            { name: "Type", values: ["${contentType}"] }
+          ],
+          first: 100,
+          sort: HEIGHT_DESC
+        ) {
+          edges {
+            node {
+              id
+              owner { address }
+              tags { name value }
+              block { timestamp height }
+            }
+          }
+        }
+      }
+    `;
+    
+    try {
+      const res = await fetch(ARWEAVE_GRAPHQL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: gql }),
+      });
+      const json = await res.json();
+      const edges = json?.data?.transactions?.edges || [];
+      
+      const items: ArweaveItem[] = [];
+      for (const edge of edges) {
+        const node = edge.node;
+        const tags = node.tags.reduce((acc: any, t: any) => ({ ...acc, [t.name]: t.value }), {});
+        
+        // Fetch actual data
+        try {
+          const dataRes = await fetch(`${ARWEAVE_GATEWAY}/${node.id}`);
+          const data = await dataRes.json();
+          
+          // Filter by query if provided
+          if (query) {
+            const searchStr = JSON.stringify(data).toLowerCase();
+            if (!searchStr.includes(query.toLowerCase())) continue;
+          }
+          
+          items.push({
+            txId: node.id,
+            ownerPubkey: tags['Owner-Pubkey'] || node.owner.address,
+            type: tags['Type'],
+            createdAt: parseInt(tags['Created-At'] || '0'),
+            data,
+          });
+        } catch {
+          // Skip items that fail to load
+        }
+      }
+      
+      return items;
+    } catch (e) {
+      console.error('Arweave search error:', e);
+      return [];
+    }
+  },
+  
+  // Search stores
+  searchStores: async (query?: string) => ArweaveClient.search(TAG_STORE, query),
+  
+  // Search coupons
+  searchCoupons: async (query?: string) => ArweaveClient.search(TAG_COUPON, query),
+  
+  // Search DApps
+  searchDApps: async (query?: string) => ArweaveClient.search(TAG_DAPP, query),
+  
+  // Search academics
+  searchAcademics: async (query?: string) => ArweaveClient.search(TAG_ACADEMIC, query),
+  
+  // Search services
+  searchServices: async (query?: string) => ArweaveClient.search(TAG_SERVICE, query),
+  
+  // Get item by ID
+  getById: async (txId: string): Promise<ArweaveItem | null> => {
+    try {
+      const dataRes = await fetch(`${ARWEAVE_GATEWAY}/${txId}`);
+      const data = await dataRes.json();
+      return {
+        txId,
+        ownerPubkey: data.ownerPubkey || '',
+        type: data.type || 'Unknown',
+        createdAt: data.createdAt || 0,
+        data,
+      };
+    } catch {
+      return null;
+    }
+  },
+};
+
+// ============================================================================
+// DIRECT ARWEAVE PUBLISHER (Phone publishes directly via Bundlr)
+// All uploads include attestation hash + signature for tamper-proofing
+// ============================================================================
+const ArweavePublisher = {
+  // Upload signed data to Arweave via Bundlr
+  uploadSigned: async (
+    signedData: SignedArweaveData,
+    baseTags: { name: string; value: string }[],
+  ): Promise<{ txId: string } | { error: string }> => {
+    try {
+      // Add signature tags
+      const signatureTags = ArweaveSignatureManager.createSignedTags(signedData);
+      const allTags = [...baseTags, ...signatureTags];
+      
+      const dataBytes = new TextEncoder().encode(JSON.stringify(signedData));
+      
+      const res = await fetch(`${BUNDLR_NODE}/tx/arweave`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'x-tags': JSON.stringify(allTags),
+        },
+        body: dataBytes,
+      });
+      
+      if (!res.ok) {
+        const errText = await res.text();
+        return { error: `Upload failed: ${errText}` };
+      }
+      
+      const result = await res.json();
+      return { txId: result.id };
+    } catch (e: any) {
+      return { error: e.message };
+    }
+  },
+  
+  // Legacy upload (without signing - kept for compatibility)
+  upload: async (
+    data: any, 
+    tags: { name: string; value: string }[],
+    _signingKey: string
+  ): Promise<{ txId: string } | { error: string }> => {
+    try {
+      const dataBytes = new TextEncoder().encode(JSON.stringify(data));
+      
+      const res = await fetch(`${BUNDLR_NODE}/tx/arweave`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'x-tags': JSON.stringify(tags),
+        },
+        body: dataBytes,
+      });
+      
+      if (!res.ok) {
+        const errText = await res.text();
+        return { error: `Upload failed: ${errText}` };
+      }
+      
+      const result = await res.json();
+      return { txId: result.id };
+    } catch (e: any) {
+      return { error: e.message };
+    }
+  },
+  
+  // Publish store with attestation (FREE - small data)
+  publishStore: async (
+    storeData: any, 
+    ownerPubkey: string, 
+    attestation: AttestationResult
+  ): Promise<{ txId: string } | { error: string }> => {
+    const signedData = await ArweaveSignatureManager.signData(storeData, ownerPubkey, attestation);
+    const tags = [
+      { name: 'App-Name', value: APP_TAG },
+      { name: 'Type', value: TAG_STORE },
+      { name: 'Owner-Pubkey', value: ownerPubkey },
+      { name: 'Created-At', value: Date.now().toString() },
+      { name: 'Content-Type', value: 'application/json' },
+    ];
+    return ArweavePublisher.uploadSigned(signedData, tags);
+  },
+  
+  // Publish coupon with attestation (FREE - small data)
+  publishCoupon: async (
+    couponData: any, 
+    ownerPubkey: string, 
+    attestation: AttestationResult
+  ): Promise<{ txId: string } | { error: string }> => {
+    const signedData = await ArweaveSignatureManager.signData(couponData, ownerPubkey, attestation);
+    const tags = [
+      { name: 'App-Name', value: APP_TAG },
+      { name: 'Type', value: TAG_COUPON },
+      { name: 'Owner-Pubkey', value: ownerPubkey },
+      { name: 'Store-Id', value: couponData.storeId },
+      { name: 'Created-At', value: Date.now().toString() },
+    ];
+    return ArweavePublisher.uploadSigned(signedData, tags);
+  },
+  
+  // Publish DApp with attestation
+  publishDApp: async (
+    dappData: any, 
+    ownerPubkey: string, 
+    attestation: AttestationResult
+  ): Promise<{ txId: string } | { error: string }> => {
+    const signedData = await ArweaveSignatureManager.signData(dappData, ownerPubkey, attestation);
+    const tags = [
+      { name: 'App-Name', value: APP_TAG },
+      { name: 'Type', value: TAG_DAPP },
+      { name: 'Owner-Pubkey', value: ownerPubkey },
+      { name: 'Game-Type', value: dappData.gameType || 'utility' },
+      { name: 'Created-At', value: Date.now().toString() },
+    ];
+    return ArweavePublisher.uploadSigned(signedData, tags);
+  },
+  
+  // Publish academic profile with attestation
+  publishAcademic: async (
+    profileData: any, 
+    ownerPubkey: string, 
+    attestation: AttestationResult
+  ): Promise<{ txId: string } | { error: string }> => {
+    const signedData = await ArweaveSignatureManager.signData(profileData, ownerPubkey, attestation);
+    const tags = [
+      { name: 'App-Name', value: APP_TAG },
+      { name: 'Type', value: TAG_ACADEMIC },
+      { name: 'Owner-Pubkey', value: ownerPubkey },
+      { name: 'Created-At', value: Date.now().toString() },
+    ];
+    return ArweavePublisher.uploadSigned(signedData, tags);
+  },
+  
+  // Publish service listing with attestation
+  publishService: async (
+    serviceData: any, 
+    ownerPubkey: string, 
+    attestation: AttestationResult
+  ): Promise<{ txId: string } | { error: string }> => {
+    const signedData = await ArweaveSignatureManager.signData(serviceData, ownerPubkey, attestation);
+    const tags = [
+      { name: 'App-Name', value: APP_TAG },
+      { name: 'Type', value: TAG_SERVICE },
+      { name: 'Owner-Pubkey', value: ownerPubkey },
+      { name: 'Category', value: serviceData.category },
+      { name: 'Created-At', value: Date.now().toString() },
+    ];
+    return ArweavePublisher.uploadSigned(signedData, tags);
+  },
+};
+
+// ============================================================================
+// TOWN HALL VERIFIER (Only external service we use)
+// ============================================================================
+const TownHallVerifier = {
+  // Verify user stats meet criteria
+  verifyUser: async (aptNumber: string): Promise<{
+    verified: boolean;
+    stats?: { xp: number; pComplete: number; deadlocks: number; snailMode: boolean };
+    proof?: string;
+    error?: string;
+  }> => {
+    try {
+      const res = await fetch(`${TOWN_HALL_API}/api/verify/user/${aptNumber}`);
+      return await res.json();
+    } catch (e: any) {
+      return { verified: false, error: e.message };
+    }
+  },
+  
+  // Verify store meets verification criteria
+  verifyStore: async (storeId: string): Promise<{
+    verified: boolean;
+    ownerStats?: { xp: number; pComplete: number };
+    proof?: string;
+    error?: string;
+  }> => {
+    try {
+      const res = await fetch(`${TOWN_HALL_API}/api/verify/store/${storeId}`);
+      return await res.json();
+    } catch (e: any) {
+      return { verified: false, error: e.message };
+    }
+  },
+  
+  // Verify DApp meets quality gate
+  verifyDApp: async (dappId: string): Promise<{
+    verified: boolean;
+    qualityChecks?: any;
+    proof?: string;
+    error?: string;
+  }> => {
+    try {
+      const res = await fetch(`${TOWN_HALL_API}/api/verify/dapp/${dappId}`);
+      return await res.json();
+    } catch (e: any) {
+      return { verified: false, error: e.message };
+    }
+  },
+  
+  // Get verification status for any ID
+  getStatus: async (id: string, type: 'user' | 'store' | 'dapp'): Promise<any> => {
+    const endpoint = type === 'user' ? 'user' : type === 'store' ? 'store' : 'dapp';
+    try {
+      const res = await fetch(`${TOWN_HALL_API}/api/verify/${endpoint}/${id}`);
+      return await res.json();
+    } catch (e: any) {
+      return { error: e.message };
+    }
+  },
+};
+
+// ============================================================================
+// CONTENT MODERATION (All runs on phone)
+// ============================================================================
+const ContentModerator = {
+  // Check image for NSFW (runs locally with NSFW.js)
+  checkImage: async (imageBase64: string): Promise<{ safe: boolean; reason?: string }> => {
+    // In production: use nsfwjs
+    // const model = await nsfwjs.load();
+    // const predictions = await model.classify(imageElement);
+    // if (predictions.find(p => p.className === 'Porn' && p.probability > 0.7)) {
+    //   return { safe: false, reason: 'NSFW content detected' };
+    // }
+    return { safe: true };
+  },
+  
+  // Check text for toxicity (runs locally)
+  checkText: async (text: string): Promise<{ safe: boolean; reason?: string }> => {
+    // In production: use @tensorflow-models/toxicity
+    const toxicPatterns = [
+      /\b(kill|murder|rape)\b.*\b(you|them|her|him)\b/i,
+      /\b(hate|exterminate)\b.*\b(jews|blacks|whites|asians|gays)\b/i,
+    ];
+    for (const pattern of toxicPatterns) {
+      if (pattern.test(text)) {
+        return { safe: false, reason: 'Toxic content detected' };
+      }
+    }
+    return { safe: true };
+  },
+  
+  // Compute image hash for CSAM check
+  computeImageHash: async (imageBase64: string): Promise<string> => {
+    return await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      imageBase64
+    );
+  },
+};
+
+// ============================================================================
+// DEVICE INTEGRITY MANAGER
+// Detects rooted/jailbroken devices, emulators, tampered environments
+// ============================================================================
+interface IntegrityResult {
+  compromised: boolean;
+  reason: string | null;
+  details?: string;
+}
+
+const DeviceIntegrityManager = {
+  checkIntegrity: async (): Promise<IntegrityResult> => {
+    try {
+      // Check for rooted/jailbroken device
+      const isRooted = await Device.isRootedExperimentalAsync();
+      if (isRooted) {
+        return {
+          compromised: true,
+          reason: 'untrusted_os_root',
+          details: Platform.OS === 'ios' ? 'Jailbroken device detected' : 'Rooted device detected',
+        };
+      }
+      
+      // Check for emulator/simulator
+      if (!Device.isDevice) {
+        return {
+          compromised: true,
+          reason: 'virtual_environment',
+          details: Platform.OS === 'ios' ? 'iOS Simulator detected' : 'Android Emulator detected',
+        };
+      }
+      
+      // Check for suspicious device names (common emulators)
+      if (Platform.OS === 'android') {
+        const deviceName = (Device.deviceName || '').toLowerCase();
+        const modelName = (Device.modelName || '').toLowerCase();
+        const suspicious = ['sdk', 'emulator', 'genymotion', 'bluestacks', 'nox', 'memu', 'andy'];
+        for (const s of suspicious) {
+          if (deviceName.includes(s) || modelName.includes(s)) {
+            return {
+              compromised: true,
+              reason: 'suspicious_device_name',
+              details: `Emulator detected: ${Device.modelName}`,
+            };
+          }
+        }
+      }
+      
+      return { compromised: false, reason: null };
+    } catch (error: any) {
+      // Fail safe - if check fails, assume not compromised
+      return { compromised: false, reason: null, details: `Check failed: ${error.message}` };
+    }
+  },
+  
+  getFingerprint: () => ({
+    brand: Device.brand,
+    manufacturer: Device.manufacturer,
+    modelName: Device.modelName,
+    modelId: Device.modelId,
+    osName: Device.osName,
+    osVersion: Device.osVersion,
+    deviceYearClass: Device.deviceYearClass,
+    totalMemory: Device.totalMemory,
+    isDevice: Device.isDevice,
+  }),
+};
+
+// ============================================================================
+// ATTESTATION MANAGER
+// iOS App Attest / Android Play Integrity
+// Proves app and device haven't been tampered with
+// ============================================================================
+interface AttestationResult {
+  success: boolean;
+  platform: 'ios' | 'android' | 'web';
+  attestationBlob?: string;
+  keyId?: string;
+  nonce: string;
+  timestamp: number;
+  deviceIntegrity: boolean;
+  appIntegrity: boolean;
+  error?: string;
+}
+
+const AttestationManager = {
+  keyId: null as string | null,
+  lastAttestation: null as AttestationResult | null,
+  
+  // In production: set to true with Apple Developer / Play Console setup
+  IOS_ENABLED: false,
+  ANDROID_ENABLED: false,
+  
+  getPlatform: (): 'ios' | 'android' | 'web' => {
+    if (Platform.OS === 'ios') return 'ios';
+    if (Platform.OS === 'android') return 'android';
+    return 'web';
+  },
+  
+  isAvailable: async (): Promise<boolean> => {
+    const platform = AttestationManager.getPlatform();
+    if (platform === 'ios') return AttestationManager.IOS_ENABLED;
+    if (platform === 'android') return AttestationManager.ANDROID_ENABLED;
+    return false;
+  },
+  
+  // Perform device attestation with server challenge
+  performAttestation: async (challenge: string): Promise<AttestationResult> => {
+    const platform = AttestationManager.getPlatform();
+    const timestamp = Date.now();
+    
+    // First check device integrity
+    const integrity = await DeviceIntegrityManager.checkIntegrity();
+    if (integrity.compromised) {
+      return {
+        success: false,
+        platform,
+        nonce: challenge,
+        timestamp,
+        deviceIntegrity: false,
+        appIntegrity: false,
+        error: integrity.details || integrity.reason || 'Device compromised',
+      };
+    }
+    
+    if (platform === 'ios') {
+      // Mock iOS App Attest (real impl requires Apple Developer account)
+      // In production: use react-native-app-attest
+      const mockBlob = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        `ios_attestation_${challenge}_${timestamp}_${Device.modelId}`
+      );
+      const keyId = `ios_key_${timestamp}`;
+      AttestationManager.keyId = keyId;
+      await SecureStore.setItemAsync('attestation_key_id', keyId);
+      
+      const result: AttestationResult = {
+        success: true,
+        platform: 'ios',
+        attestationBlob: `IOS_ATTESTATION_${mockBlob}`,
+        keyId,
+        nonce: challenge,
+        timestamp,
+        deviceIntegrity: true,
+        appIntegrity: true,
+      };
+      AttestationManager.lastAttestation = result;
+      return result;
+    }
+    
+    if (platform === 'android') {
+      // Mock Play Integrity (real impl requires Play Console)
+      const mockToken = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        `android_integrity_${challenge}_${timestamp}_${Device.modelId}`
+      );
+      
+      const result: AttestationResult = {
+        success: true,
+        platform: 'android',
+        attestationBlob: `ANDROID_TOKEN_${mockToken}`,
+        nonce: challenge,
+        timestamp,
+        deviceIntegrity: true,
+        appIntegrity: true,
+      };
+      AttestationManager.lastAttestation = result;
+      return result;
+    }
+    
+    // Web - no hardware attestation available
+    return {
+      success: true,
+      platform: 'web',
+      nonce: challenge,
+      timestamp,
+      deviceIntegrity: false,
+      appIntegrity: false,
+    };
+  },
+  
+  // Compute attestation hash for L1 inscription (16 bytes)
+  computeAttestationHash: async (attestation: AttestationResult): Promise<string> => {
+    const data = `${attestation.attestationBlob || ''}_${attestation.nonce}_${attestation.timestamp}_${attestation.keyId || ''}`;
+    const fullHash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, data);
+    return fullHash.slice(0, 32); // First 16 bytes = 32 hex chars
+  },
+  
+  getLastAttestation: (): AttestationResult | null => AttestationManager.lastAttestation,
+};
+
+// ============================================================================
+// ARWEAVE SIGNATURE MANAGER
+// Signs data before publishing to prove it came from untampered app
+// ============================================================================
+interface SignedArweaveData {
+  data: any;
+  signature: string;
+  signerPubkey: string;
+  attestationHash: string;
+  timestamp: number;
+}
+
+const ArweaveSignatureManager = {
+  // Sign data with user's key + attestation binding
+  signData: async (
+    data: any,
+    publicKeyHex: string,
+    attestation: AttestationResult,
+  ): Promise<SignedArweaveData> => {
+    const timestamp = Date.now();
+    
+    // Get attestation hash
+    const attestationHash = await AttestationManager.computeAttestationHash(attestation);
+    
+    // Create message: hash of (data + attestation + timestamp)
+    const dataJson = JSON.stringify(data);
+    const messageToSign = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      `${dataJson}_${attestationHash}_${timestamp}`
+    );
+    
+    // Sign with secp256k1 (in production: use crypto library)
+    // For now: HMAC-based signature placeholder
+    const signature = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      `SIGN_${messageToSign}_${publicKeyHex}`
+    );
+    
+    return {
+      data,
+      signature,
+      signerPubkey: publicKeyHex,
+      attestationHash,
+      timestamp,
+    };
+  },
+  
+  // Verify signed data matches expected pubkey
+  verifySignature: (signedData: SignedArweaveData, expectedPubkey: string): boolean => {
+    // In production: verify secp256k1 ECDSA signature
+    return signedData.signerPubkey === expectedPubkey && 
+           signedData.signature.length > 0 &&
+           signedData.attestationHash.length > 0;
+  },
+  
+  // Create signed tags for Arweave upload
+  createSignedTags: (signedData: SignedArweaveData): { name: string; value: string }[] => [
+    { name: 'Signer-Pubkey', value: signedData.signerPubkey },
+    { name: 'Attestation-Hash', value: signedData.attestationHash },
+    { name: 'Signature', value: signedData.signature },
+    { name: 'Signed-At', value: signedData.timestamp.toString() },
+  ],
+};
+
+// ============================================================================
+// HUMAN VERIFIER (Biometric proof-of-human)
+// ============================================================================
+const HumanVerifier = {
+  verify: async (): Promise<{ verified: boolean; attestation?: string }> => {
+    try {
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Verify you are human',
+        disableDeviceFallback: true,
+      });
+      if (!result.success) return { verified: false };
+      
+      const attestation = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        `human_${Date.now()}_${Device.modelId}`
+      );
+      return { verified: true, attestation };
+    } catch {
+      return { verified: false };
+    }
+  },
+};
+
+// ============================================================================
+// GEO COMPLIANCE (OFAC + State restrictions)
+// ============================================================================
+const BLOCKED_COUNTRIES = ['CU', 'IR', 'KP', 'SY', 'RU', 'BY', 'VE', 'MM', 'SD', 'YE', 'SO', 'CF', 'LY', 'ZW'];
+const BLOCKED_STATES = ['NY', 'WA']; // BitLicense states
+
+const GeoChecker = {
+  check: async (): Promise<{ allowed: boolean; reason?: string }> => {
+    try {
+      // Check SIM card country (catches VPN users)
+      const simCountry = await Cellular.getIsoCountryCodeAsync();
+      if (simCountry && BLOCKED_COUNTRIES.includes(simCountry.toUpperCase())) {
+        return { allowed: false, reason: `Service unavailable in ${simCountry}` };
+      }
+      
+      // For US, would need to check state via IP geolocation
+      // This runs on phone, so we trust the SIM card as primary signal
+      
+      return { allowed: true };
+    } catch {
+      return { allowed: true }; // Fail open
+    }
+  },
+};
+
+// ============================================================================
+// WALLET SCREEN
+// ============================================================================
+const WalletScreen: React.FC<{ wallet: WalletState; onRefresh: () => void }> = ({ wallet, onRefresh }) => {
+  const [showAddress, setShowAddress] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await onRefresh();
+    setRefreshing(false);
+  };
+
+  const revealAddress = async () => {
+    const result = await LocalAuthentication.authenticateAsync({
+      promptMessage: 'Reveal Kaspa address',
+    });
+    if (result.success) {
+      setShowAddress(true);
+      setTimeout(() => setShowAddress(false), 30000); // Auto-hide after 30s
+    }
+  };
+
+  const copyAddress = async () => {
+    if (wallet.kaspaAddress) {
+      await Clipboard.setStringAsync(wallet.kaspaAddress);
+      Alert.alert('Copied', 'Address copied to clipboard');
+    }
+  };
+
+  return (
+    <ScrollView 
+      style={styles.screen}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+    >
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>🏠 {wallet.aptAlias || 'APT-???'}</Text>
+        
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>XP</Text>
+            <Text style={styles.statValue}>{wallet.xp}</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Complete</Text>
+            <Text style={styles.statValue}>{(wallet.pComplete * 100).toFixed(0)}%</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Deadlocks</Text>
+            <Text style={styles.statValue}>{wallet.deadlocks}</Text>
+          </View>
+        </View>
+        
+        {wallet.inSnailMode && (
+          <View style={styles.snailBadge}>
+            <Text style={styles.snailText}>🐌 Snail Mode</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Kaspa Address</Text>
+        {showAddress ? (
+          <TouchableOpacity onPress={copyAddress}>
+            <Text style={styles.addressText} selectable>{wallet.kaspaAddress}</Text>
+            <Text style={styles.hint}>Tap to copy • Hides in 30s</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.button} onPress={revealAddress}>
+            <Text style={styles.buttonText}>🔐 Reveal Address</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Public Key</Text>
+        <Text style={styles.monoText} selectable>{wallet.publicKey?.slice(0, 20)}...{wallet.publicKey?.slice(-10)}</Text>
+      </View>
+    </ScrollView>
+  );
+};
+
+// ============================================================================
+// SEARCH SCREEN (Queries Arweave directly from phone)
+// ============================================================================
+const SearchScreen: React.FC = () => {
+  const [query, setQuery] = useState('');
+  const [searchType, setSearchType] = useState<'stores' | 'coupons' | 'dapps' | 'academics' | 'services'>('coupons');
+  const [results, setResults] = useState<ArweaveItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<ArweaveItem | null>(null);
+  const [verificationResult, setVerificationResult] = useState<any>(null);
+
+  const doSearch = async () => {
+    Keyboard.dismiss();
+    setLoading(true);
+    setResults([]);
+    
+    let items: ArweaveItem[] = [];
+    switch (searchType) {
+      case 'stores': items = await ArweaveClient.searchStores(query); break;
+      case 'coupons': items = await ArweaveClient.searchCoupons(query); break;
+      case 'dapps': items = await ArweaveClient.searchDApps(query); break;
+      case 'academics': items = await ArweaveClient.searchAcademics(query); break;
+      case 'services': items = await ArweaveClient.searchServices(query); break;
+    }
+    
+    // Sort by price (cheapest first) then KAS discount
+    items.sort((a, b) => {
+      const priceA = a.data?.dollarPrice || a.data?.price || 0;
+      const priceB = b.data?.dollarPrice || b.data?.price || 0;
+      if (priceA !== priceB) return priceA - priceB;
+      const discountA = a.data?.kasDiscountPercent || 0;
+      const discountB = b.data?.kasDiscountPercent || 0;
+      return discountB - discountA;
+    });
+    
+    setResults(items);
+    setLoading(false);
+  };
+
+  const verifyItem = async (item: ArweaveItem) => {
+    setSelectedItem(item);
+    const type = item.type === 'Store' ? 'store' : item.type === 'DApp' ? 'dapp' : 'user';
+    const result = await TownHallVerifier.getStatus(item.txId, type as any);
+    setVerificationResult(result);
+  };
+
+  const renderItem = ({ item }: { item: ArweaveItem }) => (
+    <TouchableOpacity style={styles.resultCard} onPress={() => verifyItem(item)}>
+      <View style={styles.resultHeader}>
+        <Text style={styles.resultTitle}>{item.data?.name || item.data?.displayText || 'Unnamed'}</Text>
+        {item.verified && <Text style={styles.verifiedBadge}>✓ Verified</Text>}
+      </View>
+      <Text style={styles.resultDesc} numberOfLines={2}>{item.data?.description || ''}</Text>
+      <View style={styles.resultFooter}>
+        {item.data?.dollarPrice && (
+          <Text style={styles.priceText}>${item.data.dollarPrice.toFixed(2)}</Text>
+        )}
+        {item.data?.kasDiscountPercent > 0 && (
+          <Text style={styles.discountText}>{item.data.kasDiscountPercent}% KAS discount</Text>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.searchBar}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search marketplace..."
+          value={query}
+          onChangeText={setQuery}
+          onSubmitEditing={doSearch}
+          returnKeyType="search"
+        />
+        <TouchableOpacity style={styles.searchButton} onPress={doSearch}>
+          <Text style={styles.searchButtonText}>🔍</Text>
+        </TouchableOpacity>
+      </View>
+      
+      <ScrollView horizontal style={styles.typeSelector} showsHorizontalScrollIndicator={false}>
+        {(['coupons', 'stores', 'dapps', 'academics', 'services'] as const).map(type => (
+          <TouchableOpacity
+            key={type}
+            style={[styles.typeButton, searchType === type && styles.typeButtonActive]}
+            onPress={() => setSearchType(type)}
+          >
+            <Text style={[styles.typeButtonText, searchType === type && styles.typeButtonTextActive]}>
+              {type.charAt(0).toUpperCase() + type.slice(1)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {loading ? (
+        <ActivityIndicator size="large" style={styles.loader} />
+      ) : (
+        <FlatList
+          data={results}
+          renderItem={renderItem}
+          keyExtractor={item => item.txId}
+          contentContainerStyle={styles.resultsList}
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>
+              {query ? 'No results found' : 'Enter a search term'}
+            </Text>
+          }
+        />
+      )}
+
+      {/* Verification Modal */}
+      <Modal visible={!!selectedItem} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{selectedItem?.data?.name || 'Item Details'}</Text>
+            
+            {verificationResult ? (
+              <View style={styles.verificationBox}>
+                <Text style={styles.verificationStatus}>
+                  {verificationResult.verified ? '✓ VERIFIED' : '⚠ NOT VERIFIED'}
+                </Text>
+                {verificationResult.stats && (
+                  <View style={styles.statsBox}>
+                    <Text>XP: {verificationResult.stats.xp}</Text>
+                    <Text>Completion: {(verificationResult.stats.pComplete * 100).toFixed(0)}%</Text>
+                    <Text>Deadlocks: {verificationResult.stats.deadlocks}</Text>
+                  </View>
+                )}
+                {verificationResult.proof && (
+                  <Text style={styles.proofText}>Proof: {verificationResult.proof.slice(0, 20)}...</Text>
+                )}
+              </View>
+            ) : (
+              <ActivityIndicator />
+            )}
+            
+            <TouchableOpacity 
+              style={styles.closeButton} 
+              onPress={() => { setSelectedItem(null); setVerificationResult(null); }}
+            >
+              <Text style={styles.closeButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+};
+
+// ============================================================================
+// WORKSPACE SCREEN (Create stores, coupons, DApps, academics)
+// ============================================================================
+const WorkspaceScreen: React.FC<{ wallet: WalletState }> = ({ wallet }) => {
+  const [activeTab, setActiveTab] = useState<'store' | 'coupon' | 'dapp' | 'academic' | 'service'>('store');
+  const [publishing, setPublishing] = useState(false);
+  const [myStoreId, setMyStoreId] = useState<string | null>(null);
+  
+  // Store form
+  const [storeName, setStoreName] = useState('');
+  const [storeDesc, setStoreDesc] = useState('');
+  
+  // Coupon form
+  const [couponName, setCouponName] = useState('');
+  const [couponDesc, setCouponDesc] = useState('');
+  const [dollarPrice, setDollarPrice] = useState('');
+  const [kasDiscount, setKasDiscount] = useState('');
+  const [hiddenUsd, setHiddenUsd] = useState('');
+  
+  // DApp form
+  const [dappName, setDappName] = useState('');
+  const [dappDesc, setDappDesc] = useState('');
+  const [gameType, setGameType] = useState('puzzle');
+  
+  // Academic form
+  const [academicTitle, setAcademicTitle] = useState('');
+  const [academicAbstract, setAcademicAbstract] = useState('');
+  const [pricePerQuestion, setPricePerQuestion] = useState('');
+  
+  // Service form
+  const [serviceName, setServiceName] = useState('');
+  const [serviceDesc, setServiceDesc] = useState('');
+  const [serviceCategory, setServiceCategory] = useState('Handyman');
+  const [servicePrice, setServicePrice] = useState('');
+
+  const publishStore = async () => {
+    if (!storeName.trim()) return Alert.alert('Error', 'Store name required');
+    
+    // Content moderation
+    const textCheck = await ContentModerator.checkText(storeName + ' ' + storeDesc);
+    if (!textCheck.safe) return Alert.alert('Blocked', textCheck.reason);
+    
+    // Human verification
+    const human = await HumanVerifier.verify();
+    if (!human.verified) return Alert.alert('Error', 'Human verification required');
+    
+    // Device attestation (proves untampered app/device)
+    const challenge = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      `store_${Date.now()}_${wallet.publicKey}`
+    );
+    const attestation = await AttestationManager.performAttestation(challenge);
+    if (!attestation.success) {
+      return Alert.alert('Error', attestation.error || 'Device attestation failed');
+    }
+    
+    setPublishing(true);
+    const storeData = {
+      name: storeName,
+      description: storeDesc,
+      ownerPubkey: wallet.publicKey,
+      ownerApt: wallet.aptAlias,
+      createdAt: Date.now(),
+    };
+    
+    const result = await ArweavePublisher.publishStore(storeData, wallet.publicKey!, attestation);
+    setPublishing(false);
+    
+    if ('txId' in result) {
+      setMyStoreId(result.txId);
+      Alert.alert('Success', `Store published!\nTx: ${result.txId.slice(0, 16)}...`);
+      setStoreName('');
+      setStoreDesc('');
+    } else {
+      Alert.alert('Error', result.error);
+    }
+  };
+
+  const publishCoupon = async () => {
+    if (!myStoreId) return Alert.alert('Error', 'Create a store first');
+    if (!couponName.trim()) return Alert.alert('Error', 'Coupon name required');
+    
+    const textCheck = await ContentModerator.checkText(couponName + ' ' + couponDesc);
+    if (!textCheck.safe) return Alert.alert('Blocked', textCheck.reason);
+    
+    const human = await HumanVerifier.verify();
+    if (!human.verified) return Alert.alert('Error', 'Human verification required');
+    
+    // Device attestation
+    const challenge = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      `coupon_${Date.now()}_${wallet.publicKey}`
+    );
+    const attestation = await AttestationManager.performAttestation(challenge);
+    if (!attestation.success) {
+      return Alert.alert('Error', attestation.error || 'Device attestation failed');
+    }
+    
+    setPublishing(true);
+    const couponData = {
+      storeId: myStoreId,
+      name: couponName,
+      description: couponDesc,
+      dollarPrice: parseFloat(dollarPrice) || 0,
+      kasDiscountPercent: parseFloat(kasDiscount) || 0,
+      hiddenUsdValue: parseFloat(hiddenUsd) || parseFloat(dollarPrice) || 0,
+      ownerPubkey: wallet.publicKey,
+      createdAt: Date.now(),
+    };
+    
+    const result = await ArweavePublisher.publishCoupon(couponData, wallet.publicKey!, attestation);
+    setPublishing(false);
+    
+    if ('txId' in result) {
+      Alert.alert('Success', `Coupon published!\nTx: ${result.txId.slice(0, 16)}...`);
+      setCouponName('');
+      setCouponDesc('');
+      setDollarPrice('');
+      setKasDiscount('');
+      setHiddenUsd('');
+    } else {
+      Alert.alert('Error', result.error);
+    }
+  };
+
+  const publishDApp = async () => {
+    if (!dappName.trim()) return Alert.alert('Error', 'DApp name required');
+    
+    const textCheck = await ContentModerator.checkText(dappName + ' ' + dappDesc);
+    if (!textCheck.safe) return Alert.alert('Blocked', textCheck.reason);
+    
+    const human = await HumanVerifier.verify();
+    if (!human.verified) return Alert.alert('Error', 'Human verification required');
+    
+    // Device attestation
+    const challenge = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      `dapp_${Date.now()}_${wallet.publicKey}`
+    );
+    const attestation = await AttestationManager.performAttestation(challenge);
+    if (!attestation.success) {
+      return Alert.alert('Error', attestation.error || 'Device attestation failed');
+    }
+    
+    setPublishing(true);
+    const dappData = {
+      name: dappName,
+      description: dappDesc,
+      gameType,
+      ownerPubkey: wallet.publicKey,
+      ownerApt: wallet.aptAlias,
+      createdAt: Date.now(),
+    };
+    
+    const result = await ArweavePublisher.publishDApp(dappData, wallet.publicKey!, attestation);
+    setPublishing(false);
+    
+    if ('txId' in result) {
+      Alert.alert('Success', `DApp published!\nTx: ${result.txId.slice(0, 16)}...`);
+      setDappName('');
+      setDappDesc('');
+    } else {
+      Alert.alert('Error', result.error);
+    }
+  };
+
+  const publishAcademic = async () => {
+    if (!academicTitle.trim()) return Alert.alert('Error', 'Title required');
+    
+    const textCheck = await ContentModerator.checkText(academicTitle + ' ' + academicAbstract);
+    if (!textCheck.safe) return Alert.alert('Blocked', textCheck.reason);
+    
+    const human = await HumanVerifier.verify();
+    if (!human.verified) return Alert.alert('Error', 'Human verification required');
+    
+    // Device attestation
+    const challenge = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      `academic_${Date.now()}_${wallet.publicKey}`
+    );
+    const attestation = await AttestationManager.performAttestation(challenge);
+    if (!attestation.success) {
+      return Alert.alert('Error', attestation.error || 'Device attestation failed');
+    }
+    
+    setPublishing(true);
+    const academicData = {
+      title: academicTitle,
+      abstract: academicAbstract,
+      pricePerQuestionUsd: parseFloat(pricePerQuestion) || 5,
+      ownerPubkey: wallet.publicKey,
+      createdAt: Date.now(),
+    };
+    
+    const result = await ArweavePublisher.publishAcademic(academicData, wallet.publicKey!, attestation);
+    setPublishing(false);
+    
+    if ('txId' in result) {
+      Alert.alert('Success', `Academic profile published!\nTx: ${result.txId.slice(0, 16)}...`);
+      setAcademicTitle('');
+      setAcademicAbstract('');
+      setPricePerQuestion('');
+    } else {
+      Alert.alert('Error', result.error);
+    }
+  };
+
+  const publishService = async () => {
+    if (!serviceName.trim()) return Alert.alert('Error', 'Service name required');
+    
+    const textCheck = await ContentModerator.checkText(serviceName + ' ' + serviceDesc);
+    if (!textCheck.safe) return Alert.alert('Blocked', textCheck.reason);
+    
+    const human = await HumanVerifier.verify();
+    if (!human.verified) return Alert.alert('Error', 'Human verification required');
+    
+    // Device attestation
+    const challenge = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      `service_${Date.now()}_${wallet.publicKey}`
+    );
+    const attestation = await AttestationManager.performAttestation(challenge);
+    if (!attestation.success) {
+      return Alert.alert('Error', attestation.error || 'Device attestation failed');
+    }
+    
+    setPublishing(true);
+    const serviceData = {
+      name: serviceName,
+      description: serviceDesc,
+      category: serviceCategory,
+      priceUsd: parseFloat(servicePrice) || 0,
+      ownerPubkey: wallet.publicKey,
+      ownerApt: wallet.aptAlias,
+      createdAt: Date.now(),
+    };
+    
+    const result = await ArweavePublisher.publishService(serviceData, wallet.publicKey!, attestation);
+    setPublishing(false);
+    
+    if ('txId' in result) {
+      Alert.alert('Success', `Service published!\nTx: ${result.txId.slice(0, 16)}...`);
+      setServiceName('');
+      setServiceDesc('');
+      setServicePrice('');
+    } else {
+      Alert.alert('Error', result.error);
+    }
+  };
+
+  return (
+    <ScrollView style={styles.screen}>
+      <Text style={styles.screenTitle}>📦 Workspace</Text>
+      
+      {/* Tab selector */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar}>
+        {(['store', 'coupon', 'dapp', 'academic', 'service'] as const).map(tab => (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.tab, activeTab === tab && styles.tabActive]}
+            onPress={() => setActiveTab(tab)}
+          >
+            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+              {tab === 'store' ? '🏪 Store' : 
+               tab === 'coupon' ? '🎟️ Coupon' : 
+               tab === 'dapp' ? '🎮 DApp' : 
+               tab === 'academic' ? '🎓 Academic' : '🔧 Service'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {/* Store Form */}
+      {activeTab === 'store' && (
+        <View style={styles.form}>
+          <Text style={styles.formTitle}>Create Store</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Store name"
+            value={storeName}
+            onChangeText={setStoreName}
+          />
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Description"
+            value={storeDesc}
+            onChangeText={setStoreDesc}
+            multiline
+          />
+          <TouchableOpacity 
+            style={[styles.publishButton, publishing && styles.buttonDisabled]} 
+            onPress={publishStore}
+            disabled={publishing}
+          >
+            <Text style={styles.publishButtonText}>
+              {publishing ? 'Publishing...' : '🚀 Publish to Arweave (FREE)'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Coupon Form */}
+      {activeTab === 'coupon' && (
+        <View style={styles.form}>
+          <Text style={styles.formTitle}>Create Coupon</Text>
+          {!myStoreId && (
+            <Text style={styles.warning}>⚠️ Create a store first</Text>
+          )}
+          <TextInput
+            style={styles.input}
+            placeholder="Item name"
+            value={couponName}
+            onChangeText={setCouponName}
+          />
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Description"
+            value={couponDesc}
+            onChangeText={setCouponDesc}
+            multiline
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Dollar price (e.g., 25.00)"
+            value={dollarPrice}
+            onChangeText={setDollarPrice}
+            keyboardType="decimal-pad"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="KAS discount % (e.g., 15)"
+            value={kasDiscount}
+            onChangeText={setKasDiscount}
+            keyboardType="decimal-pad"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Hidden USD value (for integrity survey)"
+            value={hiddenUsd}
+            onChangeText={setHiddenUsd}
+            keyboardType="decimal-pad"
+          />
+          <Text style={styles.hint}>Hidden value is only used to verify you honored the price after sale</Text>
+          <TouchableOpacity 
+            style={[styles.publishButton, (publishing || !myStoreId) && styles.buttonDisabled]} 
+            onPress={publishCoupon}
+            disabled={publishing || !myStoreId}
+          >
+            <Text style={styles.publishButtonText}>
+              {publishing ? 'Publishing...' : '🚀 Publish Coupon (FREE)'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* DApp Form */}
+      {activeTab === 'dapp' && (
+        <View style={styles.form}>
+          <Text style={styles.formTitle}>Create DApp</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="DApp name"
+            value={dappName}
+            onChangeText={setDappName}
+          />
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Description"
+            value={dappDesc}
+            onChangeText={setDappDesc}
+            multiline
+          />
+          <View style={styles.gameTypeSelector}>
+            {['puzzle', 'board', 'card', 'physics', 'rpg', 'utility'].map(type => (
+              <TouchableOpacity
+                key={type}
+                style={[styles.gameTypeButton, gameType === type && styles.gameTypeButtonActive]}
+                onPress={() => setGameType(type)}
+              >
+                <Text style={styles.gameTypeText}>{type}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity 
+            style={[styles.publishButton, publishing && styles.buttonDisabled]} 
+            onPress={publishDApp}
+            disabled={publishing}
+          >
+            <Text style={styles.publishButtonText}>
+              {publishing ? 'Publishing...' : '🚀 Publish DApp'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Academic Form */}
+      {activeTab === 'academic' && (
+        <View style={styles.form}>
+          <Text style={styles.formTitle}>Create Academic Profile</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Research title / Expertise"
+            value={academicTitle}
+            onChangeText={setAcademicTitle}
+          />
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Abstract / Bio"
+            value={academicAbstract}
+            onChangeText={setAcademicAbstract}
+            multiline
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Price per question (USD)"
+            value={pricePerQuestion}
+            onChangeText={setPricePerQuestion}
+            keyboardType="decimal-pad"
+          />
+          <TouchableOpacity 
+            style={[styles.publishButton, publishing && styles.buttonDisabled]} 
+            onPress={publishAcademic}
+            disabled={publishing}
+          >
+            <Text style={styles.publishButtonText}>
+              {publishing ? 'Publishing...' : '🚀 Publish Profile (FREE)'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Service Form */}
+      {activeTab === 'service' && (
+        <View style={styles.form}>
+          <Text style={styles.formTitle}>Create Service Listing</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Service name"
+            value={serviceName}
+            onChangeText={setServiceName}
+          />
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Description"
+            value={serviceDesc}
+            onChangeText={setServiceDesc}
+            multiline
+          />
+          <View style={styles.categorySelector}>
+            {['Plumbing', 'Electrical', 'Handyman', 'Cleaning', 'Moving', 'Other'].map(cat => (
+              <TouchableOpacity
+                key={cat}
+                style={[styles.categoryButton, serviceCategory === cat && styles.categoryButtonActive]}
+                onPress={() => setServiceCategory(cat)}
+              >
+                <Text style={styles.categoryText}>{cat}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="Price (USD)"
+            value={servicePrice}
+            onChangeText={setServicePrice}
+            keyboardType="decimal-pad"
+          />
+          <TouchableOpacity 
+            style={[styles.publishButton, publishing && styles.buttonDisabled]} 
+            onPress={publishService}
+            disabled={publishing}
+          >
+            <Text style={styles.publishButtonText}>
+              {publishing ? 'Publishing...' : '🚀 Publish Service (FREE)'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </ScrollView>
+  );
+};
+
+// ============================================================================
+// TOWN HALL SCREEN (Verification only - the ONLY backend we run)
+// ============================================================================
+const TownHallScreen: React.FC = () => {
+  const [inputId, setInputId] = useState('');
+  const [idType, setIdType] = useState<'apt' | 'store' | 'dapp'>('apt');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const verify = async () => {
+    if (!inputId.trim()) return Alert.alert('Error', 'Enter an ID to verify');
+    
+    Keyboard.dismiss();
+    setLoading(true);
+    setResult(null);
+    
+    let verifyResult: any;
+    switch (idType) {
+      case 'apt':
+        verifyResult = await TownHallVerifier.verifyUser(inputId);
+        break;
+      case 'store':
+        verifyResult = await TownHallVerifier.verifyStore(inputId);
+        break;
+      case 'dapp':
+        verifyResult = await TownHallVerifier.verifyDApp(inputId);
+        break;
+    }
+    
+    setResult(verifyResult);
+    setLoading(false);
+  };
+
+  return (
+    <ScrollView style={[styles.screen, styles.townHallBg]}>
+      <Text style={styles.townHallTitle}>🏛️ Town Hall</Text>
+      <Text style={styles.townHallSubtitle}>Verification Service</Text>
+      
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Verify Identity or Content</Text>
+        <Text style={styles.hint}>
+          Enter an APT number, Store ID, or DApp ID to check verification status and view SNARK proof.
+        </Text>
+        
+        <View style={styles.typeSelector}>
+          {(['apt', 'store', 'dapp'] as const).map(type => (
+            <TouchableOpacity
+              key={type}
+              style={[styles.typeButton, idType === type && styles.typeButtonActive]}
+              onPress={() => setIdType(type)}
+            >
+              <Text style={[styles.typeButtonText, idType === type && styles.typeButtonTextActive]}>
+                {type === 'apt' ? '👤 APT' : type === 'store' ? '🏪 Store' : '🎮 DApp'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        <TextInput
+          style={styles.input}
+          placeholder={
+            idType === 'apt' ? 'APT-304' : 
+            idType === 'store' ? 'Store TX ID' : 
+            'DApp TX ID'
+          }
+          value={inputId}
+          onChangeText={setInputId}
+          autoCapitalize="none"
+        />
+        
+        <TouchableOpacity 
+          style={[styles.verifyButton, loading && styles.buttonDisabled]} 
+          onPress={verify}
+          disabled={loading}
+        >
+          <Text style={styles.verifyButtonText}>
+            {loading ? 'Verifying...' : '🔍 Verify'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+      
+      {/* Results */}
+      {result && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Verification Result</Text>
+          
+          <View style={[
+            styles.verificationBadge,
+            result.verified ? styles.verifiedBg : styles.unverifiedBg
+          ]}>
+            <Text style={styles.verificationBadgeText}>
+              {result.verified ? '✓ VERIFIED' : '⚠ NOT VERIFIED'}
+            </Text>
+          </View>
+          
+          {result.stats && (
+            <View style={styles.statsBox}>
+              <Text style={styles.statsTitle}>User Stats</Text>
+              <View style={styles.statsGrid}>
+                <View style={styles.statGridItem}>
+                  <Text style={styles.statGridLabel}>XP</Text>
+                  <Text style={styles.statGridValue}>{result.stats.xp}</Text>
+                </View>
+                <View style={styles.statGridItem}>
+                  <Text style={styles.statGridLabel}>Completion</Text>
+                  <Text style={styles.statGridValue}>{(result.stats.pComplete * 100).toFixed(0)}%</Text>
+                </View>
+                <View style={styles.statGridItem}>
+                  <Text style={styles.statGridLabel}>Deadlocks</Text>
+                  <Text style={styles.statGridValue}>{result.stats.deadlocks}</Text>
+                </View>
+                <View style={styles.statGridItem}>
+                  <Text style={styles.statGridLabel}>Snail Mode</Text>
+                  <Text style={styles.statGridValue}>{result.stats.snailMode ? '🐌 Yes' : 'No'}</Text>
+                </View>
+              </View>
+            </View>
+          )}
+          
+          {result.ownerStats && (
+            <View style={styles.statsBox}>
+              <Text style={styles.statsTitle}>Owner Stats</Text>
+              <Text>XP: {result.ownerStats.xp}</Text>
+              <Text>Completion: {(result.ownerStats.pComplete * 100).toFixed(0)}%</Text>
+            </View>
+          )}
+          
+          {result.qualityChecks && (
+            <View style={styles.statsBox}>
+              <Text style={styles.statsTitle}>Quality Checks</Text>
+              <Text>Passed: {result.qualityChecks.passed ? '✓' : '✗'}</Text>
+            </View>
+          )}
+          
+          {result.proof && (
+            <View style={styles.proofBox}>
+              <Text style={styles.proofTitle}>SNARK Proof</Text>
+              <Text style={styles.proofText} selectable>
+                {result.proof.slice(0, 64)}...
+              </Text>
+              <TouchableOpacity 
+                onPress={() => Clipboard.setStringAsync(result.proof)}
+                style={styles.copyButton}
+              >
+                <Text style={styles.copyButtonText}>📋 Copy Full Proof</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          {result.error && (
+            <Text style={styles.errorText}>Error: {result.error}</Text>
+          )}
+        </View>
+      )}
+      
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>About Town Hall</Text>
+        <Text style={styles.aboutText}>
+          Town Hall is the only service operated by KasVillage. It verifies:
+        </Text>
+        <Text style={styles.bulletPoint}>• User stats meet criteria (XP, completion rate)</Text>
+        <Text style={styles.bulletPoint}>• Store owners have good standing</Text>
+        <Text style={styles.bulletPoint}>• DApps pass quality gates</Text>
+        <Text style={styles.aboutText}>
+          {'\n'}All marketplace activity happens peer-to-peer on Arweave. 
+          We don't operate the marketplace - we only verify.
+        </Text>
+      </View>
+    </ScrollView>
+  );
+};
+
+// ============================================================================
+// DAPP SANDBOX (Run third-party DApps in isolated WebView)
+// ============================================================================
+const DAppSandboxScreen: React.FC<{ dappUrl: string; dappName: string; onClose: () => void }> = ({ dappUrl, dappName, onClose }) => {
+  const webViewRef = useRef<WebView>(null);
+  
+  const SANDBOX_JS = `
+    (function() {
+      'use strict';
+      const BLOCKED = 'KasVillage: Blocked';
+      Object.defineProperty(window, 'localStorage', { get: () => { throw new Error(BLOCKED); } });
+      Object.defineProperty(window, 'sessionStorage', { get: () => { throw new Error(BLOCKED); } });
+      window.open = () => { throw new Error(BLOCKED); };
+      window.eval = () => { throw new Error(BLOCKED); };
+      
+      window.kasvillageSDK = {
+        getPublicKey: () => window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'GET_PUBKEY' })),
+        requestPayment: (amount, recipient, memo) => {
+          if (amount > 100000000000) throw new Error('Exceeds $1000 cap');
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'PAYMENT', amount, recipient, memo }));
+        },
+        version: '1.0.0'
+      };
+      true;
+    })();
+  `;
+  
+  return (
+    <View style={styles.screen}>
+      <View style={styles.dappHeader}>
+        <TouchableOpacity onPress={onClose} style={styles.dappCloseButton}>
+          <Text style={styles.dappCloseText}>✕</Text>
+        </TouchableOpacity>
+        <Text style={styles.dappTitle}>{dappName}</Text>
+        <View style={styles.dappSandboxBadge}>
+          <Text style={styles.dappSandboxText}>🔒 Sandbox</Text>
+        </View>
+      </View>
+      <WebView
+        ref={webViewRef}
+        source={{ uri: dappUrl }}
+        injectedJavaScript={SANDBOX_JS}
+        style={styles.dappWebView}
+        onMessage={(event) => {
+          const data = JSON.parse(event.nativeEvent.data);
+          // Handle SDK calls
+          console.log('DApp SDK call:', data);
+        }}
+      />
+    </View>
+  );
+};
+
+// ============================================================================
+// MAIN APP
+// ============================================================================
+const App: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'wallet' | 'search' | 'workspace' | 'townhall'>('wallet');
+  const [wallet, setWallet] = useState<WalletState>({
+    initialized: false,
+    publicKey: null,
+    kaspaAddress: null,
+    aptAlias: null,
+    authenticated: false,
+    xp: 0,
+    pComplete: 1.0,
+    deadlocks: 0,
+    inSnailMode: false,
+  });
+  const [blocked, setBlocked] = useState(false);
+  const [blockReason, setBlockReason] = useState('');
+
+  useEffect(() => {
+    initializeApp();
+  }, []);
+
+  const initializeApp = async () => {
+    // Geo check
+    const geo = await GeoChecker.check();
+    if (!geo.allowed) {
+      setBlocked(true);
+      setBlockReason(geo.reason || 'Service unavailable');
+      return;
+    }
+    
+    // Load wallet
+    const publicKey = await SecureStore.getItemAsync('public_key');
+    const kaspaAddress = await SecureStore.getItemAsync('kaspa_address');
+    const aptAlias = await SecureStore.getItemAsync('apt_alias');
+    
+    if (publicKey) {
+      setWallet(prev => ({
+        ...prev,
+        initialized: true,
+        publicKey,
+        kaspaAddress,
+        aptAlias,
+      }));
+    } else {
+      // Generate new wallet
+      const keyBytes = await Crypto.getRandomBytesAsync(32);
+      const newPubKey = Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      await SecureStore.setItemAsync('public_key', newPubKey);
+      
+      // Generate APT alias
+      const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, newPubKey);
+      const aptNum = parseInt(hash.slice(0, 4), 16) % 1000;
+      const newAptAlias = `APT-${aptNum.toString().padStart(3, '0')}`;
+      await SecureStore.setItemAsync('apt_alias', newAptAlias);
+      
+      setWallet(prev => ({
+        ...prev,
+        initialized: true,
+        publicKey: newPubKey,
+        aptAlias: newAptAlias,
+      }));
+    }
+  };
+
+  const refreshWallet = async () => {
+    // Fetch latest stats from Town Hall
+    if (wallet.aptAlias) {
+      const result = await TownHallVerifier.verifyUser(wallet.aptAlias);
+      if (result.stats) {
+        setWallet(prev => ({
+          ...prev,
+          xp: result.stats.xp,
+          pComplete: result.stats.pComplete,
+          deadlocks: result.stats.deadlocks,
+          inSnailMode: result.stats.snailMode,
+        }));
+      }
+    }
+  };
+
+  if (blocked) {
+    return (
+      <View style={styles.blockedScreen}>
+        <Text style={styles.blockedTitle}>⛔ Access Denied</Text>
+        <Text style={styles.blockedText}>{blockReason}</Text>
+      </View>
+    );
+  }
+
+  if (!wallet.initialized) {
+    return (
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator size="large" color="#49EACB" />
+        <Text style={styles.loadingText}>Initializing...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {/* Content */}
+      <View style={styles.content}>
+        {activeTab === 'wallet' && <WalletScreen wallet={wallet} onRefresh={refreshWallet} />}
+        {activeTab === 'search' && <SearchScreen />}
+        {activeTab === 'workspace' && <WorkspaceScreen wallet={wallet} />}
+        {activeTab === 'townhall' && <TownHallScreen />}
+      </View>
+      
+      {/* Tab Bar */}
+      <View style={styles.tabBar}>
+        {[
+          { id: 'wallet', icon: '💳', label: 'Wallet' },
+          { id: 'search', icon: '🔍', label: 'Search' },
+          { id: 'workspace', icon: '📦', label: 'Workspace' },
+          { id: 'townhall', icon: '🏛️', label: 'Town Hall' },
+        ].map(tab => (
+          <TouchableOpacity
+            key={tab.id}
+            style={[styles.tabItem, activeTab === tab.id && styles.tabItemActive]}
+            onPress={() => setActiveTab(tab.id as any)}
+          >
+            <Text style={styles.tabIcon}>{tab.icon}</Text>
+            <Text style={[styles.tabLabel, activeTab === tab.id && styles.tabLabelActive]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+};
+
+// ============================================================================
+// STYLES
+// ============================================================================
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0a0a0a' },
+  content: { flex: 1 },
+  screen: { flex: 1, backgroundColor: '#0a0a0a', padding: rs.s(16) },
+  screenTitle: { fontSize: rs.font(24), fontWeight: 'bold', color: '#fff', marginBottom: rs.s(16) },
+  
+  // Cards
+  card: { backgroundColor: '#1a1a1a', borderRadius: rs.s(12), padding: rs.s(16), marginBottom: rs.s(16) },
+  cardTitle: { fontSize: rs.font(18), fontWeight: 'bold', color: '#fff', marginBottom: rs.s(12) },
+  
+  // Stats
+  statsRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: rs.s(12) },
+  statItem: { alignItems: 'center' },
+  statLabel: { fontSize: rs.font(12), color: '#888' },
+  statValue: { fontSize: rs.font(20), fontWeight: 'bold', color: '#49EACB' },
+  
+  // Snail badge
+  snailBadge: { backgroundColor: '#ff6b00', borderRadius: rs.s(8), padding: rs.s(8), alignItems: 'center' },
+  snailText: { color: '#fff', fontWeight: 'bold' },
+  
+  // Address
+  addressText: { fontSize: rs.font(12), color: '#49EACB', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  monoText: { fontSize: rs.font(11), color: '#888', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  hint: { fontSize: rs.font(11), color: '#666', marginTop: rs.s(4) },
+  
+  // Buttons
+  button: { backgroundColor: '#49EACB', borderRadius: rs.s(8), padding: rs.s(12), alignItems: 'center' },
+  buttonText: { color: '#000', fontWeight: 'bold', fontSize: rs.font(14) },
+  buttonDisabled: { opacity: 0.5 },
+  
+  // Search
+  searchBar: { flexDirection: 'row', marginBottom: rs.s(12) },
+  searchInput: { flex: 1, backgroundColor: '#1a1a1a', borderRadius: rs.s(8), padding: rs.s(12), color: '#fff', fontSize: rs.font(14) },
+  searchButton: { backgroundColor: '#49EACB', borderRadius: rs.s(8), padding: rs.s(12), marginLeft: rs.s(8) },
+  searchButtonText: { fontSize: rs.font(18) },
+  
+  // Type selector
+  typeSelector: { flexDirection: 'row', marginBottom: rs.s(12) },
+  typeButton: { paddingHorizontal: rs.s(16), paddingVertical: rs.s(8), borderRadius: rs.s(16), backgroundColor: '#1a1a1a', marginRight: rs.s(8) },
+  typeButtonActive: { backgroundColor: '#49EACB' },
+  typeButtonText: { color: '#888', fontSize: rs.font(12) },
+  typeButtonTextActive: { color: '#000', fontWeight: 'bold' },
+  
+  // Results
+  resultsList: { paddingBottom: rs.s(20) },
+  resultCard: { backgroundColor: '#1a1a1a', borderRadius: rs.s(12), padding: rs.s(16), marginBottom: rs.s(12) },
+  resultHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs.s(8) },
+  resultTitle: { fontSize: rs.font(16), fontWeight: 'bold', color: '#fff', flex: 1 },
+  verifiedBadge: { color: '#49EACB', fontSize: rs.font(12), fontWeight: 'bold' },
+  resultDesc: { fontSize: rs.font(13), color: '#888', marginBottom: rs.s(8) },
+  resultFooter: { flexDirection: 'row', justifyContent: 'space-between' },
+  priceText: { fontSize: rs.font(16), fontWeight: 'bold', color: '#fff' },
+  discountText: { fontSize: rs.font(12), color: '#49EACB' },
+  emptyText: { textAlign: 'center', color: '#666', marginTop: rs.s(40) },
+  loader: { marginTop: rs.s(40) },
+  
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: rs.s(20) },
+  modalContent: { backgroundColor: '#1a1a1a', borderRadius: rs.s(16), padding: rs.s(20) },
+  modalTitle: { fontSize: rs.font(20), fontWeight: 'bold', color: '#fff', marginBottom: rs.s(16) },
+  closeButton: { backgroundColor: '#333', borderRadius: rs.s(8), padding: rs.s(12), alignItems: 'center', marginTop: rs.s(16) },
+  closeButtonText: { color: '#fff', fontWeight: 'bold' },
+  
+  // Verification
+  verificationBox: { marginBottom: rs.s(16) },
+  verificationStatus: { fontSize: rs.font(18), fontWeight: 'bold', color: '#49EACB', textAlign: 'center' },
+  statsBox: { backgroundColor: '#0a0a0a', borderRadius: rs.s(8), padding: rs.s(12), marginTop: rs.s(12) },
+  proofText: { fontSize: rs.font(10), color: '#666', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  
+  // Form
+  form: { marginBottom: rs.s(20) },
+  formTitle: { fontSize: rs.font(18), fontWeight: 'bold', color: '#fff', marginBottom: rs.s(12) },
+  input: { backgroundColor: '#1a1a1a', borderRadius: rs.s(8), padding: rs.s(12), color: '#fff', fontSize: rs.font(14), marginBottom: rs.s(12), borderWidth: 1, borderColor: '#333' },
+  textArea: { height: rs.s(80), textAlignVertical: 'top' },
+  warning: { color: '#ff6b00', marginBottom: rs.s(12) },
+  publishButton: { backgroundColor: '#49EACB', borderRadius: rs.s(8), padding: rs.s(16), alignItems: 'center' },
+  publishButtonText: { color: '#000', fontWeight: 'bold', fontSize: rs.font(16) },
+  
+  // Game type selector
+  gameTypeSelector: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: rs.s(12) },
+  gameTypeButton: { paddingHorizontal: rs.s(12), paddingVertical: rs.s(6), borderRadius: rs.s(12), backgroundColor: '#1a1a1a', margin: rs.s(4) },
+  gameTypeButtonActive: { backgroundColor: '#49EACB' },
+  gameTypeText: { color: '#fff', fontSize: rs.font(12) },
+  
+  // Category selector
+  categorySelector: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: rs.s(12) },
+  categoryButton: { paddingHorizontal: rs.s(12), paddingVertical: rs.s(6), borderRadius: rs.s(12), backgroundColor: '#1a1a1a', margin: rs.s(4) },
+  categoryButtonActive: { backgroundColor: '#49EACB' },
+  categoryText: { color: '#fff', fontSize: rs.font(12) },
+  
+  // Tab bar
+  tabBar: { flexDirection: 'row', backgroundColor: '#0a0a0a', borderTopWidth: 1, borderTopColor: '#1a1a1a', paddingBottom: Platform.OS === 'ios' ? rs.s(20) : rs.s(8) },
+  tab: { paddingHorizontal: rs.s(16), paddingVertical: rs.s(8), borderRadius: rs.s(16), marginRight: rs.s(8) },
+  tabActive: { backgroundColor: 'rgba(73, 234, 203, 0.2)' },
+  tabText: { color: '#888', fontSize: rs.font(12) },
+  tabTextActive: { color: '#49EACB', fontWeight: 'bold' },
+  tabItem: { flex: 1, alignItems: 'center', paddingVertical: rs.s(8) },
+  tabItemActive: {},
+  tabIcon: { fontSize: rs.font(20), marginBottom: rs.s(2) },
+  tabLabel: { fontSize: rs.font(10), color: '#666' },
+  tabLabelActive: { color: '#49EACB' },
+  
+  // Town Hall
+  townHallBg: { backgroundColor: '#1a1510' },
+  townHallTitle: { fontSize: rs.font(28), fontWeight: 'bold', color: '#d4a574', textAlign: 'center', marginTop: rs.s(20) },
+  townHallSubtitle: { fontSize: rs.font(14), color: '#a08060', textAlign: 'center', marginBottom: rs.s(20) },
+  verifyButton: { backgroundColor: '#d4a574', borderRadius: rs.s(8), padding: rs.s(16), alignItems: 'center' },
+  verifyButtonText: { color: '#1a1510', fontWeight: 'bold', fontSize: rs.font(16) },
+  verificationBadge: { borderRadius: rs.s(8), padding: rs.s(16), alignItems: 'center', marginBottom: rs.s(16) },
+  verifiedBg: { backgroundColor: 'rgba(73, 234, 203, 0.2)' },
+  unverifiedBg: { backgroundColor: 'rgba(255, 107, 0, 0.2)' },
+  verificationBadgeText: { fontSize: rs.font(18), fontWeight: 'bold', color: '#fff' },
+  statsTitle: { fontSize: rs.font(14), fontWeight: 'bold', color: '#fff', marginBottom: rs.s(8) },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  statGridItem: { width: '50%', marginBottom: rs.s(8) },
+  statGridLabel: { fontSize: rs.font(11), color: '#666' },
+  statGridValue: { fontSize: rs.font(16), color: '#fff', fontWeight: 'bold' },
+  proofBox: { backgroundColor: '#0a0a0a', borderRadius: rs.s(8), padding: rs.s(12), marginTop: rs.s(12) },
+  proofTitle: { fontSize: rs.font(12), color: '#888', marginBottom: rs.s(4) },
+  copyButton: { marginTop: rs.s(8), padding: rs.s(8), backgroundColor: '#1a1a1a', borderRadius: rs.s(4), alignItems: 'center' },
+  copyButtonText: { color: '#49EACB', fontSize: rs.font(12) },
+  errorText: { color: '#ff6b00' },
+  aboutText: { color: '#a08060', fontSize: rs.font(13), lineHeight: rs.font(20) },
+  bulletPoint: { color: '#d4a574', fontSize: rs.font(13), marginLeft: rs.s(8), marginTop: rs.s(4) },
+  
+  // DApp
+  dappHeader: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', padding: rs.s(12) },
+  dappCloseButton: { padding: rs.s(8) },
+  dappCloseText: { fontSize: rs.font(20), color: '#fff' },
+  dappTitle: { flex: 1, fontSize: rs.font(16), fontWeight: 'bold', color: '#fff', marginLeft: rs.s(8) },
+  dappSandboxBadge: { backgroundColor: '#49EACB', borderRadius: rs.s(4), paddingHorizontal: rs.s(8), paddingVertical: rs.s(4) },
+  dappSandboxText: { fontSize: rs.font(10), color: '#000', fontWeight: 'bold' },
+  dappWebView: { flex: 1 },
+  
+  // Loading/Blocked
+  loadingScreen: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0a0a0a' },
+  loadingText: { color: '#fff', marginTop: rs.s(16) },
+  blockedScreen: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0a0a0a', padding: rs.s(40) },
+  blockedTitle: { fontSize: rs.font(24), fontWeight: 'bold', color: '#ff6b00', marginBottom: rs.s(16) },
+  blockedText: { fontSize: rs.font(14), color: '#888', textAlign: 'center' },
+});
+
+export default App;
