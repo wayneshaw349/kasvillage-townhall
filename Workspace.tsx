@@ -1363,13 +1363,27 @@ const KvChainGamePublish: React.FC = () => {
       </TouchableOpacity>
       {(() => { const { KvDevGuide } = require('./kv_dev_publish'); return <KvDevGuide visible={guideOpen} onClose={() => setGuideOpen(false)} onTemplate={kvTemplate} />; })()}
       {preview ? (
-        <Modal visible animationType="slide" onRequestClose={() => setPreview(null)}>
+        <Modal visible animationType="slide" onRequestClose={() => { const c = (globalThis as any).__kvPreviewClose; if (c) c(); else setPreview(null); }}>
           {(() => {
             const OCPV = require('./OnChainPageView').default;
             const p = preview;
-            return <OCPV storeAddress="preview" pageHash="preview" network="testnet-10" previewHtml={p.html}
-              game={{ manifestAddress: 'preview', manifestHash: 'preview', head: 'preview-' + p.id }}
-              onClose={() => { setPreview(null); if (!p.noPublish) setTimeout(() => Alert.alert('Did it work?', 'If it played right, put it on chain. If not, fix the file and publish it again - nothing was spent.', [{ text: 'Not yet', style: 'cancel' }, { text: unlisted ? 'Publish (unlisted)' : 'Publish & List', onPress: () => runPublish(p.id) }]), 450); }} />;
+            // KV_PREVIEW_BACK: one close path for the Back button, the player's own close and Android back
+            const _close = () => { setPreview(null); if (!p.noPublish) setTimeout(() => Alert.alert('Did it work?', 'If it played right, put it on chain. If not, fix the file and publish it again - nothing was spent.', [{ text: 'Not yet', style: 'cancel' }, { text: unlisted ? 'Publish (unlisted)' : 'Publish & List', onPress: () => runPublish(p.id) }]), 450); };
+            (globalThis as any).__kvPreviewClose = _close;
+            return (
+              <View style={{ flex: 1, backgroundColor: '#000' }}>
+                <OCPV storeAddress="preview" pageHash="preview" network="testnet-10" previewHtml={p.html}
+                  game={{ manifestAddress: 'preview', manifestHash: 'preview', head: 'preview-' + p.id }}
+                  onClose={_close} />
+                <TouchableOpacity onPress={_close} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  style={{ position: 'absolute', top: 48, left: 12, zIndex: 50, elevation: 50, backgroundColor: 'rgba(20,18,16,0.85)', borderWidth: 1, borderColor: '#f0c860', borderRadius: 18, paddingVertical: 7, paddingHorizontal: 14 }}>
+                  <Text style={{ color: '#f0c860', fontWeight: '800', fontSize: 14 }}>{'\u2039 Back'}</Text>
+                </TouchableOpacity>
+                <View pointerEvents="none" style={{ position: 'absolute', top: 52, right: 12, zIndex: 50, backgroundColor: 'rgba(20,18,16,0.85)', borderRadius: 10, paddingVertical: 4, paddingHorizontal: 10 }}>
+                  <Text style={{ color: '#4ade80', fontWeight: '800', fontSize: 11 }}>TEST RUN</Text>
+                </View>
+              </View>
+            );
           })()}
         </Modal>
       ) : null}
