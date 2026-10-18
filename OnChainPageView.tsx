@@ -84,7 +84,9 @@ const KV_GAME_CSP = '<meta http-equiv="Content-Security-Policy" content="default
 // dimensions and rotated into the portrait viewport, so the game reflows as if
 // the phone turned - no expo-screen-orientation, no dev-client rebuild. Touch
 // coordinates map through a real CSS transform, so input keeps working.
-const KV_ROT_JS = "(function(){try{var r=__R__,s=__S__;var b=document.body;if(!b)return;if(!window.__kvVInit){window.__kvVInit=1;var st=document.createElement('style');st.textContent='html{background:#000;}html,body{margin:0;padding:0;overflow:hidden;}';document.head.appendChild(st);window.addEventListener('resize',function(){try{window.__kvView(window.__kvR||0,window.__kvS||0);}catch(e){}});}window.__kvNat=function(){var t=b.style.transform;b.style.transform='none';var w=1,h=1,i,c=b.children;for(i=0;i<c.length;i++){var q=c[i].getBoundingClientRect();if(q.width>w)w=q.width;if(q.bottom>h)h=q.bottom;}w=Math.max(w,b.scrollWidth,1);h=Math.max(h,b.scrollHeight,1);b.style.transform=t;return{w:w,h:h};};window.__kvView=function(rr,ss){b.style.transformOrigin='0 0';var vw=window.innerWidth,vh=window.innerHeight;var n=window.__kvNat();if(!ss){var tw=rr?vh:vw,th=rr?vw:vh;ss=Math.min(tw/n.w,th/n.h)*0.88;if(!isFinite(ss)||ss<=0)ss=1;ss=Math.round(ss*100)/100;}var x,y;if(rr){x=(vw+ss*n.h)/2;y=(vh-ss*n.w)/2;b.style.transform='translate('+x+'px,'+y+'px) rotate(90deg) scale('+ss+')';}else{x=(vw-ss*n.w)/2;if(x<0)x=0;y=(vh-ss*n.h)/2;if(y<0)y=0;b.style.transform='translate('+x+'px,'+y+'px) scale('+ss+')';}window.__kvR=rr;window.__kvS=ss;try{window.ReactNativeWebView.postMessage(JSON.stringify({kvview:1,scale:ss,w:n.w,h:n.h}));}catch(e){}};window.__kvView(r,s);}catch(e){}})();true;";
+// KV_LAND_SHIM: self-landscape for games (see wire_game_landscape.cjs)
+const KV_LAND_SHIM = "(function(){try{\nif(window.__kvLandInit)return;window.__kvLandInit=1;\nvar RW=function(){return window.__kvRealW||window.screen.width;};\nvar RH=function(){return window.__kvRealH||window.screen.height;};\nif(!(RW()<RH()))return;\nwindow.__kvSelfLandscape=1;\ntry{Object.defineProperty(window,'innerWidth',{configurable:true,get:function(){return RH();}});}catch(e){}\ntry{Object.defineProperty(window,'innerHeight',{configurable:true,get:function(){return RW();}});}catch(e){}\ntry{if(window.visualViewport){Object.defineProperty(window.visualViewport,'width',{configurable:true,get:function(){return RH();}});Object.defineProperty(window.visualViewport,'height',{configurable:true,get:function(){return RW();}});}}catch(e){}\nvar st=document.createElement('style');st.textContent='html{background:#000;overflow:hidden;margin:0;padding:0;width:100%;height:100%;}';\nvar apply=function(){var b=document.body;if(!b)return false;var w=RW(),h=RH();\n if(!st.parentNode){var hd=document.head||document.documentElement;if(hd)hd.appendChild(st);}\n b.style.setProperty('position','fixed','important');b.style.setProperty('margin','0','important');\n b.style.top='0';b.style.left='0';b.style.width=h+'px';b.style.height=w+'px';b.style.overflow='hidden';\n b.style.transformOrigin='0 0';b.style.transform='translateX('+w+'px) rotate(90deg)';return true;};\nvar nat=Element.prototype.getBoundingClientRect;\nElement.prototype.getBoundingClientRect=function(){var r=nat.call(this);var w=RW();var L=r.top,T=w-r.right,W=r.height,H=r.width;\n return {left:L,top:T,right:L+W,bottom:T+H,width:W,height:H,x:L,y:T,toJSON:function(){return {left:L,top:T,width:W,height:H};}};};\nvar map=function(o){if(!o||o.__kvL)return;var sx=o.clientX,sy=o.clientY;if(typeof sx!=='number')return;var vx=sy,vy=RW()-sx;\n try{['clientX','pageX','x'].forEach(function(k){Object.defineProperty(o,k,{configurable:true,value:vx});});\n ['clientY','pageY','y'].forEach(function(k){Object.defineProperty(o,k,{configurable:true,value:vy});});\n Object.defineProperty(o,'__kvL',{value:1});}catch(e){}};\nvar tl=function(L){var a=[];if(L)for(var i=0;i<L.length;i++){var t=L[i],vx=t.clientY,vy=RW()-t.clientX;a.push({identifier:t.identifier,target:t.target,clientX:vx,clientY:vy,pageX:vx,pageY:vy,screenX:t.screenX,screenY:t.screenY,radiusX:t.radiusX,radiusY:t.radiusY,rotationAngle:t.rotationAngle,force:t.force});}a.item=function(i){return a[i]||null;};return a;};\nvar fix=function(e){if(e.__kvL)return;if(typeof TouchEvent!=='undefined'&&e instanceof TouchEvent){try{var T=tl(e.touches),C=tl(e.changedTouches),G=tl(e.targetTouches);Object.defineProperty(e,'touches',{configurable:true,value:T});Object.defineProperty(e,'changedTouches',{configurable:true,value:C});Object.defineProperty(e,'targetTouches',{configurable:true,value:G});Object.defineProperty(e,'__kvL',{value:1});}catch(x){}}else map(e);};\n['click','dblclick','contextmenu','mousedown','mouseup','mousemove','pointerdown','pointermove','pointerup','pointercancel','touchstart','touchmove','touchend','touchcancel','wheel'].forEach(function(t){window.addEventListener(t,fix,{capture:true,passive:true});});\nif(!apply()){var mo=new MutationObserver(function(){if(apply()){mo.disconnect();try{window.dispatchEvent(new Event('resize'));}catch(e){}}});mo.observe(document,{childList:true,subtree:true});}\ndocument.addEventListener('DOMContentLoaded',function(){apply();try{window.dispatchEvent(new Event('resize'));}catch(e){}});\n}catch(e){window.__kvLandErr=String(e);}})();";
+const KV_ROT_JS = "(function(){try{if(window.__kvSelfLandscape)return;var r=__R__,s=__S__;var b=document.body;if(!b)return;if(!window.__kvVInit){window.__kvVInit=1;var st=document.createElement('style');st.textContent='html{background:#000;}html,body{margin:0;padding:0;overflow:hidden;}';document.head.appendChild(st);window.addEventListener('resize',function(){try{window.__kvView(window.__kvR||0,window.__kvS||0);}catch(e){}});}window.__kvNat=function(){var t=b.style.transform;b.style.transform='none';var w=1,h=1,i,c=b.children;for(i=0;i<c.length;i++){var q=c[i].getBoundingClientRect();if(q.width>w)w=q.width;if(q.bottom>h)h=q.bottom;}w=Math.max(w,b.scrollWidth,1);h=Math.max(h,b.scrollHeight,1);b.style.transform=t;return{w:w,h:h};};window.__kvView=function(rr,ss){b.style.transformOrigin='0 0';var vw=window.innerWidth,vh=window.innerHeight;var n=window.__kvNat();if(!ss){var tw=rr?vh:vw,th=rr?vw:vh;ss=Math.min(tw/n.w,th/n.h)*0.88;if(!isFinite(ss)||ss<=0)ss=1;ss=Math.round(ss*100)/100;}var x,y;if(rr){x=(vw+ss*n.h)/2;y=(vh-ss*n.w)/2;b.style.transform='translate('+x+'px,'+y+'px) rotate(90deg) scale('+ss+')';}else{x=(vw-ss*n.w)/2;if(x<0)x=0;y=(vh-ss*n.h)/2;if(y<0)y=0;b.style.transform='translate('+x+'px,'+y+'px) scale('+ss+')';}window.__kvR=rr;window.__kvS=ss;try{window.ReactNativeWebView.postMessage(JSON.stringify({kvview:1,scale:ss,w:n.w,h:n.h}));}catch(e){}};window.__kvView(r,s);}catch(e){}})();true;";
 
 // iOS suspends a Web Audio AudioContext during inactivity. The game's
 // sequencer loops correctly (step % 64, driven by setInterval) - but it
@@ -115,6 +117,15 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const webRef = useRef<any>(null);
   const [paySheet, setPaySheet] = useState<any>(null);
   const [rot, setRot] = useState(false);
+  const [land, setLand] = useState<boolean | null>(null);
+  const [wv, setWv] = useState<{ w: number; h: number } | null>(null);
+  const landKey = 'kv_land_' + String((props.game && (props.game as any).head) || 'page').slice(0, 16);
+  useEffect(() => {
+    if (!props.game || !html) return;
+    const def = /name=["']kv-orientation["'][^>]*content=["']landscape|KV_MP2|KV_FACES/i.test(String(html).slice(0, 400000));
+    (async () => { try { const AS = require('@react-native-async-storage/async-storage').default; const v = await AS.getItem(landKey); setLand(v === null || v === undefined ? def : v === '1'); } catch { setLand(def); } })();
+  }, [html]);
+  const toggleLand = () => { const n = !land; setLand(n); try { require('@react-native-async-storage/async-storage').default.setItem(landKey, n ? '1' : '0'); } catch {} };
   const [zoom, setZoom] = useState(1);
   // Remember how this person likes to view THIS game. Rebuilding the board
   // smaller would mean 66 fragments and ~77 KAS for a preference; a stored
@@ -299,12 +310,14 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   }
 
   return (
-    <View style={styles.fill}>
+    <View style={styles.fill} onLayout={(e: any) => { const L = e.nativeEvent.layout; if (!wv || Math.abs(wv.w - L.width) > 1 || Math.abs(wv.h - L.height) > 1) setWv({ w: L.width, h: L.height }); }}>
+      {props.game && (land === null || !wv) ? null : (
       <WebView
+        key={'kvwv' + (land ? 1 : 0)}
         source={{ html, baseUrl: 'https://kv-game.local/' }}
         originWhitelist={['https://kv-game.local']}
         ref={webRef}
-        injectedJavaScriptBeforeContentLoaded={CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? ('try{window.KV_GRANTS=' + JSON.stringify((globalThis as any).__kvGrantsAll || {}) + ';}catch(e){};') : '') /* KV_GRANTS */}
+        injectedJavaScriptBeforeContentLoaded={(props.game && land && wv ? 'window.__kvRealW=' + Math.round(wv.w) + ';window.__kvRealH=' + Math.round(wv.h) + ';' + KV_LAND_SHIM : '') + CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? ('try{window.KV_GRANTS=' + JSON.stringify((globalThis as any).__kvGrantsAll || {}) + ';}catch(e){};') : '') /* KV_GRANTS */}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         javaScriptEnabled
@@ -327,13 +340,16 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
         setSupportMultipleWindows={false}
         style={styles.fill}
       />
+      )}
       {props.game ? (
         <View style={{ position: 'absolute', right: 6, top: '32%' }}>
           {[
-            { t: '\u27F3', on: () => { const n = !rot; setRot(n); applyView(n, 0); }, hot: rot },
+            { t: '\u27F3', on: toggleLand, hot: !!land },
+            ...(land ? [] : [
             { t: '\u25A3', on: () => { setZoom(0); applyView(rot, 0); }, hot: false },
             { t: '\u2212', on: () => { const z = Math.max(0.3, Math.round((zoom - 0.15) * 100) / 100); setZoom(z); applyView(rot, z); }, hot: false },
             { t: '+', on: () => { const z = Math.min(1.5, Math.round((zoom + 0.15) * 100) / 100); setZoom(z); applyView(rot, z); }, hot: false },
+            ]),
           ].map((b, i) => (
             <TouchableOpacity key={i} onPress={b.on}
               style={{ width: 36, height: 36, borderRadius: 18, marginBottom: 7,
