@@ -369,6 +369,7 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
       <Text style={{ fontSize: 22 }}>🕹️</Text>
       <Text style={{ fontWeight: '700', marginTop: 4 }} numberOfLines={1}>{item.name}</Text>
       <Text style={{ color: '#666', fontSize: 11 }} numberOfLines={1}>{item.category || 'Game'} · on-chain · verified by hash</Text>
+      {(() => { const tg = item.quad && Array.isArray(item.quad.tags) ? item.quad.tags.map(String).filter((t: string) => { try { const cf = require('./content_filter'); const sc = cf.scanTextStrict || cf.scanText; return sc(t).ok !== false; } catch { return true; } }).slice(0, 4) : []; return tg.length ? <Text style={{ color: '#a16207', fontSize: 10, marginTop: 1 }} numberOfLines={1}>{tg.map((t: string) => '#' + t).join(' ')}</Text> : null; })()}
       <Text style={{ color: '#7c3aed', fontSize: 11, marginTop: 2 }} numberOfLines={1}>
         {'⛓ ' + (pledge != null ? pledge + ' KAS pledged' : 'pledge n/a') + ' · dev XP ' + (xp != null ? xp : '…')}
       </Text>
@@ -1488,31 +1489,9 @@ export default function VillageMailbox() {
   };
 
   // Filter by query
-  const filteredData = useMemo(() => {
-    const data = getCurrentData();
-    if (!query.trim()) return []; // search-first: no auto-populated feed
-    
-    let q = query.toLowerCase();
-    // Time tiers: "shoes week" / "kascity 30 hours" / "dapp 2 days" -> cutoff
-    let cutoff = 0;
-    // KV_TIER_FIX: leading \b so 'sunday'/'holiday' are not read as time tiers
-    const tm = q.match(/\b(?:last\s+)?(\d+)?\s*(hour|day|week|month)s?\b/);
-    if (tm) {
-      const nN = tm[1] ? parseInt(tm[1], 10) : 1;
-      const unit: any = { hour: 3600e3, day: 86400e3, week: 604800e3, month: 2592000e3 };
-      cutoff = Date.now() - nN * unit[tm[2]];
-      q = q.replace(tm[0], '').trim();
-    }
-    return data.filter((item: any) => {
-      const _age = item.t || item.createdAt || 0; // KV_TIER_FIX: store rail carries createdAt
-      if (cutoff && _age && _age < cutoff) return false;
-      const searchable = [
-        item.name, item.title, item.storeName, item.description, 
-        item.category, item.institution, item.field
-      ].filter(Boolean).join(' ').toLowerCase();
-      return q ? searchable.includes(q) : true;
-    });
-  }, [section, dapps, storefronts, coupons, academics, services, query]);
+  const filteredData = useMemo(() => { // KV_SEARCH_V2: any word order, ranked, typo-tolerant
+    try { return require('./kv_search').searchItems(getCurrentData() || [], query, section); } catch { return []; }
+  }, [section, dapps, storefronts, coupons, academics, services, games, query]);
 
   // Render item
   const renderItem = ({ item, index }: { item: any; index: number }) => {
@@ -1668,6 +1647,18 @@ export default function VillageMailbox() {
           </TouchableOpacity>
         </View>
 
+        {/* KV_SEARCH_CHIPS: one tap = a search, no typing */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: rs.s(6) }} contentContainerStyle={{ paddingHorizontal: rs.s(12) }}>
+          {((require('./kv_search').SEARCH_CHIPS as any)[section] || ['all']).map((c: string) => {
+            const on = query.trim().toLowerCase() === c;
+            return (
+              <TouchableOpacity key={c} onPress={() => setQuery(on ? '' : c)} style={{ marginRight: rs.s(6), borderWidth: 1, borderColor: on ? '#d97706' : '#d6d3d1', backgroundColor: on ? '#fef3c7' : 'transparent', borderRadius: 14, paddingVertical: 4, paddingHorizontal: 10 }}>
+                <Text style={{ fontSize: rs.font(11), color: '#44403c', fontWeight: '700' }}>{c}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
         {/* Content */}
         {error ? (
           <ErrorState error={error} onRetry={handleRetry} />
@@ -1678,7 +1669,7 @@ export default function VillageMailbox() {
               Search the Village
             </Text>
             <Text style={{ fontSize: rs.font(12), color: COLORS.stone500, marginTop: rs.s(8), textAlign: 'center' }}>
-              Type a store, app, coupon, or topic above. Results come straight from the Kaspa L1 registry.
+              Type any words (any order) or tap a chip - "all" lists everything. Results come straight from the Kaspa L1 registry.
             </Text>
           </View>
         ) : loading && filteredData.length === 0 ? (

@@ -96,6 +96,7 @@ export async function readPickedText(uri: string): Promise<string> {
 export const KV_GAME_TEMPLATE = `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>Moo Catch</title>
+<meta name="kv-tags" content="arcade, casual, 1-player">
 <style>html,body{margin:0;height:100%;background:#10182a;overflow:hidden;font-family:system-ui;color:#fff}
 canvas{display:block;width:100vw;height:100vh;touch-action:none}#hud{position:fixed;top:10px;left:12px;font-weight:800}</style></head>
 <body><div id="hud">0</div><canvas id="c"></canvas>
@@ -127,7 +128,7 @@ const GUIDE: Array<[string, string]> = [
   ['2. Draw your art in code', 'Use <canvas>, SVG or CSS shapes. Pictures (<img>, pasted image data, photos) are not allowed. Every image in KasVillage is generated, so nothing harmful can be uploaded.'],
   ['3. No internet', 'Games run offline inside the wallet. No fetch / XMLHttpRequest / outside scripts. Save progress with localStorage.'],
   ['4. Clean text', 'No adult content, gambling, weapons or drug sales, scams, slurs, or anything asking for wallet keys or phrases. The wallet checks every word before upload.'],
-  ['5. Name it', 'Set a <title>. "Moo Catch" becomes the id moo-catch automatically.'],
+  ['5. Name it + tags', 'Set a <title>. "Moo Catch" becomes the id moo-catch automatically. Add <meta name="kv-tags" content="arcade, puzzle, 2-player"> so players find it by tag (up to 8).'],
   ['6. Publish', 'Workspace → DApps → PUBLISH YOUR GAME. Pick the file (or paste it / give a link). The wallet checks it, you TEST RUN it in the real player, then PUBLISH & LIST.'],
   ['7. Cost', 'About 0.2 KAS per chunk of your game, parked in your own addresses (reclaimable), plus ~1 KAS to list it. The exact amount shows before you pay.'],
   ['8. Keep it fresh', 'The chain keeps data about 30 hours. Players who installed it keep it forever; for NEW players, refresh with PUBLISH & LIST before the clock on your row runs out.'],
@@ -161,4 +162,15 @@ export function KvDevGuide(props: { visible: boolean; onClose: () => void; onTem
       </View>
     </Modal>
   );
+}
+
+// KV_TAGS: <meta name="kv-tags" content="board, strategy, 2-player"> -> up to 8 clean, content-checked tags
+export function tagsFromHtml(html: string): string[] {
+  const s = String(html || '');
+  const m = /<meta[^>]+name=["']kv-tags["'][^>]*content=["']([^"']*)["']/i.exec(s) || /<meta[^>]+content=["']([^"']*)["'][^>]*name=["']kv-tags["']/i.exec(s);
+  if (!m) return [];
+  let scan: any = null; try { const cf = require('./content_filter'); scan = cf.scanTextStrict || cf.scanText; } catch {}
+  const out: string[] = [];
+  for (const raw of m[1].split(',')) { const t = raw.trim().toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/\s+/g, ' ').slice(0, 20); if (t.length >= 2 && out.indexOf(t) < 0 && (!scan || scan(t).ok !== false)) out.push(t); }
+  return out.slice(0, 8);
 }

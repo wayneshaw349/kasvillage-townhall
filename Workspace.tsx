@@ -950,7 +950,7 @@ const KvChainGamePublish: React.FC = () => {
         try {
           const m = JSON.parse(v || '{}'); const { TRUSTED_GAMES } = require('./game_chunks');
           for (const id of Object.keys(m)) {
-            if (!(GAMES as any)[id]) (GAMES as any)[id] = { bundle: { manifest: m[id].manifest, frags: [] }, head: m[id].head, nonceBase: m[id].nonceBase, url: m[id].url, local: m[id].local };
+            if (!(GAMES as any)[id]) (GAMES as any)[id] = { bundle: { manifest: m[id].manifest, frags: [] }, head: m[id].head, nonceBase: m[id].nonceBase, url: m[id].url, local: m[id].local, tags: m[id].tags };
             (TRUSTED_GAMES as any)[id] = m[id].head;
           }
           setGamesTick((x: number) => x + 1);
@@ -982,6 +982,7 @@ const KvChainGamePublish: React.FC = () => {
       setMyMeta(saved);
     } catch {}
   };
+  const kvTagsOf = (id: string) => { const e: any = (GAMES as any)[id]; const t = (e && e.tags) || (((myMeta || {})[id] || {}).tags); return Array.isArray(t) && t.length ? t.slice(0, 8) : undefined; };
   const kvBuildSaved = async (id: string) => {
     const _A = require('@react-native-async-storage/async-storage').default;
     const html = await _A.getItem('kv_my_game_html_' + id);
@@ -999,6 +1000,7 @@ const KvChainGamePublish: React.FC = () => {
       gadd('checking ' + id + ' (' + Math.round(html.length / 1024) + ' KB)');
       const { buildChainBundle, nonceBaseFor } = require('./kv_build_chain');
       const b: any = buildChainBundle(html, id);
+      const _tags: string[] = require('./kv_dev_publish').tagsFromHtml(html); // KV_TAGS
       if (!b.ok) {
         b.issues.forEach((x: string) => gadd('BLOCKED: ' + x));
         const tips = D.friendlyIssues(b.issues);
@@ -1014,10 +1016,10 @@ const KvChainGamePublish: React.FC = () => {
       const priv = await _kvResolvePrivHex(); if (!priv) throw new Error('wallet keys unavailable');
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
       const nonceBase = (prevE && prevE.nonceBase) || nonceBaseFor(pub, id);
-      (GAMES as any)[id] = { bundle: b.bundle, head: b.head, nonceBase, url: src.url, local: src.url ? 0 : 1 };
+      (GAMES as any)[id] = { bundle: b.bundle, head: b.head, nonceBase, url: src.url, local: src.url ? 0 : 1, tags: _tags };
       const { TRUSTED_GAMES } = require('./game_chunks'); (TRUSTED_GAMES as any)[id] = b.head;
       if (!src.url) { try { await require('@react-native-async-storage/async-storage').default.setItem('kv_my_game_html_' + id, html); } catch { gadd('note: could not keep a copy of the file - publish now, or pick it again later'); } }
-      await kvMarkMeta(id, { url: src.url || null, local: src.url ? 0 : 1, head: b.head, nonceBase, manifest: b.bundle.manifest, savedAt: Date.now(), ...(prevE && prevE.head !== b.head ? { publishedAt: 0 } : {}) });
+      await kvMarkMeta(id, { tags: _tags, url: src.url || null, local: src.url ? 0 : 1, head: b.head, nonceBase, manifest: b.bundle.manifest, savedAt: Date.now(), ...(prevE && prevE.head !== b.head ? { publishedAt: 0 } : {}) });
       setGamesTick((x: number) => x + 1);
       setGbusy('');
       const joined = b.bundle.frags.map((f: any) => f.text).join('');
@@ -1163,7 +1165,7 @@ const KvChainGamePublish: React.FC = () => {
       const _u8 = (t: string) => { const s2 = unescape(encodeURIComponent(t)); const a = new Uint8Array(s2.length); for (let i = 0; i < s2.length; i++) a[i] = s2.charCodeAt(i); return a; };
       const manifestHash = bytesToHex(sha256(_u8(JSON.stringify({ ...m, addresses: slotAddresses }))));
       gadd('manifestHash ' + manifestHash.slice(0, 16) + '…');
-      const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
+      const quad = { game: gameId, tags: kvTagsOf(gameId), manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
       try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
       gadd('announcing to game registry…');
       // KV_SEND_GATE: SEND BOARD delivers privately; UNLISTED skips the public announce
@@ -1266,13 +1268,13 @@ const KvChainGamePublish: React.FC = () => {
         if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
         gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to + ' | pledge ' + (daaSpan.pledge_kas || 0) + ' KAS');
       } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
-      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan });
+      const t = JSON.stringify({ game: gameId, tags: kvTagsOf(gameId), manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan });
       setTriple(t);
       await Clipboard.setStringAsync(t);
       try {
         gadd('announcing to game registry…');
         const { announceToRegistry } = require('./payload_publish');
-        const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
+        const quad = { game: gameId, tags: kvTagsOf(gameId), manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
         try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
         // KV_SEND_GATE: SEND BOARD delivers privately; UNLISTED skips the public announce
         if ((globalThis as any).__kvSendTo || (globalThis as any).__kvUnlisted) {
