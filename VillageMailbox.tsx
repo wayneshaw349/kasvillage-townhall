@@ -350,7 +350,11 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
         const tc = require('./townhall_client');
         const f = tc.getUserStats || tc.fetchUserStats || tc.getStats;
         if (!f || !item.o) return;
-        const st = await f(item.o);
+        const _C: any = (globalThis as any).__kvStatsCache || ((globalThis as any).__kvStatsCache = new Map());
+        const _h = _C.get(item.o);
+        let st: any;
+        if (_h && Date.now() - _h.at < 600000) st = await _h.p;
+        else { const _p = f(item.o).catch(() => null); _C.set(item.o, { at: Date.now(), p: _p }); st = await _p; }
         if (alive && st) {
           if (typeof st.xp === 'number') setXp(st.xp);
           // Bayesian trust, same formula as TownHall (main.rs):
@@ -751,6 +755,11 @@ export default function VillageMailbox() {
   const [coldScan, setColdScan] = useState<{ onKey: (t: string) => void } | null>(null); // KV_COLD_SCAN
   const [gameView, setGameView] = useState<{ name: string; addr: string; hash: string; loading: boolean; game: KvGameDescriptor | null; error: string } | null>(null);
   const [query, setQuery] = useState('');
+  // KV_VOLUME: debounced search + paged rendering
+  const [dq, setDq] = useState('');
+  useEffect(() => { const h = setTimeout(() => setDq(query), 200); return () => clearTimeout(h); }, [query]);
+  const [shown, setShown] = useState(60);
+  useEffect(() => { setShown(60); }, [dq, section]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -1490,8 +1499,8 @@ export default function VillageMailbox() {
 
   // Filter by query
   const filteredData = useMemo(() => { // KV_SEARCH_V2: any word order, ranked, typo-tolerant
-    try { return require('./kv_search').searchItems(getCurrentData() || [], query, section); } catch { return []; }
-  }, [section, dapps, storefronts, coupons, academics, services, games, query]);
+    try { return require('./kv_search').searchItems(getCurrentData() || [], dq, section); } catch { return []; }
+  }, [section, dapps, storefronts, coupons, academics, services, games, dq]);
 
   // Render item
   const renderItem = ({ item, index }: { item: any; index: number }) => {
@@ -1678,8 +1687,12 @@ export default function VillageMailbox() {
           <EmptyState section={section} />
         ) : (
           <FlatList
-            data={filteredData}
-            keyExtractor={(item) => item.id}
+            data={filteredData.slice(0, shown)}
+            keyExtractor={(item: any, i: number) => String(item.id || (item.quad && item.quad.head) || item.arweaveTx || item.address || i)}
+            initialNumToRender={8}
+            maxToRenderPerBatch={8}
+            windowSize={7}
+            removeClippedSubviews
             renderItem={renderItem}
             numColumns={section === 'coupons' ? 1 : 2}
             key={section === 'coupons' ? 'list' : 'grid'}
@@ -1688,7 +1701,7 @@ export default function VillageMailbox() {
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={COLORS.purple600} />
             }
-            onEndReached={handleLoadMore}
+            onEndReached={() => { if (shown < filteredData.length) setShown((n: number) => n + 60); else handleLoadMore(); }}
             onEndReachedThreshold={0.3}
             ListFooterComponent={
               loading && filteredData.length > 0 ? (
