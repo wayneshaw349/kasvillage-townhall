@@ -229,6 +229,7 @@ async function fetchGameViaWalk(
     const scan = scanGameForPublish(html);
     if (!scan.ok) return { html: null, error: 'game failed safety scan: ' + scan.issues.map((i: any) => i.code).join(',') };
     await gameCacheSave(pinnedHead, html);
+    await kvSaveManifest(pinnedHead, mjson);
     return { html };
   } catch (e: any) { return { html: null, error: String(e?.message || e) }; }
 }
@@ -250,7 +251,7 @@ export async function fetchGamePuzzle(
     const m = config as GameManifest;
     if (config) {
       const cached = await gameCacheLoad(pinnedHead, m.html_sha256);
-      if (cached) { onProgress && onProgress(m.frags.length, m.frags.length); return { html: cached }; }
+      if (cached) { await kvSaveManifest(pinnedHead, JSON.stringify(m)); onProgress && onProgress(m.frags.length, m.frags.length); return { html: cached }; }
     }
     if (!m || m.kind !== 'kv_game_manifest' || m.v !== 2) {
       // THIRD FALLBACK - install via coordinates. No indexer answered, so the
@@ -288,8 +289,96 @@ export async function fetchGamePuzzle(
     const scan = scanGameForPublish(html);
     if (!scan.ok) return { html: null, error: 'game failed safety scan: ' + scan.issues.map((i) => i.code).join(',') };
     await gameCacheSave(pinnedHead, html);
+    await kvSaveManifest(pinnedHead, JSON.stringify(m));
     return { html };
   } catch (e: any) {
     return { html: null, error: String(e?.message || e) };
   }
+}
+
+// ---------------------------------------------------------------------------
+// KV_GAME_REPOST - any player who has the game installed can keep it on chain.
+// The keeper re-posts the manifest + every fragment's chunks from their own
+// verified copy to the game's own addresses (content-addressed: readers check
+// hashes, not who sent them), then posts a signed 'keep' record with fresh walk
+// coordinates and replays the dev's original announce. Nothing is re-signed as
+// the dev and nothing about the game can change - HEAD and hashes pin it.
+// ---------------------------------------------------------------------------
+const KV_MAN_KEY = 'kv_game_manifest_';
+async function kvSaveManifest(head: string, json: string): Promise<void> {
+  try { const AS = require('@react-native-async-storage/async-storage').default; await AS.setItem(KV_MAN_KEY + head, json); } catch {}
+}
+async function kvLoadManifest(q: any): Promise<string | null> {
+  try { const AS = require('@react-native-async-storage/async-storage').default; const j = await AS.getItem(KV_MAN_KEY + q.head); if (j && hex(j) === q.manifestHash) return j; } catch {}
+  try { const { config } = await fetchStoreConfig(q.manifestAddress, q.manifestHash, 'testnet-10'); if (config) { const j = JSON.stringify(config); if (hex(j) === q.manifestHash) { await kvSaveManifest(q.head, j); return j; } } } catch {}
+  return null;
+}
+function kvSplitFrags(html: string, m: GameManifest): string[] | null {
+  const all = utf8ToBytes(html); const dec = new TextDecoder(); const out: string[] = []; let pos = 0;
+  for (const f of m.frags) { const t = dec.decode(all.slice(pos, pos + f.bytes)); pos += f.bytes; if (hex(t) !== f.h) return null; out.push(t); }
+  return pos === all.length ? out : null;
+}
+export async function repostGamePlan(q: any): Promise<{ ok: boolean; error?: string; txs?: number; estKas?: number; html?: string; m?: GameManifest; mjson?: string; frags?: string[] }> {
+  if (!q || !q.head || !q.manifestAddress || !q.manifestHash) return { ok: false, error: 'This listing has no game coordinates.' };
+  const html = await gameCacheLoadOffline(q.head);
+  if (!html) return { ok: false, error: 'Download the game first - keepers repost from their own verified copy.' };
+  const mjson = await kvLoadManifest(q);
+  if (!mjson) return { ok: false, error: 'Could not find this game\'s manifest. Re-download the game (it saves the manifest), then try again.' };
+  const m = JSON.parse(mjson) as GameManifest;
+  if (m.head !== q.head || !verifyChain(m).head) return { ok: false, error: 'Manifest does not match this game.' };
+  if (hex(html) !== m.html_sha256) return { ok: false, error: 'Your copy does not match the published game - re-download it.' };
+  if (m.addresses.some((a) => !a)) return { ok: false, error: 'Manifest has unpublished slots.' };
+  const frags = kvSplitFrags(html, m);
+  if (!frags) return { ok: false, error: 'Could not split your copy into the published fragments.' };
+  const { htmlToChunkData } = require('./html_chunks');
+  const { configToChunkData } = require('./config_chunks');
+  let txs = configToChunkData(JSON.parse(mjson)).chunks.length + 2;
+  for (const t of frags) txs += htmlToChunkData(t).chunks.length;
+  return { ok: true, txs, estKas: Math.round(txs * 0.1 * 10) / 10, html, m, mjson, frags };
+}
+export async function repostGame(
+  keeper: OwnerKeys, q: any, announceRec: any | null,
+  onProgress?: (done: number, total: number) => void,
+): Promise<{ success: boolean; error?: string; sent?: number; coords?: any }> {
+  const plan = await repostGamePlan(q);
+  if (!plan.ok) return { success: false, error: plan.error };
+  const { signRecord, buildPayloadHex } = require('./kaspa_payload');
+  const { sendKaspaViaRest } = require('./kaspa_rest_tx');
+  const { REPOST_SOMPI, registryAddress, repostRecord } = require('./payload_publish');
+  const { htmlToChunkData } = require('./html_chunks');
+  const { configToChunkData } = require('./config_chunks');
+  const m = plan.m!; let done = 0; const total = plan.txs!;
+  const send = async (to: string, d: any, k: string = 'cfg') => {
+    const rec = signRecord({ k, v: 1, o: keeper.pubkeyHex, t: Date.now(), d } as any, keeper.privateKeyHex);
+    const res: any = await sendKaspaViaRest({ senderAddress: keeper.address, recipientAddress: to, amountSompi: REPOST_SOMPI, privateKeyHex: keeper.privateKeyHex, network: keeper.network, payload: buildPayloadHex(rec) });
+    if (!res || res.success === false) throw new Error(String((res && res.error) || 'send failed'));
+    onProgress && onProgress(++done, total);
+  };
+  try {
+    let anchor = '';
+    try { anchor = String((await (await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink')).json()).sink || ''); } catch {}
+    const mc = configToChunkData(JSON.parse(plan.mjson!));
+    if (mc.hash !== q.manifestHash) return { success: false, error: 'manifest hash drifted - not reposting' };
+    for (let i = 0; i < mc.chunks.length; i++) await send(q.manifestAddress, { seq: i, tot: mc.chunks.length, h: mc.hash, c: mc.chunks[i] });
+    for (const f of m.frags) {
+      const { chunks, hash } = htmlToChunkData(plan.frags![f.i]);
+      if (hash !== f.h) return { success: false, error: 'fragment ' + f.i + ' hash drifted' };
+      for (let i = 0; i < chunks.length; i++) await send(m.addresses[f.slot]!, { ty: 'html', seq: i, tot: chunks.length, h: hash, c: chunks[i] });
+    }
+    // fresh walk span from the slot UTXOs (same recipe as the dev publish)
+    let coords: any = {};
+    try {
+      let lo = Number.MAX_SAFE_INTEGER, hi = 0;
+      for (const sa of (m.addresses as string[]).concat([q.manifestAddress])) {
+        const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(sa) + '/utxos');
+        for (const u of (await ur.json()) || []) { const d = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0); if (d > 0) { if (d < lo) lo = d; if (d > hi) hi = d; } }
+      }
+      if (hi > 0) coords = { daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600 };
+    } catch {}
+    if (/^[0-9a-f]{64}$/.test(anchor)) coords.anchor_hash = anchor;
+    await send(registryAddress('game', keeper.network), { head: q.head, game: q.game, manifestAddress: q.manifestAddress, manifestHash: q.manifestHash, tip_addr: keeper.address, ...coords }, 'keep'); // KV_KEEPER_ADDR
+    if (announceRec && announceRec.sig) { try { await repostRecord(keeper, announceRec, 'game'); } catch {} }
+    onProgress && onProgress(total, total);
+    return { success: true, sent: done, coords };
+  } catch (e: any) { return { success: false, error: String(e?.message || e) + ' (after ' + done + '/' + total + ')', sent: done }; }
 }

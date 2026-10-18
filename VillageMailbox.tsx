@@ -339,7 +339,7 @@ const errorStyles = StyleSheet.create({
 // ============================================================================
 // EMPTY STATE
 // ============================================================================
-function GameRegistryCard({ item, onInstall, installing, onTip }: any) {
+function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, reposting, repostProg, onTipKeeper }: any) {
   const R = require('react');
   const [xp, setXp] = R.useState(null as number | null);
   const [tr, setTr] = R.useState(null as any);
@@ -384,6 +384,30 @@ function GameRegistryCard({ item, onInstall, installing, onTip }: any) {
         style={{ marginTop: 8, backgroundColor: installing ? '#999' : (item.warn ? '#b91c1c' : '#7c3aed'), borderRadius: 8, paddingVertical: 6, alignItems: 'center' }}>
         <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{installing ? 'DOWNLOADING…' : 'DOWNLOAD'}</Text>
       </TouchableOpacity>
+      {/* KV_GAME_REPOST: keeper button + freshness */}
+      {onRepost && item.quad ? (() => {
+        const ageH = Math.max(0, Math.round((Date.now() - Math.max(Number(item.t || 0), Number(item.keptAt || 0))) / 3600000));
+        const col = ageH < 18 ? '#059669' : ageH < 26 ? '#d97706' : '#dc2626';
+        return (
+          <View style={{ marginTop: 6 }}>
+            <Text style={{ color: col, fontSize: 10, textAlign: 'center' }}>{'⏱ posted ~' + ageH + 'h ago' + (ageH < 18 ? ' · fresh' : ageH < 26 ? ' · renew soon' : ' · expiring - repost to keep it') + (item.keptBy ? ' · kept by a player' : '')}</Text>
+            <TouchableOpacity onPress={() => onRepost(item)} disabled={!!reposting}
+              style={{ marginTop: 4, borderColor: '#4f46e5', borderWidth: 1, borderRadius: 8, paddingVertical: 5, alignItems: 'center', opacity: reposting ? 0.6 : 1 }}>
+              <Text style={{ color: '#4f46e5', fontWeight: '700', fontSize: 11 }}>{reposting ? 'REPOSTING ' + (repostProg || '') + '…' : 'Repost — keep this game alive'}</Text>
+            </TouchableOpacity>
+            {onTipKeeper && Array.isArray(item.keepers) && item.keepers.length ? (
+              <View style={{ marginTop: 6 }}>
+                <Text style={{ color: '#d97706', fontSize: 10, fontWeight: '700', textAlign: 'center' }}>{'Kept alive by ' + item.keepers.length + ' keeper' + (item.keepers.length === 1 ? '' : 's')}</Text>
+                {item.keepers.slice(0, 3).map((ka: string, ki: number) => (
+                  <TouchableOpacity key={ki} onPress={() => onTipKeeper(item, ka)} style={{ marginTop: 4, borderWidth: 1, borderColor: '#d97706', borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}>
+                    <Text style={{ color: '#d97706', fontSize: 10, fontWeight: '700' }}>{ka.slice(10, 26) + '… — Tip this keeper'}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        );
+      })() : null}
       {/* KV_GAME_CARD_FLAG */}
       {(() => { const _fi = item.quad ? ((globalThis as any).__kvFlagInfo || new Map()).get(String(item.quad.head)) : null; return _fi && _fi.n ? (
         <Text style={{ marginTop: 6, color: '#92400e', backgroundColor: '#fef3c7', fontSize: 10, fontWeight: '700', borderRadius: 6, padding: 4, textAlign: 'center' }}>{'\u2691 Flagged ' + _fi.n + '/3 \u2014 ' + _fi.reasons.join(', ')}</Text>
@@ -829,11 +853,12 @@ export default function VillageMailbox() {
             if (r && r.k === 'grant' && r.d && r.d.game && r.d.to) { try { if (typeof kp.verifyRecord === 'function' && !kp.verifyRecord(r)) return null; } catch { return null; } return { grant: true, rec: r }; } // KV_GRANTS_LANE
             if (r && r.k === 'flag' && r.d && r.d.head) return { flag: true, head: String(r.d.head), reason: String(r.d.reason || ''), t: r.t || 0, o: r.o || '' };
             if (r && r.k === 'delist' && r.d && r.d.head) return { delist: true, head: String(r.d.head), t: r.t || 0, o: r.o || '' }; // KV_DELIST_FILTER
+            if (r && r.k === 'keep' && r.d && r.d.head) { try { if (typeof kp.verifyRecord === 'function' && !kp.verifyRecord(r)) return null; } catch { return null; } return { keep: true, head: String(r.d.head), d: r.d, t: r.t || 0, o: r.o || '' }; } // KV_GAME_KEEP
             if (!r || r.k !== 'registry' || !r.d) return null;
             let quad: any = null; try { quad = r.d.primaryLink ? JSON.parse(r.d.primaryLink) : null; } catch {}
             if (!quad || !quad.head || !quad.manifestAddress || !quad.manifestHash) return null;
             if (String(r.d.category || '').toLowerCase() !== 'game') return null;
-            return { name: r.d.name || quad.game, category: r.d.category || 'Game', t: r.t || 0, o: r.o || '', quad };
+            return { name: r.d.name || quad.game, category: r.d.category || 'Game', t: r.t || 0, o: r.o || '', quad, rec: r };
           };
           const byHead = new Map<string, any>();
           // KV_MOD_PUBKEY: moderation key - its delists apply to any head. Rotate to a dedicated key before mainnet.
@@ -841,9 +866,13 @@ export default function VillageMailbox() {
           const delistByHead = new Map<string, any>();
           const flagsByHead = new Map<string, Map<string, string>>(); // head -> flagger -> reason
           const grantRecs: any[] = [];
+          const keepByHead = new Map<string, any>(); // KV_GAME_KEEP
+          const keepersByHead = new Map<string, string[]>(); // KV_GAME_KEEPER_TIP
           const modHeadsG = new Map<string, number>(); const modLiftG = new Map<string, number>();
           const take = (it: any) => {
             if (!it) return;
+            if (it.keep) { try { const ka = String((it.d && it.d.tip_addr) || ''); const own = require('./canonical_agreement_steps').deriveAddress(String(it.o).slice(2), 'testnet-10'); if (ka && ka === own) { let L = keepersByHead.get(it.head); if (!L) { L = []; keepersByHead.set(it.head, L); } if (L.indexOf(ka) < 0) L.push(ka); } } catch {} }
+            if (it.keep) { const pk = keepByHead.get(it.head); if (!pk || Number(it.d.daa_to || 0) > Number(pk.d.daa_to || 0)) keepByHead.set(it.head, it); return; }
             if (it.grant) { grantRecs.push(it.rec); return; }
             if (it.flag) { let m = flagsByHead.get(it.head); if (!m) { m = new Map(); flagsByHead.set(it.head, m); } m.set(String(it.o), it.reason); return; }
             if (it.undelist) { if (it.o === KV_MOD_PUBKEY) modLiftG.set(it.head, Math.max(modLiftG.get(it.head) || 0, it.t)); return; }
@@ -988,6 +1017,9 @@ export default function VillageMailbox() {
             await AS.setItem('kv_game_mod_actions', JSON.stringify(_ga));
             for (const h of Object.keys(_ga)) if (_ga[h].del && byHead.has(h)) { byHead.delete(h); console.log('[GamesLane] mod-removed (sticky) ' + h.slice(0, 8)); }
           } catch {}
+          // KV_GAME_KEEP: a keeper's fresh walk coordinates replace stale ones (hash-pinned, so coords can only help or fail)
+          for (const [kh, kr] of keepByHead) { const it0 = byHead.get(kh); if (!it0) continue; const kd = kr.d || {}; if (kd.manifestHash && kd.manifestHash !== it0.quad.manifestHash) continue; if (/^[0-9a-f]{64}$/.test(String(kd.anchor_hash || '')) && Number(kd.daa_to || 0) > Number(it0.quad.daa_to || 0)) byHead.set(kh, { ...it0, quad: { ...it0.quad, anchor_hash: kd.anchor_hash, daa_from: kd.daa_from, daa_to: kd.daa_to }, keptBy: kr.o, keptAt: kr.t }); }
+          for (const [kh2, L2] of keepersByHead) { const it2 = byHead.get(kh2); if (it2) byHead.set(kh2, { ...it2, keepers: L2 }); }
           const items = Array.from(byHead.values()).filter((it: any) => {
             const d = delistByHead.get(it.quad.head);
             if (!d) return true;
@@ -1381,6 +1413,60 @@ export default function VillageMailbox() {
     setTipBusy(false);
   };
 
+  // KV_GAME_REPOST: any player who has the game installed can keep it alive on chain
+  const [repostingGame, setRepostingGame] = useState<string>('');
+  const [repostGameProg, setRepostGameProg] = useState<string>('');
+  const runRepostGame = async (item: any) => {
+    const q = item && item.quad;
+    if (!q || repostingGame) return;
+    try {
+      const gc = require('./game_chunks');
+      const plan: any = await gc.repostGamePlan(q);
+      if (!plan.ok) { Alert.alert('Repost', String(plan.error)); return; }
+      const age = Math.max(0, Math.round((Date.now() - Math.max(Number(item.t || 0), Number(item.keptAt || 0))) / 3600000));
+      Alert.alert('Keep ' + (item.name || q.game) + ' alive?', 'Last posted ~' + age + 'h ago (the chain keeps data ~30h).\n\nThis re-posts the whole game from YOUR verified copy: ' + plan.txs + ' records, about ' + plan.estKas + ' KAS + fees. The dust lands at the game\'s own addresses. New players can download it for another ~30 hours and your wallet is credited as its keeper.\n\nKeep this screen open while it runs.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Repost', onPress: async () => {
+          setRepostingGame(q.head); setRepostGameProg('0/' + plan.txs);
+          try {
+            const ps = require('./proposal_share'); const SS = require('expo-secure-store');
+            const sender = (await SS.getItemAsync('kv_kaspa_address')) || (await SS.getItemAsync('kaspa_address'));
+            const priv = await ps._kvResolvePrivHex();
+            if (!sender || !priv) throw new Error('wallet identity unavailable');
+            const { bytesToHex, hexToBytes } = require('@noble/hashes/utils'); const { secp256k1 } = require('@noble/curves/secp256k1');
+            const keeper = { privateKeyHex: priv, pubkeyHex: bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true)), address: sender, network: 'testnet-10' as any };
+            const r: any = await gc.repostGame(keeper, q, item.rec || null, (d: number, t: number) => setRepostGameProg(d + '/' + t));
+            if (r && r.success) Alert.alert('Reposted ✓', (item.name || q.game) + ' is fresh on chain again (' + r.sent + ' records). New players can install it for ~30 more hours.');
+            else Alert.alert('Repost stopped', String((r && r.error) || 'unknown') + '\n\nWhat was sent still counts - you can tap Repost again.');
+          } catch (e: any) { Alert.alert('Repost failed', String((e && e.message) || e)); }
+          setRepostingGame(''); setRepostGameProg('');
+        } },
+      ]);
+    } catch (e: any) { Alert.alert('Repost failed', String((e && e.message) || e)); }
+  };
+  // KV_GAME_KEEPER_TIP: tip whoever kept a game alive (wallet-to-wallet)
+  const tipGameKeeper = (item: any, addr: string) => {
+    const nm = String((item && (item.name || (item.quad && item.quad.game))) || 'game');
+    require('./kv_prompt').kvPrompt('Tip the keeper', 'Keeper of "' + nm + '"\n' + addr + '\n\nKAS goes straight to their wallet. Tips are what keep games alive.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Send tip', onPress: async (v: string) => {
+        const kas = Number(String(v || '').replace(/[^0-9.]/g, ''));
+        if (!(kas > 0) || kas > 5000) { Alert.alert('Invalid amount', 'Enter between 0 and 5000 KAS.'); return; }
+        try {
+          const ps = require('./proposal_share'); const SS = require('expo-secure-store');
+          const sender = (await SS.getItemAsync('kv_kaspa_address')) || (await SS.getItemAsync('kaspa_address'));
+          const priv = await ps._kvResolvePrivHex();
+          if (!sender || !priv) throw new Error('wallet identity unavailable');
+          if (sender === addr) { Alert.alert('That is you', 'You kept this game alive yourself.'); return; }
+          const { sendKaspaViaRest } = require('./kaspa_rest_tx');
+          const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: String(addr), amountSompi: BigInt(Math.round(kas * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
+          if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
+          console.log('[GameKeeperTip]', kas, 'KAS ->', String(addr).slice(0, 24));
+          Alert.alert('Tip sent \u2713', kas + ' KAS to the keeper of "' + nm + '".');
+        } catch (e: any) { Alert.alert('Tip failed', String((e && e.message) || e)); }
+      } },
+    ], 'plain-text', '1');
+  };
   const installGame = async (item: any) => {
     const q = item.quad;
     if (!q || installingGame) return;
@@ -1509,7 +1595,7 @@ export default function VillageMailbox() {
       case 'coupons': return <CouponCard item={item} onPress={onPress} />;
       case 'academics': return <AcademicCard item={item} onPress={onPress} />;
       case 'services': return <ServiceCard item={item} onPress={onPress} />;
-      case 'games': return <GameRegistryCard item={item} onInstall={installGame} installing={installingGame === (item.quad && item.quad.head)} onTip={tipDev} />;
+      case 'games': return <GameRegistryCard item={item} onInstall={installGame} installing={installingGame === (item.quad && item.quad.head)} onTip={tipDev} onRepost={runRepostGame} onTipKeeper={tipGameKeeper} reposting={repostingGame === (item.quad && item.quad.head)} repostProg={repostGameProg} />;
     }
   };
 
