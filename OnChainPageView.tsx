@@ -40,6 +40,8 @@ export interface OnChainPageViewProps {
   onClose?: () => void;
   /** Chain GAME mode: solve the hash-chained puzzle instead of a single page. */
   game?: { manifestAddress: string; manifestHash: string; head: string };
+  /** KV_PREVIEW: test-run local HTML in the locked game player (nothing is fetched). */
+  previewHtml?: string;
 }
 
 // Injected before page scripts run. Belt-and-braces: even if a link slipped the
@@ -150,6 +152,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
     setHtml(null);
     setError(null);
     (async () => {
+      if ((props as any).previewHtml) { if (alive) setHtml(injectCsp(String((props as any).previewHtml), KV_GAME_CSP)); return; } // KV_PREVIEW
       const res = props.game
         ? await fetchGamePuzzle(props.game.manifestAddress, props.game.manifestHash, (KV_HEAD_SUPERSEDE[props.game.head] || props.game.head), network,
             (have, total) => { if (alive) setProgress('solving puzzle ' + have + '/' + total); },

@@ -950,7 +950,7 @@ const KvChainGamePublish: React.FC = () => {
         try {
           const m = JSON.parse(v || '{}'); const { TRUSTED_GAMES } = require('./game_chunks');
           for (const id of Object.keys(m)) {
-            if (!(GAMES as any)[id]) (GAMES as any)[id] = { bundle: { manifest: m[id].manifest, frags: [] }, head: m[id].head, nonceBase: m[id].nonceBase, url: m[id].url };
+            if (!(GAMES as any)[id]) (GAMES as any)[id] = { bundle: { manifest: m[id].manifest, frags: [] }, head: m[id].head, nonceBase: m[id].nonceBase, url: m[id].url, local: m[id].local };
             (TRUSTED_GAMES as any)[id] = m[id].head;
           }
           setGamesTick((x: number) => x + 1);
@@ -965,44 +965,126 @@ const KvChainGamePublish: React.FC = () => {
     const { buildChainBundle } = require('./kv_build_chain');
     return buildChainBundle(html, id);
   };
-  const runPublishAny = () => {
-    const kvP = require('./kv_prompt').kvPrompt;
-    kvP('Publish any HTML - link', 'Link to the finished .html (GitHub raw, your own site...). The wallet fetches it, makes the chain edition and scans it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Next', onPress: (url: string) => {
-      url = String(url || '').trim();
-      if (!/^https:\/\/\S+$/i.test(url)) { Alert.alert('Bad link', 'Use a full https:// link to the .html file.'); return; }
-      const guess = (url.split('?')[0].split('/').pop() || 'game').replace(/\.html?$/i, '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'game';
-      setTimeout(() => kvP('Game id', 'a-z, 0-9 and - only. Names the listing and its on-chain addresses.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Build', onPress: async (id: string) => {
-        id = String(id || '').trim().toLowerCase();
-        if (gbusy) return;
-        setGbusy(id); setGlog([]);
-        try {
-          const prevE: any = (GAMES as any)[id];
-          if (prevE && !prevE.url) throw new Error('"' + id + '" is a built-in game id - pick another');
-          gadd('fetching ' + url);
-          const b: any = await kvFetchBuild(url, id);
-          if (!b.ok) { b.issues.forEach((x: string) => gadd('BLOCKED: ' + x)); setGbusy(''); Alert.alert('Not publishable', b.issues.slice(0, 6).join('\n') + (b.issues.length > 6 ? '\n\u2026' : '')); return; }
-          gadd('built ' + b.bundle.frags.length + ' fragments | HEAD ' + b.head.slice(0, 16) + '\u2026 | ' + b.chunks + ' chunks (~' + b.estKas + ' KAS)');
-          const { _kvResolvePrivHex } = require('./proposal_share');
-          const priv = await _kvResolvePrivHex(); if (!priv) throw new Error('wallet keys unavailable');
-          const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
-          const { nonceBaseFor } = require('./kv_build_chain');
-          const nonceBase = (prevE && prevE.nonceBase) || nonceBaseFor(pub, id);
-          (GAMES as any)[id] = { bundle: b.bundle, head: b.head, nonceBase, url };
-          const { TRUSTED_GAMES } = require('./game_chunks'); (TRUSTED_GAMES as any)[id] = b.head;
-          const _A = require('@react-native-async-storage/async-storage').default;
-          const saved = JSON.parse((await _A.getItem('kv_my_games')) || '{}');
-          saved[id] = { url, head: b.head, nonceBase, manifest: b.bundle.manifest, savedAt: Date.now() };
-          await _A.setItem('kv_my_games', JSON.stringify(saved));
-          setGamesTick((x: number) => x + 1);
-          setGbusy('');
-          const unl = !!(globalThis as any).__kvUnlisted;
-          Alert.alert('Ready: ' + id, b.bundle.frags.length + ' fragments, about ' + b.estKas + ' KAS to publish.\nIt has its own row now. PUBLISH puts it on chain' + (unl ? ' (UNLISTED is on: no public announce).' : ' and announces it.'), [
-            { text: 'Later', style: 'cancel' },
-            { text: 'Publish now', onPress: () => runPublish(id) },
-          ]);
-        } catch (e: any) { gadd('ERROR: ' + String((e && e.message) || e)); setGbusy(''); Alert.alert('Publish any failed', String((e && e.message) || e)); }
-      } }], 'plain-text', guess), 450);
-    } }], 'plain-text', 'https://');
+  // KV_DEV_ONBOARD: pick file / paste / link / template -> auto name -> checks -> test run -> PUBLISH & LIST
+  const [gprog, setGprog] = useState<any>(null);
+  const [preview, setPreview] = useState<any>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [myMeta, setMyMeta] = useState<any>({});
+  useEffect(() => { try { require('@react-native-async-storage/async-storage').default.getItem('kv_my_games').then((v: any) => { try { setMyMeta(JSON.parse(v || '{}')); } catch {} }); } catch {} }, [gamesTick, gbusy]);
+  const kvMarkMeta = async (id: string, patch: any) => {
+    try {
+      const _A = require('@react-native-async-storage/async-storage').default;
+      const saved = JSON.parse((await _A.getItem('kv_my_games')) || '{}');
+      if (!saved[id]) saved[id] = {};
+      Object.assign(saved[id], patch);
+      await _A.setItem('kv_my_games', JSON.stringify(saved));
+      setMyMeta(saved);
+    } catch {}
+  };
+  const kvBuildSaved = async (id: string) => {
+    const _A = require('@react-native-async-storage/async-storage').default;
+    const html = await _A.getItem('kv_my_game_html_' + id);
+    if (!html) return { ok: false, issues: ['your saved copy is gone - use PUBLISH YOUR GAME and pick the file again'] };
+    return require('./kv_build_chain').buildChainBundle(html, id);
+  };
+  const kvBuildAndOffer = async (html: string, src: { url?: string; name?: string }, id: string) => {
+    if (gbusy) return;
+    const D = require('./kv_dev_publish');
+    if (!/^[a-z0-9-]{3,48}$/.test(id)) { Alert.alert('Name too short', 'Use 3-48 letters, numbers or dashes.'); return; }
+    const prevE: any = (GAMES as any)[id];
+    if (prevE && !prevE.url && !prevE.local) { Alert.alert('Name taken', '"' + id + '" is a built-in game. Pick another name.'); return; }
+    setGbusy(id); setGlog([]);
+    try {
+      gadd('checking ' + id + ' (' + Math.round(html.length / 1024) + ' KB)');
+      const { buildChainBundle, nonceBaseFor } = require('./kv_build_chain');
+      const b: any = buildChainBundle(html, id);
+      if (!b.ok) {
+        b.issues.forEach((x: string) => gadd('BLOCKED: ' + x));
+        const tips = D.friendlyIssues(b.issues);
+        setGbusy('');
+        Alert.alert('Almost there - ' + tips.length + ' thing' + (tips.length === 1 ? '' : 's') + ' to fix', tips.slice(0, 6).join('\n\n') + (tips.length > 6 ? '\n\n…and ' + (tips.length - 6) + ' more (see the log)' : '') + '\n\nNothing was spent.', [
+          { text: 'OK' },
+          { text: 'How to fix', onPress: () => setGuideOpen(true) },
+        ]);
+        return;
+      }
+      gadd('passed every check | ' + b.bundle.frags.length + ' fragments | ' + b.chunks + ' chunks (~' + b.estKas + ' KAS)');
+      const { _kvResolvePrivHex } = require('./proposal_share');
+      const priv = await _kvResolvePrivHex(); if (!priv) throw new Error('wallet keys unavailable');
+      const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+      const nonceBase = (prevE && prevE.nonceBase) || nonceBaseFor(pub, id);
+      (GAMES as any)[id] = { bundle: b.bundle, head: b.head, nonceBase, url: src.url, local: src.url ? 0 : 1 };
+      const { TRUSTED_GAMES } = require('./game_chunks'); (TRUSTED_GAMES as any)[id] = b.head;
+      if (!src.url) { try { await require('@react-native-async-storage/async-storage').default.setItem('kv_my_game_html_' + id, html); } catch { gadd('note: could not keep a copy of the file - publish now, or pick it again later'); } }
+      await kvMarkMeta(id, { url: src.url || null, local: src.url ? 0 : 1, head: b.head, nonceBase, manifest: b.bundle.manifest, savedAt: Date.now(), ...(prevE && prevE.head !== b.head ? { publishedAt: 0 } : {}) });
+      setGamesTick((x: number) => x + 1);
+      setGbusy('');
+      const joined = b.bundle.frags.map((f: any) => f.text).join('');
+      Alert.alert('Passed every check: ' + id, Math.round(b.htmlBytes / 1024) + ' KB · about ' + b.estKas + ' KAS to put on chain (parked in your own addresses), plus ~1 KAS to list.\n\nTest-run it first: it plays in the same locked player your players get.', [
+        { text: 'Later', style: 'cancel' },
+        { text: 'Test run', onPress: () => setPreview({ id, html: joined }) },
+        { text: unlisted ? 'Publish (unlisted)' : 'Publish & List', onPress: () => runPublish(id) },
+      ]);
+    } catch (e: any) { gadd('ERROR: ' + String((e && e.message) || e)); setGbusy(''); Alert.alert('Could not prepare the game', String((e && e.message) || e)); }
+  };
+  const kvIngest = (html: string, src: { url?: string; name?: string }) => {
+    const D = require('./kv_dev_publish');
+    html = String(html || '');
+    if (!D.looksLikeHtml(html)) { Alert.alert('Not an HTML game', 'Use the whole .html file - it should contain <html>, <body>, <canvas> or <script>.'); return; }
+    const guess = D.slugFromHtml(html, src.name || src.url || '');
+    setTimeout(() => require('./kv_prompt').kvPrompt('Name your game', 'Taken from your page title. It becomes the game id on chain (a-z, 0-9, -). Change it if you like.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Check it', onPress: (t: string) => kvBuildAndOffer(html, src, D.cleanId(t || guess)) },
+    ], 'plain-text', guess), 350);
+  };
+  const kvPickFile = async () => {
+    let DP: any = null;
+    try { DP = require('expo-document-picker'); if (!DP || !DP.getDocumentAsync) DP = null; } catch { DP = null; }
+    if (!DP) { Alert.alert('Needs the app update', 'Picking a file arrives with the next app build. For now use "Copy & paste" or "From a link".'); return; }
+    try {
+      const r: any = await DP.getDocumentAsync({ type: ['text/html', 'text/plain', 'application/octet-stream', '*/*'], copyToCacheDirectory: true, multiple: false });
+      if (!r || r.canceled || !r.assets || !r.assets[0]) return;
+      const a = r.assets[0];
+      if (a.size && a.size > 8000000) { Alert.alert('Too big', 'Games must be under 8 MB.'); return; }
+      const html = await require('./kv_dev_publish').readPickedText(a.uri);
+      kvIngest(html, { name: a.name });
+    } catch (e: any) { Alert.alert('Could not read the file', String((e && e.message) || e)); }
+  };
+  const kvFromClipboard = async () => {
+    try {
+      const t = await Clipboard.getStringAsync();
+      if (!t) { Alert.alert('Clipboard is empty', 'Open your .html in a text editor, select all, copy, then tap this again.'); return; }
+      kvIngest(t, { name: 'my-game' });
+    } catch (e: any) { Alert.alert('Clipboard failed', String((e && e.message) || e)); }
+  };
+  const kvFromLink = () => {
+    require('./kv_prompt').kvPrompt('Game link', 'A https link to the finished .html (GitHub raw, your own site…).', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Fetch', onPress: async (u: string) => {
+        const url = String(u || '').trim();
+        if (!/^https:\/\/\S+$/i.test(url)) { Alert.alert('Bad link', 'Use a full https:// link to the .html file.'); return; }
+        try { const r = await fetch(url); if (!r.ok) throw new Error('could not fetch the page (' + r.status + ')'); kvIngest(await r.text(), { url }); }
+        catch (e: any) { Alert.alert('Fetch failed', String((e && e.message) || e)); }
+      } },
+    ], 'plain-text', 'https://');
+  };
+  const kvTemplate = () => {
+    const T = require('./kv_dev_publish').KV_GAME_TEMPLATE;
+    require('./kv_prompt').kvChoose('Starter template', 'A tiny game that already passes every check. Copy it to edit on your computer, or try it here.', [
+      { text: 'Copy template', onPress: async () => { await Clipboard.setStringAsync(T); Alert.alert('Copied', 'Paste it into a new file named my-game.html, make it yours, then come back to PUBLISH YOUR GAME.'); } },
+      { text: 'Test run it', onPress: () => setPreview({ id: 'template', html: T, noPublish: true }) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+  const runPublishStart = () => {
+    require('./kv_prompt').kvChoose('Publish your game', 'Your game is one .html file with everything inside. Where is it?', [
+      { text: 'Pick the .html file', onPress: () => { kvPickFile(); } },
+      { text: 'Copy & paste (clipboard)', onPress: () => { kvFromClipboard(); } },
+      { text: 'From a link (https)', onPress: kvFromLink },
+      { text: 'Start from the template', onPress: kvTemplate },
+      { text: 'How to make a game', onPress: () => setGuideOpen(true) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
   const runDelist = async (gameId: string) => {
     if (gbusy) return;
@@ -1106,20 +1188,20 @@ const KvChainGamePublish: React.FC = () => {
         setGbusy(''); return;
       }
       const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: manifestHash } as any);
-      if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '… (~1 KAS)');
+      if (_ann && _ann.success !== false) { gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '… (~1 KAS)'); kvMarkMeta(gameId, { listedAt: Date.now() }); }
       else gadd('announce failed: ' + String((_ann && _ann.error) || 'unknown'));
     } catch (e: any) { gadd('announce error: ' + String(e?.message || e)); }
     setGbusy('');
   };
   const runPublish = async (gameId: string) => {
     if (gbusy) return;
-    setGbusy(gameId); setGlog([]); setTriple('');
+    setGbusy(gameId); setGlog([]); setTriple(''); setGprog(null);
     try {
       const entry = GAMES[gameId];
       const { publishGamePuzzle, fetchGamePuzzle, TRUSTED_GAMES } = require('./game_chunks');
-      if (entry && (entry as any).url && (!entry.bundle.frags || !entry.bundle.frags.length)) { // KV_PUBLISH_ANY rebuild from the link
-        gadd('rebuilding from ' + (entry as any).url);
-        const rb: any = await kvFetchBuild((entry as any).url, gameId);
+      if (entry && ((entry as any).url || (entry as any).local) && (!entry.bundle.frags || !entry.bundle.frags.length)) { // KV_PUBLISH_ANY rebuild from the link / saved file
+        gadd('rebuilding from ' + ((entry as any).url || 'your saved file'));
+        const rb: any = (entry as any).url ? await kvFetchBuild((entry as any).url, gameId) : await kvBuildSaved(gameId);
         if (!rb.ok || rb.head !== entry.head) { gadd('ERROR: the page at the link changed or is blocked - use PUBLISH ANY HTML again (' + (rb.issues || []).slice(0, 2).join('; ') + ')'); setGbusy(''); return; }
         entry.bundle = rb.bundle;
       }
@@ -1162,9 +1244,10 @@ const KvChainGamePublish: React.FC = () => {
       gadd(entry.bundle.frags.length + ' fragments -> publishing (keep this screen open)…');
       const t0 = Date.now();
       const res = await publishGamePuzzle(owner, m, entry.bundle.frags, slotAddresses, manifestAddress,
-        (done: number, total: number) => gadd('fragment ' + done + '/' + total + ' (' + Math.round((Date.now() - t0) / 1000) + 's)'));
+        (done: number, total: number) => { setGprog({ done, total }); gadd('fragment ' + done + '/' + total + ' (' + Math.round((Date.now() - t0) / 1000) + 's)'); });
       if (!res.success) { gadd('PUBLISH FAILED: ' + res.error); setGbusy(''); return; }
       gadd('manifest published, hash ' + res.manifestHash);
+      kvMarkMeta(gameId, { publishedAt: Date.now() });
       gadd('verifying: solving the puzzle back from chain…');
       const back = await fetchGamePuzzle(manifestAddress, res.manifestHash, m.head, owner.network);
       gadd(back.html ? 'ROUND-TRIP OK (' + back.html.length + ' bytes)' : 'ROUND-TRIP FAILED: ' + back.error);
@@ -1213,19 +1296,20 @@ const KvChainGamePublish: React.FC = () => {
           setGbusy(''); return;
         }
         const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: res.manifestHash } as any);
-        if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '…');
+        if (_ann && _ann.success !== false) { gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '…'); kvMarkMeta(gameId, { listedAt: Date.now() }); Alert.alert('Live: ' + gameId, 'Players find it in Mailbox → Games now. New players can download it for about 30 hours - the clock on its row tells you when to refresh.'); }
         else gadd('announce failed (game still live): ' + String((_ann && _ann.error) || 'unknown'));
       } catch (e: any) { gadd('announce error (game still live): ' + String(e?.message || e)); }
       gadd('LAUNCH TRIPLE copied to clipboard.');
     } catch (e: any) {
       gadd('ERROR: ' + String(e?.message || e));
-    } finally { setGbusy(''); }
+    } finally { setGbusy(''); setGprog(null); }
   };
-  if (myAddr !== KV_PUBLISHER_ADDR) return null;   // owner gate
+  const _kvOwner = myAddr === KV_PUBLISHER_ADDR;
+  if (!myAddr) return null;   // KV_DEV_OPEN: every wallet can publish its own games
   return (
     <View style={{ backgroundColor: '#141210', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#6a5a34' }}>
-      <Text style={{ color: '#f0c860', fontWeight: '900', fontFamily: 'monospace', fontSize: 14 }}>?? PUBLISH CHAIN GAMES</Text>
-      <Text style={{ color: '#9a8f78', fontFamily: 'monospace', fontSize: 10, marginVertical: 6 }}>owner-only · pinned HEADs only · sequential txs</Text>
+      <Text style={{ color: '#f0c860', fontWeight: '900', fontFamily: 'monospace', fontSize: 14 }}>?? PUBLISH YOUR GAME</Text>
+      <Text style={{ color: '#9a8f78', fontFamily: 'monospace', fontSize: 10, marginVertical: 6 }}>your key signs it · checked before upload · players install it from chain</Text>
       <TouchableOpacity disabled={!!gbusy} onPress={async () => {
         try {
           const led = require('./utxo_ledger');
@@ -1268,22 +1352,41 @@ const KvChainGamePublish: React.FC = () => {
           </Text>
         </View>
       </TouchableOpacity>
-      <TouchableOpacity disabled={!!gbusy} onPress={runPublishAny} style={{ backgroundColor: '#13261f', borderWidth: 1, borderColor: '#16a34a', borderRadius: 8, padding: 10, marginBottom: 8, alignItems: 'center' }}>
-        <Text style={{ color: '#4ade80', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>{'\uFF0B PUBLISH ANY HTML GAME (by link)'}</Text>
+      {/* KV_DEV_ONBOARD_UI */}
+      {(() => { const { KvPromptHost } = require('./kv_prompt'); return <KvPromptHost />; })()}
+      <TouchableOpacity disabled={!!gbusy} onPress={runPublishStart} style={{ backgroundColor: '#13261f', borderWidth: 1, borderColor: '#16a34a', borderRadius: 10, padding: 14, marginBottom: 6, alignItems: 'center' }}>
+        <Text style={{ color: '#4ade80', fontWeight: '900', fontSize: 15 }}>{'＋ PUBLISH YOUR GAME'}</Text>
+        <Text style={{ color: '#7fb89a', fontSize: 10, marginTop: 3 }}>pick a file · paste · link · template</Text>
       </TouchableOpacity>
-      {Object.entries(GAMES).map(([id, e]: any) => (
+      <TouchableOpacity onPress={() => setGuideOpen(true)} style={{ borderWidth: 1, borderColor: '#6a5a34', borderRadius: 8, padding: 8, marginBottom: 10, alignItems: 'center' }}>
+        <Text style={{ color: '#f0c860', fontWeight: '700', fontSize: 12 }}>{'📘 HOW TO MAKE A GAME (1 page + template)'}</Text>
+      </TouchableOpacity>
+      {(() => { const { KvDevGuide } = require('./kv_dev_publish'); return <KvDevGuide visible={guideOpen} onClose={() => setGuideOpen(false)} onTemplate={kvTemplate} />; })()}
+      {preview ? (
+        <Modal visible animationType="slide" onRequestClose={() => setPreview(null)}>
+          {(() => {
+            const OCPV = require('./OnChainPageView').default;
+            const p = preview;
+            return <OCPV storeAddress="preview" pageHash="preview" network="testnet-10" previewHtml={p.html}
+              game={{ manifestAddress: 'preview', manifestHash: 'preview', head: 'preview-' + p.id }}
+              onClose={() => { setPreview(null); if (!p.noPublish) setTimeout(() => Alert.alert('Did it work?', 'If it played right, put it on chain. If not, fix the file and publish it again - nothing was spent.', [{ text: 'Not yet', style: 'cancel' }, { text: unlisted ? 'Publish (unlisted)' : 'Publish & List', onPress: () => runPublish(p.id) }]), 450); }} />;
+          })()}
+        </Modal>
+      ) : null}
+      {Object.entries(GAMES).filter(([gid, ge]: any) => _kvOwner || !!ge.url || !!ge.local).map(([id, e]: any) => (
         <React.Fragment key={id}>
+        {(() => { const ex = require('./kv_dev_publish').expiryInfo(((myMeta || {})[id] || {}).publishedAt); return <Text style={{ color: ex.color, fontFamily: 'monospace', fontSize: 11, marginTop: 6, marginBottom: 4 }}>{'\u23F1 ' + id + ' - ' + ex.label}</Text>; })()}
         <TouchableOpacity key={id + '-ann'} disabled={!!gbusy} onPress={() => runAnnounceOnly(id)}
           style={{ backgroundColor: '#241f36', borderWidth: 1, borderColor: '#7c5cff', borderRadius: 8, padding: 10, marginBottom: 6 }}>
           <Text style={{ color: '#b9a6ff', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>
-            {gbusy === id ? 'WORKING…' : 'ANNOUNCE ' + id + ' (registry only, ~1 KAS)'}
+            {gbusy === id ? 'WORKING…' : 'RE-LIST ' + id + ' (no re-upload, ~1 KAS)'}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => runGrant(id)} style={{ borderWidth: 1, borderColor: '#0891b2', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#0891b2', fontWeight: '700', fontSize: 11 }}>GRANT</Text></TouchableOpacity>
                 {(() => { const { KvPromptHost } = require('./kv_prompt'); return <KvPromptHost />; })()}
                 <TouchableOpacity onPress={() => runSendBoard(id)} style={{ borderWidth: 1, borderColor: '#16a34a', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#16a34a', fontWeight: '700', fontSize: 11 }}>SEND BOARD</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => setUnlisted(!unlisted)} style={{ borderWidth: 1, borderColor: unlisted ? '#b45309' : '#a8a29e', backgroundColor: unlisted ? '#fef3c7' : 'transparent', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: unlisted ? '#b45309' : '#78716c', fontWeight: '700', fontSize: 11 }}>{unlisted ? 'UNLISTED \u2713' : 'UNLISTED'}</Text></TouchableOpacity>
-                <TouchableOpacity onPress={modErrorNote} style={{ borderWidth: 1, borderColor: '#b91c1c', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#b91c1c', fontWeight: '700', fontSize: 11 }}>MOD: ERROR NOTE</Text></TouchableOpacity>
+                {_kvOwner ? (<TouchableOpacity onPress={modErrorNote} style={{ borderWidth: 1, borderColor: '#b91c1c', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#b91c1c', fontWeight: '700', fontSize: 11 }}>MOD: ERROR NOTE</Text></TouchableOpacity>) : null}
                 <TouchableOpacity onPress={exportSales} style={{ borderWidth: 1, borderColor: '#7c3aed', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#7c3aed', fontWeight: '700', fontSize: 11 }}>EXPORT SALES</Text></TouchableOpacity>
                 <TouchableOpacity onPress={setMyContact} style={{ borderWidth: 1, borderColor: '#64748b', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#64748b', fontWeight: '700', fontSize: 11 }}>MY CONTACT</Text></TouchableOpacity>
                 <TouchableOpacity key={id + '-del'} disabled={!!gbusy} onPress={() => runDelist(id)}
@@ -1295,11 +1398,20 @@ const KvChainGamePublish: React.FC = () => {
         <TouchableOpacity key={id} disabled={!!gbusy} onPress={() => runPublish(id)}
           style={{ backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 8, padding: 10, alignItems: 'center', marginBottom: 6, opacity: gbusy && gbusy !== id ? 0.4 : 1 }}>
           <Text style={{ color: '#f0c860', fontFamily: 'monospace', fontWeight: '700', fontSize: 12 }}>
-            {gbusy === id ? 'PUBLISHING ' + id + '…' : 'PUBLISH ' + id + ' (' + (e.bundle.frags.length || (e.bundle.manifest && e.bundle.manifest.frags ? e.bundle.manifest.frags.length : 0)) + ' frags)'}
+            {gbusy === id ? 'PUBLISHING ' + id + '…' : (unlisted ? 'PUBLISH ' : 'PUBLISH & LIST ') + id + ' (~' + ((e.bundle.manifest && e.bundle.manifest.est_kas) || '?') + ' KAS)'}
           </Text>
         </TouchableOpacity>
         </React.Fragment>
       ))}
+      {/* KV_DEV_PROGRESS */}
+      {gbusy && gprog && gprog.total ? (
+        <View style={{ marginVertical: 6 }}>
+          <View style={{ height: 10, backgroundColor: '#2a2118', borderRadius: 5, overflow: 'hidden' }}>
+            <View style={{ width: (Math.round(100 * gprog.done / gprog.total) + '%') as any, height: 10, backgroundColor: '#4ade80' }} />
+          </View>
+          <Text style={{ color: '#9a8f78', fontSize: 10, fontFamily: 'monospace', marginTop: 3 }}>{gprog.done >= gprog.total ? 'uploaded - verifying and listing…' : 'uploading ' + gprog.done + '/' + gprog.total + ' · keep this screen open'}</Text>
+        </View>
+      ) : null}
       <TouchableOpacity onPress={() => Clipboard.setStringAsync(glog.join(String.fromCharCode(10)))}
         style={{ alignSelf: 'flex-start', backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 6, paddingVertical: 4, paddingHorizontal: 10, marginTop: 6 }}>
         <Text style={{ color: '#f0c860', fontFamily: 'monospace', fontSize: 10 }}>?? COPY LOG</Text>
