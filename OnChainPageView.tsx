@@ -75,7 +75,9 @@ const BRIDGE = `
 // NOT routed through onShouldStartLoadWithRequest on either platform — a remote
 // tracking pixel leaks the viewer's IP to the page author. A restrictive CSP in
 // <head> closes the channel entirely: no network, inline style + data: only.
-const CSP_META = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; media-src data:; font-src data:;">';
+const CSP_META = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src \'none\'; media-src data:; font-src data:;">';
+// KV_GAME_CSP: games run inline JS but get no network and no outside images; canvas/blob images only.
+const KV_GAME_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\'; style-src \'unsafe-inline\'; img-src data: blob:; media-src data: blob:; font-src data:; worker-src blob:; connect-src \'none\';">';
 // Landscape without a native dependency. The body is laid out at swapped
 // dimensions and rotated into the portrait viewport, so the game reflows as if
 // the phone turned - no expo-screen-orientation, no dev-client rebuild. Touch
@@ -95,11 +97,11 @@ const KV_ROT_JS = "(function(){try{var r=__R__,s=__S__;var b=document.body;if(!b
 // chain and immutable; this fixes it from outside without a republish.
 const KV_AUDIO_KEEP = "(function(){try{var C=window.AudioContext||window.webkitAudioContext;if(!C)return;var made=[];function W(){var c=new C();made.push(c);return c;}W.prototype=C.prototype;try{window.AudioContext=W;}catch(e){}try{window.webkitAudioContext=W;}catch(e){}function kick(){for(var i=0;i<made.length;i++){var c=made[i];if(c&&c.state==='suspended'){try{c.resume();}catch(e){}}}}setInterval(kick,1500);document.addEventListener('touchstart',kick,true);document.addEventListener('touchend',kick,true);document.addEventListener('visibilitychange',kick);window.__kvAudioKick=kick;}catch(e){}})();true;";
 
-function injectCsp(raw: string): string {
-  if (/http-equiv=["']Content-Security-Policy["']/i.test(raw)) return raw;
-  if (/<head(\s[^>]*)?>/i.test(raw)) return raw.replace(/<head(\s[^>]*)?>/i, (mm) => mm + CSP_META); // word-boundary: never matches JS like i<heads.length
-  if (/<html[^>]*>/i.test(raw)) return raw.replace(/<html([^>]*)>/i, '<html$1><head>' + CSP_META + '</head>');
-  return CSP_META + raw;
+function injectCsp(raw: string, meta: string = CSP_META): string {
+  // always inject: a page's own CSP can only tighten, never loosen ours
+  if (/<head(\s[^>]*)?>/i.test(raw)) return raw.replace(/<head(\s[^>]*)?>/i, (mm) => mm + meta); // word-boundary: never matches JS like i<heads.length
+  if (/<html[^>]*>/i.test(raw)) return raw.replace(/<html([^>]*)>/i, '<html$1><head>' + meta + '</head>');
+  return meta + raw;
 }
 
 export default function OnChainPageView(props: OnChainPageViewProps) {
@@ -164,7 +166,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       if (!alive) return;
       // Games: full inline-JS apps, verified by hash chain + scanner - the
       // static-page CSP (default-src none, no scripts) would kill them.
-      if (res.html) setHtml(props.game ? res.html : injectCsp(res.html));
+      if (res.html) setHtml(props.game ? injectCsp(res.html, KV_GAME_CSP) : injectCsp(res.html));
       else {
         const g: any = props.game || {};
         const diag = props.game

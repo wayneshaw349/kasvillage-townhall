@@ -4045,7 +4045,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         brandName,
         storeDescription,
         storeCategory,
-        logoUrl,
+        logoUrl: '', // KV_PROCEDURAL_LOGO: photo logos are never published
         logoShape,
         bannerStyle,
         bannerRecipe,
@@ -4328,14 +4328,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 <Text style={{ fontSize: rs.font(8), color: '#78716c', marginBottom: rs.s(8) }}>Listed in Academics only after DKIM verification.</Text>
               ) : null}
               
-              <InputField
-                label="Logo Image URL"
-                value={logoUrl}
-                onChangeText={setLogoUrl}
-                placeholder="Paste Instagram/Etsy/TikTok image link"
-                keyboardType="url"
-                note="Only moderated platform links allowed for safety."
-              />
+              <Text style={{ fontSize: rs.font(9), color: '#78716c', marginBottom: rs.s(8) }}>Your store emblem is generated from your brand name, shape and colors. Photo logos are not used.</Text>
               
               <Text style={inputStyles.label}>Logo Shape Preview</Text>
               <View style={{ flexDirection: 'row', gap: rs.s(16), marginBottom: rs.s(12), alignItems: 'center' }}>

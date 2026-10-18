@@ -57,6 +57,10 @@ const BLOCKED_PATTERNS: Array<[RegExp, string]> = [
   [/clipboard(Data)?\.(setData|writeText)/i,                 'clipboard_write'],
   [/\bfetch\s*\(|XMLHttpRequest|navigator\.sendBeacon/i,     'network_call'],
   [/<script[^>]*\ssrc\s*=/i,                                 'external_script'],
+  // KV_PROC_ONLY: images must be procedural - no photos, embedded or linked
+  [/<img\b/i,                                                'image_tag'],
+  [/data:image\//i,                                          'embedded_image'],
+  [/iVBORw0KGgo|\/9j\/4[AQ]|R0lGOD[ld]h|UklGR.{2,6}V0VCUA/,  'embedded_image_b64'],
 ];
 
 /** Any href/src that leaves the sandbox. kv:// and #anchors are fine. */
@@ -66,7 +70,7 @@ function findExternalRefs(html: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     const v = m[1].trim();
-    if (v.startsWith('kv://') || v.startsWith('#') || v.startsWith('data:image/')) continue;
+    if (v.startsWith('kv://') || v.startsWith('#') || v.startsWith('data:audio/') || v.startsWith('data:font/')) continue; // KV_PROC_ONLY: no data:image
     out.push(v.slice(0, 80));
   }
   return out;

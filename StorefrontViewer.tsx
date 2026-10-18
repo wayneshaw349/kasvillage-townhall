@@ -249,7 +249,7 @@ const HeroSection: React.FC<SectionPreviewProps> = ({ section, theme }) => (
 
 const BrandBarSection: React.FC<SectionPreviewProps> = ({ section, theme, storefront }) => (
   <View style={sectionStyles.brandBar}>
-    {storefront?.logoUrl && isWhitelistedUrl(storefront.logoUrl) ? (
+    {false /* KV_PROCEDURAL_LOGO: no photo logos */ && storefront?.logoUrl ? (
       <Image
         source={{ uri: storefront.logoUrl }}
         style={[
@@ -1185,7 +1185,7 @@ export const StorefrontViewer: React.FC<StorefrontViewerProps> = ({
           {/* Header */}
           <View style={[styles.header, { backgroundColor: theme.primary }]}>
             <View style={styles.headerLeft}>
-              {storefront?.logoUrl && isWhitelistedUrl(storefront.logoUrl) ? (
+              {false /* KV_PROCEDURAL_LOGO: no photo logos */ && storefront?.logoUrl ? (
                 <Image
                   source={{ uri: storefront.logoUrl }}
                   style={[
@@ -1193,7 +1193,11 @@ export const StorefrontViewer: React.FC<StorefrontViewerProps> = ({
                     storefront.logoShape === 'square' ? { borderRadius: rs.s(8) } : { borderRadius: rs.s(20) }
                   ]}
                 />
-              ) : null}
+              ) : (
+                <View style={{ width: rs.s(32), height: rs.s(32), borderRadius: storefront?.logoShape === 'square' ? rs.s(8) : rs.s(16), backgroundColor: (theme as any).accent || '#a855f7', alignItems: 'center', justifyContent: 'center', marginRight: rs.s(8) }}>
+                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>{String(storefront?.brandName || '?').trim().charAt(0).toUpperCase()}</Text>
+                </View>
+              )}
               <Text style={styles.headerTitle}>
                 {storefront?.brandName || hostName}
               </Text>
