@@ -29,11 +29,13 @@ export interface ScanResult {
 const PHISH: RegExp[] = [
   /\bseed\s*phrase\b/i,
   /\brecovery\s*phrase\b/i,
-  /\bmnemonic\b/i,
+  /\bmnemonic\s+(phrase|words?|seed|code|backup)\b/i, // KV_PHISH_FP: was any mnemonic
+  /\b(enter|type|paste|submit|share|send)\s+(your\s+|the\s+)?mnemonic\b/i,
   /\bprivate\s*key\b/i,
   /\bsecret\s*key\b/i,
   /\bwallet\s*(password|pin|passphrase)\b/i,
-  /\b(12|24)\s*words?\b/i,
+  /\b(12|24)[\s-]*words?\b[^.!?]{0,30}\b(phrase|seed|recovery|backup|wallet)\b/i, // KV_PHISH_FP: was any 12/24 words
+  /\b(enter|type|paste|submit|share|send)\s+(your\s+|the\s+)?(12|24)[\s-]*words?\b/i,
   /\benter\s+your\s+(key|phrase|password|pin)\b/i,
   /\bverify\s+your\s+wallet\b/i,
   /\bconnect\s+your\s+wallet\s+to\s+claim\b/i,
@@ -236,16 +238,37 @@ function kvNormalize(t: string): string {
 }
 const KV_STRICT_RULES: Array<[string, RegExp]> = [
   ['adult', /\b(porn|porno|xxx|nsfw|escort service|escorts|hookup|nude pics|sex cam|cam girl|onlyfans leak)\b/],
-  ['weapons', /\b(ghost gun|auto sear|glock switch|unregistered (firearm|gun)s?|untraceable (firearm|gun)s?|explosives for sale|buy explosives|pipe bomb|grenades?|full auto conversion)\b/],
+  ['weapons', /\b(ghost guns?|auto sears?|glock switch(es)?|unregistered (firearm|gun)s?|untraceable (firearm|gun)s?|explosives for sale|buy explosives|pipe bombs?|grenades?|full auto conversion)\b/],
   ['scam', /\b(send \d+(\.\d+)? ?kas get \d+|double your (kas|crypto|money)|guaranteed (returns?|profit)|seed phrase|recovery phrase|private key|airdrop claim|giveaway send)\b/],
   ['illegal_trade', /\b(cocaine|coke|heroin|meth|crystal meth|fentanyl|mdma|ecstasy|molly|xanax|oxy|oxycodone|percocet|percs|ketamine|lsd|shrooms)\b[^.!?]{0,25}\b(deals?|plug|menu|connect|wholesale|by the (gram|oz|ounce|pound)|grams?|zips?)\b/],
   ['gambling', /\b(casino|sportsbook|roulette|sports betting|bet now|online betting|slot machines?|lottery tickets?)\b/],
 ];
+function kvSquash(n: string): string {
+  // join runs of single-character tokens: 's e e d p h r a s e' -> 'seedphrase'
+  const t = n.split(' '); const o: string[] = []; let run = '';
+  for (const w of t) { if (w.length === 1) run += w; else { if (run) { o.push(run); run = ''; } o.push(w); } }
+  if (run) o.push(run);
+  return o.join(' ');
+}
 function kvWalkStrings(o: any, path: string, out: Array<[string, string]>, depth: number = 0) {
   if (depth > 8 || o == null) return;
   if (typeof o === 'string') { out.push([path, o]); return; }
   if (Array.isArray(o)) { o.forEach((v, i) => kvWalkStrings(v, path + '[' + i + ']', out, depth + 1)); return; }
   if (typeof o === 'object') for (const k of Object.keys(o)) kvWalkStrings(o[k], path + '.' + k, out, depth + 1);
+}
+// KV_SLUR_HASH: one-way hashes of slurs (+ plurals, letter-collapsed forms). Matches whole words only.
+const KV_SLUR_H = new Set<string>(["290fedowzxm","2b2kccjuv0w","11ss8oogt2v","2emij7gma9o","185u4j9ttf4","l4mgaol78h","h87zqcsx1w","rw3cx7reim","mlt0jihr27","289s4sk5k0h","eh7iobl40h","2fvyjgluvdp","ty98s3d25n","2der11syiqa","zjk6ililhr","6voycgqet3","21ty6l0rgna","1yb4v3xe0cz","28v6b0u8vkz","zhni53yb3d","gu49stghk1","28ck4tiqn7e","1wplasgwpff","1przrfzaals","1zrd2j8vsmf","srk67wdl5t","129l8tpj8sg","vi8tdv2zez","1rtyqgyzuky","jrh5q4ow5d","1juwujy5mr5","26jmnd3spaf","2gmmzy29cdy","1wbotkru6hq","186sumx36d3","1jrd0dw7849","18w145ebwdo","20wzofpb3ao","5kjxfze1q3","o5l7pnqrfm","m4rohoj1yj","dx9hawcpgx","471lgat23n","kxmcwsksfu","19msgyli5ey","2fzka2ng7xn","f53l6ch7n1","qxjy0vr59n","wockg5ryhp","22a9k8ri4yi","1iyn1b0tqxo","1pni8ch55wm","1hbtct98zrl","1icxm6zkn","1yxfvenhtrx","1ba93vnmyqm","5np8sxr9we","1netqdgpxa9","w369h45do7","7nbwxbj29k","ztfi243qvw","121jd5w8af9","1i0zpzy6o3w","10z468hffnn","19d6p5z6z7m","hg2ii883ky","1j1qwvwsnk2","glomqjppta","1z8rhwlkuza","1rmj2mn2gu7","e0ppld9ejv","f0apautbt5","1mwa1fmybwg","2g70xqs5o1i","1ule6bwm0ux","1qx68k1acht","chxuc2i3b5","191xtx07s2c","c03r97eg7d","lz91vv8on","1nssmemqqct","ew90rmzw1z","8y650lk4e5","2d8yhtbxomi","1xaam8gv69d","2f6myylzo94","88t7180tpj","15vgabghx1s","185deefbthm","7576pqtkwb","14gec39qhk0","269j0qdck6x","s3mp5e218z","19fjyv8x5st","2ba044ixyyx","qg9xfcr3s6","1tb1392lnwt","8ofug523qf","tgmzh81du8","vh5o3duqds","1nkyewz3xk9","27w7bwz0k04","1gifzmbsn16","vdqr5xpu1e","3d2p17eek1","21125toalw0","gdsgpjilru","dv9hebmx2h","18s29hvomaw","smy3hkryx8","1131w074luk","1li72xsgara","hksbblglss","1cw4gn0fzlb","ulfuhtectn","1lpah2z6yrp","gifgzbh3r9","biti05edfn","d94tdns41v","22cg91q04kq","1aub70skg2u","2c8foey9xgq","sfb0p0vwqn"]);
+function kvH53(str: string): string { let h1 = 0xdeadbeef ^ 0x6b76, h2 = 0x41c6ce57 ^ 0x6b76;
+  for (let i = 0; i < str.length; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36); }
+function kvSlurHit(t: string): boolean {
+  for (const w of String(t || '').toLowerCase().split(/[^a-z]+/)) {
+    if (w.length < 4 || w.length > 24) continue;
+    if (KV_SLUR_H.has(kvH53(w)) || KV_SLUR_H.has(kvH53(w.replace(/(.)\1+/g, '$1')))) return true;
+  }
+  return false;
 }
 export function scanObjectStrict(obj: any): any {
   const base: any = scanObject(obj);
@@ -259,7 +282,10 @@ export function scanObjectStrict(obj: any): any {
     }
     const raw = String(s).toLowerCase().replace(/\s+/g, ' '); // keeps digits (leet map would turn 100 into ioo)
     const nL = kvNormalize(String(s).replace(/1/g, 'l')); // '1' can stand for l as well as i
-    for (const [reason, re] of KV_STRICT_RULES) if (re.test(n) || re.test(nL) || re.test(raw)) return { ok: false, reason, path: p };
+    const sq = kvSquash(n); // s e e d / f.e.n.t.a.n.y.l -> joined
+    if (sq !== n) { try { const r3: any = (scanText as any)(sq); if (r3 && r3.ok === false) return { ...r3, path: p, spaced: true }; } catch {} }
+    if (kvSlurHit(n) || kvSlurHit(nL) || kvSlurHit(sq) || kvSlurHit(raw)) return { ok: false, reason: 'slur', path: p };
+    for (const [reason, re] of KV_STRICT_RULES) if (re.test(n) || re.test(nL) || re.test(raw) || re.test(sq)) return { ok: false, reason, path: p };
   }
   return base;
 }

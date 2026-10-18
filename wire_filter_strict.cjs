@@ -18,6 +18,13 @@ const KV_STRICT_RULES: Array<[string, RegExp]> = [
   ['illegal_trade', /\\b(cocaine|coke|heroin|meth|crystal meth|fentanyl|mdma|ecstasy|molly|xanax|oxy|oxycodone|percocet|percs|ketamine|lsd|shrooms)\\b[^.!?]{0,25}\\b(deals?|plug|menu|connect|wholesale|by the (gram|oz|ounce|pound)|grams?|zips?)\\b/],
   ['gambling', /\\b(casino|sportsbook|roulette|sports betting|bet now|online betting|slot machines?|lottery tickets?)\\b/],
 ];
+function kvSquash(n: string): string {
+  // join runs of single-character tokens: 's e e d p h r a s e' -> 'seedphrase'
+  const t = n.split(' '); const o: string[] = []; let run = '';
+  for (const w of t) { if (w.length === 1) run += w; else { if (run) { o.push(run); run = ''; } o.push(w); } }
+  if (run) o.push(run);
+  return o.join(' ');
+}
 function kvWalkStrings(o: any, path: string, out: Array<[string, string]>, depth: number = 0) {
   if (depth > 8 || o == null) return;
   if (typeof o === 'string') { out.push([path, o]); return; }
@@ -36,13 +43,18 @@ export function scanObjectStrict(obj: any): any {
     }
     const raw = String(s).toLowerCase().replace(/\\s+/g, ' '); // keeps digits (leet map would turn 100 into ioo)
     const nL = kvNormalize(String(s).replace(/1/g, 'l')); // '1' can stand for l as well as i
-    for (const [reason, re] of KV_STRICT_RULES) if (re.test(n) || re.test(nL) || re.test(raw)) return { ok: false, reason, path: p };
+    const sq = kvSquash(n); // s e e d / f.e.n.t.a.n.y.l -> joined
+    if (sq !== n) { try { const r3: any = (scanText as any)(sq); if (r3 && r3.ok === false) return { ...r3, path: p, spaced: true }; } catch {} }
+    for (const [reason, re] of KV_STRICT_RULES) if (re.test(n) || re.test(nL) || re.test(raw) || re.test(sq)) return { ok: false, reason, path: p };
   }
   return base;
 }
 `;
 const jobs = [
-  { f: 'content_filter.ts', marker: 'KV_FILTER_STRICT', append: EXTRA, check: (s) => /export function scanObject\b/.test(s) && /export function scanText\b/.test(s) },
+  { f: 'content_filter.ts', marker: 'KV_FILTER_STRICT', append: EXTRA, edits: [
+    ['  /\\b(12|24)\\s*words?\\b/i,\n', '  /\\b(12|24)[\\s-]*words?\\b[^.!?]{0,30}\\b(phrase|seed|recovery|backup|wallet)\\b/i, // KV_PHISH_FP: was any 12/24 words\n  /\\b(enter|type|paste|submit|share|send)\\s+(your\\s+|the\\s+)?(12|24)[\\s-]*words?\\b/i,\n'],
+    ['  /\\bmnemonic\\b/i,\n', '  /\\bmnemonic\\s+(phrase|words?|seed|code|backup)\\b/i, // KV_PHISH_FP: was any mnemonic\n  /\\b(enter|type|paste|submit|share|send)\\s+(your\\s+|the\\s+)?mnemonic\\b/i,\n'],
+  ], check: (s) => /export function scanObject\b/.test(s) && /export function scanText\b/.test(s) },
   { f: 'kaspa_payload.ts', marker: 'scanObjectStrict', swap: true },
   { f: 'VillageMailbox.tsx', marker: 'scanObjectStrict', swap: true },
 ];
@@ -54,11 +66,13 @@ for (const j of jobs) {
   if (s.includes(j.marker)) { console.log(j.f + ': already patched - skipping'); continue; }
   if (j.check && !j.check(s)) { console.error(j.f + ': scanObject/scanText not declared as "export function" - paste their declaration lines'); ok = false; }
   if (j.swap) { j.n = s.split(A).length - 1; if (j.n < 1) { console.error(j.f + ': scan call site not found'); ok = false; } }
+  for (const [a] of (j.edits || [])) { const c = s.split(a).length - 1; if (c !== 1) { console.error(j.f + ' rule ANCHOR count ' + c + ' expected 1: ' + a.trim()); ok = false; } }
   staged.push({ ...j, s, CRLF });
 }
 if (!ok) { console.error('Aborting - nothing written.'); process.exit(1); }
 for (const j of staged) {
   let s = j.s;
+  for (const [a, b] of (j.edits || [])) s = s.split(a).join(b);
   if (j.append) s = s.replace(/\s*$/, '') + j.append;
   if (j.swap) s = s.split(A).join(B);
   fs.writeFileSync(j.f, j.CRLF ? s.replace(/\n/g, '\r\n') : s);
