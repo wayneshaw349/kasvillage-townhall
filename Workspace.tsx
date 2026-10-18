@@ -817,13 +817,26 @@ const KvChainGamePublish: React.FC = () => {
   const gadd = (l: string) => setGlog((p) => [...p.slice(-150), l]);
   const GAMES: Record<string, { bundle: any; head: string; nonceBase: number }> = require('./games_to_publish');
   // KV_GRANT_UI: dev grants a board to a buyer (buyer ID + board + payment txid as proof)
-  try { const _g: any = globalThis as any; if (!_g.__kvDevContactLoaded) { _g.__kvDevContactLoaded = 1; require('@react-native-async-storage/async-storage').default.getItem('kv_dev_contact').then((v: any) => { if (v) _g.__kvDevContact = v; }); } } catch {}
+  try { const _g: any = globalThis as any; if (!_g.__kvDevContactLoaded) { _g.__kvDevContactLoaded = 1; require('@react-native-async-storage/async-storage').default.getItem('kv_dev_contact').then((v: any) => { if (v) _g.__kvDevContact = v; }); require('@react-native-async-storage/async-storage').default.getItem('kv_dev_price').then((v: any) => { try { if (v) _g.__kvDevPrice = JSON.parse(v); } catch {} }); } } catch {}
   const setMyContact = () => {
     const RN = require('react-native');
     
     require('./kv_prompt').kvPrompt('My contact (for buyers)', 'Telegram @handle, email, or a link (ig.me/..., wa.me/...). Goes into your next ANNOUNCE so buyers can reach you.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Save', onPress: async (t: string) => { const v = String(t || '').trim(); (globalThis as any).__kvDevContact = v; try { await require('@react-native-async-storage/async-storage').default.setItem('kv_dev_contact', v); } catch {} Alert.alert('Saved', v ? 'Re-ANNOUNCE the game so the contact reaches the card.' : 'Contact cleared.'); } },
+      { text: 'Save', onPress: async (t: string) => { const v = String(t || '').trim(); (globalThis as any).__kvDevContact = v; try { await require('@react-native-async-storage/async-storage').default.setItem('kv_dev_contact', v); } catch {} const _cur: any = (globalThis as any).__kvDevPrice || {};
+        setTimeout(() => require('./kv_prompt').kvPrompt('Board price (KAS)', 'Your usual price per board. Only inside the buyer\'s message, never shown on the card. 0 = none.', [
+          { text: 'Next', onPress: (p: string) => {
+            const price = Number(String(p || '').replace(/[^0-9.]/g, '')) || 0;
+            setTimeout(() => require('./kv_prompt').kvPrompt('FROST above (KAS)', 'Purchases at or above this use a FROST agreement (buyer protection). Below it: direct send + txid.', [
+              { text: 'Save', onPress: async (f: string) => {
+                const frostAbove = Number(String(f || '').replace(/[^0-9.]/g, '')) || 20;
+                (globalThis as any).__kvDevPrice = { price, frostAbove };
+                try { await require('@react-native-async-storage/async-storage').default.setItem('kv_dev_price', JSON.stringify({ price, frostAbove })); } catch {}
+                Alert.alert('Saved', 'Re-ANNOUNCE the game so your contact and pricing reach buyers.');
+              } },
+            ], 'plain-text', String(_cur.frostAbove || 20)), 450);
+          } },
+        ], 'plain-text', String(_cur.price || '')), 450); } },
     ], 'plain-text', String((globalThis as any).__kvDevContact || ''));
   };
   const runGrant = (gameId: string) => {
@@ -835,9 +848,10 @@ const KvChainGamePublish: React.FC = () => {
       if (!/^0[23][0-9a-f]{64}$/.test(to)) { Alert.alert('Bad pubkey', 'A pubkey is 66 hex characters starting with 02 or 03.'); return; }
       ask('Grant - board', 'Board / item name your game checks, e.g. board2', (item) => {
         if (!item) return;
-        ask('Grant - payment txid', 'The buyer\'s payment transaction id (proof it was paid).', (txid) => {
-          txid = txid.toLowerCase().replace(/[^0-9a-f]/g, '');
-          if (!/^[0-9a-f]{64}$/.test(txid)) { Alert.alert('Bad txid', 'A transaction id is 64 hex characters.'); return; }
+        ask('Grant - payment proof', 'Payment txid (64 hex) for a direct send, or the agreement ID (AGR_...) for a FROST agreement.', (txid) => { // KV_GRANT_FROST
+          const _agr = /^AGR_[A-Za-z0-9]+$/.test(txid.trim()) ? txid.trim() : '';
+          txid = _agr || txid.toLowerCase().replace(/[^0-9a-f]/g, '');
+          if (!_agr && !/^[0-9a-f]{64}$/.test(txid)) { Alert.alert('Bad proof', 'Enter a 64-hex txid or an AGR_ agreement ID.'); return; }
           Alert.alert('Grant ' + item + '?', 'To ' + to.slice(0, 12) + '\u2026 for ' + gameId + ' (0.1 KAS, signed by your key).', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Grant', onPress: async () => {
@@ -936,7 +950,7 @@ const KvChainGamePublish: React.FC = () => {
       const _u8 = (t: string) => { const s2 = unescape(encodeURIComponent(t)); const a = new Uint8Array(s2.length); for (let i = 0; i < s2.length; i++) a[i] = s2.charCodeAt(i); return a; };
       const manifestHash = bytesToHex(sha256(_u8(JSON.stringify({ ...m, addresses: slotAddresses }))));
       gadd('manifestHash ' + manifestHash.slice(0, 16) + '…');
-      const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...daaSpan };
+      const quad = { game: gameId, manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
       try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
       gadd('announcing to game registry…');
       const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: manifestHash } as any);
@@ -1010,13 +1024,13 @@ const KvChainGamePublish: React.FC = () => {
         if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
         gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to + ' | pledge ' + (daaSpan.pledge_kas || 0) + ' KAS');
       } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
-      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...daaSpan });
+      const t = JSON.stringify({ game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan });
       setTriple(t);
       await Clipboard.setStringAsync(t);
       try {
         gadd('announcing to game registry…');
         const { announceToRegistry } = require('./payload_publish');
-        const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...daaSpan };
+        const quad = { game: gameId, manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
         try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
         const _ann: any = await announceToRegistry(owner, manifestAddress, gameId, 'Game', 'game', { primaryLink: JSON.stringify(quad), configHash: res.manifestHash } as any);
         if (_ann && _ann.success !== false) gadd('registry announce OK -> ' + String(_ann.registryAddr || '').slice(0, 24) + '…');

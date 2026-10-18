@@ -399,7 +399,8 @@ function GameRegistryCard({ item, onInstall, installing, onTip }: any) {
           try {
             const g: any = globalThis as any; let me = g.__kvMyPub || '';
             if (!me) { try { const ps = require('./proposal_share'); const pk = await ps._kvResolvePrivHex(); const { bytesToHex, hexToBytes } = require('@noble/hashes/utils'); const { secp256k1 } = require('@noble/curves/secp256k1'); me = bytesToHex(secp256k1.getPublicKey(hexToBytes(pk), true)); g.__kvMyPub = me; } catch {} }
-            const msg = 'Hi! I play ' + (item.name || item.quad.game) + ' on KasVillage and would like the next board. My pubkey: ' + me;
+            const _p = Number(item.quad.price || 0), _fa = Number(item.quad.frostAbove || 20);
+            const msg = 'Hi! I play ' + (item.name || item.quad.game) + ' on KasVillage and would like the next board' + (_p ? ' (' + _p + ' KAS)' : '') + '. ' + (_p && _p >= _fa ? 'It is ' + _fa + '+ KAS, so let\'s use a FROST agreement. ' : (_p ? 'I will send to the address on the game card and give you the txid. ' : '')) + 'My pubkey: ' + me;
             try { await require('expo-clipboard').setStringAsync(msg); } catch { try { require('react-native').Clipboard.setString(msg); } catch {} }
             const c = String(item.quad.contact).trim(); const RN = require('react-native');
             let url = c;
@@ -898,10 +899,20 @@ export default function VillageMailbox() {
                 if (String(d.to) !== me || !game || !item || pubOf.get(game) !== String(r.o)) continue;
                 const list = all[game] || (all[game] = []);
                 if (list.indexOf(item) < 0) { list.push(item); changed = true; }
-                if (!proofs.some((p: any) => p.game === game && p.item === item && p.txid === String(d.txid || ''))) {
+                const _old = proofs.find((p: any) => p.game === game && p.item === item && p.txid === String(d.txid || '')); // KV_GRANT_AGR
+                if (!_old || !_old.verified) {
                   let v: any = { ok: false, amountKas: 0 };
-                  try { v = await kp.kvVerifyPayment(String(d.txid || ''), payTo.get(game) || '', 'testnet-10'); } catch {}
-                  proofs.push({ game, item, txid: String(d.txid || ''), dev: String(r.o), verified: !!v.ok, amountKas: v.amountKas || 0, grant: r, savedAt: Date.now() });
+                  try {
+                    const _ref = String(d.txid || '');
+                    if (/^AGR_/.test(_ref)) {
+                      const sr = require('./stat_records'); const chain: any[] = await sr.loadChain();
+                      const xo = (k: string) => String(k || '').replace(/^0[23]/, '').toLowerCase();
+                      const rec = (chain || []).find((c: any) => c.agrId === _ref);
+                      if (rec && rec.outcome === 'complete' && xo(rec.cpPubkey) === xo(String(r.o))) v = { ok: true, amountKas: Number(rec.buyerAmountSompi || 0) / 1e8, agr: true, releaseTxId: (rec.anchor && rec.anchor.releaseTxId) || '' };
+                    } else v = await kp.kvVerifyPayment(_ref, payTo.get(game) || '', 'testnet-10');
+                  } catch {}
+                  if (_old) { if (!v.ok) continue; proofs.splice(proofs.indexOf(_old), 1); }
+                  proofs.push({ game, item, txid: String(d.txid || ''), dev: String(r.o), verified: !!v.ok, amountKas: v.amountKas || 0, agr: !!v.agr, releaseTxId: v.releaseTxId || '', grant: r, savedAt: Date.now() });
                   changed = true;
                   console.log('[Grants] ' + game + '/' + item + ' granted' + (v.ok ? ' - payment VERIFIED ' + v.amountKas + ' KAS' : ' - payment not verified'));
                 }
