@@ -969,6 +969,7 @@ const KvChainGamePublish: React.FC = () => {
   const [gprog, setGprog] = useState<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [openBook, setOpenBook] = useState<string | null>(null);
   const [myMeta, setMyMeta] = useState<any>({});
   useEffect(() => { try { require('@react-native-async-storage/async-storage').default.getItem('kv_my_games').then((v: any) => { try { setMyMeta(JSON.parse(v || '{}')); } catch {} }); } catch {} }, [gamesTick, gbusy]);
   const kvMarkMeta = async (id: string, patch: any) => {
@@ -1354,13 +1355,44 @@ const KvChainGamePublish: React.FC = () => {
       </TouchableOpacity>
       {/* KV_DEV_ONBOARD_UI */}
       {(() => { const { KvPromptHost } = require('./kv_prompt'); return <KvPromptHost />; })()}
-      <TouchableOpacity disabled={!!gbusy} onPress={runPublishStart} style={{ backgroundColor: '#13261f', borderWidth: 1, borderColor: '#16a34a', borderRadius: 10, padding: 14, marginBottom: 6, alignItems: 'center' }}>
-        <Text style={{ color: '#4ade80', fontWeight: '900', fontSize: 15 }}>{'＋ PUBLISH YOUR GAME'}</Text>
-        <Text style={{ color: '#7fb89a', fontSize: 10, marginTop: 3 }}>pick a file · paste · link · template</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => setGuideOpen(true)} style={{ borderWidth: 1, borderColor: '#6a5a34', borderRadius: 8, padding: 8, marginBottom: 10, alignItems: 'center' }}>
-        <Text style={{ color: '#f0c860', fontWeight: '700', fontSize: 12 }}>{'📘 HOW TO MAKE A GAME (1 page + template)'}</Text>
-      </TouchableOpacity>
+      {/* KV_BOOKSHELF: every game is a book on the shelf - tap a book to open its actions */}
+      {(() => {
+        const D = require('./kv_dev_publish');
+        const PAL = ['#7f1d1d', '#1e3a8a', '#14532d', '#713f12', '#581c87', '#134e4a', '#7c2d12', '#3f3f46', '#831843', '#1e293b'];
+        const hsh = (t: string) => { let h = 7; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0; return h; };
+        const book = (key: string, o: { title: string; color: string; h: number; onPress: () => void; ribbon?: string; dashed?: boolean; open?: boolean; sub?: string }) => (
+          <TouchableOpacity key={key} onPress={o.onPress} disabled={!!gbusy} activeOpacity={0.85}
+            style={{ width: 46, height: o.h, marginHorizontal: 3, borderRadius: 4, backgroundColor: o.dashed ? 'transparent' : o.color,
+              borderWidth: o.open ? 2 : 1, borderStyle: o.dashed ? 'dashed' : 'solid', borderColor: o.open ? '#f0c860' : o.dashed ? '#4ade80' : 'rgba(0,0,0,0.45)',
+              transform: [{ translateY: o.open ? -10 : 0 }], overflow: 'hidden', opacity: gbusy && !o.open ? 0.6 : 1 }}>
+            {!o.dashed ? <View style={{ position: 'absolute', top: 10, left: 0, right: 0, height: 3, backgroundColor: 'rgba(240,200,96,0.55)' }} /> : null}
+            {!o.dashed ? <View style={{ position: 'absolute', bottom: 10, left: 0, right: 0, height: 3, backgroundColor: 'rgba(240,200,96,0.55)' }} /> : null}
+            {!o.dashed ? <View style={{ position: 'absolute', top: 0, bottom: 0, left: 4, width: 2, backgroundColor: 'rgba(255,255,255,0.10)' }} /> : null}
+            <View style={{ position: 'absolute', width: o.h - 34, height: 46, left: (46 - (o.h - 34)) / 2, top: (o.h - 46) / 2, transform: [{ rotate: '-90deg' }], alignItems: 'center', justifyContent: 'center' }}>
+              <Text numberOfLines={1} style={{ color: o.dashed ? '#4ade80' : '#f6ecd6', fontWeight: '900', fontSize: 12, letterSpacing: 1 }}>{o.title}</Text>
+              {o.sub ? <Text numberOfLines={1} style={{ color: o.dashed ? '#7fb89a' : 'rgba(246,236,214,0.7)', fontSize: 8, marginTop: 1 }}>{o.sub}</Text> : null}
+            </View>
+            {o.ribbon ? <View style={{ position: 'absolute', top: 0, right: 7, width: 7, height: 18, backgroundColor: o.ribbon, borderBottomLeftRadius: 2, borderBottomRightRadius: 2 }} /> : null}
+          </TouchableOpacity>
+        );
+        const mine = Object.entries(GAMES).filter(([gid, ge]: any) => _kvOwner || !!ge.url || !!ge.local);
+        return (
+          <View style={{ marginBottom: 10, marginTop: 4 }}>
+            <View style={{ backgroundColor: '#2a1a0e', borderRadius: 6, paddingTop: 12, borderWidth: 1, borderColor: '#4a2f17' }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'flex-end', paddingHorizontal: 8 }}>
+                {book('kv-new', { title: '＋ NEW GAME', sub: 'file · paste · link', color: '', h: 150, dashed: true, onPress: runPublishStart })}
+                {mine.map(([gid]: any) => {
+                  const ex = D.expiryInfo(((myMeta || {})[gid] || {}).publishedAt);
+                  return book('kv-b-' + gid, { title: gid.toUpperCase(), sub: ex.hoursLeft > 0 ? '~' + Math.round(ex.hoursLeft) + 'h left' : ex.hoursLeft === 0 ? 'expired' : 'draft', color: PAL[hsh(gid) % PAL.length], h: 128 + (hsh(gid + 'h') % 26), ribbon: ex.color, open: openBook === gid, onPress: () => setOpenBook(openBook === gid ? null : gid) });
+                })}
+                {book('kv-guide', { title: 'HOW TO', sub: 'guide + template', color: '#5a4320', h: 136, onPress: () => setGuideOpen(true) })}
+              </ScrollView>
+              <View style={{ height: 12, backgroundColor: '#7a4e2a', borderTopWidth: 2, borderTopColor: '#9a6a3c', borderBottomWidth: 4, borderBottomColor: '#3e2614' }} />
+            </View>
+            <Text style={{ color: '#9a8f78', fontSize: 10, marginTop: 5, textAlign: 'center' }}>{mine.length ? (openBook ? 'tap the book again to close it' : 'tap a book to open it · ribbon = chain clock') : 'your shelf is empty - tap ＋ NEW GAME'}</Text>
+          </View>
+        );
+      })()}
       {(() => { const { KvDevGuide } = require('./kv_dev_publish'); return <KvDevGuide visible={guideOpen} onClose={() => setGuideOpen(false)} onTemplate={kvTemplate} />; })()}
       {preview ? (
         <Modal visible animationType="slide" onRequestClose={() => { const c = (globalThis as any).__kvPreviewClose; if (c) c(); else setPreview(null); }}>
@@ -1387,8 +1419,12 @@ const KvChainGamePublish: React.FC = () => {
           })()}
         </Modal>
       ) : null}
-      {Object.entries(GAMES).filter(([gid, ge]: any) => _kvOwner || !!ge.url || !!ge.local).map(([id, e]: any) => (
+      {Object.entries(GAMES).filter(([gid, ge]: any) => (_kvOwner || !!ge.url || !!ge.local) && gid === openBook).map(([id, e]: any) => (
         <React.Fragment key={id}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f6ecd6', borderRadius: 6, paddingVertical: 8, paddingHorizontal: 12, marginTop: 2 }}>
+          <Text style={{ color: '#2a1a0e', fontWeight: '900', fontSize: 15 }}>{'\uD83D\uDCD6 ' + id}</Text>
+          <TouchableOpacity onPress={() => setOpenBook(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}><Text style={{ color: '#7a4e2a', fontWeight: '800', fontSize: 14 }}>{'close \u2715'}</Text></TouchableOpacity>
+        </View>
         {(() => { const ex = require('./kv_dev_publish').expiryInfo(((myMeta || {})[id] || {}).publishedAt); return <Text style={{ color: ex.color, fontFamily: 'monospace', fontSize: 11, marginTop: 6, marginBottom: 4 }}>{'\u23F1 ' + id + ' - ' + ex.label}</Text>; })()}
         <TouchableOpacity key={id + '-ann'} disabled={!!gbusy} onPress={() => runAnnounceOnly(id)}
           style={{ backgroundColor: '#241f36', borderWidth: 1, borderColor: '#7c5cff', borderRadius: 8, padding: 10, marginBottom: 6 }}>
