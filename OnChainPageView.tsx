@@ -123,7 +123,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   useEffect(() => {
     if (!props.game || !html) return;
     const def = /name=["']kv-orientation["'][^>]*content=["']landscape|KV_MP2|KV_FACES/i.test(String(html).slice(0, 400000));
-    (async () => { try { const AS = require('@react-native-async-storage/async-storage').default; const v = await AS.getItem(landKey); setLand(v === null || v === undefined ? def : v === '1'); } catch { setLand(def); } })();
+    (async () => { try { const AS = require('@react-native-async-storage/async-storage').default; try { const _mc = await AS.getItem('kv_dev_contact'); if (_mc) (globalThis as any).__kvDevContact = _mc; } catch {} const v = await AS.getItem(landKey); setLand(v === null || v === undefined ? def : v === '1'); } catch { setLand(def); } })();
   }, [html]);
   const toggleLand = () => { const n = !land; setLand(n); try { require('@react-native-async-storage/async-storage').default.setItem(landKey, n ? '1' : '0'); } catch {} };
   const [zoom, setZoom] = useState(1);
@@ -269,6 +269,16 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
 
   const onMessage = useCallback((event: any) => {
     try { const _d = JSON.parse(event?.nativeEvent?.data || '{}'); if (_d.kvlog !== undefined) { console.log('[GamePage]', _d.kvlog); return; } } catch {}
+    // KV_GAME_CONTACT: vetted contact handoff for player-to-player offers (no in-game money)
+    try { const _c = JSON.parse(event?.nativeEvent?.data || '{}'); if (_c && _c.kvcontact && props.game) { const to = String(_c.kvcontact.to || '').replace(/[<>"'`\s]/g, '').slice(0, 80); const text = String(_c.kvcontact.text || '').slice(0, 400); if (!to) return;
+      let url = '';
+      if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(to)) url = 'mailto:' + to + '?subject=' + encodeURIComponent('KasCity offer') + '&body=' + encodeURIComponent(text);
+      else if (/^@?[A-Za-z0-9_]{3,}$/.test(to)) url = 'https://t.me/' + to.replace(/^@/, '');
+      else if (/^(https:\/\/)?(t\.me|wa\.me|ig\.me|discord\.gg|x\.com)\//i.test(to)) url = /^https:/i.test(to) ? to : 'https://' + to;
+      (async () => { try { await require('expo-clipboard').setStringAsync(text); } catch {} })();
+      const RN = require('react-native');
+      RN.Alert.alert('Contact player', 'Your message is copied - paste it in the chat.\n\nAgree on the deal there, then settle wallet-to-wallet in KasVillage (direct send or a FROST agreement). Never pay an address you did not verify. The owner presses TRANSFER in the game after being paid.' + (url ? '' : '\n\nContact: ' + to), url ? [{ text: 'Cancel', style: 'cancel' }, { text: 'Open chat', onPress: () => { RN.Linking.openURL(url).catch(() => RN.Alert.alert('Could not open', to)); } }] : [{ text: 'OK' }]);
+      return; } } catch {}
     if (handleKvNetMessage(event.nativeEvent.data, (js) => webRef.current?.injectJavaScript(js))) return;
     try {
       const msg = JSON.parse(event.nativeEvent.data);
@@ -317,7 +327,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
         source={{ html, baseUrl: 'https://kv-game.local/' }}
         originWhitelist={['https://kv-game.local']}
         ref={webRef}
-        injectedJavaScriptBeforeContentLoaded={(props.game && land && wv ? 'window.__kvRealW=' + Math.round(wv.w) + ';window.__kvRealH=' + Math.round(wv.h) + ';' + KV_LAND_SHIM : '') + CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? ('try{window.KV_GRANTS=' + JSON.stringify((globalThis as any).__kvGrantsAll || {}) + ';}catch(e){};') : '') /* KV_GRANTS */}
+        injectedJavaScriptBeforeContentLoaded={(props.game && land && wv ? 'window.__kvRealW=' + Math.round(wv.w) + ';window.__kvRealH=' + Math.round(wv.h) + ';' + KV_LAND_SHIM : '') + CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? ('try{window.KV_GRANTS=' + JSON.stringify((globalThis as any).__kvGrantsAll || {}) + ';window.KV_MY_CONTACT=' + JSON.stringify(String((globalThis as any).__kvDevContact || '').slice(0, 80)) + ';}catch(e){};') : '') /* KV_GRANTS */}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         javaScriptEnabled
