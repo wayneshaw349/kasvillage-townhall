@@ -59,6 +59,13 @@ const capM = view.match(/kas > \(props\.game \? (\d+) : (\d+)\)/) || view.match(
 /setStringAsync\(m\.text/.test(net) && !/KV_CLIP_GUARD/.test(net) ? out('WARN', 'a game can overwrite your clipboard silently (address-swap risk when you paste an address)', 'kv_net_bridge.ts') : out('PASS', 'games cannot write the clipboard silently');
 /kc\[0-9a-f\]\{8\}/.test(view) ? out('PASS', 'game clipboard read returns only a table code, never the full clipboard') : out('WARN', 'game may read full clipboard');
 
+console.log('\n== CONTENT BLOCKER');
+const hc = rd('html_chunks.ts'), ws = rd('Workspace.tsx');
+/KV_PAGE_CONTENT_GATE/.test(hc) ? out('PASS', 'pages (stores, dapps, custom HTML): words on screen run the content filter') : out('FAIL', 'pages only get a code scan - words on screen are not filtered', 'html_chunks.ts scanHtmlForPublish');
+/KV_PUBLISH_CONTENT_GATE/.test(ws) ? out('PASS', 'shelf game publish runs the full content blocker on the phone') : out('FAIL', 'shelf game publish skips the content blocker', 'Workspace.tsx runPublish');
+/scanObject(Strict)?\(storefrontConfig\)/.test(ws) ? out('PASS', 'store name / description / links / coupons filtered') : out('WARN', 'store config not filtered');
+/<img\\b/.test(hc) && /data:image/.test(hc) ? out('PASS', 'no photos on pages or games (procedural images only)') : out('WARN', 'pages can embed photos');
+
 console.log('\n== SEED PHRASE HANDLING');
 const clip = grepAll(/setStringAsync\(\s*mnemonic\s*\)/);
 const cleared = all.some(([, s]) => /setStringAsync\(\s*mnemonic\s*\)[\s\S]{0,400}setStringAsync\(\s*''\s*\)/.test(s));
