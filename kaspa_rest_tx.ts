@@ -389,7 +389,7 @@ function addressToScript(address: string): Uint8Array {
 // so back-to-back sends rebuild on already-spent UTXOs -> orphan rejection).
 const _spentOutpoints = new Set<string>();
 // Change outputs from our own accepted txs � chainable before REST sees them.
-const _pendingChange = new Map<string, { txId: string; index: number; amount: string; script: string; address: string }>();
+const _pendingChange = new Map<string, { txId: string; index: number; amount: string; script: string; address: string; at?: number }>(); // KV_PHANTOM_CHANGE
 
 export async function sendKaspaViaRest(params: {
   senderAddress: string;
@@ -418,6 +418,7 @@ export async function sendKaspaViaRest(params: {
       for (const [k, c] of _pendingChange) {
         if (c.address !== senderAddress) continue;
         if (_spentOutpoints.has(k)) continue;
+        if (c.at && Date.now() - c.at > 90000 && !utxos.some(u => ((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0) === k)) { console.log('[REST-TX] dropping stale remembered change', k); _pendingChange.delete(k); continue; }
         if (utxos.some(u => ((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0) === k)) { _pendingChange.delete(k); continue; }
         utxos.push({ address: c.address, outpoint: { transactionId: c.txId, index: c.index }, utxoEntry: { amount: c.amount, scriptPublicKey: { scriptPublicKey: c.script }, blockDaaScore: '0', isCoinbase: false } } as any);
         console.log('[REST-TX] Chained pending change:', k, c.amount);
@@ -625,6 +626,11 @@ export async function sendKaspaViaRest(params: {
       console.log('[REST-TX] payload present -> submitting via wRPC (REST strips payload)');
       try { (tx as any).__payloadAddress = params.recipientAddress || ''; } catch {}
       const _w = await _wrpcSubmit(tx, network, _predictedTxId);
+      if (_w.error && /orphan/i.test(_w.error) && !(params as any).__orphanRebuilt) {
+        let _ph = 0;
+        for (const u of selectedUtxos) { const k = ((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0); if (_pendingChange.has(k)) { _pendingChange.delete(k); _spentOutpoints.add(k); _ph++; } }
+        if (_ph) { console.warn('[REST-TX] orphan came from remembered change that never landed - dropped ' + _ph + ', rebuilding from real coins'); return sendKaspaViaRest({ ...params, __orphanRebuilt: true } as any); }
+      }
       if (_w.error) {
         console.error('[REST-TX] wRPC submit FAILED:', _w.error);
         return { success: false, error: 'wRPC submit failed: ' + _w.error };
@@ -677,7 +683,7 @@ export async function sendKaspaViaRest(params: {
       const _sendAmt = amountSompi === 0n ? selectedAmount - fee : amountSompi;
       const _chg = selectedAmount - _sendAmt - fee;
       if (_chg > 0n) {
-        _pendingChange.set(txId + ':1', { txId, index: 1, amount: _chg.toString(), script: '20' + bytesToHex(xOnlyPubkey) + 'ac', address: senderAddress });
+        _pendingChange.set(txId + ':1', { txId, index: 1, amount: _chg.toString(), script: '20' + bytesToHex(xOnlyPubkey) + 'ac', address: senderAddress, at: Date.now() });
       }
     } catch (e) { console.warn('[REST-TX] spent-track record failed:', e); }
     return { success: true, txId, explorerUrl: explorerBase + txId };
@@ -698,7 +704,7 @@ export async function sendKaspaViaRest(params: {
 // ============================================================================
 async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): Promise<{ transactionId?: string; error?: string }> {
   // KV_ORPHAN_RETRY: a chained tx can reach a node that has not seen its parent yet - resend the same tx
-  const _waits = [1500, 3000, 5000, 8000, 12000];
+  const _waits = [3000];   // inner retry already waits 12 s; a real orphan is rebuilt by the sender
   let _r = await _wrpcSubmitOnce(restTx, network, idHint);
   for (let _i = 0; _i < _waits.length && _r.error && /orphan/i.test(_r.error); _i++) {
     console.warn('[REST-TX] parent not on this node yet (orphan) - resending same tx in ' + _waits[_i] + 'ms');
@@ -732,6 +738,7 @@ async function _wrpcSubmitOnce(restTx: any, network: KaspaNetwork, idHint: strin
       try { j = JSON.parse(bodyText); } catch {}
       if (resp.status === 422 || (resp.status === 400 && j.error)) {
         const em = String(j.error || bodyText.slice(0, 200));
+        if (/already accepted by the consensus|already in the mempool/i.test(em)) { console.log('[REST-TX] tx already in - counted as sent'); return { transactionId: idHint || '' }; }
         // orphan-retry: parent tx not yet visible on the node that got this
         // submit (LB / mempool sync gap). The tx is fine — wait, resubmit.
         if (/orphan/i.test(em) && (_orphanTries = (_orphanTries || 0) + 1) <= 6) {
