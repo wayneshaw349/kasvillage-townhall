@@ -4,4 +4,5 @@ module.exports = {
   'kascity-414-chain': { bundle: require('./chain_kascity-414-chain_bundle.json'), head: '976b8c49712ee5fd1e00a33e1042f6fd5ac24f3c135b4e1fca3a80010e476805', nonceBase: 9414 },
   'kascity-offers': { bundle: require('./chain_kascity-offers_bundle.json'), head: 'eab047c874da46a9b05d19b090f9102acb828222d610467436862fdb2f555c73', nonceBase: 9514 },
   'kascity-offers-land': { bundle: require('./chain_kascity-offers-land_bundle.json'), head: '268632153ee76c47c32fa5ae9612e4cda1bb857cdf86c04872e61e852f233a5f', nonceBase: 9614 },
+  'kascity-v4': { bundle: require('./chain_kascity-v4_bundle.json'), head: '36e5ea751ba0a2b077a8173e764609ad64333704fba7042c69eb93d5af4033ac', nonceBase: 9714 },
 };
