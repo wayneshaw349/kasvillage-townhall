@@ -675,7 +675,7 @@ export const AppNavigator: React.FC = () => {
               }
             }
           } catch (e) { /* TownHall unreachable */ }
-          // Sync UTXO ledger � tags new receives as 'free' + update financial summary
+          // Sync UTXO ledger · tags new receives as 'free' + update financial summary
           try {
             const { syncLedger } = await import('./utxo_ledger');
             const ledgerResult = await syncLedger(kaspaAddress);

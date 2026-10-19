@@ -698,7 +698,7 @@ export function getRiskLabel(rating: RiskRating): string {
     reliable: '✓ Reliable',
     medium_risk: '⚠ Medium Risk',
     high_risk: '🚨 High Risk',
-    unknown: '? Unknown',
+    unknown: '❔ Unknown',
   };
   return labels[rating];
 }

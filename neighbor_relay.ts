@@ -8,7 +8,7 @@
 // 3. Both see TX confirmation
 
 import * as SecureStore from 'expo-secure-store';
-// LocalServer removed — WiFi P2P not available in Expo Go
+// LocalServer removed Â· WiFi P2P not available in Expo Go
 const getLocalIP = async (): Promise<string | null> => null;
 const LocalP2PServer = null;
 import { TailscaleHelper } from './tailscaleHelper';

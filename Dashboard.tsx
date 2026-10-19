@@ -990,7 +990,7 @@ const BayesianGauge: React.FC<{
     reliable: '\u2713 Reliable',
     medium_risk: '\u26A0 Medium Risk',
     high_risk: '\uD83D\uDEA8 High Risk',
-    unknown: '? New User',
+    unknown: '🆕 New User',
   };
 
   const pctText = loading ? '...' : (clampedScore * 100).toFixed(0) + '%';

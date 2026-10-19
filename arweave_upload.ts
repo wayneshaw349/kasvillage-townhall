@@ -79,7 +79,7 @@ function bytesToHex(bytes: Uint8Array): string {
 // =============================================================================
 
 // ============================================================================
-// UPLOAD COOLDOWN � prevents spam/DDoS on Turbo free tier
+// UPLOAD COOLDOWN · prevents spam/DDoS on Turbo free tier
 // ============================================================================
 const UPLOAD_COOLDOWN_MS = 120_000; // 2 minutes between uploads
 let _lastUploadTime = 0;
@@ -139,7 +139,7 @@ export async function uploadToTurbo(
     ? new TextEncoder().encode(data) 
     : data;
   
-  // Cooldown check � throttled uploads go to queue
+  // Cooldown check · throttled uploads go to queue
   const cooldown = checkCooldown(tags);
   if (!cooldown.allowed) {
     const { enqueueUpload } = await import('./upload_queue');

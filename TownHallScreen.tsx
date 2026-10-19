@@ -1115,7 +1115,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                 board: data.board,
               }, 1, DAPP_PLEDGE_SOMPI); // nonce 1 = dapp slot (0 = store)
               if (_pub && _pub.success !== false) {
-                console.log('[DAppAttest] published � addr:', _pub.storeAddress);
+                console.log('[DAppAttest] published · addr:', _pub.storeAddress);
                 try { await announceToRegistry(_owner, _pub.storeAddress, sendName, 'GameGrid', 'dapp'); } catch {} // KV_DKIM_ANNOUNCE: kind arg was missing - announce landed on the store registry
                 const _attest = {
                   kind: 'dapp_verify',
@@ -1375,7 +1375,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
             }
           }
         } catch (e) { console.warn('[TownHall] Arweave inscription failed:', e); }
-        Alert.alert('? Verified!', arweaveTxId ? 'Proof on Arweave! TX: '+arweaveTxId.slice(0,24)+'...' : 'Verified! Proof: '+(data.proof_hash||'').slice(0,24)+'...', [{ text: 'OK' }]);
+        Alert.alert('✓ Verified!', arweaveTxId ? 'Proof on Arweave! TX: '+arweaveTxId.slice(0,24)+'...' : 'Verified! Proof: '+(data.proof_hash||'').slice(0,24)+'...', [{ text: 'OK' }]);
       } else {
         Alert.alert('Verification Failed', data.error || 'Please try again.');
       }

@@ -9302,7 +9302,7 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
         console.warn('[PhaseAnchor] Avatar SVG save failed (non-fatal):', svgErr.message);
       }
 
-      // Arweave upload � permanent avatar backup (non-blocking)
+      // Arweave upload · permanent avatar backup (non-blocking)
       try {
         console.log("[PhaseAnchor] Starting Arweave upload...");
         const arTags: ArweaveTag[] = [

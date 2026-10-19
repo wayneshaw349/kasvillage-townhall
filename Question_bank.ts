@@ -492,7 +492,7 @@ export function generateQuestionBank(recipe: QuizRecipe): QuizQuestion[] {
 export function selectQuizQuestions(allQuestions: QuizQuestion[], count: number = 5): QuizQuestion[] {
   if (allQuestions.length === 0) return [];
   
-  // For single question (return auth), pick fully random � no priority bias
+  // For single question (return auth), pick fully random · no priority bias
   if (count === 1) {
     const shuffled = [...allQuestions].sort(() => Math.random() - 0.5);
     return [shuffled[0]];

@@ -317,8 +317,8 @@ export async function fetchFeeEstimate(
   } catch {
     // Toccata fallback formula: fee = 100 * max(compute_grams, 2 * tx_bytes)
     // Typical FROST tx: 2 inputs, 2 outputs
-    // tx_bytes � 35 + 2*(41+65) + 2*(9+34) = 333 bytes
-    // compute_grams � 333 + 2*340 + 2*1000 = 3013
+    // tx_bytes · 35 + 2*(41+65) + 2*(9+34) = 333 bytes
+    // compute_grams · 333 + 2*340 + 2*1000 = 3013
     // fee = 100 * max(3013, 2*333) = 100 * 3013 = 301300 sompi
     const txBytes = 333; // typical FROST 2-in-2-out
     const computeGrams = txBytes + 2 * 340 + 2 * 1000;

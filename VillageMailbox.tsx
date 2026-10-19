@@ -572,7 +572,7 @@ function StorefrontCard({ item, onPress }: { item: StorefrontEntry; onPress: () 
       {tipAddr ? (
         <TouchableOpacity onPress={doTip}
           style={{ position: 'absolute', right: 6, bottom: 6, zIndex: 20, borderColor: '#7c3aed', borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
-          <Text style={{ color: '#b9a6ff', fontSize: 10, fontWeight: '700' }}>{'\U0001F49C TIP'}</Text>
+          <Text style={{ color: '#b9a6ff', fontSize: 10, fontWeight: '700' }}>{'\u{1F49C} TIP'}</Text>
         </TouchableOpacity>
       ) : null}
       <View style={cardStyles.badgeContainer}>
@@ -1716,7 +1716,7 @@ export default function VillageMailbox() {
       <Modal visible={!!tipT} animationType="fade" transparent onRequestClose={() => setTipT(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', padding: 22 }}>
           <View style={{ backgroundColor: '#15151f', borderRadius: 14, padding: 18, borderColor: '#7c3aed', borderWidth: 1 }}>
-            <Text style={{ color: '#b9a6ff', fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>{'\U0001F49C TIP THE DEV'}</Text>
+            <Text style={{ color: '#b9a6ff', fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>{'\u{1F49C} TIP THE DEV'}</Text>
             <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', marginTop: 6 }}>{(tipT && tipT.name) || 'dev'}</Text>
             <Text style={{ color: '#8a8aa0', fontSize: 10, marginTop: 8 }}>TO (declared by dev in their announce)</Text>
             <Text style={{ color: '#ddd', fontSize: 10, fontFamily: 'monospace', marginTop: 2 }} selectable>

@@ -327,7 +327,7 @@ async function decryptKey(encryptedHex: string): Promise<Uint8Array> {
 }
 
 // ============================================================================
-// SCHNORR KEY MANAGER (ephemeral � for Lamport attestation, NOT for L1 sends)
+// SCHNORR KEY MANAGER (ephemeral · for Lamport attestation, NOT for L1 sends)
 // ============================================================================
 
 class SchnorrKeyManager {
@@ -773,7 +773,7 @@ async function getTransactionHistory(): Promise<TransactionHistoryEntry[]> {
 }
 
 // ============================================================================
-// SEND WITH HYBRID SIG (REST API � main wallet signs L1, ephemeral for attestation)
+// SEND WITH HYBRID SIG (REST API · main wallet signs L1, ephemeral for attestation)
 // ============================================================================
 
 async function sendKASWithHybridSig(
@@ -940,7 +940,7 @@ async function sendKASFromVault(
 }
 
 // ============================================================================
-// SEND INSCRIPTION TX (REST API � main wallet)
+// SEND INSCRIPTION TX (REST API · main wallet)
 // ============================================================================
 
 async function sendInscriptionTx(payloadHex: string, toAddress: string): Promise<string> {

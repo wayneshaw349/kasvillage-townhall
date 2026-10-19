@@ -218,7 +218,7 @@ async function verifyStorefrontWithTownHall(storefront: {
     };
   } catch (error) {
     console.log('TownHall unreachable:', storefront.storeName);
-    return { verified: false, code_hash: undefined, scan_result: { passed: false, status: 'not_displayed' }, message: 'Verification unavailable � Town Hall offline' };
+    return { verified: false, code_hash: undefined, scan_result: { passed: false, status: 'not_displayed' }, message: 'Verification unavailable · Town Hall offline' };
   }
 }
 
@@ -267,7 +267,7 @@ async function verifyServiceWithTownHall(service: {
     };
   } catch (error) {
     console.log('TownHall unreachable:', service.title);
-    return { verified: false, code_hash: undefined, scan_result: { passed: false, status: 'not_displayed' }, message: 'Verification unavailable � Town Hall offline' };
+    return { verified: false, code_hash: undefined, scan_result: { passed: false, status: 'not_displayed' }, message: 'Verification unavailable · Town Hall offline' };
   }
 }
 
@@ -316,25 +316,25 @@ const BANNER_STYLES = [
 ];
 
 const DISCIPLINES = [
-  { id: 'cs', label: 'Computer Science', icon: '??' },
-  { id: 'math', label: 'Mathematics', icon: '??' },
-  { id: 'physics', label: 'Physics', icon: '??' },
-  { id: 'bio', label: 'Biology', icon: '??' },
-  { id: 'chem', label: 'Chemistry', icon: '??' },
-  { id: 'econ', label: 'Economics', icon: '??' },
-  { id: 'eng', label: 'Engineering', icon: '??' },
-  { id: 'law', label: 'Law', icon: '??' },
-  { id: 'med', label: 'Medicine', icon: '??' },
-  { id: 'psych', label: 'Psychology', icon: '??' },
-  { id: 'other', label: 'Other', icon: '??' },
+  { id: 'cs', label: 'Computer Science', icon: '💻' },
+  { id: 'math', label: 'Mathematics', icon: '📐' },
+  { id: 'physics', label: 'Physics', icon: '⚛️' },
+  { id: 'bio', label: 'Biology', icon: '🧬' },
+  { id: 'chem', label: 'Chemistry', icon: '⚗️' },
+  { id: 'econ', label: 'Economics', icon: '📈' },
+  { id: 'eng', label: 'Engineering', icon: '🛠️' },
+  { id: 'law', label: 'Law', icon: '⚖️' },
+  { id: 'med', label: 'Medicine', icon: '🩺' },
+  { id: 'psych', label: 'Psychology', icon: '🧠' },
+  { id: 'other', label: 'Other', icon: '📚' },
 ];
 
 const QA_CHANNELS = [
-  { id: 'telegram', label: 'Telegram', icon: '??', placeholder: 't.me/username or @handle' },
-  { id: 'instagram_dm', label: 'Instagram DM', icon: '??', placeholder: '@your_instagram' },
-  { id: 'signal', label: 'Signal', icon: '??', placeholder: 'Signal username' },
-  { id: 'email', label: 'Email (generic)', icon: '??', placeholder: 'any email (not .edu)' },
-  { id: 'nostr', label: 'Nostr', icon: '??', placeholder: 'npub...' },
+  { id: 'telegram', label: 'Telegram', icon: '✈️', placeholder: 't.me/username or @handle' },
+  { id: 'instagram_dm', label: 'Instagram DM', icon: '📸', placeholder: '@your_instagram' },
+  { id: 'signal', label: 'Signal', icon: '🔐', placeholder: 'Signal username' },
+  { id: 'email', label: 'Email (generic)', icon: '✉️', placeholder: 'any email (not .edu)' },
+  { id: 'nostr', label: 'Nostr', icon: '🟣', placeholder: 'npub...' },
 ];
 
 const STOREFRONT_FONTS = [
@@ -352,20 +352,20 @@ const STOREFRONT_LAYOUTS = [
 ];
 
 const SOCIAL_PLATFORMS = [
-  { id: 'instagram', label: 'Instagram', icon: '??', domain: 'instagram.com' },
-  { id: 'tiktok', label: 'TikTok', icon: '??', domain: 'tiktok.com' },
-  { id: 'facebook', label: 'Facebook', icon: '??', domain: 'facebook.com' },
-  { id: 'etsy', label: 'Etsy Shop', icon: '???', domain: 'etsy.com' },
-  { id: 'pinterest', label: 'Pinterest', icon: '??', domain: 'pinterest.com' },
-  { id: 'youtube', label: 'YouTube', icon: '??', domain: 'youtube.com' },
-  { id: 'twitch', label: 'Twitch', icon: '??', domain: 'twitch.tv' },
+  { id: 'instagram', label: 'Instagram', icon: '📸', domain: 'instagram.com' },
+  { id: 'tiktok', label: 'TikTok', icon: '🎵', domain: 'tiktok.com' },
+  { id: 'facebook', label: 'Facebook', icon: '📘', domain: 'facebook.com' },
+  { id: 'etsy', label: 'Etsy Shop', icon: '🛍️', domain: 'etsy.com' },
+  { id: 'pinterest', label: 'Pinterest', icon: '📌', domain: 'pinterest.com' },
+  { id: 'youtube', label: 'YouTube', icon: '▶️', domain: 'youtube.com' },
+  { id: 'twitch', label: 'Twitch', icon: '🎮', domain: 'twitch.tv' },
 ];
 
 // Communication channels for buyer-seller contact
 const COMMUNICATION_CHANNELS = [
-  { id: 'telegram', label: 'Telegram', icon: '??', placeholder: 't.me/username or @username' },
-  { id: 'messenger', label: 'FB Messenger', icon: '??', placeholder: 'm.me/username' },
-  { id: 'instagram_dm', label: 'Instagram DM', icon: '??', placeholder: '@your_instagram' },
+  { id: 'telegram', label: 'Telegram', icon: '✈️', placeholder: 't.me/username or @username' },
+  { id: 'messenger', label: 'FB Messenger', icon: '💬', placeholder: 'm.me/username' },
+  { id: 'instagram_dm', label: 'Instagram DM', icon: '📸', placeholder: '@your_instagram' },
 ];
 
 const DAPP_TEMPLATE_CODE = `// ---------------------------------------------------------------------------
@@ -466,7 +466,7 @@ const PassportGate: React.FC<PassportGateProps> = ({ filledTraits, missingTraits
     <View style={gateStyles.iconContainer}>
       <Lock size={rs.s(40)} color={COLORS.amber600} />
     </View>
-    <Text style={gateStyles.title}>?? Passport Required</Text>
+    <Text style={gateStyles.title}>🛂 Passport Required</Text>
     <Text style={gateStyles.subtitle}>
       Complete 6 identity traits to unlock your Storefront Workspace.
     </Text>
@@ -1235,7 +1235,7 @@ const KvChainGamePublish: React.FC = () => {
         const tot = (Array.isArray(uj) ? uj : []).reduce((a: bigint, u: any) => a + BigInt(u.utxoEntry?.amount || u.amount || '0'), 0n);
         gadd('visible UTXOs ' + (Number(tot) / 1e8).toFixed(4) + ' KAS in ' + (Array.isArray(uj) ? uj.length : 0) + ' coins');
         gadd('ledger locks: collateral ' + (Number(lt.collateral) / 1e8) + ' + IOU ' + (Number(lt.iou) / 1e8) + ' = ' + (Number(lt.total) / 1e8) + ' KAS');
-        if (lt.total > 0n) gadd('?? locks > 0 while summary shows 0 -> press RELEASE STALE LOCKS first');
+        if (lt.total > 0n) gadd('⚠️ locks > 0 while summary shows 0 -> press RELEASE STALE LOCKS first');
       } catch (pf: any) { gadd('preflight warn: ' + String(pf?.message || pf)); }
       const m = entry.bundle.manifest;
       const slots = Math.max(...m.frags.map((f: any) => f.slot)) + 1;
@@ -1320,7 +1320,7 @@ const KvChainGamePublish: React.FC = () => {
   if (!myAddr) return null;   // KV_DEV_OPEN: every wallet can publish its own games
   return (
     <View style={{ backgroundColor: '#141210', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#6a5a34' }}>
-      <Text style={{ color: '#f0c860', fontWeight: '900', fontFamily: 'monospace', fontSize: 14 }}>?? PUBLISH YOUR GAME</Text>
+      <Text style={{ color: '#f0c860', fontWeight: '900', fontFamily: 'monospace', fontSize: 14 }}>🎮 PUBLISH YOUR GAME</Text>
       <Text style={{ color: '#9a8f78', fontFamily: 'monospace', fontSize: 10, marginVertical: 6 }}>your key signs it · checked before upload · players install it from chain</Text>
       <TouchableOpacity disabled={!!gbusy} onPress={async () => {
         try {
@@ -1343,7 +1343,7 @@ const KvChainGamePublish: React.FC = () => {
           gadd('released ' + c + ' collateral + ' + i + ' IOU orphan entries; locks now ' + (Number(lt.total) / 1e8) + ' KAS');
         } catch (e: any) { gadd('release failed: ' + String(e?.message || e)); }
       }} style={{ backgroundColor: '#1d2a18', borderWidth: 1, borderColor: '#3f5a34', borderRadius: 8, padding: 8, alignItems: 'center', marginBottom: 6 }}>
-        <Text style={{ color: '#9fd98a', fontFamily: 'monospace', fontSize: 11 }}>?? RELEASE STALE LOCKS (ledger cleanup)</Text>
+        <Text style={{ color: '#9fd98a', fontFamily: 'monospace', fontSize: 11 }}>🧹 RELEASE STALE LOCKS (ledger cleanup)</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={() => toggleTip(!tipOn)} activeOpacity={0.8}
         style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: tipOn ? '#241f36' : '#17171f',
@@ -1355,7 +1355,7 @@ const KvChainGamePublish: React.FC = () => {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ color: tipOn ? '#b9a6ff' : '#888', fontFamily: 'monospace', fontWeight: '800', fontSize: 12 }}>
-            {'\U0001F49C ACCEPT TIPS' + (tipOn ? '' : '  (off)')}
+            {'\u{1F49C} ACCEPT TIPS' + (tipOn ? '' : '  (off)')}
           </Text>
           <Text style={{ color: '#6f6f85', fontSize: 9, marginTop: 3, lineHeight: 12 }}>
             {tipOn
@@ -1475,7 +1475,7 @@ const KvChainGamePublish: React.FC = () => {
       ) : null}
       <TouchableOpacity onPress={() => Clipboard.setStringAsync(glog.join(String.fromCharCode(10)))}
         style={{ alignSelf: 'flex-start', backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 6, paddingVertical: 4, paddingHorizontal: 10, marginTop: 6 }}>
-        <Text style={{ color: '#f0c860', fontFamily: 'monospace', fontSize: 10 }}>?? COPY LOG</Text>
+        <Text style={{ color: '#f0c860', fontFamily: 'monospace', fontSize: 10 }}>📋 COPY LOG</Text>
       </TouchableOpacity>
       <View style={{ height: 300, marginTop: 4 }}>
         <ScrollView nestedScrollEnabled>
@@ -1555,7 +1555,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                 <ShieldCheck size={rs.s(20)} color={COLORS.amber500} />
                 <Text style={qgStyles.headerText}>SDK Compliance Gate</Text>
               </View>
-              <Text style={qgStyles.headerSubtext}>SDK v{SDK_VERSION} � Step {step} of 3</Text>
+              <Text style={qgStyles.headerSubtext}>SDK v{SDK_VERSION} · Step {step} of 3</Text>
             </View>
             <TouchableOpacity onPress={onClose}>
               <X size={rs.s(24)} color={COLORS.stone500} />
@@ -1587,7 +1587,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
 
                 {/* Code Paste + SDK Scan */}
                 <View style={{ backgroundColor: COLORS.stone50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(16), borderWidth: 1, borderColor: COLORS.stone200 }}>
-                  <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.stone800, marginBottom: rs.s(6) }}>?? Paste DApp Code for SDK Scan</Text>
+                  <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.stone800, marginBottom: rs.s(6) }}>🔎 Paste DApp Code for SDK Scan</Text>
                   <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginBottom: rs.s(8) }}>
                     The SDK scanner checks for image uploads, realistic faces, eval(), iframes, and 53+ violation patterns.
                   </Text>
@@ -1599,7 +1599,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                     placeholderTextColor={COLORS.stone400}
                     multiline
                   />
-                  <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, marginTop: 4 }}>{pastedCode.length} chars � {pastedCode.split('\n').length} lines</Text>
+                  <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, marginTop: 4 }}>{pastedCode.length} chars · {pastedCode.split('\n').length} lines</Text>
                   
                   <TouchableOpacity
                     style={{ backgroundColor: pastedCode.length > 20 ? COLORS.indigo600 : COLORS.stone300, borderRadius: rs.s(10), paddingVertical: rs.s(12), alignItems: 'center', marginTop: rs.s(8), flexDirection: 'row', justifyContent: 'center', gap: rs.s(8) }}
@@ -1621,7 +1621,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                       </Text>
                     </View>
                     <Text style={{ fontSize: rs.font(11), color: COLORS.stone600, marginBottom: rs.s(6) }}>
-                      {scanResult.stats.linesScanned} lines scanned � {scanResult.stats.patternsChecked} patterns checked � {scanResult.stats.whitelistApplied} whitelisted
+                      {scanResult.stats.linesScanned} lines scanned · {scanResult.stats.patternsChecked} patterns checked · {scanResult.stats.whitelistApplied} whitelisted
                     </Text>
                     
                     {scanResult.violations.length > 0 && (
@@ -1642,7 +1642,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                       <View style={{ marginTop: rs.s(8) }}>
                         <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: COLORS.amber800 }}>Warnings ({scanResult.warnings.length}):</Text>
                         {scanResult.warnings.slice(0, 5).map((w: any, i: number) => (
-                          <Text key={i} style={{ fontSize: rs.font(9), color: COLORS.amber700, marginTop: 2 }}>? Line {w.line}: {w.note}</Text>
+                          <Text key={i} style={{ fontSize: rs.font(9), color: COLORS.amber700, marginTop: 2 }}>⚠️ Line {w.line}: {w.note}</Text>
                         ))}
                       </View>
                     )}
@@ -1730,8 +1730,8 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                 {/* Board Preview */}
                 <View style={[qgStyles.boardPreview, { borderColor: board.color }]}>
                   <Text style={[qgStyles.boardName, { color: board.color }]}>
-                    {(manifest.pledgeKas || 100) >= 2000 ? '?? Elite' :
-                     (manifest.pledgeKas || 100) >= 500 ? '?? Main' : '?? Incubator'}
+                    {(manifest.pledgeKas || 100) >= 2000 ? '💎 Elite' :
+                     (manifest.pledgeKas || 100) >= 500 ? '⭐ Main' : '🌱 Incubator'}
                   </Text>
                   <Text style={qgStyles.boardDesc}>
                     {(manifest.pledgeKas || 100) >= 2000 ? 'Premium placement, highest visibility' :
@@ -1745,7 +1745,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                 
                 <View style={qgStyles.buttonRow}>
                   <TouchableOpacity style={qgStyles.backBtn} onPress={() => setStep(1)}>
-                    <Text style={qgStyles.backBtnText}>? Back</Text>
+                    <Text style={qgStyles.backBtnText}>‹ Back</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={qgStyles.stakeBtn}
@@ -1810,7 +1810,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                   <Text style={{ fontSize: rs.font(10), color: COLORS.stone600 }}>Lines Scanned: {scanResult?.stats?.linesScanned || 0}</Text>
                   <Text style={{ fontSize: rs.font(10), color: COLORS.stone600 }}>Violations: 0</Text>
                   <Text style={{ fontSize: rs.font(10), color: COLORS.stone600 }}>Code Hash: on Arweave</Text>
-                  <Text style={{ fontSize: rs.font(10), color: COLORS.green600, fontWeight: 'bold', marginTop: 4 }}>? Periodic re-scan enabled via TownHall</Text>
+                  <Text style={{ fontSize: rs.font(10), color: COLORS.green600, fontWeight: 'bold', marginTop: 4 }}>✓ Periodic re-scan enabled via TownHall</Text>
                 </View>
                 <TouchableOpacity style={qgStyles.doneBtn} onPress={() => { onVerified({ ...manifest, scanResult }); onClose(); }}><Text style={qgStyles.doneBtnText}>Done</Text></TouchableOpacity>
               </View>
@@ -2273,14 +2273,14 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
   // ============================================================================
   
   // =========================================================================
-  // ECDH ENCRYPTION � secp256k1 shared secret ? XOR-SHA256 stream cipher
+  // ECDH ENCRYPTION · secp256k1 shared secret ? XOR-SHA256 stream cipher
   // =========================================================================
   
   const ecdhEncrypt = async (plaintext: string, myPrivKeyHex: string, theirPubKeyHex: string): Promise<string> => {
     const myPrivKey = hexToBytes(myPrivKeyHex);
     const theirPubKey = hexToBytes(theirPubKeyHex);
     
-    // ECDH shared secret: myPrivKey � theirPubKey
+    // ECDH shared secret: myPrivKey · theirPubKey
     const sharedPoint = secp256k1.getSharedSecret(myPrivKey, theirPubKey);
     const sharedSecret = sha256(sharedPoint);
     
@@ -2354,7 +2354,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
   };
   
   // =========================================================================
-  // P2P SEND � ECDH encrypted
+  // P2P SEND · ECDH encrypted
   // =========================================================================
   
   const sendQAMessageP2P = async (
@@ -2366,12 +2366,12 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const myPrivkey = await SecureStore.getItemAsync('kv_private_key') || '';
       const payload = JSON.stringify(message);
       
-      // Real ECDH encryption � only recipient can decrypt with their private key
+      // Real ECDH encryption · only recipient can decrypt with their private key
       let encrypted: string;
       if (myPrivkey && recipientPubkey && recipientPubkey.length >= 66) {
         encrypted = await ecdhEncrypt(payload, myPrivkey, recipientPubkey);
       } else {
-        // Fallback if keys not available � base64 (not secure, dev only)
+        // Fallback if keys not available · base64 (not secure, dev only)
         encrypted = 'PLAIN:' + btoa(payload);
         console.warn('[QA] ECDH keys not available, using insecure fallback');
       }
@@ -2418,7 +2418,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
           { name: 'Unix-Time', value: String(Math.floor(Date.now() / 1000)) },
         ]);
       } catch {
-        // Arweave offline � save locally for later upload
+        // Arweave offline · save locally for later upload
         const commitKey = `kv_arweave_commit_${tag}_${Date.now()}`;
         await SecureStore.setItemAsync(commitKey, JSON.stringify({
           hash: hashHex,
@@ -2865,7 +2865,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
           {/* Header */}
           <View style={acStyles.header}>
             <View>
-              <Text style={acStyles.headerTitle}>?? Research Shelf</Text>
+              <Text style={acStyles.headerTitle}>📚 Research Shelf</Text>
               <Text style={acStyles.headerSubtitle}>Privacy-Preserving Academic Exchange</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={acStyles.closeBtn}>
@@ -2882,10 +2882,10 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                 onPress={() => setActiveTab(tab)}
               >
                 <Text style={[acStyles.tabText, activeTab === tab && acStyles.tabTextActive]}>
-                  {tab === 'browse' && '?? Browse'}
-                  {tab === 'submit' && '?? Submit'}
-                  {tab === 'services' && '?? Services'}
-                  {tab === 'profile' && '?? Profile'}
+                  {tab === 'browse' && '🔎 Browse'}
+                  {tab === 'submit' && '📤 Submit'}
+                  {tab === 'services' && '🛠️ Services'}
+                  {tab === 'profile' && '👤 Profile'}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -2907,16 +2907,16 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       </Text>
                       <View style={acStyles.disclaimerList}>
                         <Text style={acStyles.disclaimerItem}>
-                          � <Text style={{ fontWeight: 'bold' }}>We cannot guarantee the authenticity of any author.</Text> Researcher identities are self-attested.
+                          • <Text style={{ fontWeight: 'bold' }}>We cannot guarantee the authenticity of any author.</Text> Researcher identities are self-attested.
                         </Text>
                         <Text style={acStyles.disclaimerItem}>
-                          � <Text style={{ fontWeight: 'bold' }}>We cannot verify true identity.</Text> Pseudonymous IDs protect privacy.
+                          • <Text style={{ fontWeight: 'bold' }}>We cannot verify true identity.</Text> Pseudonymous IDs protect privacy.
                         </Text>
                         <Text style={acStyles.disclaimerItem}>
-                          � <Text style={{ fontWeight: 'bold' }}>We cannot guarantee research validity.</Text> Content is user-submitted.
+                          • <Text style={{ fontWeight: 'bold' }}>We cannot guarantee research validity.</Text> Content is user-submitted.
                         </Text>
                         <Text style={acStyles.disclaimerItem}>
-                          � <Text style={{ fontWeight: 'bold' }}>Always verify through official channels.</Text>
+                          • <Text style={{ fontWeight: 'bold' }}>Always verify through official channels.</Text>
                         </Text>
                       </View>
                     </View>
@@ -2924,7 +2924,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       style={acStyles.acceptBtn}
                       onPress={() => setDisclaimerAccepted(true)}
                     >
-                      <Text style={acStyles.acceptBtnText}>I Understand � Continue to Browse</Text>
+                      <Text style={acStyles.acceptBtnText}>I Understand · Continue to Browse</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
@@ -2943,7 +2943,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     </View>
                     <View style={acStyles.miniDisclaimer}>
                       <Text style={acStyles.miniDisclaimerText}>
-                        ?? Platform does not verify author identity or research validity.
+                        ⚠️ Platform does not verify author identity or research validity.
                       </Text>
                     </View>
                     
@@ -2951,14 +2951,14 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     {selectedAbstract ? (
                       <View>
                         <TouchableOpacity onPress={() => { setSelectedAbstract(null); setQaList([]); }} style={{ padding: 8 }}>
-                          <Text style={{ color: COLORS.amber600, fontSize: 15, fontWeight: 'bold' }}>? Back to list</Text>
+                          <Text style={{ color: COLORS.amber600, fontSize: 15, fontWeight: 'bold' }}>‹ Back to list</Text>
                         </TouchableOpacity>
                         
                         {/* Abstract Card */}
                         <View style={{ backgroundColor: COLORS.cardBg, borderRadius: 12, padding: 16, marginTop: 8, borderWidth: 1, borderColor: COLORS.stone200 }}>
                           <Text style={{ color: COLORS.stone800, fontSize: 18, fontWeight: 'bold' }}>{selectedAbstract.title}</Text>
                           <Text style={{ color: COLORS.stone500, fontSize: 12, marginTop: 4 }}>
-                            By {selectedAbstract.researcherId} � {selectedAbstract.institutionDomain} � {new Date(selectedAbstract.timestamp).toLocaleDateString()}
+                            By {selectedAbstract.researcherId} · {selectedAbstract.institutionDomain} · {new Date(selectedAbstract.timestamp).toLocaleDateString()}
                           </Text>
                           <Text style={{ color: COLORS.stone700, fontSize: 14, marginTop: 12, lineHeight: 20 }}>{selectedAbstract.text}</Text>
                           
@@ -2976,23 +2976,23 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                             const { Linking } = require('react-native');
                             Linking.openURL(selectedAbstract.repositoryUrl);
                           }} style={{ marginTop: 10 }}>
-                            <Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>?? View Repository</Text>
+                            <Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>📂 View Repository</Text>
                           </TouchableOpacity>
-                          {selectedAbstract.videoUrl ? <TouchableOpacity onPress={() => Linking.openURL(selectedAbstract.videoUrl!)} style={{ marginTop: 6 }}><Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>?? Watch Video Explainer</Text></TouchableOpacity> : null}
-                          {selectedAbstract.qaChannel && selectedAbstract.qaHandle ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, backgroundColor: '#fef3c7', borderRadius: 8, padding: 8 }}><Text style={{ fontSize: 11, color: '#92400e' }}>?? Questions via {selectedAbstract.qaChannel}: <Text style={{ fontWeight: 'bold' }}>{selectedAbstract.qaHandle}</Text></Text></View> : null}
+                          {selectedAbstract.videoUrl ? <TouchableOpacity onPress={() => Linking.openURL(selectedAbstract.videoUrl!)} style={{ marginTop: 6 }}><Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>🎬 Watch Video Explainer</Text></TouchableOpacity> : null}
+                          {selectedAbstract.qaChannel && selectedAbstract.qaHandle ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, backgroundColor: '#fef3c7', borderRadius: 8, padding: 8 }}><Text style={{ fontSize: 11, color: '#92400e' }}>💬 Questions via {selectedAbstract.qaChannel}: <Text style={{ fontWeight: 'bold' }}>{selectedAbstract.qaHandle}</Text></Text></View> : null}
                         </View>
                         
                         {/* Q&A Section */}
                         <View style={{ marginTop: 16 }}>
                           <Text style={{ color: COLORS.stone800, fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
-                            ?? Questions & Answers ({qaList.length})
+                            ❓ Questions & Answers ({qaList.length})
                           </Text>
                           
                           {qaList.filter(q => !q.declined).map(qa => (
                             <View key={qa.id} style={{ backgroundColor: COLORS.cardBg, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: qa.answerText ? COLORS.green200 : COLORS.stone200 }}>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                                 <Text style={{ fontSize: 12, color: COLORS.stone500 }}>
-                                  {qa.isPaid ? '?? Paid' : '?? Free'} � {new Date(qa.timestamp).toLocaleDateString()}
+                                  {qa.isPaid ? '💰 Paid' : '🆓 Free'} · {new Date(qa.timestamp).toLocaleDateString()}
                                 </Text>
                               </View>
                               <Text style={{ color: COLORS.stone800, fontSize: 14, fontWeight: '600', marginTop: 4 }}>Q: {qa.questionText}</Text>
@@ -3019,7 +3019,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                                           if (answer) handleAnswerQuestion(qa.id, answer);
                                         });
                                       } else {
-                                        Alert.alert('Answer', 'Answer input not available on this device � use desktop');
+                                        Alert.alert('Answer', 'Answer input not available on this device · use desktop');
                                       }
                                     }}
                                   >
@@ -3045,11 +3045,11 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                           {/* Ask Question Input */}
                           <View style={{ backgroundColor: COLORS.cardBg, borderRadius: 12, padding: 12, marginTop: 8, borderWidth: 1, borderColor: COLORS.amber200 }}>
                             {qaList.filter(q => q.askerApt === 'me').length === 0 ? (
-                              <Text style={{ color: COLORS.green600, fontSize: 12, marginBottom: 6 }}>?? Your first question is FREE</Text>
+                              <Text style={{ color: COLORS.green600, fontSize: 12, marginBottom: 6 }}>🆓 Your first question is FREE</Text>
                             ) : selectedAbstract.questionPrice > 0 ? (
-                              <Text style={{ color: COLORS.amber600, fontSize: 12, marginBottom: 6 }}>?? Follow-up questions cost {selectedAbstract.questionPrice} KAS</Text>
+                              <Text style={{ color: COLORS.amber600, fontSize: 12, marginBottom: 6 }}>💰 Follow-up questions cost {selectedAbstract.questionPrice} KAS</Text>
                             ) : (
-                              <Text style={{ color: COLORS.green600, fontSize: 12, marginBottom: 6 }}>?? This researcher hasn't set a price � questions are free</Text>
+                              <Text style={{ color: COLORS.green600, fontSize: 12, marginBottom: 6 }}>🆓 This researcher hasn't set a price · questions are free</Text>
                             )}
                             <TextInput
                               style={{ backgroundColor: COLORS.stone100, borderRadius: 8, padding: 10, fontSize: 14, color: COLORS.stone800, minHeight: 60, textAlignVertical: 'top' }}
@@ -3085,14 +3085,14 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                             >
                               <Text style={{ color: COLORS.stone800, fontSize: 15, fontWeight: 'bold' }}>{abstract_.title}</Text>
                               <Text style={{ color: COLORS.stone500, fontSize: 12, marginTop: 2 }}>
-                                {abstract_.researcherId} � {abstract_.institutionDomain}
+                                {abstract_.researcherId} · {abstract_.institutionDomain}
                               </Text>
                               <Text style={{ color: COLORS.stone600, fontSize: 13, marginTop: 6 }} numberOfLines={3}>
                                 {abstract_.text}
                               </Text>
                               <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
-                                <Text style={{ color: COLORS.stone400, fontSize: 11 }}>?? {abstract_.questionCount} questions</Text>
-                                <Text style={{ color: COLORS.stone400, fontSize: 11 }}>?? {abstract_.viewCount} views</Text>
+                                <Text style={{ color: COLORS.stone400, fontSize: 11 }}>❓ {abstract_.questionCount} questions</Text>
+                                <Text style={{ color: COLORS.stone400, fontSize: 11 }}>👁️ {abstract_.viewCount} views</Text>
                                 <Text style={{ color: COLORS.stone400, fontSize: 11 }}>{new Date(abstract_.timestamp).toLocaleDateString()}</Text>
                               </View>
                               {abstract_.keywords.length > 0 && (
@@ -3116,14 +3116,14 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
               </View>
             )}
             
-            {/* Submit Tab � DKIM On-Device Verification */}
+            {/* Submit Tab · DKIM On-Device Verification */}
             {activeTab === 'submit' && (
               <View style={acStyles.tabContent}>
-                {/* Step 0: Get Code � no email field exists */}
+                {/* Step 0: Get Code · no email field exists */}
                 {verificationStep === 0 && !researcherProfile && (
                   <View>
-                    <Text style={{ fontSize: rs.font(20), fontWeight: '900', color: COLORS.amber900, textAlign: 'center', marginBottom: rs.s(8) }}>?? Prove Your School Email</Text>
-                    <Text style={{ fontSize: rs.font(13), color: COLORS.stone600, textAlign: 'center', marginBottom: rs.s(16), lineHeight: rs.font(20) }}>Your email NEVER enters this app � not even for a second.{String.fromCharCode(10)}We only read the school name from the DKIM digital stamp.</Text>
+                    <Text style={{ fontSize: rs.font(20), fontWeight: '900', color: COLORS.amber900, textAlign: 'center', marginBottom: rs.s(8) }}>🎓 Prove Your School Email</Text>
+                    <Text style={{ fontSize: rs.font(13), color: COLORS.stone600, textAlign: 'center', marginBottom: rs.s(16), lineHeight: rs.font(20) }}>Your email NEVER enters this app · not even for a second.{String.fromCharCode(10)}We only read the school name from the DKIM digital stamp.</Text>
                     <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 24, marginBottom: 16 }}>
                       {['Get Code', 'Paste Proof'].map((label, i) => (
                         <View key={i} style={{ alignItems: 'center' }}>
@@ -3149,13 +3149,13 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       <Text style={{ fontSize: 12, color: COLORS.stone600 }}>4. Hit send, come back here, tap Next</Text>
                     </View>
                     <TouchableOpacity style={{ backgroundColor: magicLink ? COLORS.amber600 : COLORS.stone300, borderRadius: 12, paddingVertical: 16, alignItems: 'center' }} onPress={() => { if (!magicLink) { Alert.alert('Generate Code First'); return; } setVerificationStep(1); }} disabled={!magicLink}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>I Sent the Email ? Next</Text>
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>I Sent the Email → Next</Text>
                     </TouchableOpacity>
                     <View style={{ backgroundColor: COLORS.green50, borderRadius: 10, padding: 12, marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <ShieldCheck size={18} color={COLORS.green600} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 11, fontWeight: 'bold', color: COLORS.green800 }}>Zero Knowledge</Text>
-                        <Text style={{ fontSize: 10, color: COLORS.green700 }}>No email field exists. We read your school from the DKIM stamp. DNS lookup for public key ? RSA verify on YOUR phone. Zero PII transmitted.</Text>
+                        <Text style={{ fontSize: 10, color: COLORS.green700 }}>No email field exists. We read your school from the DKIM stamp. DNS lookup for public key → RSA verify on YOUR phone. Zero PII transmitted.</Text>
                       </View>
                     </View>
                   </View>
@@ -3164,7 +3164,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                 {/* Step 1: Paste Proof + Real DKIM Verify */}
                 {verificationStep === 1 && !researcherProfile && (
                   <View>
-                    <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.amber900, textAlign: 'center', marginBottom: 8 }}>?? Paste the Proof</Text>
+                    <Text style={{ fontSize: 18, fontWeight: '900', color: COLORS.amber900, textAlign: 'center', marginBottom: 8 }}>📋 Paste the Proof</Text>
                     <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 24, marginBottom: 16 }}>
                       {['Get Code', 'Paste Proof'].map((label, i) => (
                         <View key={i} style={{ alignItems: 'center' }}>
@@ -3177,14 +3177,14 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     </View>
                     <Text style={{ fontSize: 13, color: COLORS.stone600, textAlign: 'center', marginBottom: 12 }}>Open the email you sent. Get the raw source:</Text>
                     <View style={{ backgroundColor: COLORS.stone50, borderRadius: 12, padding: 12, marginBottom: 12, gap: 8 }}>
-                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>?? Gmail (phone)</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>Open email ? ? ? "Show original" ? Copy</Text></View>
-                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>?? Gmail (computer)</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>Open email ? ? ? "Show original" ? Select all ? Copy</Text></View>
-                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>?? Outlook</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>Open email ? ��� ? "View message source" ? Copy</Text></View>
-                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>?? Apple Mail</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>View ? Message ? Raw Source ? Copy</Text></View>
+                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>✉️ Gmail (phone)</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>Open email ? ? ? "Show original" → Copy</Text></View>
+                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>✉️ Gmail (computer)</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>Open email ? ? ? "Show original" → Select all → Copy</Text></View>
+                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>✉️ Outlook</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>Open email ? ··· ? "View message source" → Copy</Text></View>
+                      <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone800 }}>✉️ Apple Mail</Text><Text style={{ fontSize: 11, color: COLORS.stone600 }}>View → Message → Raw Source → Copy</Text></View>
                     </View>
                     <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.stone700, marginBottom: 6 }}>Paste everything here:</Text>
                     <TextInput style={{ backgroundColor: '#fff', borderWidth: 2, borderColor: rawEmailHeaders.length > 200 ? COLORS.green500 : COLORS.stone300, borderRadius: 12, padding: 12, fontSize: 11, fontFamily: 'monospace', color: COLORS.stone700, minHeight: 100, textAlignVertical: 'top' }} value={rawEmailHeaders} onChangeText={setRawEmailHeaders} placeholder="Paste the full email source here..." placeholderTextColor={COLORS.stone400} multiline />
-                    {rawEmailHeaders.length > 0 && <Text style={{ fontSize: 10, color: rawEmailHeaders.length > 200 ? COLORS.green600 : COLORS.amber600, marginTop: 4 }}>{rawEmailHeaders.length > 200 ? '? ' + rawEmailHeaders.length + ' chars pasted' : '? Keep pasting � need the full source'}</Text>}
+                    {rawEmailHeaders.length > 0 && <Text style={{ fontSize: 10, color: rawEmailHeaders.length > 200 ? COLORS.green600 : COLORS.amber600, marginTop: 4 }}>{rawEmailHeaders.length > 200 ? '? ' + rawEmailHeaders.length + ' chars pasted' : '✓ Keep pasting · need the full source'}</Text>}
                     {verificationError ? <Text style={{ fontSize: 11, color: COLORS.red600, marginTop: 8 }}>{verificationError}</Text> : null}
                     {dkimSteps && dkimSteps.length > 0 && (
                       <View style={{ backgroundColor: '#f0f9ff', borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 1, borderColor: '#93c5fd' }}>
@@ -3211,25 +3211,25 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                         await SecureStore.setItemAsync('kv_researcher_domain', domain);
                         setRawEmailHeaders(''); setMagicLink(''); setEduEmail('');
                         setResearcherProfile({ researcher_id: researcherId, email_verified: true, institution_domain: domain, domain_hash: domainHash, xp: 0, abstract_count: 0, questions_answered: 0, question_price: 0 });
-                        Alert.alert('Verified! ??', 'DKIM cryptographically verified on-device!\n\nSchool: ' + domain + '\nID: ' + researcherId + '\n\nZero data left your phone.');
+                        Alert.alert('Verified! ✅', 'DKIM cryptographically verified on-device!\n\nSchool: ' + domain + '\nID: ' + researcherId + '\n\nZero data left your phone.');
                       } catch (e) { setVerificationError(String(e)); }
                       setIsLoading(false);
                     }} disabled={isLoading || rawEmailHeaders.length < 200}>
-                      {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>?? Verify DKIM Signature</Text>}
+                      {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>🔐 Verify DKIM Signature</Text>}
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setVerificationStep(0)} style={{ alignItems: 'center', paddingVertical: 8, marginTop: 4 }}><Text style={{ color: COLORS.stone400, fontSize: 12 }}>? Start over</Text></TouchableOpacity>
+                    <TouchableOpacity onPress={() => setVerificationStep(0)} style={{ alignItems: 'center', paddingVertical: 8, marginTop: 4 }}><Text style={{ color: COLORS.stone400, fontSize: 12 }}>✓ Start over</Text></TouchableOpacity>
                     <View style={{ backgroundColor: COLORS.green50, borderRadius: 10, padding: 12, marginTop: 12 }}>
-                      <Text style={{ fontSize: 10, color: COLORS.green700, textAlign: 'center', lineHeight: 15 }}>?? DNS lookup for school's public key ? RSA verify on YOUR phone ? only school name saved. Zero PII transmitted.</Text>
+                      <Text style={{ fontSize: 10, color: COLORS.green700, textAlign: 'center', lineHeight: 15 }}>🔐 DNS lookup for school's public key → RSA verify on YOUR phone → only school name saved. Zero PII transmitted.</Text>
                     </View>
                   </View>
                 )}
 
-                {/* Verified � Abstract Submission Form */}
+                {/* Verified · Abstract Submission Form */}
                 {researcherProfile && (
                   <View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.green100, borderRadius: 12, padding: 12, marginBottom: 16 }}>
                       <ShieldCheck size={20} color={COLORS.green700} />
-                      <View><Text style={{ fontSize: 14, fontWeight: 'bold', color: COLORS.green800 }}>Verified Researcher ??</Text><Text style={{ fontSize: 10, color: COLORS.green600 }}>{researcherProfile.institution_domain} � {researcherProfile.researcher_id}</Text></View>
+                      <View><Text style={{ fontSize: 14, fontWeight: 'bold', color: COLORS.green800 }}>Verified Researcher ✅</Text><Text style={{ fontSize: 10, color: COLORS.green600 }}>{researcherProfile.institution_domain} · {researcherProfile.researcher_id}</Text></View>
                     </View>
                     <InputField label="Abstract Title" value={abstractTitle} onChangeText={setAbstractTitle} placeholder="Your research title..." />
                     <InputField label="Abstract Text" value={abstractText} onChangeText={setAbstractText} placeholder="Full abstract (500 words max)..." multiline />
@@ -3244,12 +3244,12 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       ))}
                     </View>
                     <View style={{ backgroundColor: COLORS.blue50, borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: COLORS.blue200 }}>
-                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.blue800, marginBottom: 4 }}>?? Video Explainer (optional)</Text>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.blue800, marginBottom: 4 }}>🎬 Video Explainer (optional)</Text>
                       <Text style={{ fontSize: 10, color: COLORS.blue600, marginBottom: 8 }}>Short video on Instagram/TikTok explaining your research</Text>
                       <TextInput style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.blue300, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: COLORS.stone800 }} value={abstractVideoUrl} onChangeText={setAbstractVideoUrl} placeholder="https://instagram.com/reel/..." placeholderTextColor={COLORS.stone400} keyboardType="url" autoCapitalize="none" />
                     </View>
                     <View style={{ backgroundColor: '#fef3c7', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#f59e0b' }}>
-                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#92400e', marginBottom: 4 }}>?? How should people reach you?</Text>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#92400e', marginBottom: 4 }}>💬 How should people reach you?</Text>
                       <Text style={{ fontSize: 10, color: '#b45309', marginBottom: 8 }}>Questions get routed to your chosen channel</Text>
                       <View style={{ gap: 6 }}>
                         {QA_CHANNELS.map(ch => (
@@ -3294,7 +3294,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
             {activeTab === 'services' && (
               <View style={acStyles.tabContent}>
                 <View style={acStyles.serviceBox}>
-                  <Text style={acStyles.serviceTitle}>?? KASPA Rate Per Question</Text>
+                  <Text style={acStyles.serviceTitle}>💰 KASPA Rate Per Question</Text>
                   <Text style={acStyles.serviceSubtitle}>
                     Set your price for follow-up questions. First question is FREE.
                   </Text>
@@ -3319,7 +3319,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                 </View>
                 
                 <View style={acStyles.serviceBox}>
-                  <Text style={acStyles.serviceTitle}>?? Tutoring & Consulting</Text>
+                  <Text style={acStyles.serviceTitle}>🧑‍🏫 Tutoring & Consulting</Text>
                   <Text style={acStyles.serviceSubtitle}>
                     Offer code auditing, tutoring, analytics, consulting services. Contact via your chosen QA channel.
                   </Text>
@@ -3383,7 +3383,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     
                     {/* Question Pricing */}
                     <View style={{ backgroundColor: COLORS.amber50, borderRadius: 12, padding: 14, marginTop: 12, borderWidth: 1, borderColor: COLORS.amber200 }}>
-                      <Text style={{ color: COLORS.amber800, fontSize: 14, fontWeight: 'bold', marginBottom: 6 }}>?? Question Pricing</Text>
+                      <Text style={{ color: COLORS.amber800, fontSize: 14, fontWeight: 'bold', marginBottom: 6 }}>💰 Question Pricing</Text>
                       <Text style={{ color: COLORS.stone600, fontSize: 12, marginBottom: 8 }}>
                         First question from any user is always FREE.{'\n'}Set a price for follow-up questions:
                       </Text>
@@ -3418,10 +3418,10 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     </View>
                     
                     <View style={acStyles.privacyGuarantee}>
-                      <Text style={acStyles.privacyGuaranteeTitle}>?? Privacy Guarantee</Text>
-                      <Text style={acStyles.privacyGuaranteeItem}>? Your email was NOT stored � only a hash</Text>
-                      <Text style={acStyles.privacyGuaranteeItem}>? Pseudonymous researcher ID</Text>
-                      <Text style={acStyles.privacyGuaranteeItem}>? No tracking, no ads, no data selling</Text>
+                      <Text style={acStyles.privacyGuaranteeTitle}>🔒 Privacy Guarantee</Text>
+                      <Text style={acStyles.privacyGuaranteeItem}>✓ Your email was NOT stored · only a hash</Text>
+                      <Text style={acStyles.privacyGuaranteeItem}>✓ Pseudonymous researcher ID</Text>
+                      <Text style={acStyles.privacyGuaranteeItem}>✓ No tracking, no ads, no data selling</Text>
                     </View>
                   </View>
                 )}
@@ -4020,7 +4020,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   // Item CRUD
   const handleSaveItem = () => {
     if (!itemForm.name.trim()) { Alert.alert('Required', 'Item name is required'); return; }
-    if (!itemForm.socialUrl.trim()) { Alert.alert('Required', 'Social post URL is required � link to your Instagram/Pinterest/Etsy listing'); return; }
+    if (!itemForm.socialUrl.trim()) { Alert.alert('Required', 'Social post URL is required · link to your Instagram/Pinterest/Etsy listing'); return; }
     const url = itemForm.socialUrl.trim();
     const allowed = ['instagram.com', 'pinterest.com', 'etsy.com', 'tiktok.com', 'facebook.com', 'youtube.com', 'ebay.com'];
     const isAllowed = allowed.some(d => url.includes(d));
@@ -4077,13 +4077,13 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   };
   
   const getPlatformIcon = (url: string) => {
-    if (url?.includes('instagram')) return '??';
-    if (url?.includes('pinterest')) return '??';
-    if (url?.includes('etsy')) return '???';
-    if (url?.includes('tiktok')) return '??';
-    if (url?.includes('ebay')) return '???';
-    if (url?.includes('facebook')) return '??';
-    return '??';
+    if (url?.includes('instagram')) return '📸';
+    if (url?.includes('pinterest')) return '📌';
+    if (url?.includes('etsy')) return '🛍️';
+    if (url?.includes('tiktok')) return '🎵';
+    if (url?.includes('ebay')) return '🏷️';
+    if (url?.includes('facebook')) return '📘';
+    return '🔗';
   };
 
   // Coupon CRUD
@@ -4120,9 +4120,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     const runwayScore = Math.min(runwayPct / 100, 1.0);
     
     // Price score: two components
-    // 1) Low USD base (50%) � $0=perfect, $500+=0
+    // 1) Low USD base (50%) · $0=perfect, $500+=0
     const usdFactor = avgUsdPrice <= 0 ? 1.0 : Math.max(0, 1.0 - avgUsdPrice / 500);
-    // 2) KAS discount from USD (50%) � if KAS price * rate < USD price, that's a discount
+    // 2) KAS discount from USD (50%) · if KAS price * rate < USD price, that's a discount
     let kasDiscountPct = 0;
     if (avgUsdPrice > 0 && avgKasPrice > 0 && kasRateUsd > 0) {
       const kasValueUsd = avgKasPrice * kasRateUsd;
@@ -4515,17 +4515,17 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     style={{ alignItems: 'center', opacity: logoShape === shape.id ? 1 : 0.4 }}
                   >
                     <View style={{ width: rs.s(64), height: rs.s(64), borderRadius: shape.radius, backgroundColor: logoShape === shape.id ? COLORS.amber200 : COLORS.stone200, borderWidth: logoShape === shape.id ? 3 : 1, borderColor: logoShape === shape.id ? COLORS.amber600 : COLORS.stone300, justifyContent: 'center', alignItems: 'center', marginBottom: rs.s(4) }}>
-                      <Text style={{ fontSize: rs.font(24) }}>{logoUrl ? '??' : '??'}</Text>
+                      <Text style={{ fontSize: rs.font(24) }}>{logoUrl ? '•' : '•'}</Text>
                     </View>
                     <Text style={{ fontSize: rs.font(11), fontWeight: logoShape === shape.id ? 'bold' : 'normal', color: logoShape === shape.id ? COLORS.amber900 : COLORS.stone500 }}>{shape.label}</Text>
-                    {logoShape === shape.id && <Text style={{ fontSize: rs.font(9), color: COLORS.amber600 }}>? Selected</Text>}
+                    {logoShape === shape.id && <Text style={{ fontSize: rs.font(9), color: COLORS.amber600 }}>✓ Selected</Text>}
                   </TouchableOpacity>
                 ))}
               </View>
             </SectionCard>
             
 
-            <SectionCard title="?? Banner Style">
+            <SectionCard title="🎨 Banner Style">
               <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(10) }}>Choose how your store banner looks</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(8) }}>
                 {BANNER_STYLES.map(bs => (
@@ -4553,7 +4553,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               ))}
             </SectionCard>
             
-            <SectionCard title="?? Communication Channels">
+            <SectionCard title="💬 Communication Channels">
               <Text style={wsStyles.commNote}>
                 How buyers can contact you to discuss purchases
               </Text>
@@ -4574,7 +4574,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 </View>
               ))}
               <Text style={wsStyles.commTip}>
-                ?? At least one contact method required for buyers to reach you
+                ⚠️ At least one contact method required for buyers to reach you
               </Text>
             </SectionCard>
           </View>
@@ -4668,11 +4668,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           </SectionCard>
         )}
         
-        {/* Fonts Tab � Banner Styles + Graffiti Builder */}
+        {/* Fonts Tab · Banner Styles + Graffiti Builder */}
         {activeView === 'fonts' && (
           <View>
             {/* Font Style Selector */}
-            <SectionCard title="?? Banner Text Style">
+            <SectionCard title="🔤 Banner Text Style">
               <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(12) }}>Choose how your store name renders on the banner</Text>
               <View style={{ gap: rs.s(8), marginBottom: rs.s(8) }}>
                 {[
@@ -4680,7 +4680,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                   { id: 'bold', label: 'Bold Impact', weight: '900', spacing: 2, transform: 'uppercase', preview: (brandName || 'MY STORE').toUpperCase() },
                   { id: 'elegant', label: 'Elegant Serif', weight: '300', spacing: 4, transform: 'capitalize', preview: brandName || 'My Store' },
                   { id: 'retro', label: 'Retro Block', weight: '800', spacing: 6, transform: 'uppercase', preview: (brandName || 'MY STORE').toUpperCase() },
-                  { id: 'graffiti', label: '?? Graffiti (advanced)', weight: '900', spacing: 0, transform: 'uppercase', preview: bannerRecipe.text || 'HOOD' },
+                  { id: 'graffiti', label: '🎨 Graffiti (advanced)', weight: '900', spacing: 0, transform: 'uppercase', preview: bannerRecipe.text || 'HOOD' },
                 ].map(font => (
                   <TouchableOpacity key={font.id} onPress={() => setSelectedFont({ id: font.id, name: font.label, fontFamily: 'System' })}
                     style={{ backgroundColor: selectedFont.id === font.id ? COLORS.amber50 : '#fff', borderWidth: 2, borderColor: selectedFont.id === font.id ? COLORS.amber500 : COLORS.stone200, borderRadius: rs.s(12), padding: rs.s(14), overflow: 'hidden' }}>
@@ -4694,17 +4694,17 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                         <Text style={{ fontSize: rs.font(20), fontWeight: font.weight as any, color: bannerStyle.text || '#fff', letterSpacing: font.spacing, textTransform: font.transform as any }}>{font.preview}</Text>
                       </View>
                     )}
-                    {selectedFont.id === font.id && <Text style={{ fontSize: rs.font(9), color: COLORS.amber600, marginTop: rs.s(4) }}>? Active</Text>}
+                    {selectedFont.id === font.id && <Text style={{ fontSize: rs.font(9), color: COLORS.amber600, marginTop: rs.s(4) }}>✓ Active</Text>}
                   </TouchableOpacity>
                 ))}
               </View>
             </SectionCard>
 
-            {/* Graffiti Builder � only visible when graffiti font selected */}
+            {/* Graffiti Builder · only visible when graffiti font selected */}
             {selectedFont.id === 'graffiti' && (
-            <SectionCard title="?? Graffiti Banner Builder">
+            <SectionCard title="🎨 Graffiti Banner Builder">
               <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(12) }}>
-                Create your store banner. Recipe saved to Arweave � renders on any device.
+                Create your store banner. Recipe saved to Arweave · renders on any device.
               </Text>
 
               {/* LIVE SVG PREVIEW */}
@@ -4758,7 +4758,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     );
                   })}
                 </Svg>
-                <Text style={{ textAlign: 'center', fontSize: rs.font(9), color: COLORS.stone400, marginTop: rs.s(4) }}>Live Preview � {bannerRecipe.text.length} chars</Text>
+                <Text style={{ textAlign: 'center', fontSize: rs.font(9), color: COLORS.stone400, marginTop: rs.s(4) }}>Live Preview · {bannerRecipe.text.length} chars</Text>
               </View>
 
               {/* Banner Text */}
@@ -4779,9 +4779,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               <Text style={inputStyles.label}>Graffiti Style</Text>
               <View style={{ flexDirection: 'row', gap: rs.s(8), marginBottom: rs.s(12) }}>
                 {([
-                  { id: 'block', label: '? Block', desc: 'Sharp angles' },
-                  { id: 'bubble', label: '? Bubble', desc: 'Rounded soft' },
-                  { id: 'wild', label: '? Wild', desc: 'Wavy chaos' },
+                  { id: 'block', label: 'Block', desc: 'Sharp angles' },
+                  { id: 'bubble', label: 'Bubble', desc: 'Rounded soft' },
+                  { id: 'wild', label: 'Wild', desc: 'Wavy chaos' },
                 ] as const).map(st => (
                   <TouchableOpacity key={st.id} onPress={() => setBannerRecipe(prev => ({ ...prev, style: st.id }))}
                     style={{ flex: 1, backgroundColor: bannerRecipe.style === st.id ? COLORS.amber100 : COLORS.stone50, borderWidth: 2, borderColor: bannerRecipe.style === st.id ? COLORS.amber500 : COLORS.stone200, borderRadius: rs.s(10), padding: rs.s(10), alignItems: 'center' }}>
@@ -4814,9 +4814,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               <Text style={inputStyles.label}>Decorations</Text>
               <View style={{ flexDirection: 'row', gap: rs.s(8), marginBottom: rs.s(16) }}>
                 {([
-                  { id: 'stars', label: '? Stars' },
-                  { id: 'arrows', label: '? Arrows' },
-                  { id: 'plain', label: '? Plain' },
+                  { id: 'stars', label: 'Stars' },
+                  { id: 'arrows', label: 'Arrows' },
+                  { id: 'plain', label: 'Plain' },
                 ] as const).map(d => (
                   <TouchableOpacity key={d.id} onPress={() => setBannerRecipe(prev => ({ ...prev, decoStyle: d.id }))}
                     style={{ flex: 1, backgroundColor: bannerRecipe.decoStyle === d.id ? COLORS.amber100 : COLORS.stone50, borderWidth: 2, borderColor: bannerRecipe.decoStyle === d.id ? COLORS.amber500 : COLORS.stone200, borderRadius: rs.s(8), padding: rs.s(8), alignItems: 'center' }}>
@@ -4838,7 +4838,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(14) }}>Save Banner Recipe</Text>
               </TouchableOpacity>
               <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, textAlign: 'center', marginTop: rs.s(6) }}>
-                Recipe is ~200 bytes on Arweave � renders SVG on any device from the recipe
+                Recipe is ~200 bytes on Arweave · renders SVG on any device from the recipe
               </Text>
             </SectionCard>
             )}
@@ -4889,7 +4889,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: rs.s(20) }}>
                 <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(20), maxHeight: '85%' }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs.s(16) }}>
-                    <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.amber900 }}>{editingItem ? '?? Edit Item' : '? New Item'}</Text>
+                    <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.amber900 }}>{editingItem ? '✏️ Edit Item' : '🆕 New Item'}</Text>
                     <TouchableOpacity onPress={() => { setShowItemForm(false); setEditingItem(null); }}>
                       <X size={rs.s(20)} color={COLORS.stone500} />
                     </TouchableOpacity>
@@ -4906,8 +4906,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                       </View>
                     </View>
                     <View style={{ backgroundColor: COLORS.blue50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(12), borderWidth: 1, borderColor: COLORS.blue200 }}>
-                      <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.blue800, marginBottom: rs.s(4) }}>?? Direct Post Link</Text>
-                      <Text style={{ fontSize: rs.font(10), color: COLORS.blue600, marginBottom: rs.s(8) }}>Link to this item on Instagram, Pinterest, Etsy, TikTok, eBay, or Facebook. Buyers tap ? opens your post.</Text>
+                      <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.blue800, marginBottom: rs.s(4) }}>🔗 Direct Post Link</Text>
+                      <Text style={{ fontSize: rs.font(10), color: COLORS.blue600, marginBottom: rs.s(8) }}>Link to this item on Instagram, Pinterest, Etsy, TikTok, eBay, or Facebook. Buyers tap → opens your post.</Text>
                       <TextInput
                         style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.blue300, borderRadius: rs.s(10), paddingHorizontal: rs.s(12), paddingVertical: rs.s(10), fontSize: rs.font(12), color: COLORS.stone800, fontFamily: 'monospace' }}
                         value={itemForm.socialUrl}
@@ -4919,7 +4919,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                         autoCorrect={false}
                       />
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(6), marginTop: rs.s(8) }}>
-                        {['?? Instagram', '?? Pinterest', '??? Etsy', '?? TikTok', '??? eBay', '?? Facebook'].map(p => (
+                        {['📸 Instagram', '📌 Pinterest', '🛍️ Etsy', '🎵 TikTok', '🏷️ eBay', '📘 Facebook'].map(p => (
                           <View key={p} style={{ backgroundColor: COLORS.stone100, paddingHorizontal: rs.s(8), paddingVertical: rs.s(3), borderRadius: rs.s(6) }}>
                             <Text style={{ fontSize: rs.font(9), color: COLORS.stone500 }}>{p}</Text>
                           </View>
@@ -4940,12 +4940,12 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         {/* Coupons Tab */}
         {activeView === 'coupons' && (
           <View>
-            <SectionCard title="??? Coupon Management">
+            <SectionCard title="🎟️ Coupon Management">
               <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(12) }}>
                 Create discount codes. Linked to agreements at checkout.
               </Text>
 
-              {/* Bar Chart � coupon usage */}
+              {/* Bar Chart · coupon usage */}
               {coupons.length > 0 && (
                 <View style={{ backgroundColor: COLORS.stone50, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(16) }}>
                   <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: COLORS.stone600, marginBottom: rs.s(8) }}>Usage Overview</Text>
@@ -4999,10 +4999,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                         </View>
                         <Text style={{ fontSize: rs.font(11), color: COLORS.stone600, marginTop: 2 }}>
                           {cpn.discountPercent > 0 ? cpn.discountPercent + '% off' : cpn.discountKas + ' KAS off'}
-                          {cpn.description ? ' � ' + cpn.description : ''}
+                          {cpn.description ? ' · ' + cpn.description : ''}
                         </Text>
                         <Text style={{ fontSize: rs.font(10), color: COLORS.stone400, marginTop: 2 }}>
-                          Used {cpn.usedCount}/{cpn.maxUses} � {daysLeft > 0 ? daysLeft + ' days left' : 'Expired'}
+                          Used {cpn.usedCount}/{cpn.maxUses} · {daysLeft > 0 ? daysLeft + ' days left' : 'Expired'}
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', gap: rs.s(10) }}>
@@ -5032,7 +5032,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             </SectionCard>
 
             {/* Visibility Score */}
-            <SectionCard title="?? Mailbox Visibility Score">
+            <SectionCard title="📬 Mailbox Visibility Score">
               <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginBottom: rs.s(10) }}>
                 This score determines how high your store ranks in buyer mailboxes.
               </Text>
@@ -5074,7 +5074,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: rs.s(20) }}>
                 <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(20) }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: rs.s(16) }}>
-                    <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.amber900 }}>{editingCoupon ? '?? Edit Coupon' : '??? New Coupon'}</Text>
+                    <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.amber900 }}>{editingCoupon ? '✏️ Edit Coupon' : '➕ New Coupon'}</Text>
                     <TouchableOpacity onPress={() => { setShowCouponForm(false); setEditingCoupon(null); }}>
                       <X size={rs.s(20)} color={COLORS.stone500} />
                     </TouchableOpacity>
@@ -5085,7 +5085,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                       <InputField label="Discount %" value={couponForm.discountPercent} onChangeText={(t) => setCouponForm(p => ({ ...p, discountPercent: t, discountKas: '' }))} placeholder="10" keyboardType="numeric" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <InputField label="� OR � Fixed KAS" value={couponForm.discountKas} onChangeText={(t) => setCouponForm(p => ({ ...p, discountKas: t, discountPercent: '' }))} placeholder="5" keyboardType="numeric" />
+                      <InputField label="— OR — Fixed KAS" value={couponForm.discountKas} onChangeText={(t) => setCouponForm(p => ({ ...p, discountKas: t, discountPercent: '' }))} placeholder="5" keyboardType="numeric" />
                     </View>
                   </View>
                   <View style={{ flexDirection: 'row', gap: rs.s(10) }}>
@@ -5117,7 +5117,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             
             <View style={wsStyles.complianceNotice}>
               <Text style={wsStyles.complianceText}>
-                <Text style={{ fontWeight: 'bold' }}>?? Compliance:</Text> Prohibited content apps are restricted and auto-rejected by the SDK scanner. DApps are NOT visible in KasVillage unless they pass the SDK Compliance Gate. Post a video demo on Instagram/TikTok as your listing.
+                <Text style={{ fontWeight: 'bold' }}>⚖️ Compliance:</Text> Prohibited content apps are restricted and auto-rejected by the SDK scanner. DApps are NOT visible in KasVillage unless they pass the SDK Compliance Gate. Post a video demo on Instagram/TikTok as your listing.
               </Text>
             </View>
             
@@ -5240,22 +5240,22 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               {gameStage ? <Text style={{ fontSize: rs.font(10), color: COLORS.indigo700, textAlign: 'center', marginTop: rs.s(6) }}>{gameStage}</Text> : null}
             </View>
             
-            {/* Video Demo � the listing IS the marketing */}
+            {/* Video Demo · the listing IS the marketing */}
             <View style={{ backgroundColor: '#fef3c7', borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(12), borderWidth: 1, borderColor: '#f59e0b' }}>
-              <Text style={{ fontSize: rs.font(14), fontWeight: '900', color: '#92400e', marginBottom: rs.s(6) }}>?? Video Demo = Your Listing</Text>
+              <Text style={{ fontSize: rs.font(14), fontWeight: '900', color: '#92400e', marginBottom: rs.s(6) }}>🎬 Video Demo = Your Listing</Text>
               <Text style={{ fontSize: rs.font(11), color: '#b45309', lineHeight: rs.font(17), marginBottom: rs.s(10) }}>
-                Post a short video demo of your DApp, game, or website on Instagram or TikTok. That video IS your storefront listing � buyers see the demo, tap through, and the SDK compliance badge proves it's safe.
+                Post a short video demo of your DApp, game, or website on Instagram or TikTok. That video IS your storefront listing · buyers see the demo, tap through, and the SDK compliance badge proves it's safe.
               </Text>
               <View style={{ gap: rs.s(6) }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(8) }}>
-                  <Text style={{ fontSize: rs.font(18) }}>??</Text>
+                  <Text style={{ fontSize: rs.font(18) }}>📸</Text>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#92400e' }}>Instagram Reel (15-60s)</Text>
                     <Text style={{ fontSize: rs.font(9), color: '#b45309' }}>Show gameplay, UI walkthrough, or feature highlight</Text>
                   </View>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(8) }}>
-                  <Text style={{ fontSize: rs.font(18) }}>??</Text>
+                  <Text style={{ fontSize: rs.font(18) }}>🎵</Text>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: '#92400e' }}>TikTok (15-60s)</Text>
                     <Text style={{ fontSize: rs.font(9), color: '#b45309' }}>Quick demo with trending audio = organic reach</Text>
@@ -5276,24 +5276,24 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               style={wsStyles.bookShelfBtn}
               onPress={() => setShowAcademicPanel(true)}
             >
-              <Text style={wsStyles.bookShelfBtnText}>?? Book Shelf (Academic Research P2P)</Text>
+              <Text style={wsStyles.bookShelfBtnText}>📚 Book Shelf (Academic Research P2P)</Text>
             </TouchableOpacity>
             
             {/* Template */}
             <View style={{ backgroundColor: '#fef2f2', borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(12), borderWidth: 1, borderColor: '#fca5a5' }}>
-              <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: '#991b1b', marginBottom: rs.s(6) }}>?? Required SDK Modules</Text>
+              <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: '#991b1b', marginBottom: rs.s(6) }}>🧩 Required SDK Modules</Text>
               <Text style={{ fontSize: rs.font(10), color: '#b91c1c', marginBottom: rs.s(8) }}>Your DApp MUST import from at least one KasVillage SDK module. No SDK import = scan fails.</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(4) }}>
                 {(() => {
                 const sdkModules = [
-                  { cat: '?? Core Engine', mods: ['procedural_sdk', 'game_v1', 'game_loop', 'game_input'] },
-                  { cat: '?? Avatar & Identity', mods: ['avatar_engine', 'player_sprite', 'enemy_avatars'] },
-                  { cat: '?? Rendering', mods: ['canvas_renderer', 'ps1_engine', 'ps1_presets', 'board_renderer', 'camera_system'] },
-                  { cat: '?? Combat & Input', mods: ['touch_input', 'parry_system', 'enemy_combos', 'paint_v2'] },
-                  { cat: '?? World', mods: ['environments', 'particles', 'wave_spawner', 'difficulty', 'vagrant_preset'] },
-                  { cat: '?? Audio & Music', mods: ['audio_ui', 'spotify_auth', 'spotify_sync', 'juice'] },
-                  { cat: '?? Items & Economy', mods: ['item_library', 'wallet_bridge'] },
-                  { cat: '?? Multiplayer', mods: ['multiplayer', 'tuned_config'] },
+                  { cat: '⚙️ Core Engine', mods: ['procedural_sdk', 'game_v1', 'game_loop', 'game_input'] },
+                  { cat: '🧑 Avatar & Identity', mods: ['avatar_engine', 'player_sprite', 'enemy_avatars'] },
+                  { cat: '🖼️ Rendering', mods: ['canvas_renderer', 'ps1_engine', 'ps1_presets', 'board_renderer', 'camera_system'] },
+                  { cat: '🥊 Combat & Input', mods: ['touch_input', 'parry_system', 'enemy_combos', 'paint_v2'] },
+                  { cat: '🌍 World', mods: ['environments', 'particles', 'wave_spawner', 'difficulty', 'vagrant_preset'] },
+                  { cat: '🎵 Audio & Music', mods: ['audio_ui', 'spotify_auth', 'spotify_sync', 'juice'] },
+                  { cat: '💎 Items & Economy', mods: ['item_library', 'wallet_bridge'] },
+                  { cat: '👥 Multiplayer', mods: ['multiplayer', 'tuned_config'] },
                 ];
                 return sdkModules.map(group => (
                   <View key={group.cat} style={{ marginBottom: rs.s(8) }}>
@@ -5307,17 +5307,17 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                           Clipboard.setStringAsync('Fetch this file and use it to build: ' + rawUrl);
                           Alert.alert('Copied!', fileName + '.ts\nGitHub URL on clipboard.\nPaste into Claude Code.');
                         }} style={{ backgroundColor: '#fff', paddingHorizontal: rs.s(6), paddingVertical: rs.s(3), borderRadius: rs.s(5), borderWidth: 1, borderColor: '#fca5a5' }} activeOpacity={0.6}>
-                          <Text style={{ fontSize: rs.font(8), fontFamily: 'monospace', color: '#991b1b' }}>?? {m}</Text>
+                          <Text style={{ fontSize: rs.font(8), fontFamily: 'monospace', color: '#991b1b' }}>• {m}</Text>
                         </TouchableOpacity>
                       ))}
                     </View>
                   </View>
                 ));
               })()}
-              <Text style={{ fontSize: rs.font(8), color: '#b91c1c', marginTop: rs.s(4), fontStyle: 'italic' }}>Tap any module ? copies import + procedural_sdk to clipboard</Text>
+              <Text style={{ fontSize: rs.font(8), color: '#b91c1c', marginTop: rs.s(4), fontStyle: 'italic' }}>Tap any module → copies import + procedural_sdk to clipboard</Text>
               <Text style={{ fontSize: rs.font(7), color: '#78716c', marginTop: rs.s(2) }}>{(() => { let c = 0; [4,3,5,4,5,4,2,2].forEach(n => c += n); return c; })()} modules across 8 categories</Text>
               </View>
-              <Text style={{ fontSize: rs.font(9), color: '#b91c1c', marginTop: rs.s(6) }}>Use kvFetch() instead of raw fetch() � blocks image responses at runtime.</Text>
+              <Text style={{ fontSize: rs.font(9), color: '#b91c1c', marginTop: rs.s(6) }}>Use kvFetch() instead of raw fetch() · blocks image responses at runtime.</Text>
             </View>
             <View style={wsStyles.templateBox}>
               <Text style={wsStyles.templateTitle}>DApp Template</Text>
@@ -5332,7 +5332,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         
         {/* Academic Tab */}
         {activeView === 'academic' && (
-          <SectionCard title="?? Academic Research">
+          <SectionCard title="🎓 Academic Research">
             <Text style={wsStyles.sectionSubtitle}>
               Privacy-preserving academic exchange. Verify via .edu email, publish abstracts, offer consulting.
             </Text>
@@ -5346,10 +5346,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           </SectionCard>
         )}
         
-        {/* Preview Tab � What Buyers See */}
+        {/* Preview Tab · What Buyers See */}
         {activeView === 'preview' && (
           <View>
-            <SectionCard title="?? What Buyers See">
+            <SectionCard title="👀 What Buyers See">
               <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginBottom: rs.s(12) }}>This is how your store appears in the Mailbox feed</Text>
               
               {/* Storefront Card Preview */}
@@ -5365,7 +5365,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                   <View style={{ flexDirection: 'row', justifyContent: 'center', gap: rs.s(16), paddingVertical: rs.s(8), backgroundColor: COLORS.stone50 }}>
                     {Object.entries(socialLinks).filter(([, v]) => v).map(([k]) => (
                       <Text key={k} style={{ fontSize: rs.font(20) }}>
-                        {k === 'instagram' ? '??' : k === 'tiktok' ? '??' : k === 'etsy' ? '???' : k === 'pinterest' ? '??' : k === 'youtube' ? '??' : k === 'facebook' ? '??' : '??'}
+                        {k === 'instagram' ? '📸' : k === 'tiktok' ? '🎵' : k === 'etsy' ? '🛍️' : k === 'pinterest' ? '📌' : k === 'youtube' ? '▶️' : k === 'facebook' ? '📘' : '📘'}
                       </Text>
                     ))}
                   </View>
@@ -5384,13 +5384,13 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                       </Text>
                     </View>
                   )) : (
-                    <Text style={{ fontSize: rs.font(11), color: COLORS.stone400, textAlign: 'center', paddingVertical: rs.s(12) }}>No items yet � add items in the Items tab</Text>
+                    <Text style={{ fontSize: rs.font(11), color: COLORS.stone400, textAlign: 'center', paddingVertical: rs.s(12) }}>No items yet · add items in the Items tab</Text>
                   )}
                   {stash.length > 3 && <Text style={{ fontSize: rs.font(10), color: COLORS.amber600, textAlign: 'center', marginTop: rs.s(4) }}>+{stash.length - 3} more items</Text>}
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: rs.s(12), paddingVertical: rs.s(8), backgroundColor: COLORS.stone50 }}>
-                  <Text style={{ fontSize: rs.font(9), color: COLORS.stone400 }}>{stash.length} items � {coupons.length} coupons</Text>
-                  <Text style={{ fontSize: rs.font(9), color: COLORS.green600, fontWeight: 'bold' }}>? SDK Compliant</Text>
+                  <Text style={{ fontSize: rs.font(9), color: COLORS.stone400 }}>{stash.length} items · {coupons.length} coupons</Text>
+                  <Text style={{ fontSize: rs.font(9), color: COLORS.green600, fontWeight: 'bold' }}>✓ SDK Compliant</Text>
                 </View>
               </View>
               <View style={{ backgroundColor: COLORS.amber50, borderRadius: rs.s(8), padding: rs.s(10) }}>

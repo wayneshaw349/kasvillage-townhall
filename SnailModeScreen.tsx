@@ -127,10 +127,10 @@ export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({
         <View style={{ flex: 1 }}>
           <Text style={styles.actionTitle}>How to rebuild trust</Text>
           <Text style={styles.actionText}>
-            â€¢ Complete agreements within posted timeframes{'\n'}
-            â€¢ Communicate clearly if delays occur{'\n'}
-            â€¢ Accept agreements with balanced pricing{'\n'}
-            â€¢ Follow through on your commitments
+            • Complete agreements within posted timeframes{'\n'}
+            • Communicate clearly if delays occur{'\n'}
+            • Accept agreements with balanced pricing{'\n'}
+            • Follow through on your commitments
           </Text>
         </View>
       </View>
@@ -138,7 +138,7 @@ export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({
       {/* Waiting indicator */}
       <View style={styles.waitingBox}>
         <ActivityIndicator size="large" color={COLORS.stone500} />
-        <Text style={styles.waitingText}>Waiting for cooldownâ€¦</Text>
+        <Text style={styles.waitingText}>Waiting for cooldown…</Text>
         <Text style={styles.waitingSubtext}>
           This helps us maintain a healthy marketplace where neighbors trust each other.
         </Text>

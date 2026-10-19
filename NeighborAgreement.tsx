@@ -1548,7 +1548,7 @@ function parseClipboard(raw: string): {
                 console.log('[Kill-Gate] Crash-recovery: kill broadcast — will fund next cycle');
                 continue;
               }
-            } catch (e) { console.warn('[Kill-Gate] Crash-recovery check failed — NOT funding:', e); continue; } // seller's amount �5%
+            } catch (e) { console.warn('[Kill-Gate] Crash-recovery check failed — NOT funding:', e); continue; } // seller's amount ·5%
             // Check we haven't already sent (idempotent guard)
             const sentKey = 'kv_frost_poll_sent_' + entry.agrId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
@@ -1746,7 +1746,7 @@ function parseClipboard(raw: string): {
     return () => { cancelled = true; clearInterval(interval); };
   }, [step, contract.agreementId, contract.multisigAddress, role, contract.buyerPubkey, contract.sellerPubkey, contract.itemPriceKas, contract.sellerCommitmentKas])
 
-  // Poll FROST address balance � auto-advance to step 4 when both confirmed
+  // Poll FROST address balance · auto-advance to step 4 when both confirmed
   useEffect(() => {
     // DISABLED: PartialSig-Poll — old auto-cosign path
     // Seller now signs via canonical sellerSignTemplate at step 5 (clipboard)
@@ -2105,7 +2105,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
               }
             }
           } catch (e) { console.warn('[Neighbor] TownHall propose failed:', e); }
-          // L1 inscription disabled � Arweave inscription is the permanent record
+          // L1 inscription disabled · Arweave inscription is the permanent record
           // wRPC sendWithInscription not available from React Native/Hermes
           console.log('[Neighbor] Skipping wRPC inscription (Arweave is source of truth)');
         } catch (e) {
@@ -2234,7 +2234,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
       const allProposed = await listProposedAgreements();
       // Arweave fallback — query permanent storage if TownHall cache is empty
       let arweaveProposals: any[] = [];
-      // Always query Arweave � TownHall is stateless and may have stale data
+      // Always query Arweave · TownHall is stateless and may have stale data
       try {
         arweaveProposals = await queryAgreementsFromArweave({ status: 'Proposed', network: 'testnet-10' });
         console.log('[Neighbor] Arweave found', arweaveProposals.length, 'proposals');
@@ -2920,7 +2920,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
       console.log('[Neighbor] Buyer accepted — deriving FROST, auto-send via poll');
       setInboxAgreements(prev => prev.filter(a => (a.agreementId || a.agreement_id) !== agrId));
 
-      // Proceed to FROST derivation � derive FROST + auto-send
+      // Proceed to FROST derivation · derive FROST + auto-send
       // Run canonical verification
       // Normalize raw agreement data
       const normalized = normalizeAgreement(agreement);
@@ -2979,7 +2979,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
         setIsLoading(false);
         return;
       }
-      console.log('[Neighbor] BOTH AGREED � deriving FROST and auto-sending collateral');
+      console.log('[Neighbor] BOTH AGREED · deriving FROST and auto-sending collateral');
       if (true) {
         // Party A = seller (proposer), Party B = buyer (acceptor)
         const rawAmount = (typeof agrAmount === 'number' ? agrAmount : Number(agrAmount)) / 1e8;
@@ -3442,7 +3442,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
       }
 
       Alert.alert('Collateral Sent', 'TX: ' + (result.txId || '').slice(0, 16) + '...\nWaiting for counterparty to lock...');
-      // Stay on step 3 � don't advance until both confirmed via L1 poll
+      // Stay on step 3 · don't advance until both confirmed via L1 poll
     } catch (e) {
       console.error('[Neighbor] Lock error:', e);
       Alert.alert('Error', e instanceof Error ? e.message : 'Lock failed');
@@ -5060,7 +5060,7 @@ nonces: _killNonces,
             )}
             
             {/* Seller Release Bar */}
-            { /* Old R input bars removed � canonical template flow handles R internally */ }
+            { /* Old R input bars removed · canonical template flow handles R internally */ }
 
             {/* Step 5: Complete */}
             
@@ -5089,7 +5089,7 @@ nonces: _killNonces,
                       </View>
                       <View style={{ marginBottom: 10 }}>
                         <Text style={{ fontSize: 12, fontWeight: '600', color: '#1e40af', marginBottom: 2 }}>Confirmation / Receipt # (optional)</Text>
-                        <Text style={{ fontSize: 10, color: '#4338ca', marginBottom: 4 }}>{"Saved to Arweave as proof you received the item.\nShare separately in DM � do NOT mix with signed response."}</Text>
+                        <Text style={{ fontSize: 10, color: '#4338ca', marginBottom: 4 }}>{"Saved to Arweave as proof you received the item.\nShare separately in DM · do NOT mix with signed response."}</Text>
                         <TextInput
                           style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#93c5fd', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, color: '#1c1917' }}
                           placeholder="e.g. delivery confirmed, receipt #, etc."
@@ -5252,7 +5252,7 @@ nonces: _killNonces,
                         </TouchableOpacity>
                       ) : null}
             <View style={{ backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#86efac' }}>
-              <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>? Delivery Confirmed ? Send to Seller</Text>
+              <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>✓ Delivery Confirmed → Send to Seller</Text>
               <Text style={{ fontSize: 11, color: '#15803d' }}>AGR ID: {contract.agreementId}</Text>
               <Text style={{ fontSize: 11, color: '#15803d', marginTop: 2 }}>Arweave TX: {contract.partialReleaseTx || contract.arweaveTxId || 'pending...'}</Text>
               <TouchableOpacity 
@@ -5264,7 +5264,7 @@ nonces: _killNonces,
                     Alert.alert('Copied', 'Send this to the seller so they can release funds');
                   } catch {}
                 }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>?? Copy Delivery Confirmation</Text>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>📋 Copy Delivery Confirmation</Text>
               </TouchableOpacity>
             </View>
               <View style={styles.completeContainer}>

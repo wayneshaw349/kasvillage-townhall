@@ -17,7 +17,7 @@ import { blake2b } from '@noble/hashes/blake2b';
 const N_ORDER = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
 
 // ============================================================================
-// KASPA SIGHASH � Blake2b-256 with TransactionSigningHash domain key
+// KASPA SIGHASH · Blake2b-256 with TransactionSigningHash domain key
 // Must match kaspa_rest_tx.ts computeSighash exactly
 // ============================================================================
 const KASPA_HASH_KEY = new TextEncoder().encode('TransactionSigningHash');
@@ -154,7 +154,7 @@ export function deriveAggregatePubkey(pubkeyA: string, pubkeyB: string, agreemen
 export function aggregateToAddress(aggregatePubkey: string, network: KaspaNetwork): string {
   const prefix = network === 'mainnet' ? 'kaspa' : 'kaspatest';
   // aggregatePubkey is a real 33-byte compressed EC point
-  // Use x-only (32 bytes) for P2PK address � looks like a normal Kaspa address
+  // Use x-only (32 bytes) for P2PK address · looks like a normal Kaspa address
   const aggBytes = hexToBytes(aggregatePubkey);
   const xOnlyBytes = aggBytes.length === 33 ? aggBytes.slice(1) : aggBytes;
 
@@ -260,7 +260,7 @@ export function aggregatePartialSigs(sigA: string, sigB: string): string {
   }
 
   // R_agg = R_A + R_B (EC point addition on secp256k1)
-  // R is x-only (32 bytes) � lift to full point, add, compress back to x-only
+  // R is x-only (32 bytes) · lift to full point, add, compress back to x-only
   let R_A; try { R_A = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x02, ...sigABytes.slice(0, 32)])); } catch { R_A = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x03, ...sigABytes.slice(0, 32)])); }
   let R_B; try { R_B = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x02, ...sigBBytes.slice(0, 32)])); } catch { R_B = (secp as any).ProjectivePoint.fromHex(new Uint8Array([0x03, ...sigBBytes.slice(0, 32)])); }
   const R_agg = R_A.add(R_B);

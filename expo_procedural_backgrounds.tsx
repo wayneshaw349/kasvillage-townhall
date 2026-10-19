@@ -223,7 +223,7 @@ function generateWorkspaceObjects(type: string, palette: any, rand: () => number
   elements.push(<Rect key="leg-l" x={w * 0.2} y={wallY} width={w * 0.03} height={h * 0.08} fill={palette.dark} />);
   elements.push(<Rect key="leg-r" x={w * 0.77} y={wallY} width={w * 0.03} height={h * 0.08} fill={palette.dark} />);
   
-  // PROCEDURAL: Small props on shelves � different per class
+  // PROCEDURAL: Small props on shelves · different per class
   const propColors = [palette.accent, "#C0392B", "#2980B9", "#27AE60", "#8E44AD", "#F39C12"];
   
   switch (type) {

@@ -388,7 +388,7 @@ function addressToScript(address: string): Uint8Array {
 // SPENT-TRACK: outpoints consumed by txs this session (REST index lags ~1-2s,
 // so back-to-back sends rebuild on already-spent UTXOs -> orphan rejection).
 const _spentOutpoints = new Set<string>();
-// Change outputs from our own accepted txs � chainable before REST sees them.
+// Change outputs from our own accepted txs · chainable before REST sees them.
 const _pendingChange = new Map<string, { txId: string; index: number; amount: string; script: string; address: string; at?: number }>(); // KV_PHANTOM_CHANGE
 
 export async function sendKaspaViaRest(params: {
