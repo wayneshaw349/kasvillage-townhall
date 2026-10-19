@@ -2,7 +2,7 @@
 //   node wire_wallet_hardening.cjs     (project folder; safe to run twice)
 // 1 game pay sheet asks Face ID / passcode     2 app lock fails closed + passcode-only phones locked
 // 3 vault send always asks fresh               4 new vault offers Go Cold after cards are saved
-// 5 pay cap 100 KAS games / 1000 pages          6 games can't put a Kaspa address on your clipboard
+// 5 no pay cap (Face ID confirms every amount) 6 games can't put a Kaspa address on your clipboard
 // 7 seed phrase clipboard clears after 60 s     8 crypto randomness for the typing-check salt
 const fs = require('fs');
 let ok = 0, skip = 0, bad = 0;
@@ -29,9 +29,9 @@ patch('OnChainPageView.tsx', [
     "        try { _a = await LA.authenticateAsync({ promptMessage: 'Pay ' + paySheet.kas + ' KAS', cancelLabel: 'Cancel', disableDeviceFallback: false }); } catch { _a = null; }\n" +
     "        if (!_a || !_a.success) { setPayBusy(false); if (_a && _a.error && !/cancel/i.test(String(_a.error))) setNotice('Payment needs Face ID or your phone passcode.'); return; }\n" +
     "      }\n      const ps = require('./proposal_share');")],
-  ['pay cap 100 KAS games / 1000 pages', 'KV_PAY_CAP', rep(
-    "if (!okAddr || !(kas > 0) || kas > 5000) {",
-    "if (!okAddr || !(kas > 0) || kas > (props.game ? 100 : 1000) /* KV_PAY_CAP */) {")],
+  ['no pay cap (Face ID confirms every amount)', 'KV_PAY_NOCAP', (x) => x
+    .replace("if (!okAddr || !(kas > 0) || kas > 5000) {", "if (!okAddr || !(kas > 0) || !isFinite(kas) /* KV_PAY_NOCAP */) {")
+    .replace("if (!okAddr || !(kas > 0) || kas > (props.game ? 100 : 1000) /* KV_PAY_CAP */) {", "if (!okAddr || !(kas > 0) || !isFinite(kas) /* KV_PAY_NOCAP */) {")],
 ]);
 
 console.log('AppNaviagator.tsx');

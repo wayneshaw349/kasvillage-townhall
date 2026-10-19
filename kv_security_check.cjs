@@ -55,7 +55,7 @@ const pay = fnBody(view, 'const confirmPay');
 /authenticateAsync|biometric/i.test(pay) ? out('PASS', 'game payment sheet asks Face ID before sending')
   : out('FAIL', 'game payment sheet sends with ONE tap - no Face ID / passcode (someone holding the unlocked phone, or a misleading game, can pay)', 'OnChainPageView.tsx confirmPay');
 const capM = view.match(/kas > \(props\.game \? (\d+) : (\d+)\)/) || view.match(/kas > (\d{2,})\)/) || []; const cap = capM[1];
-cap && +cap > 500 ? out('WARN', 'a game can request up to ' + cap + ' KAS in one sheet - lower the cap', 'OnChainPageView.tsx kv://pay') : out('PASS', 'game payment cap ok');
+/KV_PAY_NOCAP/.test(view) ? out('PASS', 'no pay cap - any price allowed, Face ID / passcode confirms every amount') : cap && +cap > 500 && !/KV_PAY_AUTH/.test(view) ? out('WARN', 'a game can request up to ' + cap + ' KAS with no Face ID', 'OnChainPageView.tsx kv://pay') : out('PASS', 'game payment amount ok');
 /setStringAsync\(m\.text/.test(net) && !/KV_CLIP_GUARD/.test(net) ? out('WARN', 'a game can overwrite your clipboard silently (address-swap risk when you paste an address)', 'kv_net_bridge.ts') : out('PASS', 'games cannot write the clipboard silently');
 /kc\[0-9a-f\]\{8\}/.test(view) ? out('PASS', 'game clipboard read returns only a table code, never the full clipboard') : out('WARN', 'game may read full clipboard');
 
