@@ -697,6 +697,18 @@ export async function sendKaspaViaRest(params: {
 // Takes the REST-shaped tx object; returns { transactionId } or { error }.
 // ============================================================================
 async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): Promise<{ transactionId?: string; error?: string }> {
+  // KV_ORPHAN_RETRY: a chained tx can reach a node that has not seen its parent yet - resend the same tx
+  const _waits = [1500, 3000, 5000, 8000, 12000];
+  let _r = await _wrpcSubmitOnce(restTx, network, idHint);
+  for (let _i = 0; _i < _waits.length && _r.error && /orphan/i.test(_r.error); _i++) {
+    console.warn('[REST-TX] parent not on this node yet (orphan) - resending same tx in ' + _waits[_i] + 'ms');
+    await new Promise((res) => setTimeout(res, _waits[_i]));
+    _r = await _wrpcSubmitOnce(restTx, network, idHint);
+    if (_r.error && /already (in the mempool|accepted)|duplicate/i.test(_r.error)) return { transactionId: idHint || '' };
+  }
+  return _r;
+}
+async function _wrpcSubmitOnce(restTx: any, network: KaspaNetwork, idHint: string): Promise<{ transactionId?: string; error?: string }> {
   // RELAY-SUBMIT: public tn10 wRPC is borsh-only and REST strips payloads, so
   // payload txs go through the TownHall relay (stateless forwarder; the txid
   // commits the payload, so PREDICT CHECK verifies the broadcast independently).
