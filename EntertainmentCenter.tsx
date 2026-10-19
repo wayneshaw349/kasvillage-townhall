@@ -560,7 +560,12 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
       
       {/* Header */}
       <View style={styles.header}>
-        <View>
+        {onClose ? ( /* KV_EC_BACK */
+          <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} style={{ paddingVertical: 6, paddingHorizontal: 12, marginRight: 10, borderRadius: 16, borderWidth: 1, borderColor: '#d6a54a', backgroundColor: '#2a2118' }}>
+            <Text style={{ color: '#f0c860', fontWeight: '800', fontSize: 14 }}>{'\u2039 Back'}</Text>
+          </TouchableOpacity>
+        ) : null}
+        <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>🎮 Entertainment Center</Text>
           <Text style={styles.headerSubtitle}>DApps, Games & Academic Research</Text>
         </View>

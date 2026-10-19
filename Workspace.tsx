@@ -1210,6 +1210,15 @@ const KvChainGamePublish: React.FC = () => {
       }
       const { deriveStoreKeys } = require('./payload_publish');
       const { _kvResolvePrivHex } = require('./proposal_share');
+      { // KV_PUBLISH_CONTENT_GATE: shelf books built on the PC get the same content blocker as NEW GAME
+        const _fr: any[] = (entry && entry.bundle && entry.bundle.frags) || [];
+        if (_fr.length) {
+          gadd('content check (text, images, code)…');
+          const _cb: any = require('./kv_build_chain').buildChainBundle(_fr.map((x: any) => x.text).join(''), gameId);
+          if (!_cb.ok) { (_cb.issues || []).forEach((x: string) => gadd('BLOCKED: ' + x)); gadd('nothing was sent'); setGbusy(''); return; }
+          gadd('content check passed');
+        }
+      }
       if (TRUSTED_GAMES[gameId] !== entry.head || entry.bundle.manifest.head !== entry.head) {
         gadd('ERROR: ' + gameId + ' HEAD is not pinned in TRUSTED_GAMES — verify with TownHall first'); setGbusy(''); return;
       }

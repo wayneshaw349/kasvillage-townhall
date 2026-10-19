@@ -1093,7 +1093,7 @@ export const AppNavigator: React.FC = () => {
           onSwitchMode={switchMode}
           onNavigateMailbox={() => setScreen('mailbox')}
           onNavigateWorkspace={() => setScreen('workspace')}
-          onNavigateEntertainment={() => setScreen('entertainment')}
+          onNavigateEntertainment={() => { (globalThis as any).__kvEcFrom = 'dashboard'; setScreen('entertainment'); }} /* KV_EC_FROM */
           onNavigateProfile={() => setScreen('profile')}
           onNavigateNeighbor={() => setScreen('neighbor_agreement')}
           onNavigatePhoneProof={() => setScreen('phone_proof')}
@@ -1194,16 +1194,16 @@ export const AppNavigator: React.FC = () => {
 
     case 'entertainment':
       return <EntertainmentCenter
-        onClose={() => setScreen('dashboard')}
+        onClose={() => setScreen((((globalThis as any).__kvEcFrom) || 'dashboard') as any)}
       />;
 
     case 'profile':
       return <ProfileScreen
         navigation={{ goBack: () => setScreen('dashboard') }}
           onNavigatePhoneProof={() => setScreen('phone_proof')}
-        onNavigateEntertainment={() => setScreen('entertainment')}
+        onNavigateEntertainment={() => { (globalThis as any).__kvEcFrom = 'profile'; setScreen('entertainment'); }}
         onNavigateTownHall={() => setScreen('town_hall')}
-        onNavigateBookshelf={() => setScreen('entertainment')}
+        onNavigateBookshelf={() => { (globalThis as any).__kvEcFrom = 'profile'; setScreen('entertainment'); }}
         onNavigateVaultBackup={openVaultBackup}
         onNavigateVaultRestore={() => setScreen('vault_recovery')}
         onNavigateCreateVault={() => setScreen('generate_vault')}
