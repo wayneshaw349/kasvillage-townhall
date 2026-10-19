@@ -704,7 +704,11 @@ async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): 
     'https://kasvillage.app.runonflux.io/api/kaspa/submit-tx',
   ];
   let lastErr = 'no relay reachable';
-  for (const url of RELAYS) {
+  let _orphanTries = 0;
+  // orphan retries re-enter the loop; extend the iteration list so 'continue'
+  // has somewhere to go: same relay repeated.
+  const ATTEMPTS = [...RELAYS, ...Array(6).fill(RELAYS[0])];
+  for (const url of ATTEMPTS) {
     try {
       const resp = await fetch(url, {
         method: 'POST',
@@ -715,8 +719,16 @@ async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): 
       let j: any = {};
       try { j = JSON.parse(bodyText); } catch {}
       if (resp.status === 422 || (resp.status === 400 && j.error)) {
+        const em = String(j.error || bodyText.slice(0, 200));
+        // orphan-retry: parent tx not yet visible on the node that got this
+        // submit (LB / mempool sync gap). The tx is fine — wait, resubmit.
+        if (/orphan/i.test(em) && (_orphanTries = (_orphanTries || 0) + 1) <= 6) {
+          console.log('[REST-TX] orphan (parent not propagated yet) — retry ' + _orphanTries + '/6 in 2s');
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
         // Node/gate rejection is final — same result on any relay.
-        return { error: String(j.error || bodyText.slice(0, 200)) };
+        return { error: em };
       }
       if (!resp.ok) { lastErr = 'relay ' + resp.status + ': ' + bodyText.slice(0, 200); continue; }
       // Durable-records mirror: the Flux relay's disk is recycled on redeploy,
