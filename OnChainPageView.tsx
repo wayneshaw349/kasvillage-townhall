@@ -271,6 +271,12 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
 
   const onMessage = useCallback((event: any) => {
     try { const _d = JSON.parse(event?.nativeEvent?.data || '{}'); if (_d.kvlog !== undefined) { console.log('[GamePage]', _d.kvlog); return; } } catch {}
+    // KV_GAME_INVITE: share an invite / paste a table code (games only)
+    try { const _g = JSON.parse(event?.nativeEvent?.data || '{}');
+      if (_g && _g.kvshare && props.game) { const t = String(_g.kvshare.text || '').slice(0, 300); require('react-native').Share.share({ message: t }).catch(() => {}); return; }
+      if (_g && _g.kvpaste && props.game) { (async () => { let code = ''; try { const t = await require('expo-clipboard').getStringAsync(); code = ((String(t || '').match(/kc[0-9a-f]{8}/i) || [])[0] || '').toLowerCase(); } catch {}
+        try { webRef.current && webRef.current.injectJavaScript('try{window.__kvPasted&&window.__kvPasted(' + JSON.stringify(code) + ')}catch(e){};true;'); } catch {} })(); return; }
+    } catch {}
     // KV_GAME_CONTACT: vetted contact handoff for player-to-player offers (no in-game money)
     try { const _c = JSON.parse(event?.nativeEvent?.data || '{}'); if (_c && _c.kvcontact && props.game) { const to = String(_c.kvcontact.to || '').replace(/[<>"'`\s]/g, '').slice(0, 80); const text = String(_c.kvcontact.text || '').slice(0, 400); if (!to) return;
       let url = '';
