@@ -2,5 +2,5 @@
 // (static requires so Metro bundles every game's fragments)
 module.exports = {
   'kascity-414-chain': { bundle: require('./chain_kascity-414-chain_bundle.json'), head: '976b8c49712ee5fd1e00a33e1042f6fd5ac24f3c135b4e1fca3a80010e476805', nonceBase: 9414 },
-  'kascity-v7': { bundle: require('./chain_kascity-v7_bundle.json'), head: '76b57c52e5420451a380d5db19d80d122ab9b322f44e5dd2ec1b710664869440', nonceBase: 10014 },
+  'kascity-v8': { bundle: require('./chain_kascity-v8_bundle.json'), head: '55edbc3201985c333f729c7f51f1a0769ab8031f777e7f99f0f4eefa03932654', nonceBase: 10114 },
 };
