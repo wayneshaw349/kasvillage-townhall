@@ -4515,7 +4515,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     style={{ alignItems: 'center', opacity: logoShape === shape.id ? 1 : 0.4 }}
                   >
                     <View style={{ width: rs.s(64), height: rs.s(64), borderRadius: shape.radius, backgroundColor: logoShape === shape.id ? COLORS.amber200 : COLORS.stone200, borderWidth: logoShape === shape.id ? 3 : 1, borderColor: logoShape === shape.id ? COLORS.amber600 : COLORS.stone300, justifyContent: 'center', alignItems: 'center', marginBottom: rs.s(4) }}>
-                      <Text style={{ fontSize: rs.font(24) }}>{logoUrl ? '•' : '•'}</Text>
+                      <Text style={{ fontSize: rs.font(24) }}>{logoUrl ? '🖼️' : '🏪'}</Text>
                     </View>
                     <Text style={{ fontSize: rs.font(11), fontWeight: logoShape === shape.id ? 'bold' : 'normal', color: logoShape === shape.id ? COLORS.amber900 : COLORS.stone500 }}>{shape.label}</Text>
                     {logoShape === shape.id && <Text style={{ fontSize: rs.font(9), color: COLORS.amber600 }}>✓ Selected</Text>}
