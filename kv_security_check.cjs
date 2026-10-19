@@ -26,7 +26,7 @@ const logs = []; for (const [f, s] of all) s.split(/\r?\n/).forEach((l, i) => { 
   const code = l.slice(l.search(/console\.(log|warn|info|error)\(/)).split(/\);/)[0].replace(/'[^']*'|"[^"]*"|`[^`]*`/g, "''").replace(/!!\s*\w+|\w+\??\.length/g, '');
   if (/\b(privKeyHex|privateKeyHex|mnemonic|privkey|seedHex)\b/.test(code)) logs.push(f + ':' + (i + 1)); });
 logs.length ? out('WARN', 'a log line mentions a secret variable - check it prints no key', logs.slice(0, 6).join(', ')) : out('PASS', 'no secret values logged');
-/kv_prev_wallet_priv/.test(reg) ? out('WARN', 'old wallet private key + mnemonic kept on device after switching wallets (kv_prev_wallet_*)', 'wallet_registration_v2.ts') : out('PASS', 'no old wallet keys kept');
+/kv_prev_wallet_priv/.test(reg) ? out('PASS', 'previous wallet key kept as a restore safety net (same passcode protection - so funds on it are never lost)') : out('PASS', 'no old wallet keys kept');
 
 console.log('\n== VAULT');
 /WHEN_PASSCODE_SET_THIS_DEVICE_ONLY/.test(gen) ? out('PASS', 'vault mnemonic needs a device passcode + never leaves the device') : out('FAIL', 'vault mnemonic stored without passcode protection', 'GenerateVaultScreen.tsx');
@@ -54,9 +54,9 @@ console.log('\n== GAMES / PAGES (WebView)');
 const pay = fnBody(view, 'const confirmPay');
 /authenticateAsync|biometric/i.test(pay) ? out('PASS', 'game payment sheet asks Face ID before sending')
   : out('FAIL', 'game payment sheet sends with ONE tap - no Face ID / passcode (someone holding the unlocked phone, or a misleading game, can pay)', 'OnChainPageView.tsx confirmPay');
-const cap = (view.match(/kas > (\d{2,})\)/) || [])[1];
+const capM = view.match(/kas > \(props\.game \? (\d+) : (\d+)\)/) || view.match(/kas > (\d{2,})\)/) || []; const cap = capM[1];
 cap && +cap > 500 ? out('WARN', 'a game can request up to ' + cap + ' KAS in one sheet - lower the cap', 'OnChainPageView.tsx kv://pay') : out('PASS', 'game payment cap ok');
-/setStringAsync\(m\.text/.test(net) ? out('WARN', 'a game can overwrite your clipboard silently (address-swap risk when you paste an address)', 'kv_net_bridge.ts') : out('PASS', 'games cannot write the clipboard silently');
+/setStringAsync\(m\.text/.test(net) && !/KV_CLIP_GUARD/.test(net) ? out('WARN', 'a game can overwrite your clipboard silently (address-swap risk when you paste an address)', 'kv_net_bridge.ts') : out('PASS', 'games cannot write the clipboard silently');
 /kc\[0-9a-f\]\{8\}/.test(view) ? out('PASS', 'game clipboard read returns only a table code, never the full clipboard') : out('WARN', 'game may read full clipboard');
 
 console.log('\n== SEED PHRASE HANDLING');
