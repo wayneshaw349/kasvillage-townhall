@@ -88,6 +88,17 @@ export function scanHtmlForPublish(html: string): { ok: boolean; issues: HtmlSca
   if (utf8ToBytes(html).length > HTML_SOFT_MAX_BYTES) {
     issues.push({ code: 'too_large', detail: utf8ToBytes(html).length + ' bytes' });
   }
+  // KV_PAGE_CONTENT_GATE: words on screen, titles/alt text and script strings go through the content filter
+  try {
+    const cf = require('./content_filter'); const scan = cf.scanObjectStrict || cf.scanObject;
+    const visible = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').slice(0, 200000);
+    const attrs = (html.match(/(?:title|alt|placeholder|aria-label|content)\s*=\s*["'][^"']*["']/gi) || []).join(' ').slice(0, 50000);
+    const lits: string[] = []; const _re = /(["'`])((?:\\.|(?!\1)[^\\\n]){4,300})\1/g; let _m: any; let _n = 0;
+    while ((_m = _re.exec(html)) && _n < 20000) { _n++; if (/[a-z]{3,}\s+[a-z]{2,}/i.test(_m[2])) lits.push(_m[2]); }
+    const r = scan({ text: visible, attrs, strings: lits });
+    if (r && r.ok === false) issues.push({ code: 'content', detail: String(r.reason || 'blocked words') });
+  } catch {}
   return { ok: issues.length === 0, issues };
 }
 
