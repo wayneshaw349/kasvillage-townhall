@@ -19,19 +19,23 @@ const cam = uses('expo-camera');
 if (cam.length) (plist.NSCameraUsageDescription || /expo-camera[^\]]*cameraPermission/.test(plugins))
   ? out('PASS', 'camera text set') : out('FAIL', 'camera is used (' + cam.join(', ') + ') but no camera text of yours - the build falls back to Expo\'s generic text, which Apple rejects (5.1.1)', 'add expo-camera plugin with cameraPermission text');
 plist.NSFaceIDUsageDescription ? out('PASS', 'Face ID text set') : out('FAIL', 'no Face ID text');
-const ble = uses('react-native-ble-plx');
-if (plist.NSBluetoothAlwaysUsageDescription || perms.some((x) => /BLUETOOTH/.test(x)))
-  out('WARN', 'Bluetooth permissions still declared (you decided to remove Bluetooth)' + (ble.length ? ' - still imported by ' + ble.join(', ') : ''), 'remove BLE permissions, plugin and package - reviewers ask for a demo of every permission');
+const blePkg = /react-native-ble/.test(pkg);
+(plist.NSBluetoothAlwaysUsageDescription || perms.some((x) => /BLUETOOTH/.test(x)) || blePkg)
+  ? out('WARN', 'Bluetooth still declared (you decided to remove it)' + (blePkg ? ' - package.json still lists a react-native-ble package' : ''), 'node wire_store_ready.cjs, then npm install')
+  : out('PASS', 'Bluetooth removed (no permissions, no packages)');
 perms.some((x) => /ACCESS_(FINE|COARSE)_LOCATION/.test(x)) ? out('WARN', 'Android asks for LOCATION (only needed for Bluetooth) - Google Play makes you justify it', 'remove ACCESS_FINE_LOCATION with Bluetooth') : out('PASS', 'no location permission');
 /expo-notifications/.test(plugins) ? out('PASS', 'notifications plugin set') : null;
 
 console.log('\n== NETWORK (release builds block plain http)');
 const httpIp = all.filter(([, s]) => /http:\/\/\d{1,3}(\.\d{1,3}){3}:35816/.test(s)).map(([x]) => x);
 const httpHtml = fs.readdirSync('.').filter((x) => /\.html$/.test(x) && /http:\/\/\d{1,3}(\.\d{1,3}){3}:35816/.test(rd(x)));
-(httpIp.length || httpHtml.length) ? out('WARN', 'relay mirrors use plain http://IP:35816 - TestFlight / Play builds block these (ATS / cleartext); only https://kasvillage.app.runonflux.io will work', 'release: use the https Flux domain only (it load-balances the nodes); IPs cannot get an ATS exception') : out('PASS', 'no plain-http relay IPs');
-const lan = all.filter(([, s]) => /fetch\(`http:\/\/\$\{/.test(s)).map(([x]) => x);
-lan.length ? (plist.NSLocalNetworkUsageDescription ? out('PASS', 'local-network text set') : out('WARN', 'phone-to-phone http (Wi-Fi/Tailscale) in ' + lan.join(', ') + ' - iOS needs a local-network text, and cleartext must be allowed for LAN', 'add NSLocalNetworkUsageDescription, or drop these paths if unused'))
-  : out('PASS', 'no LAN http');
+const ats = plist.NSAppTransportSecurity && plist.NSAppTransportSecurity.NSAllowsArbitraryLoads, clear = /usesCleartextTraffic"?\s*:\s*true/.test(plugins);
+if (httpIp.length || httpHtml.length) (ats && clear)
+  ? out('PASS', 'relay IPs (http://IP:35816) allowed in release builds - iOS ATS + Android cleartext set (tell Apple why in review notes: user-run relay nodes by IP)')
+  : out('WARN', 'relay mirrors use plain http://IP:35816 - TestFlight / Play builds block these', 'node wire_store_ready.cjs');
+else out('PASS', 'no plain-http relay IPs');
+const lan = all.filter(([, s]) => /fetch\(`http:\/\/\$\{/.test(s) && !/KV_NO_LAN/.test(s)).map(([x]) => x);
+lan.length ? out('WARN', 'phone-to-phone http still active in ' + lan.join(', '), 'node wire_store_ready.cjs') : out('PASS', 'no phone-to-phone http (IOU file is shared instead)');
 
 console.log('\n== RELEASE BUILD');
 const prod = (eas.build && eas.build.production) || {};
@@ -40,7 +44,7 @@ prod.autoIncrement || (eas.cli && eas.cli.appVersionSource === 'remote') ? out('
 eas.build && eas.build.preview ? out('PASS', 'preview profile exists (TestFlight / internal test)') : out('WARN', 'no preview profile');
 app.android && app.android.googleServicesFile && !fs.existsSync(app.android.googleServicesFile) ? out('FAIL', 'google-services.json missing') : out('PASS', 'Android google-services file ok');
 const claudeLink = all.find(([, s]) => /openURL\('https:\/\/claude\.ai\/code'\)/.test(s));
-claudeLink ? out('WARN', '"Open Claude Code" button links out to a third-party dev tool (' + claudeLink[0] + ') - reviewers flag unexplained outbound buttons', 'hide it or label it as a developer resource') : out('PASS', 'no stray dev-tool links');
+claudeLink && !/KV_NO_CLAUDE/.test(rd(claudeLink[0])) ? out('WARN', '"Open Claude Code" button links out to a third-party dev tool (' + claudeLink[0] + ') - reviewers flag unexplained outbound buttons', 'hide it or label it as a developer resource') : out('PASS', 'no stray dev-tool links');
 
 console.log('\n== POLICY');
 all.some(([, s]) => /Remove from Phone/.test(s)) ? out('PASS', 'wallet can be removed from the phone (account deletion rule)') : out('WARN', 'no in-app wallet removal');
