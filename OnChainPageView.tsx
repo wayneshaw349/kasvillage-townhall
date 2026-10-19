@@ -120,6 +120,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const [land, setLand] = useState<boolean | null>(null);
   const [wv, setWv] = useState<{ w: number; h: number } | null>(null);
   const [topPad, setTopPad] = useState<number | null>(null); // KV_VIEW_FIX2: keep games below the status bar
+  const [barH, setBarH] = useState<number | null>(null); const boxRef = useRef<any>(null); // KV_VIEW_FIX3: game area excludes the verified bar
   const outerRef = useRef<any>(null);
   const landKey = 'kv_land_' + String((props.game && (props.game as any).head) || 'page').slice(0, 16);
   useEffect(() => {
@@ -329,7 +330,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
 
   return (
     <View ref={outerRef} style={[styles.fill, { paddingTop: topPad || 0 }]} onLayout={(e: any) => { const L = e.nativeEvent.layout;
-      const done = (pad: number) => { const h = L.height - pad; setTopPad(pad); if (!wv || Math.abs(wv.w - L.width) > 1 || Math.abs(wv.h - h) > 1) setWv({ w: L.width, h }); };
+      const done = (pad: number) => { boxRef.current = { w: L.width, h: L.height, pad }; setTopPad(pad); if (barH == null) return; const h = L.height - pad - barH; if (!wv || Math.abs(wv.w - L.width) > 1 || Math.abs(wv.h - h) > 1) setWv({ w: L.width, h }); };
       let ins = 0; try { const m = require('react-native-safe-area-context').initialWindowMetrics; ins = (m && m.insets && m.insets.top) || 0; } catch {}
       if (!props.game || !ins || topPad !== null) { done(topPad || 0); return; }
       try { outerRef.current.measureInWindow((_x: number, y: number) => done(Math.max(0, Math.round(ins - (y || 0))))); } catch { done(0); } }}>
@@ -383,7 +384,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
           <Text style={{ color: '#b9a6ff', fontSize: 9, textAlign: 'center' }}>{Math.round(zoom * 100) + '%'}</Text>
         </View>
       ) : null}
-      <View style={styles.verifiedBar}>
+      <View style={styles.verifiedBar} onLayout={(e: any) => { const bh = Math.round(e.nativeEvent.layout.height); if (bh !== barH) { setBarH(bh); const b = boxRef.current; if (b) { const h = b.h - b.pad - bh; if (!wv || Math.abs(wv.w - b.w) > 1 || Math.abs(wv.h - h) > 1) setWv({ w: b.w, h }); } } }}>
         <Text style={styles.verifiedText}>
           ⛓ On-chain page · hash {pageHash.slice(0, 12)} verified
         </Text>
