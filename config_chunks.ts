@@ -148,7 +148,15 @@ async function fetchStoreConfigViaWalk(
   } catch (e: any) { return { config: null, error: 'walk: ' + String(e?.message || e) }; }
 }
 
-export async function fetchStoreConfig(
+export async function fetchStoreConfig(storeAddress: string, expectedHash: string, network = 'testnet-10', coords?: { anchor_hash?: string; daa_to?: number }): Promise<{ config: any | null; error?: string }> {
+  let r = await _fetchStoreConfigOnce(storeAddress, expectedHash, network, coords);
+  for (let i = 0; i < 4 && !r.config && /incomplete|missing chunk/.test(String(r.error || '')); i++) {
+    await new Promise((res) => setTimeout(res, 5000));
+    r = await _fetchStoreConfigOnce(storeAddress, expectedHash, network, coords);
+  }
+  return r;
+}
+async function _fetchStoreConfigOnce(
   storeAddress: string,
   expectedHash: string,
   network = 'testnet-10',
@@ -173,7 +181,11 @@ export async function fetchStoreConfig(
       const prev = bySeq.get(r.d.seq);
       if (!prev || r.t > prev.t) bySeq.set(r.d.seq, r);
     }
-    if (bySeq.size < tot) return { config: null, error: 'incomplete: ' + bySeq.size + '/' + tot + ' chunks' };
+    if (bySeq.size < tot) { // KV_MANIFEST_LAG: index behind the chain - read the chunks off the chain instead
+      const w2 = await fetchStoreConfigViaWalk(expectedHash, coords || {});
+      if (w2.config) { await cfgCachePut(expectedHash, w2.config); return w2; }
+      return { config: null, error: 'incomplete: ' + bySeq.size + '/' + tot + ' chunks' };
+    }
     let b64 = '';
     for (let i = 0; i < tot; i++) {
       const r = bySeq.get(i);

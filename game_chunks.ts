@@ -247,7 +247,7 @@ export async function fetchGamePuzzle(
       const cachedOff = await gameCacheLoadOffline(pinnedHead);
       if (cachedOff) { onProgress && onProgress(1, 1); return { html: cachedOff }; }
     }
-    const { config, error } = await fetchStoreConfig(manifestAddress, manifestHash, network);
+    const { config, error } = await fetchStoreConfig(manifestAddress, manifestHash, network, coords as any); // KV_MANIFEST_LAG
     const m = config as GameManifest;
     if (config) {
       const cached = await gameCacheLoad(pinnedHead, m.html_sha256);
