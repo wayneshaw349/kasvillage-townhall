@@ -119,6 +119,13 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const [rot, setRot] = useState(false);
   const [land, setLand] = useState<boolean | null>(null);
   const [wv, setWv] = useState<{ w: number; h: number } | null>(null);
+  // KV_GAME_EXIT: leave the game and return to the wallet (confirm first)
+  const kvAskExit = () => { if (!props.onClose) return; const RN = require('react-native');
+    RN.Alert.alert('Leave the game?', 'You go back to your wallet. In an online game your seat is kept - open the game again and tap Rejoin table.', [
+      { text: 'Keep playing', style: 'cancel' }, { text: 'Leave', style: 'destructive', onPress: () => props.onClose && props.onClose() }]); };
+  useEffect(() => { if (!props.game || !props.onClose) return; const RN = require('react-native');
+    const sub = RN.BackHandler.addEventListener('hardwareBackPress', () => { kvAskExit(); return true; });
+    return () => { try { sub.remove(); } catch {} }; }, [props.game, props.onClose]);
   const [topPad, setTopPad] = useState<number | null>(null); // KV_VIEW_FIX2: keep games below the status bar
   const [barH, setBarH] = useState<number | null>(null); const boxRef = useRef<any>(null); // KV_VIEW_FIX3: game area excludes the verified bar
   const outerRef = useRef<any>(null);
@@ -366,6 +373,12 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       )}
       {props.game ? (
         <View style={{ position: 'absolute', right: 6, top: '32%' }}>
+          {props.onClose ? ( /* KV_GAME_EXIT */
+            <TouchableOpacity onPress={() => kvAskExit()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{ width: 36, height: 36, borderRadius: 18, marginBottom: 10, backgroundColor: '#b91c1c', borderWidth: 2, borderColor: '#fecaca', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: '#fff', fontSize: 17, fontWeight: '900' }}>{'\u2715'}</Text>
+            </TouchableOpacity>
+          ) : null}
           {[
             { t: '\u27F3', on: toggleLand, hot: !!land },
             ...(land ? [] : [
