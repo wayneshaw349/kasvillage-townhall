@@ -20,7 +20,7 @@ const asyncSecret = grepAll(/AsyncStorage\.setItem\([^)]*(mnemonic|seed|priv|sec
 asyncSecret.length ? out('FAIL', 'secret written to AsyncStorage (unencrypted)', asyncSecret.join(', ')) : out('PASS', 'no keys/mnemonics in AsyncStorage');
 const ssSecret = [];
 for (const [f, s] of all) { const re = /setItemAsync\(\s*(['"][^'"]*(mnemonic|priv|seed|secret)[^'"]*['"]|STORE_KEYS\.PRIVATE_KEY)\s*,[^;]*?\)/gi; let m;
-  while ((m = re.exec(s))) if (!/THIS_DEVICE_ONLY/.test(s.slice(m.index, m.index + 400).split(/\n\s*(await|const|let|if)\b/)[0])) ssSecret.push(f + ':' + (s.slice(0, m.index).split('\n').length)); }
+  while ((m = re.exec(s))) { const seg = s.slice(m.index, m.index + 400).split(/\n\s*(await|const|let|if)\b/)[0]; const viaVar = /,\s*(\w+)\s*\)/.exec(seg); if (!/THIS_DEVICE_ONLY/.test(seg) && !(viaVar && new RegExp('const\\s+' + viaVar[1] + '\\s*=\\s*\\{[^}]*THIS_DEVICE_ONLY').test(s))) ssSecret.push(f + ':' + (s.slice(0, m.index).split('\n').length)); } }
 ssSecret.length ? out('WARN', 'secret saved without *_THIS_DEVICE_ONLY (can sync to iCloud backup)', ssSecret.join(', ')) : out('PASS', 'all keys/mnemonics SecureStore + THIS_DEVICE_ONLY');
 const logs = []; for (const [f, s] of all) s.split(/\r?\n/).forEach((l, i) => { if (!/console\.(log|warn|info|error)\(/.test(l)) return;
   const code = l.slice(l.search(/console\.(log|warn|info|error)\(/)).split(/\);/)[0].replace(/'[^']*'|"[^"]*"|`[^`]*`/g, "''").replace(/!!\s*\w+|\w+\??\.length/g, '');
