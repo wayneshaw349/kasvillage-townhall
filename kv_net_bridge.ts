@@ -125,7 +125,8 @@ export function handleKvNetMessage(raw: string, inject: (js: string) => void, al
   if (!m || typeof m.kvwnet !== 'string') return false;
 
   if (m.kvwnet === 'copy') {
-    if (typeof m.text === 'string') Clipboard.setStringAsync(m.text.slice(0, 100000)).catch(() => {});
+    // KV_CLIP_GUARD: a game may copy text, but never a Kaspa address (stops address-swap tricks)
+    if (typeof m.text === 'string') Clipboard.setStringAsync(m.text.slice(0, 100000).replace(/kaspa(test)?:[a-z0-9]{20,}/gi, '[address hidden]')).catch(() => {});
     return true;
   }
   if (m.kvwnet !== 'req' || !Number.isInteger(m.id)) return true;

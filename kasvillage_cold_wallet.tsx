@@ -879,6 +879,7 @@ export async function vaultIsWarm(): Promise<boolean> {
 async function sendKASFromVault(
   recipientAddress: string, amountSompi: bigint, memo?: string
 ): Promise<TransactionResult> {
+  biometricAuth.clearCache(); /* KV_VAULT_FRESH: never reuse the hot-wallet unlock */
   const authOk = await biometricAuth.authenticate('Vault: send ' + formatKAS(amountSompi) + ' KASPA');
   if (!authOk) return { success: false, error: 'Authentication failed' };
 

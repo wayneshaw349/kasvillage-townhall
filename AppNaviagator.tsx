@@ -292,7 +292,10 @@ const BiometricGate: React.FC<{ onSuccess: () => void; onFail: () => void }> = (
         const hasHardware = await LocalAuthentication.hasHardwareAsync();
         const isEnrolled  = await LocalAuthentication.isEnrolledAsync();
 
-        if (!hasHardware || !isEnrolled) { onSuccess(); return; }
+        if (!hasHardware || !isEnrolled) { /* KV_GATE_PASSCODE: no Face ID -> still ask the phone passcode */
+          let lvl = 0; try { lvl = await LocalAuthentication.getEnrolledLevelAsync(); } catch { lvl = 0; }
+          if (!lvl) { onSuccess(); return; } // phone has no lock at all - nothing to ask
+        }
 
         const result = await LocalAuthentication.authenticateAsync({
           promptMessage:         'Verify your identity to enter Da Village',
@@ -301,9 +304,10 @@ const BiometricGate: React.FC<{ onSuccess: () => void; onFail: () => void }> = (
           disableDeviceFallback: false,
         });
 
+        if (!result.success && /not_enrolled|not_available|passcode_not_set/.test(String((result as any).error || ''))) { onSuccess(); return; } /* KV_GATE_NOTSUP */
         result.success ? onSuccess() : onFail();
       } catch {
-        onSuccess();
+        onFail(); /* KV_GATE_FAILCLOSED */
       }
     })();
   }, [onSuccess, onFail]);

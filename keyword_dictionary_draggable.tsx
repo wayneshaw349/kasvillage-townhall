@@ -3623,8 +3623,7 @@ export function analyzeTypingCadence(samples: JitterSample[]): JitterAnalysis {
 
 export async function createJitterCommitment(samples: JitterSample[]): Promise<JitterCommitment> {
   const analysis = analyzeTypingCadence(samples);
-  const saltBytes = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) saltBytes[i] = Math.floor(Math.random() * 256);
+  const saltBytes = Crypto.getRandomBytes(32); /* KV_SALT_CSPRNG */
   const salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
   
   const commitData = JSON.stringify({

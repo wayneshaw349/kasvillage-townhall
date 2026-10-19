@@ -67,6 +67,13 @@ export const GenerateVaultScreen: React.FC<Props> = ({
     }
   };
 
+  const finishVault = () => { /* KV_VAULT_AUTOCOLD */
+    Alert.alert('Take the vault key off this phone?',
+      'Only if you saved ALL your cards. Going cold removes the vault key from this phone, so a stolen phone cannot spend the vault. To spend later: Restore from Cards, send, then Go Cold again.',
+      [{ text: 'Keep warm', style: 'cancel', onPress: onDone },
+       { text: 'Go Cold (recommended)', onPress: async () => { try { const { vaultGoCold } = require('./kasvillage_cold_wallet'); const r = await vaultGoCold(); if (!r.success) Alert.alert('Go Cold', r.error || 'Failed'); } catch {} onDone(); } }]);
+  };
+
   // Once wires exist, hand off to the existing backup UI (QR cards).
   if (wires) {
     return (
@@ -79,7 +86,7 @@ export const GenerateVaultScreen: React.FC<Props> = ({
         <VaultBackupScreen
           wires={wires}
           threshold={threshold}
-          onDone={onDone}
+          onDone={finishVault}
           onCancel={onDone}
         />
       </View>

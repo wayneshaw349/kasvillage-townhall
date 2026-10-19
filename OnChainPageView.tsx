@@ -233,7 +233,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
         const kas = Number(segs[1] || '0');
         const memo = qs.startsWith('m=') ? decodeURIComponent(qs.slice(2)).slice(0, 60) : '';
         const okAddr = (addr.startsWith('kaspatest:') || addr.startsWith('kaspa:')) && addr.length >= 20 && addr.length <= 80;
-        if (!okAddr || !(kas > 0) || kas > 5000) { setNotice('Invalid payment request.'); return; }
+        if (!okAddr || !(kas > 0) || !isFinite(kas) /* KV_PAY_NOCAP */) { setNotice('Invalid payment request.'); return; }
         setPayDone(null);
         setPaySheet({ addr, kas, memo });
       } catch { setNotice('Invalid payment request.'); }
@@ -246,6 +246,11 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
     if (!paySheet || payBusy) return;
     setPayBusy(true);
     try {
+      { /* KV_PAY_AUTH: fresh Face ID / passcode for every payment */
+        const LA = require('expo-local-authentication'); let _a: any = null;
+        try { _a = await LA.authenticateAsync({ promptMessage: 'Pay ' + paySheet.kas + ' KAS', cancelLabel: 'Cancel', disableDeviceFallback: false }); } catch { _a = null; }
+        if (!_a || !_a.success) { setPayBusy(false); if (_a && _a.error && !/cancel/i.test(String(_a.error))) setNotice('Payment needs Face ID or your phone passcode.'); return; }
+      }
       const ps = require('./proposal_share');
       const getId = ps._kvResolveIdentity || ps.resolveKvIdentity || ps.kvResolveIdentity || ps.getKvIdentity || ps.resolveIdentity;
       let ident: any = getId ? await getId() : null;

@@ -9372,7 +9372,7 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
   
   const copyMnemonic = async () => {
     if (mnemonic) {
-      await Clipboard.setStringAsync(mnemonic);
+      await Clipboard.setStringAsync(mnemonic); setTimeout(() => { Clipboard.getStringAsync().then((c: string) => { if (c === mnemonic) Clipboard.setStringAsync(''); }).catch(() => {}); }, 60000); /* KV_CLIP_CLEAR */
     }
   };
   

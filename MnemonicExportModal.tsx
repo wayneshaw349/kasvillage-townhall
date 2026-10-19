@@ -108,7 +108,7 @@ const MnemonicExportModal: React.FC<MnemonicExportModalProps> = ({
 
   const handleCopyMnemonic = async () => {
     try {
-      await Clipboard.setStringAsync(mnemonic);
+      await Clipboard.setStringAsync(mnemonic); setTimeout(() => { Clipboard.getStringAsync().then((c: string) => { if (c === mnemonic) Clipboard.setStringAsync(''); }).catch(() => {}); }, 60000); /* KV_CLIP_CLEAR */
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
