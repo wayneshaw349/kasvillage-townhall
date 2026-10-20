@@ -38,6 +38,60 @@ import Svg, { Path, G, Defs, LinearGradient, Stop, Circle, Ellipse, RadialGradie
 import * as Crypto from 'expo-crypto';
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
+
+// KV_RITUAL_AUTH: if a wallet already exists on this device, the onboarding ritual must not
+// overwrite kv_avatar_recipe or reuse the existing keys without a fresh device unlock.
+// One successful unlock covers the rest of this ritual run (5 min window).
+// KV_RITUAL_QUIZ: a device passcode alone is not enough (anyone holding the unlocked phone
+// knows it). Replacing / reusing an existing wallet also needs the Sentry quiz passed in this
+// app session within the last 10 min (AppNaviagator sets globalThis.__kvQuizPassedAt).
+// A wallet this ritual run created itself (none existed when the run began) is exempt.
+// The window is checked when the ritual run starts (the ritual itself can take > 10 min).
+let _kvRitualAuthAt = 0;
+let _kvRitualOwnWallet = false; // reset on every ritual mount
+let _kvRitualQuizAtStart = false; // quiz was fresh (<10 min) when this ritual run began
+const KV_QUIZ_WINDOW_MS = 10 * 60_000;
+async function kvWalletExists(): Promise<boolean> {
+  for (const k of ['kv_private_key', 'kv_mnemonic', 'kv_l1_privkey_enc', 'kasvillage_private_key', 'kv_l1_privkey']) {
+    try { if (await SecureStore.getItemAsync(k)) return true; } catch { return true; } // unreadable -> treat as present (fail closed)
+  }
+  return false;
+}
+function kvQuizPassedRecently(): boolean {
+  const t = Number((globalThis as any).__kvQuizPassedAt || 0);
+  return t > 0 && Date.now() - t >= 0 && Date.now() - t < KV_QUIZ_WINDOW_MS;
+}
+/** Device has no lock of any kind (OS reports level 0) — the only case we let through unauthenticated. */
+async function kvPhoneHasNoLock(): Promise<boolean> {
+  try { return (await LocalAuthentication.getEnrolledLevelAsync()) === 0; } catch { return false; }
+}
+async function kvRequireAuthIfWalletExists(reason: string): Promise<boolean> {
+  try {
+    if (!(await kvWalletExists())) { _kvRitualOwnWallet = true; return true; }
+    if (_kvRitualOwnWallet) return true; // created by this very ritual run
+    if (!kvQuizPassedRecently() && !_kvRitualQuizAtStart) {
+      Alert.alert('Locked', 'A wallet already exists on this phone. Pass the Sentry checkpoint first, then try again.');
+      return false;
+    }
+    if (Date.now() - _kvRitualAuthAt < 5 * 60_000) return true;
+    const hasHw = await LocalAuthentication.hasHardwareAsync();
+    const enrolled = await LocalAuthentication.isEnrolledAsync();
+    if ((!hasHw || !enrolled) && (await kvPhoneHasNoLock())) { _kvRitualAuthAt = Date.now(); return true; } // no lock at all (same rule as BiometricGate)
+    const r = await LocalAuthentication.authenticateAsync({
+      promptMessage: reason,
+      fallbackLabel: 'Use Passcode',
+      cancelLabel: 'Cancel',
+      disableDeviceFallback: false,
+    });
+    if (r.success) { _kvRitualAuthAt = Date.now(); return true; }
+    if (/not_enrolled|not_available|passcode_not_set/.test(String((r as any).error || '')) && (await kvPhoneHasNoLock())) {
+      _kvRitualAuthAt = Date.now(); return true;
+    }
+  } catch {}
+  Alert.alert('Locked', 'A wallet already exists on this phone. Unlock with Face ID or your passcode to continue.');
+  return false;
+}
 import { inscribeIdentity } from './identity_inscription_v6';
 import { createWallet, getRegistrationData } from './wallet_registration_v2';
 import { inscribeIdentityViaRest } from './kaspa_rest_tx';
@@ -5305,9 +5359,18 @@ const initialRecipe: AvatarRecipe = {
 interface IdentityRitualProps {
   onRecoveryRequest?: () => void;
   onComplete?: () => void;
+  onLocked?: () => void; // KV_RITUAL_AUTH: auth failed while an existing wallet is present
 }
 
-export default function IdentityRitual({ onRecoveryRequest, onComplete }: IdentityRitualProps = {}) {
+export default function IdentityRitual({ onRecoveryRequest, onComplete, onLocked }: IdentityRitualProps = {}) {
+  // KV_RITUAL_QUIZ: each ritual run starts without the "own wallet" exemption and without a cached unlock
+  const _kvRunInit = useRef(false);
+  if (!_kvRunInit.current) {
+    _kvRunInit.current = true;
+    _kvRitualOwnWallet = false; _kvRitualAuthAt = 0;
+    _kvRitualQuizAtStart = kvQuizPassedRecently();
+    kvWalletExists().then((e) => { if (!e) _kvRitualOwnWallet = true; }).catch(() => {});
+  }
   const [state, setState] = useState<RitualState>({
     phase: 1,
     recipe: { ...initialRecipe },
@@ -6095,6 +6158,8 @@ export default function IdentityRitual({ onRecoveryRequest, onComplete }: Identi
         alert(`Verification failed: ${jitterAnalysis.flags.join(', ')}`);
         return;
       }
+      // KV_RITUAL_AUTH: never overwrite an existing wallet's recipe without a fresh unlock
+      if (!(await kvRequireAuthIfWalletExists('Unlock to replace the identity on this wallet'))) { onLocked?.(); return; }
       
       const salt = generateSalt();
       const [recipeHash, commitment] = await Promise.all([
@@ -6316,6 +6381,8 @@ export default function IdentityRitual({ onRecoveryRequest, onComplete }: Identi
                 <TouchableOpacity
                   style={{ backgroundColor: '#4CAF50', paddingVertical: 16, paddingHorizontal: 48, borderRadius: 12, marginTop: 32 }}
                   onPress={async () => {
+                    // KV_RITUAL_AUTH: never overwrite an existing wallet's recipe without a fresh unlock
+                    if (!(await kvRequireAuthIfWalletExists('Unlock to replace the identity on this wallet'))) { onLocked?.(); return; }
                     // Generate hashes before advancing to Phase 8
                     const salt = generateSalt();
                     const [recipeHash, commitment] = await Promise.all([
@@ -6456,7 +6523,7 @@ export default function IdentityRitual({ onRecoveryRequest, onComplete }: Identi
           }}
         />;
       case 8:
-        return <PhaseAnchor recipe={state.recipe} onComplete={onComplete} />;
+        return <PhaseAnchor recipe={state.recipe} onComplete={onComplete} onLocked={onLocked} />;
       default:
         return null;
     }
@@ -9018,7 +9085,7 @@ function PhaseShot({ question, questionNumber, totalQuestions, score, onAnswer }
 }
 
 
-function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?: () => void }) {
+function PhaseAnchor({ recipe, onComplete, onLocked }: { recipe: AvatarRecipe; onComplete?: () => void; onLocked?: () => void }) {
   const [step, setStep] = useState<'network_select' | 'init' | 'creating' | 'funding' | 'inscribing' | 'complete' | 'error'>('network_select');
   const [selectedNetwork, setSelectedNetwork] = useState<'testnet-10' | 'mainnet'>('testnet-10');
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
@@ -9057,6 +9124,13 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
       // Check if wallet already exists
       const existing = await getRegistrationData();
       if (existing?.kaspaAddress) {
+        // KV_RITUAL_AUTH: reusing / re-deriving an existing wallet requires a fresh unlock
+        if (!(await kvRequireAuthIfWalletExists('Unlock to use the existing wallet'))) {
+          setError('Locked: pass the Sentry checkpoint and unlock to use the existing wallet.');
+          setStep('error');
+          onLocked?.(); // KV_RITUAL_QUIZ: abort the ritual to the lock screen
+          return;
+        }
         const expectedPrefix = network === 'mainnet' ? 'kaspa:' : 'kaspatest:';
         const addr = existing.kaspaAddress;
         const dataAfterPrefix = addr.slice(expectedPrefix.length);
@@ -9091,10 +9165,9 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
           }
           // No mnemonic: nothing can restore this wallet. Clearing is the only path
           // forward, but it is irreversible, so make it explicit rather than silent.
-          console.warn('[PhaseAnchor] DELETE-GUARD: no mnemonic — wallet is unrecoverable');
-          await SecureStore.deleteItemAsync('kv_kaspa_address');
-          await SecureStore.deleteItemAsync('kv_private_key');
-          await SecureStore.deleteItemAsync('kv_mnemonic');
+          console.warn('[PhaseAnchor] DELETE-GUARD: no mnemonic - keeping the wallet (KV_NO_SILENT_DELETE)');
+          Alert.alert('Wallet kept', 'This wallet has no recovery words and belongs to the other network, so it was NOT deleted. Switch the network setting back to use it.');
+          return;
         } else {
           // Valid address — check if encrypted key exists (migration)
           const encKey = await SecureStore.getItemAsync('kv_l1_privkey_enc');
@@ -9147,6 +9220,14 @@ function PhaseAnchor({ recipe, onComplete }: { recipe: AvatarRecipe; onComplete?
         }
       }
       
+      // KV_RITUAL_QUIZ: key material without a registered address is still a wallet — never
+      // replace it from onboarding unless the quiz passed this session (or this run created it)
+      if (!(await kvRequireAuthIfWalletExists('Unlock to replace the wallet on this phone'))) {
+        setError('Locked: pass the Sentry checkpoint and unlock to replace the existing wallet.');
+        setStep('error');
+        onLocked?.();
+        return;
+      }
       // Create new wallet from identity hash
       const result = await createWallet({ network });
       

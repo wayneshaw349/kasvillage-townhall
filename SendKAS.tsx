@@ -153,7 +153,15 @@ function isValidKaspaAddress(input: string): boolean {
 }
 
 function kasToSompi(kas: number): bigint {
-  return BigInt(Math.floor(kas * 100_000_000));
+  return BigInt(Math.round(kas * 100_000_000)); // KV_SOMPI_ROUND
+}
+
+// [KV_AMOUNT_COMMA] accept "1,5" (comma decimal locales) as 1.5; junk -> 0 (never NaN -> BigInt throw)
+export function parseKasAmount(text: string | null | undefined): number {
+  const t = String(text || '').trim().replace(/\s+/g, '').replace(',', '.');
+  if (!/^\d*\.?\d*$/.test(t) || t === '' || t === '.') return 0;
+  const n = parseFloat(t);
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function sompiToKas(sompi: bigint): number {
@@ -261,27 +269,14 @@ export const SendKAS: React.FC<SendKASProps> = ({
       setError(null);
       
       if (isStealthInput(recipientInput)) {
-        const stealthParts = parseStealthInput(recipientInput);
-        if (stealthParts) {
-          try {
-            const payment = await createStealthPayment(stealthParts.scanPubkey, stealthParts.spendPubkey);
-            setstealthData(payment);
-            setResolved({
-              type: 'stealth',
-              address: payment.oneTimeAddress,
-              scanPubkey: stealthParts.scanPubkey,
-              spendPubkey: stealthParts.spendPubkey,
-              stealthPayment: payment,
-            });
-          } catch {
-            setError('Invalid PO Box address');
-            setResolved(null);
-          }
-        }
+        // [KV_STEALTH_DISABLED] the send path never publishes the ephemeral
+        // pubkey, so the recipient could never find/spend the funds. Block it.
+        setError('Stealth sends are disabled');
+        setResolved(null);
+        setstealthData(null);
         setIsResolving(false);
         return;
       }
-      
       if (isValidKaspaAddress(recipientInput)) {
         setResolved({ type: 'address', address: recipientInput });
         setIsResolving(false);
@@ -339,11 +334,12 @@ export const SendKAS: React.FC<SendKASProps> = ({
     if (text) setRecipientInput(text.trim());
   };
   
-  const amountSompi = kasToSompi(parseFloat(amountKas || '0'));
+  const amountSompi = kasToSompi(parseKasAmount(amountKas));
   const canProceed = inputValid && amountSompi > 0n && amountSompi <= balance && !isResolving;
   
   const handlePreview = async () => {
     if (!resolved?.address) return;
+    if (resolved.type === 'stealth' || isStealthInput(recipientInput)) { setError('Stealth sends are disabled'); return; }
     
     setIsLoading(true);
     setError(null);
@@ -363,7 +359,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
       amountKas: sompiToKas(amountSompi),
       estimatedFee,
       total,
-      isStealthPayment: resolved.type === 'stealth',
+      isStealthPayment: false, // KV_STEALTH_DISABLED: stealth recipients are rejected above
     });
     setStep('preview');
     setIsLoading(false);
@@ -371,6 +367,9 @@ export const SendKAS: React.FC<SendKASProps> = ({
   
   const handleSend = async () => {
     if (!preview || !resolved?.address) return;
+    if (resolved.type === 'stealth' || preview.isStealthPayment || isStealthInput(recipientInput)) {
+      setError('Stealth sends are disabled'); setStep('error'); return;
+    }
     
     setStep('sending');
     setIsLoading(true);

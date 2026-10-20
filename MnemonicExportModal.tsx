@@ -157,6 +157,7 @@ const MnemonicExportModal: React.FC<MnemonicExportModalProps> = ({
 
   const handleDeleteSeed = () => {
     if (confirmDelete) {
+      try { require('expo-secure-store').deleteItemAsync('kv_mnemonic').catch(() => {}); } catch {} // KV_SEED_DELETE: the key stays, only the 12 words go
       Alert.alert(
         '⚠️ Seed Deleted',
         'Your 12-word seed has been removed from KasVillage. Keep it safe in your Ledger/Tangem or write-down.',

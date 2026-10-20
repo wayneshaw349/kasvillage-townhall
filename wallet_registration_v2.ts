@@ -394,6 +394,98 @@ async function signMessage(message: string): Promise<string> {
   return bytesToHex(sig);
 }
 
+
+// ============================================================================
+// [KV_PREV_WALLETS] rolling stash of replaced wallets (create / restore)
+// ============================================================================
+// Index 'kv_prev_wallets' = JSON list (newest first, max 5) of metadata only.
+// Each entry's secrets live in their own SecureStore keys
+// (kv_prev_wallet_<id>_{priv,priv_enc,mnemonic,seed}, WHEN_PASSCODE_SET_THIS_DEVICE_ONLY).
+// An entry for a DIFFERENT wallet is never overwritten; per-entry secret keys
+// are never deleted (an entry that falls off the 5-slot index keeps its keys).
+// The legacy single slots kv_prev_wallet_{priv,priv_enc,mnemonic,meta} are
+// still written for compatibility with existing readers.
+export const PREV_WALLETS_INDEX = 'kv_prev_wallets';
+const PREV_WALLETS_MAX = 5;
+export interface PrevWalletEntry {
+  id: string; address: string; pubkey: string; stashedAt: number; reason: string;
+  hasPriv: boolean; hasPrivEnc: boolean; hasMnemonic: boolean; hasSeed: boolean;
+}
+export async function listPrevWallets(): Promise<PrevWalletEntry[]> {
+  try {
+    const raw = await SecureStore.getItemAsync(PREV_WALLETS_INDEX);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+/** True if any wallet KEY slot is populated (ignores avatar/stats JSON entirely). */
+export async function walletKeysExist(): Promise<boolean> {
+  for (const k of [STORE_KEYS.PRIVATE_KEY, 'kv_mnemonic', 'kv_l1_privkey_enc']) {
+    try { if (await SecureStore.getItemAsync(k)) return true; } catch {}
+  }
+  return false;
+}
+/**
+ * Stash the wallet currently in the live slots before they are overwritten.
+ * Throws if a secret could not be written, so the caller aborts instead of
+ * destroying the only copy.
+ */
+export async function stashCurrentWallet(reason: string, newAddress?: string): Promise<PrevWalletEntry | null> {
+  const opts = { keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY };
+  const prevPriv = await SecureStore.getItemAsync(STORE_KEYS.PRIVATE_KEY);
+  const prevPrivEnc = await SecureStore.getItemAsync('kv_l1_privkey_enc');
+  const prevMnemonic = await SecureStore.getItemAsync('kv_mnemonic');
+  const prevSeed = await SecureStore.getItemAsync(STORE_KEYS.MASTER_SEED);
+  const prevPub = (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY)) || '';
+  const prevAddr = (await SecureStore.getItemAsync(STORE_KEYS.KASPA_ADDRESS)) || '';
+  if (!prevPriv && !prevPrivEnc && !prevMnemonic && !prevSeed) return null;
+  if (newAddress && prevAddr && prevAddr === newAddress) return null; // same wallet, nothing to save
+
+  const list = await listPrevWallets();
+  // Same wallet already stashed (match by address, else pubkey): reuse its id only
+  // if its stored secrets equal what we are about to save — never clobber a different wallet.
+  const sameIdx = list.findIndex((e) => (prevAddr && e.address === prevAddr) || (!prevAddr && prevPub && e.pubkey === prevPub));
+  let id = '';
+  if (sameIdx >= 0) {
+    const e = list[sameIdx];
+    const ePriv = await SecureStore.getItemAsync('kv_prev_wallet_' + e.id + '_priv');
+    const eMn = await SecureStore.getItemAsync('kv_prev_wallet_' + e.id + '_mnemonic');
+    if ((ePriv || null) === (prevPriv || null) && (eMn || null) === (prevMnemonic || null)) id = e.id;
+  }
+  const isNew = !id;
+  if (isNew) {
+    const rnd = new Uint8Array(await Crypto.getRandomBytesAsync(4));
+    id = Date.now().toString(36) + Array.from(rnd, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  if (isNew) {
+    if (prevPriv) await SecureStore.setItemAsync('kv_prev_wallet_' + id + '_priv', prevPriv, opts);
+    if (prevPrivEnc) await SecureStore.setItemAsync('kv_prev_wallet_' + id + '_priv_enc', prevPrivEnc, opts);
+    if (prevMnemonic) await SecureStore.setItemAsync('kv_prev_wallet_' + id + '_mnemonic', prevMnemonic, opts);
+    if (prevSeed) await SecureStore.setItemAsync('kv_prev_wallet_' + id + '_seed', prevSeed, opts);
+    // verify read-back of the most important secret before letting the caller overwrite
+    if (prevMnemonic && (await SecureStore.getItemAsync('kv_prev_wallet_' + id + '_mnemonic')) !== prevMnemonic)
+      throw new Error('Stash verification failed (mnemonic)');
+    if (prevPriv && (await SecureStore.getItemAsync('kv_prev_wallet_' + id + '_priv')) !== prevPriv)
+      throw new Error('Stash verification failed (private key)');
+  }
+  const entry: PrevWalletEntry = {
+    id, address: prevAddr, pubkey: prevPub, stashedAt: Date.now(), reason,
+    hasPriv: !!prevPriv, hasPrivEnc: !!prevPrivEnc, hasMnemonic: !!prevMnemonic, hasSeed: !!prevSeed,
+  };
+  const next = [entry, ...list.filter((e) => e.id !== id)].slice(0, PREV_WALLETS_MAX);
+  await SecureStore.setItemAsync(PREV_WALLETS_INDEX, JSON.stringify(next));
+
+  // legacy single slots (compat with existing readers)
+  if (prevPriv) await SecureStore.setItemAsync('kv_prev_wallet_priv', prevPriv, opts);
+  if (prevPrivEnc) await SecureStore.setItemAsync('kv_prev_wallet_priv_enc', prevPrivEnc, opts);
+  if (prevMnemonic) await SecureStore.setItemAsync('kv_prev_wallet_mnemonic', prevMnemonic, opts);
+  await SecureStore.setItemAsync('kv_prev_wallet_meta', JSON.stringify({
+    address: prevAddr, pubkey: prevPub, stashedAt: entry.stashedAt, id,
+  }));
+  console.log('[Wallet] PREV-WALLETS: stashed', (prevAddr || prevPub).slice(0, 22), 'as', id, '(' + reason + ')');
+  return entry;
+}
+
 // ============================================================================
 // STEP 1: CREATE WALLET (Avatar-derived, deterministic + Stealth keys)
 // ============================================================================
@@ -430,6 +522,10 @@ export async function createWallet(options?: {
       }
     }
 
+    // [KV_NET_DEFAULT] one default for BOTH the address prefix and the stored
+    // kaspa_network (testnet-10 until the mainnet migration).
+    const network: 'mainnet' | 'testnet-10' | 'testnet-11' = options?.network || 'testnet-10';
+
     let wallet: {
       mnemonic: string;
       privateKeyHex: string;
@@ -451,7 +547,7 @@ export async function createWallet(options?: {
         mnemonic,
         privateKeyHex: bytesToHex(hdKey.privateKey),
         publicKeyHex: bytesToHex(pubBytes),
-        kaspaAddress: kaspaAddressFromXOnly(xOnly, options?.network?.startsWith('testnet') ? 'kaspatest' : 'kaspa'),
+        kaspaAddress: kaspaAddressFromXOnly(xOnly, network.startsWith('testnet') ? 'kaspatest' : 'kaspa'),
         seed: seed.slice(0, 32),
       };
     }
@@ -459,6 +555,10 @@ export async function createWallet(options?: {
     // Generate stealth keys from seed
     const stealthKeys = await generateStealthKeys(wallet.seed);
     const stealthAddress = `stealth:${stealthKeys.scanPublicKey}:${stealthKeys.spendPublicKey}`;
+
+    // [KV_CREATE_STASH] never overwrite an existing key/mnemonic without stashing it
+    // first (throws -> createWallet fails, live slots untouched).
+    await stashCurrentWallet('createWallet', wallet.kaspaAddress);
 
     // Store in SecureStore
     await SecureStore.setItemAsync(STORE_KEYS.PRIVATE_KEY, wallet.privateKeyHex, {
@@ -508,7 +608,7 @@ export async function createWallet(options?: {
     try { await SecureStore.deleteItemAsync('kaspa_address_tutorial'); } catch {}
     try { await SecureStore.deleteItemAsync('kaspa_address_real'); } catch {}
     // Save network
-    await SecureStore.setItemAsync('kaspa_network', options?.network || 'testnet-10');
+    await SecureStore.setItemAsync('kaspa_network', network);
 
     console.log('[Wallet] Created with stealth support');
     console.log(`[Wallet] Address: ${wallet.kaspaAddress}`);
@@ -578,25 +678,19 @@ export async function restoreWalletFromMnemonic(
     await generateStealthKeys(wallet.seed);
     // ---- STASH GUARD v2: address-based, saves BOTH key slots ----
     // Compares derived address vs stored address (pubkey slot can be stale).
+    // [KV_PREV_WALLETS] rolling list (max 5) + legacy single slots; stashes
+    // whenever the live slots hold a DIFFERENT wallet (or keys with no address).
     const prevAddr = (await SecureStore.getItemAsync(STORE_KEYS.KASPA_ADDRESS)) || '';
-    if (prevAddr && prevAddr !== wallet.kaspaAddress) {
+    if (prevAddr !== wallet.kaspaAddress) {
       const prevPriv = await SecureStore.getItemAsync(STORE_KEYS.PRIVATE_KEY);
-      const prevPrivEnc = await SecureStore.getItemAsync('kv_l1_privkey_enc');
-      const prevMnemonic = await SecureStore.getItemAsync('kv_mnemonic');
-      const prevPub = await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY);
-      if (prevPriv) await SecureStore.setItemAsync('kv_prev_wallet_priv', prevPriv, {
-        keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
-      });
-      if (prevPrivEnc) await SecureStore.setItemAsync('kv_prev_wallet_priv_enc', prevPrivEnc, {
-        keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
-      });
-      if (prevMnemonic) await SecureStore.setItemAsync('kv_prev_wallet_mnemonic', prevMnemonic, {
-        keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
-      });
-      await SecureStore.setItemAsync('kv_prev_wallet_meta', JSON.stringify({
-        address: prevAddr, pubkey: prevPub || '', stashedAt: Date.now(),
-      }));
-      console.log('[Restore] STASH-GUARD v2: stashed', prevAddr.slice(0, 22));
+      const prevMn = await SecureStore.getItemAsync('kv_mnemonic');
+      // [KV_PREV_WALLETS] gate on ANY key slot (mnemonic-only / enc-key-only installs too),
+      // skipping only when the live slots provably hold this same wallet.
+      const sameWallet = prevPriv ? prevPriv === wallet.privateKeyHex : (!!prevMn && prevMn === mnemonic);
+      if (prevAddr || (!sameWallet && (await walletKeysExist()))) {
+        await stashCurrentWallet('restoreWalletFromMnemonic', wallet.kaspaAddress);
+        console.log('[Restore] STASH-GUARD v2: stashed', prevAddr.slice(0, 22));
+      }
     }
 
     // ---- identical SecureStore writes ----
@@ -1021,7 +1115,8 @@ export async function getRegistrationData(): Promise<RegistrationData | null> {
   try {
     const publicKeyHex = await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY);
     const kaspaAddress = await SecureStore.getItemAsync(STORE_KEYS.KASPA_ADDRESS);
-    const stealthAddress = await getStealthAddress();
+    let stealthAddress: string | null = null;
+    try { stealthAddress = await getStealthAddress(); } catch (e) { console.warn('[getRegistrationData] stealth addr failed', e); }
     const aptNumber = await SecureStore.getItemAsync(STORE_KEYS.APT_NUMBER);
     const registrationTx = await SecureStore.getItemAsync(STORE_KEYS.REGISTRATION_TX);
     const verificationTx = await SecureStore.getItemAsync(STORE_KEYS.VERIFICATION_TX);
@@ -1039,11 +1134,18 @@ export async function getRegistrationData(): Promise<RegistrationData | null> {
       return null;
     }
 
-    const avatar = avatarJson ? JSON.parse(avatarJson) : {};
-    const stats: UserStats = statsJson ? JSON.parse(statsJson) : createDefaultUserStats();
-    const traitCount = countAvatarTraits(avatar);
-    const accessLevel = await getAccessLevel();
-    const xpTier = getXPTier(stats.xp);
+    // [KV_WALLET_EXISTS_KEYS] unrelated JSON (avatar / USER_STATS) must never make
+    // this return null — callers treat null as "no wallet" and onboarding would
+    // then create a new wallet over the existing keys.
+    let avatar: any = {};
+    try { avatar = avatarJson ? JSON.parse(avatarJson) : {}; } catch (e) { console.warn('[getRegistrationData] bad avatar JSON', e); }
+    let stats: UserStats = createDefaultUserStats();
+    try { if (statsJson) stats = JSON.parse(statsJson); } catch (e) { console.warn('[getRegistrationData] bad USER_STATS JSON', e); }
+    let traitCount = 0;
+    try { traitCount = countAvatarTraits(avatar); } catch {}
+    let accessLevel: AccessLevel = 'GUEST';
+    try { accessLevel = await getAccessLevel(); } catch (e) { console.warn('[getRegistrationData] access level failed', e); }
+    const xpTier = getXPTier(Number((stats as any)?.xp) || 0);
 
     return {
       publicKeyHex,
@@ -1062,6 +1164,24 @@ export async function getRegistrationData(): Promise<RegistrationData | null> {
     };
   } catch (error) {
     console.error('Failed to get registration data:', error);
+    // Storage error: if wallet KEY slots exist, still report the wallet so no
+    // caller mistakes a read failure for "no wallet" and overwrites keys.
+    try {
+      if (await walletKeysExist()) {
+        const kaspaAddress = (await SecureStore.getItemAsync(STORE_KEYS.KASPA_ADDRESS)) ||
+          (await SecureStore.getItemAsync('kaspa_address')) || '';
+        const publicKeyHex = (await SecureStore.getItemAsync(STORE_KEYS.PUBLIC_KEY)) || '';
+        if (kaspaAddress) {
+          return {
+            publicKeyHex, kaspaAddress, stealthAddress: null, aptNumber: null,
+            registrationTx: null, verificationTx: null, kaspaTxId: null,
+            registrationStatus: 'wallet_created', verificationStatus: 'unverified',
+            accessLevel: 'GUEST', traitCount: 0, stats: createDefaultUserStats(),
+            xpTier: getXPTier(0),
+          } as RegistrationData;
+        }
+      }
+    } catch {}
     return null;
   }
 }

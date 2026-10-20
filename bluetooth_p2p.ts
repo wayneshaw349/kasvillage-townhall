@@ -5,7 +5,7 @@ import { Platform, PermissionsAndroid } from 'react-native';
 // BLE_NATIVE_REQUIRED: needs EAS dev build
 let BleManager: any, Device: any, State: any;
 try {
-  const blePlx = require('react-native-ble-plx');
+  const blePlx: any = null; if (!blePlx) throw new Error('Bluetooth removed'); /* KV_NO_BLE_P2P */
   BleManager = blePlx.BleManager;
   Device = blePlx.Device;
   State = blePlx.State;
@@ -15,7 +15,7 @@ try {
   State = { PoweredOn: 'PoweredOn', PoweredOff: 'PoweredOff' };
 }
 let BLEAdvertiser: any;
-try { BLEAdvertiser = require('react-native-ble-advertiser').default; } catch { BLEAdvertiser = { setCompanyId: () => {}, broadcast: async () => {}, stopBroadcast: async () => {}, scan: async () => {}, stopScan: async () => {}, addListener: () => ({ remove: () => {} }) }; }
+try { BLEAdvertiser = (null as any).default; /* KV_NO_BLE_ADV */ } catch { BLEAdvertiser = { setCompanyId: () => {}, broadcast: async () => {}, stopBroadcast: async () => {}, scan: async () => {}, stopScan: async () => {}, addListener: () => ({ remove: () => {} }) }; }
 
 // =============================================================================
 // CONSTANTS

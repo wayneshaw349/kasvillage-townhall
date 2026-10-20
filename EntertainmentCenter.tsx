@@ -657,17 +657,7 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
               </View>
             )}
             
-            {/* Build DApp CTA */}
-            <TouchableOpacity 
-              style={styles.buildCta}
-              onPress={() => Linking.openURL('https://claude.ai/code')}
-            >
-              <Text style={styles.buildCtaIcon}>🛠️</Text>
-              <View>
-                <Text style={styles.buildCtaTitle}>Build Your Own DApp</Text>
-                <Text style={styles.buildCtaSubtitle}>Claude Code IDE</Text>
-              </View>
-            </TouchableOpacity>
+            {/* KV_NO_CLAUDE_CTA removed */}
           </>
         ) : (
           <>

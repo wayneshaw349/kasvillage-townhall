@@ -148,6 +148,16 @@ export function parseVaultSetupQR(data: string): VaultSetupPayload | null {
  * One fresh k per input (same rule as buyerBuildTemplate). Phone keeps nonces
  * ONLY until vaultAggregate returns, then destroys them.
  */
+/** [KV_VAULT_FEE_SHAPE] canonical vault min fee for the ACTUAL template shape (builder + verifier). */
+export function vaultMinFee(inputCount: number, outputCount: number): bigint {
+  return BigInt(inputCount * 115000 + outputCount * 48000 + 5000);
+}
+/** Highest fee an honest builder declares for this shape: a 1-output template may absorb
+ *  change up to the 2-output fee + 600-sompi dust boundary. */
+export function vaultMaxHonestFee(inputCount: number, outputCount: number): bigint {
+  return outputCount === 1 ? vaultMinFee(inputCount, 2) + 600n : vaultMinFee(inputCount, outputCount);
+}
+
 export function vaultBuildSpendTemplate(params: {
   vault: VaultInfo;
   privateKeyHex: string;   // phone's key
@@ -176,16 +186,21 @@ export function vaultBuildSpendTemplate(params: {
   }
 
   const totalIn = sorted.reduce((s, u) => s + BigInt(u.amount), 0n);
-  // Fee floor mirrors canonical formula, assume 2 outputs (recipient + change)
-  const fee = params.fee || BigInt(sorted.length * 115000 + 2 * 48000 + 5000);
-  if (amountSompi + fee > totalIn) {
-    return { error: 'Insufficient vault balance: need ' + (amountSompi + fee) + ', have ' + totalIn };
+  // [KV_VAULT_FEE_SHAPE] fee for the ACTUAL output count: 2 (recipient + change) when the
+  // change is non-dust, else 1 output with the leftover absorbed into the declared fee.
+  const fee2 = params.fee || vaultMinFee(sorted.length, 2);
+  const fee1 = params.fee || vaultMinFee(sorted.length, 1);
+  if (amountSompi + fee1 > totalIn) {
+    return { error: 'Insufficient vault balance: need ' + (amountSompi + fee1) + ', have ' + totalIn };
   }
 
-  const change = totalIn - amountSompi - fee;
+  const change = totalIn - amountSompi - fee2;
   const outputs: { v: string; s: string }[] = [{ v: amountSompi.toString(), s: recipientScript }];
-  if (change > 546n) outputs.push({ v: change.toString(), s: vault.escrowScript }); // change stays in vault
-  // change <= 546 (dust): absorbed into fee implicitly (outputs+fee < inputs is fine — verified below as non-inflation)
+  // [KV_VAULT_FEE_EXACT] dust change is absorbed into the DECLARED fee so the
+  // cosigner's check (declared fee == sum(in) - sum(out)) holds exactly.
+  let declaredFee = fee2;
+  if (change > 600n) outputs.push({ v: change.toString(), s: vault.escrowScript }); // change stays in vault
+  else declaredFee = totalIn - amountSompi; // 1 output: fee1 + leftover (<= fee2 - fee1 + 600)
 
   const nonces: FrostNonce[] = sorted.map(() =>
     generateNonce(privateKeyHex, vault.myPubkey, vault.cosignerPubkey, vault.counter)
@@ -194,7 +209,7 @@ export function vaultBuildSpendTemplate(params: {
   const template: TxTemplate = {
     u: sorted.map((u) => ({ t: u.txId, i: u.index, a: u.amount, s: u.scriptPubKey })),
     o: outputs,
-    f: fee.toString(),
+    f: declaredFee.toString(),
     R: nonces.map((n) => n.R_hex),
     agr: 'VAULT_' + vault.vaultId,
     lt: '0',
@@ -236,6 +251,11 @@ export function vaultVerifySpendTemplate(
   amountSompi?: bigint;
   changeSompi?: bigint;
   feeSompi?: bigint;
+  /** [KV_VAULT_ALL_OUTPUTS] every non-change output (what actually leaves the vault). */
+  outputs?: { script: string; sompi: bigint }[];
+  /** Real fee = sum(inputs) - sum(outputs). Equals feeSompi when valid. */
+  computedFeeSompi?: bigint;
+  declaredFeeSompi?: bigint;
 } {
   if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
     return { valid: false, error: 'Template must carry one R nonce per input (v2).' };
@@ -266,30 +286,67 @@ export function vaultVerifySpendTemplate(
   if (totalOut + fee > totalIn) {
     return { valid: false, error: 'Inflation: outputs + fee exceed inputs.' };
   }
-  const minFee = BigInt(template.u.length * 115000 + template.o.length * 48000 + 5000);
-  if (fee < minFee) {
-    return { valid: false, error: 'Fee too low: ' + fee + ' < ' + minFee };
+  // [KV_VAULT_REAL_FEE] the fee the network actually takes is in - out. A
+  // declared fee lower than that hides burned funds from the human.
+  const computedFee = totalIn - totalOut;
+  if (computedFee !== fee) {
+    return {
+      valid: false,
+      error: 'Fee mismatch: request declares ' + fee + ' sompi but inputs - outputs = ' + computedFee +
+        ' sompi. Refusing to sign.',
+    };
+  }
+  const minFee = vaultMinFee(template.u.length, template.o.length); // [KV_VAULT_FEE_SHAPE]
+  if (computedFee < minFee) {
+    return { valid: false, error: 'Fee too low: ' + computedFee + ' < ' + minFee };
   }
 
-  // Identify change (pays back to vault) vs recipient
-  const changeIdx = template.o.findIndex((o) => o.s === vault.escrowScript);
-  const recipIdx = template.o.findIndex((o) => o.s !== vault.escrowScript);
-  if (recipIdx < 0) {
+  // [KV_VAULT_ALL_OUTPUTS] change = pays back to the vault; EVERY other output is a recipient.
+  let change = 0n;
+  const recipients: { script: string; sompi: bigint }[] = [];
+  for (const o of template.o) {
+    if (o.s === vault.escrowScript) change += BigInt(o.v);
+    else recipients.push({ script: o.s, sompi: BigInt(o.v) });
+  }
+  const selfSweep = recipients.length === 0;
+  const sent = selfSweep ? totalOut : recipients.reduce((s, r) => s + r.sompi, 0n);
+
+  // Absurd-fee guard: > 1 KAS, or > 10% of the amount sent (the standard
+  // minimum fee for this template shape is always allowed).
+  const ONE_KAS = 100_000_000n;
+  if (computedFee > ONE_KAS) {
+    return { valid: false, error: 'Fee is absurd: ' + computedFee + ' sompi (> 1 KAS). Refusing to sign.' };
+  }
+  if (computedFee * 10n > sent && computedFee > vaultMaxHonestFee(template.u.length, template.o.length) + 1000n) { // [KV_VAULT_FEE_SHAPE]
+    return {
+      valid: false,
+      error: 'Fee is absurd: ' + computedFee + ' sompi is more than 10% of the ' + sent +
+        ' sompi being sent. Refusing to sign.',
+    };
+  }
+
+  if (selfSweep) {
     // Self-sweep (consolidation back into vault) — allowed, recipient IS the vault
     return {
       valid: true,
       recipientScript: vault.escrowScript,
       amountSompi: totalOut,
       changeSompi: 0n,
-      feeSompi: fee,
+      feeSompi: computedFee,
+      outputs: [],
+      computedFeeSompi: computedFee,
+      declaredFeeSompi: fee,
     };
   }
   return {
     valid: true,
-    recipientScript: template.o[recipIdx].s,
-    amountSompi: BigInt(template.o[recipIdx].v),
-    changeSompi: changeIdx >= 0 ? BigInt(template.o[changeIdx].v) : 0n,
-    feeSompi: fee,
+    recipientScript: recipients[0].script,
+    amountSompi: sent,
+    changeSompi: change,
+    feeSompi: computedFee,
+    outputs: recipients,
+    computedFeeSompi: computedFee,
+    declaredFeeSompi: fee,
   };
 }
 

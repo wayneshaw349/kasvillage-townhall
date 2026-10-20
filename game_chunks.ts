@@ -18,8 +18,9 @@
 
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
-import { publishHtmlChunks, fetchHtmlPage, scanHtmlForPublish, HtmlScanIssue } from './html_chunks';
+import { publishHtmlChunks, fetchHtmlPage, scanHtmlForPublish, HtmlScanIssue, HTML_SOFT_MAX_BYTES } from './html_chunks';
 import { publishConfigChunks, fetchStoreConfig } from './config_chunks';
+import { kvAssembleChunks, kvInflateCapped, kvTxPaysAddress, KV_PAGE_MAX_DECOMPRESSED, KV_GAME_MAX_TOTAL } from './kaspa_payload';
 import type { OwnerKeys } from './payload_publish';
 
 export const GAME_MAX_BYTES = 8_000_000;
@@ -160,20 +161,34 @@ function kvB64ToBytes(b64: string): Uint8Array {
   for (let i = 0; i < s2.length; i++) { buf = (buf << 6) | abc.indexOf(s2[i]); bits += 6; if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 255); } }
   return Uint8Array.from(out);
 }
+// KV_INFLATE_CAP: a manifest is bounded like a config, each fragment by the 60 KB
+// page cap it was published under, the whole game by KV_GAME_MAX_TOTAL.
+function kvManifestBounds(m: GameManifest): string | null {
+  if (!m || !Array.isArray(m.frags) || !m.frags.length) return 'manifest has no fragments';
+  if (Number(m.html_bytes) > KV_GAME_MAX_TOTAL) return 'game too large (' + m.html_bytes + ' bytes)';
+  if (m.frags.length * HTML_SOFT_MAX_BYTES > KV_GAME_MAX_TOTAL + HTML_SOFT_MAX_BYTES) return 'too many fragments (' + m.frags.length + ')';
+  for (const f of m.frags) if (!(Number(f.bytes) > 0) || Number(f.bytes) > HTML_SOFT_MAX_BYTES) return 'fragment ' + f.i + ' size out of bounds';
+  return null;
+}
+const kvChunkChars = (maxBytes: number) => Math.ceil(maxBytes * 4 / 3) + 65536;
 async function fetchGameViaWalk(
   manifestHash: string, pinnedHead: string,
   coords: { anchor_hash: string; daa_from?: number; daa_to: number },
   network: string,
   onProgress?: (have: number, total: number) => void,
+  manifestAddress?: string, // KV_WALK_PAYTO: manifest txs must pay it (when outputs are exposed)
 ): Promise<{ html: string | null; error?: string }> {
   try {
-    const pako = require('pako');
     const sink = await (await fetch(KV_WALK_RELAY + '/api/kaspa/sink')).json();
     const vdaa = Number(sink.virtual_daa_score || 0);
     const daaTo = Number(coords.daa_to);
     if (vdaa && vdaa - daaTo > 1100000) return { html: null, error: 'publish window (~30h) closed - needs a republish' };
-    const store: Record<string, { t: number; tot: number; c: string }> = {};
-    const mstore: Record<number, { t: number; tot: number; c: string }> = {};
+    // KV_CHUNK_CANDIDATES: keep every matching record in walk (chain) order; assembly picks
+    // signed records and tries groupings until the hash matches. No owner filter here:
+    // keepers repost under their own key (content-addressed, KV_GAME_REPOST).
+    const store: Record<string, Array<{ rec: any; tx: any }>> = {};
+    const mstore: any[] = [];
+    let kept = 0;
     let low = String(coords.anchor_hash);
     let pages = 0, retries = 0;
     while (pages < 450) {
@@ -184,49 +199,54 @@ async function fetchGameViaWalk(
       for (const b of page.blocks || []) for (const tx of b.txs || []) {
         try {
           const hx = String(tx.payload_hex || '');
+          if (hx.length > 8192) continue; // payload soft max is 2000 B
           let raw = '';
           for (let i = 0; i < hx.length; i += 2) raw += String.fromCharCode(parseInt(hx.substr(i, 2), 16));
           try { raw = decodeURIComponent(escape(raw)); } catch {}
           const rec = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw);
           const d = rec && rec.d;
           if (!d || rec.k !== 'cfg') continue;
-          if (d.ty === 'html' && d.h && typeof d.seq === 'number') {
-            const k = d.h + ':' + d.seq;
-            if (!store[k] || (rec.t || 0) > store[k].t) store[k] = { t: rec.t || 0, tot: d.tot, c: d.c };
+          if (kept > 60000) continue;
+          if (d.ty === 'html' && typeof d.h === 'string' && typeof d.seq === 'number') {
+            (store[d.h] || (store[d.h] = [])).push({ rec, tx: Array.isArray(tx.outputs) ? { outputs: tx.outputs } : null }); kept++;
           } else if (!d.ty && d.h === manifestHash && typeof d.seq === 'number') {
-            if (!mstore[d.seq] || (rec.t || 0) > mstore[d.seq].t) mstore[d.seq] = { t: rec.t || 0, tot: d.tot, c: d.c };
+            if (kvTxPaysAddress(tx, manifestAddress) === false) continue;
+            mstore.push(rec); kept++;
           }
         } catch {}
       }
       if (page.done || !page.next_low_hash) break;
       low = page.next_low_hash;
     }
-    const m0 = mstore[0];
-    if (!m0) return { html: null, error: 'walk found no manifest chunks in span' };
-    let mb64 = '';
-    for (let i = 0; i < m0.tot; i++) { const c = mstore[i]; if (!c) return { html: null, error: 'walk missing manifest chunk ' + i }; mb64 += c.c; }
-    const mjson = new TextDecoder().decode(pako.inflate(kvB64ToBytes(mb64)));
-    if (hex(mjson) !== manifestHash) return { html: null, error: 'walked manifest hash mismatch' };
+    if (!mstore.length) return { html: null, error: 'walk found no manifest chunks in span' };
+    const inflateTo = (cap: number) => (b64: string) => new TextDecoder().decode(kvInflateCapped(kvB64ToBytes(b64), cap));
+    const ma = kvAssembleChunks(mstore, manifestHash, inflateTo(KV_PAGE_MAX_DECOMPRESSED), { maxChunkChars: kvChunkChars(KV_PAGE_MAX_DECOMPRESSED) });
+    if (ma.text === null) return { html: null, error: 'walked manifest: ' + ma.error };
+    const mjson = ma.text;
     const m = JSON.parse(mjson) as GameManifest;
     if (m.kind !== 'kv_game_manifest' || m.v !== 2) return { html: null, error: 'walked manifest: bad kind' };
     if (m.head !== pinnedHead) return { html: null, error: 'walked manifest HEAD is not the pinned build' };
     const vc = verifyChain(m);
     if (!vc.head) return { html: null, error: vc.error };
+    const mb = kvManifestBounds(m);
+    if (mb) return { html: null, error: 'walked manifest: ' + mb };
     const texts: string[] = new Array(m.frags.length);
-    let have = 0;
+    let have = 0, totalBytes = 0;
     for (const f of m.frags) {
-      const f0 = store[f.h + ':0'];
-      if (!f0) return { html: null, error: 'walk missing fragment ' + f.i };
-      let b64 = '';
-      for (let i = 0; i < f0.tot; i++) { const c = store[f.h + ':' + i]; if (!c) return { html: null, error: 'walk missing chunk ' + i + ' of fragment ' + f.i }; b64 += c.c; }
-      const text = new TextDecoder().decode(pako.inflate(kvB64ToBytes(b64)));
-      if (hex(text) !== f.h) return { html: null, error: 'walked fragment ' + f.i + ' hash mismatch' };
+      const slotAddr = Array.isArray(m.addresses) ? (m.addresses[f.slot] || undefined) : undefined;
+      const fr = (store[f.h] || []).filter((x) => !x.tx || kvTxPaysAddress(x.tx, slotAddr || undefined) !== false).map((x) => x.rec);
+      if (!fr.length) return { html: null, error: 'walk missing fragment ' + f.i };
+      const fa = kvAssembleChunks(fr, f.h, inflateTo(HTML_SOFT_MAX_BYTES), { maxChunkChars: kvChunkChars(HTML_SOFT_MAX_BYTES) });
+      if (fa.text === null) return { html: null, error: 'walked fragment ' + f.i + ': ' + fa.error };
+      const text = fa.text;
+      totalBytes += utf8ToBytes(text).length;
+      if (totalBytes > KV_GAME_MAX_TOTAL) return { html: null, error: 'game exceeds ' + KV_GAME_MAX_TOTAL + ' bytes' };
       texts[f.i] = text;
       onProgress?.(++have, m.frags.length);
     }
     const html = texts.join('');
     if (hex(html) !== m.html_sha256) return { html: null, error: 'walked page hash mismatch' };
-    const scan = scanGameForPublish(html);
+    const scan = scanGameForPublish(html); // KV_DISPLAY_GATE: includes scanHtmlContent (content filter on visible text, fail-closed)
     if (!scan.ok) return { html: null, error: 'game failed safety scan: ' + scan.issues.map((i: any) => i.code).join(',') };
     await gameCacheSave(pinnedHead, html);
     await kvSaveManifest(pinnedHead, mjson);
@@ -260,7 +280,7 @@ export async function fetchGamePuzzle(
       // records from raw blocks, verify everything. Works while the publish
       // window (~30h) is open; the same walk the PC harvest proved.
       if (coords && /^[0-9a-f]{64}$/.test(String(coords.anchor_hash || '')) && Number(coords.daa_to) > 0) {
-        const w = await fetchGameViaWalk(manifestHash, pinnedHead, coords as any, network, onProgress);
+        const w = await fetchGameViaWalk(manifestHash, pinnedHead, coords as any, network, onProgress, manifestAddress);
         if (w.html) return w;
         return { html: null, error: 'manifest: ' + (error || 'no records') + '; walk: ' + (w.error || 'failed') };
       }
@@ -270,14 +290,17 @@ export async function fetchGamePuzzle(
     const vc = verifyChain(m);
     if (!vc.head) return { html: null, error: vc.error };
     if (m.addresses.some((a) => !a)) return { html: null, error: 'manifest has unpublished slots' };
+    { const mb = kvManifestBounds(m); if (mb) return { html: null, error: mb }; }
 
     const texts: string[] = new Array(m.frags.length);
-    let next = 0, have = 0, fail: string | null = null;
+    let next = 0, have = 0, fail: string | null = null, totalBytes = 0;
     const worker = async () => {
       while (!fail && next < m.frags.length) {
         const f = m.frags[next++];
-        const r = await fetchHtmlPage(m.addresses[f.slot]!, f.h, network);   // existing: hash + 60 KB scan
+        const r = await fetchHtmlPage(m.addresses[f.slot]!, f.h, network, coords, undefined, { maxBytes: HTML_SOFT_MAX_BYTES });   // existing: hash + 60 KB scan; KV_FRAG_COORDS: walk fallback per fragment; KV_INFLATE_CAP
         if (!r.html) { fail = 'fragment ' + f.i + ': ' + r.error; return; }
+        totalBytes += utf8ToBytes(r.html).length;
+        if (totalBytes > KV_GAME_MAX_TOTAL) { fail = 'game exceeds ' + KV_GAME_MAX_TOTAL + ' bytes'; return; }
         texts[f.i] = r.html; onProgress?.(++have, m.frags.length);
       }
     };
@@ -286,7 +309,7 @@ export async function fetchGamePuzzle(
 
     const html = texts.join('');
     if (hex(html) !== m.html_sha256) return { html: null, error: 'solved page hash mismatch' };
-    const scan = scanGameForPublish(html);
+    const scan = scanGameForPublish(html); // KV_DISPLAY_GATE: includes scanHtmlContent (content filter on visible text, fail-closed)
     if (!scan.ok) return { html: null, error: 'game failed safety scan: ' + scan.issues.map((i) => i.code).join(',') };
     await gameCacheSave(pinnedHead, html);
     await kvSaveManifest(pinnedHead, JSON.stringify(m));
@@ -370,7 +393,7 @@ export async function repostGame(
     try {
       let lo = Number.MAX_SAFE_INTEGER, hi = 0;
       for (const sa of (m.addresses as string[]).concat([q.manifestAddress])) {
-        const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(sa) + '/utxos');
+        const ur = await fetch((String(sa).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(sa) + '/utxos');
         for (const u of (await ur.json()) || []) { const d = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0); if (d > 0) { if (d < lo) lo = d; if (d > hi) hi = d; } }
       }
       if (hi > 0) coords = { daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600 };
@@ -382,3 +405,5 @@ export async function repostGame(
     return { success: true, sent: done, coords };
   } catch (e: any) { return { success: false, error: String(e?.message || e) + ' (after ' + done + '/' + total + ')', sent: done }; }
 }
+
+// KV_NET_API (1)

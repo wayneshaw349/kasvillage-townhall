@@ -793,6 +793,7 @@ const KvChainGamePublish: React.FC = () => {
   const [myAddr, setMyAddr] = useState('');
   const [glog, setGlog] = useState<string[]>([]);
   const [gbusy, setGbusy] = useState('');
+  const _kvGameInflight = useRef(false); // KV_INFLIGHT_LOCK
   // Tips are OPT-IN. tip_addr enters the announced quad only while this is on,
   // and cards render a TIP button only when a quad declares one. Off by
   // default; the choice persists per device.
@@ -852,7 +853,7 @@ const KvChainGamePublish: React.FC = () => {
           const _agr = /^AGR_[A-Za-z0-9]+$/.test(txid.trim()) ? txid.trim() : '';
           txid = _agr || txid.toLowerCase().replace(/[^0-9a-f]/g, '');
           if (!_agr && !/^[0-9a-f]{64}$/.test(txid)) { Alert.alert('Bad proof', 'Enter a 64-hex txid or an AGR_ agreement ID.'); return; }
-          Alert.alert('Grant ' + item + '?', 'To ' + to.slice(0, 12) + '\u2026 for ' + gameId + ' (0.1 KAS, signed by your key).', [
+          Alert.alert('Grant ' + item + '?', 'To ' + to.slice(0, 12) + '\u2026 for ' + gameId + ' (0.2 KAS, signed by your key).', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Grant', onPress: async () => {
               try {
@@ -887,7 +888,7 @@ const KvChainGamePublish: React.FC = () => {
         if (!item) return;
         ask('Send board - payment proof (optional)', 'txid or AGR_ agreement ID for your sales record. Leave blank for a free gift.', (proof) => {
           const pr = /^AGR_[A-Za-z0-9]+$/.test(proof) ? proof : proof.toLowerCase().replace(/[^0-9a-f]/g, '');
-          Alert.alert('Send ' + item + '?', gameId + ' -> ' + to.slice(0, 12) + '\u2026\nPrivate delivery (0.1 KAS to the buyer). Not announced publicly.', [
+          Alert.alert('Send ' + item + '?', gameId + ' -> ' + to.slice(0, 12) + '\u2026\nPrivate delivery (0.2 KAS to the buyer). Not announced publicly.', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Send', onPress: async () => { (globalThis as any).__kvSendTo = { toPub: to, item, proof: pr }; try { await runAnnounceOnly(gameId); } finally { (globalThis as any).__kvSendTo = null; } } },
           ]);
@@ -1120,6 +1121,11 @@ const KvChainGamePublish: React.FC = () => {
     ]);
   };
   const runAnnounceOnly = async (gameId: string) => {
+    if (gbusy || _kvGameInflight.current) return; // KV_INFLIGHT_LOCK: ref set synchronously, gbusy is stale render state
+    _kvGameInflight.current = true;
+    try { return await _runAnnounceOnlyImpl(gameId); } finally { _kvGameInflight.current = false; }
+  };
+  const _runAnnounceOnlyImpl = async (gameId: string) => {
     if (gbusy) return;
     setGbusy(gameId); setGlog([]);
     try {
@@ -1150,7 +1156,7 @@ const KvChainGamePublish: React.FC = () => {
       try {
         let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
         for (const sa of slotAddresses.concat([manifestAddress])) {
-          const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(sa) + '/utxos');
+          const ur = await fetch((String(sa).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(sa) + '/utxos');
           for (const u of (await ur.json()) || []) {
             const d = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
             if (d > 0) { if (d < lo) lo = d; if (d > hi) hi = d; }
@@ -1177,7 +1183,7 @@ const KvChainGamePublish: React.FC = () => {
           const { sendBoard } = require('./payload_publish');
           const _sb: any = await sendBoard(owner, _st.toPub, gameId, _st.item, quad, _st.proof || '');
           if (_sb && _sb.success !== false) {
-            gadd('board delivered to ' + String(_sb.toAddr).slice(0, 24) + '\u2026 (0.1 KAS rebate + render instructions)');
+            gadd('board delivered to ' + String(_sb.toAddr).slice(0, 24) + '\u2026 (0.2 KAS rebate + render instructions)');
             try {
               const _AS3 = require('@react-native-async-storage/async-storage').default;
               const _lg = JSON.parse((await _AS3.getItem('kv_sales_log')) || '[]');
@@ -1197,6 +1203,11 @@ const KvChainGamePublish: React.FC = () => {
     setGbusy('');
   };
   const runPublish = async (gameId: string) => {
+    if (gbusy || _kvGameInflight.current) return; // KV_INFLIGHT_LOCK: ref set synchronously, gbusy is stale render state
+    _kvGameInflight.current = true;
+    try { return await _runPublishImpl(gameId); } finally { _kvGameInflight.current = false; }
+  };
+  const _runPublishImpl = async (gameId: string) => {
     if (gbusy) return;
     setGbusy(gameId); setGlog([]); setTriple(''); setGprog(null);
     try {
@@ -1230,7 +1241,7 @@ const KvChainGamePublish: React.FC = () => {
         const led = require('./utxo_ledger');
         const lt = await led.getLockedTotals();
         gadd('owner ' + myAddr);
-        const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(myAddr) + '/utxos');
+        const ur = await fetch((String(myAddr).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(myAddr) + '/utxos');
         const uj = await ur.json();
         const tot = (Array.isArray(uj) ? uj : []).reduce((a: bigint, u: any) => a + BigInt(u.utxoEntry?.amount || u.amount || '0'), 0n);
         gadd('visible UTXOs ' + (Number(tot) / 1e8).toFixed(4) + ' KAS in ' + (Array.isArray(uj) ? uj.length : 0) + ' coins');
@@ -1267,7 +1278,7 @@ const KvChainGamePublish: React.FC = () => {
       try {
         let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
         for (const sa of slotAddresses.concat([manifestAddress])) {
-          const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(sa) + '/utxos');
+          const ur = await fetch((String(sa).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(sa) + '/utxos');
           for (const u of (await ur.json()) || []) {
             const d = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
             if (d > 0) { if (d < lo) lo = d; if (d > hi) hi = d; }
@@ -1294,7 +1305,7 @@ const KvChainGamePublish: React.FC = () => {
             const { sendBoard } = require('./payload_publish');
             const _sb: any = await sendBoard(owner, _st.toPub, gameId, _st.item, quad, _st.proof || '');
             if (_sb && _sb.success !== false) {
-              gadd('board delivered to ' + String(_sb.toAddr).slice(0, 24) + '\u2026 (0.1 KAS rebate + render instructions)');
+              gadd('board delivered to ' + String(_sb.toAddr).slice(0, 24) + '\u2026 (0.2 KAS rebate + render instructions)');
               try {
                 const _AS3 = require('@react-native-async-storage/async-storage').default;
                 const _lg = JSON.parse((await _AS3.getItem('kv_sales_log')) || '[]');
@@ -2686,7 +2697,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       let _absCoords: any = undefined;
       try {
         let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
-        const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(_pubRes.storeAddress) + '/utxos');
+        const ur = await fetch((String(_pubRes.storeAddress).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(_pubRes.storeAddress) + '/utxos');
         for (const u of (await ur.json()) || []) {
           const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
           if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
@@ -2780,7 +2791,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
         let _c: any = undefined;
         try {
           let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
-          const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(_st) + '/utxos');
+          const ur = await fetch((String(_st).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(_st) + '/utxos');
           for (const u of (await ur.json()) || []) {
             const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
             if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
@@ -3926,6 +3937,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   
   // Publishing state
   const [isPublishing, setIsPublishing] = useState(false);
+  const _kvStoreInflight = useRef(false); // KV_INFLIGHT_LOCK: store publish / announce
   const [pubStage, setPubStage] = useState('');
   // On-chain HTML page (optional): published as hash-pinned chunks, rendered
   // in a sandboxed WebView. kv:// links only - no external navigation.
@@ -4149,6 +4161,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   // every chunk again. This re-stamps a fresh registry entry from the stored
   // publish details for the price of one announce (~1 KAS).
   const handleAnnounceStore = async () => {
+    if (_kvStoreInflight.current) return; // KV_INFLIGHT_LOCK
+    _kvStoreInflight.current = true;
+    try { await _handleAnnounceStoreImpl(); } finally { _kvStoreInflight.current = false; }
+  };
+  const _handleAnnounceStoreImpl = async () => {
     try {
       setPubStage('Announcing to registry...');
       const AS = require('@react-native-async-storage/async-storage').default;
@@ -4163,7 +4180,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       let coords: any = undefined;
       try {
         let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
-        const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(st.storeAddress) + '/utxos');
+        const ur = await fetch((String(st.storeAddress).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(st.storeAddress) + '/utxos');
         for (const u of (await ur.json()) || []) {
           const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
           if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
@@ -4181,6 +4198,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   };
 
   const handlePublishStorefront = async () => {
+    if (_kvStoreInflight.current) return; // KV_INFLIGHT_LOCK: synchronous - a double tap cannot publish twice
+    _kvStoreInflight.current = true;
+    try { await _handlePublishStorefrontImpl(); } finally { _kvStoreInflight.current = false; }
+  };
+  const _handlePublishStorefrontImpl = async () => {
     // Validate
     if (containsProhibitedText(brandName) || containsProhibitedText(storeDescription)) {
       Alert.alert('Safety Rejection', 'Your store contains prohibited terms.');
@@ -4197,11 +4219,19 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       const { configToChunkData } = require('./config_chunks');
       _chunkCount = configToChunkData({ brandName, storeCategory, hostId, stash }).chunks.length;
     } catch {}
-    const _totalKas = 5 + 1 + _chunkCount * 0.2;
+    // KV_COST_PAGE: the on-chain HTML page rides its own chunks (0.2 KAS each)
+    let _pageChunks = 0;
+    try {
+      if (false && pageHtml && pageHtml.trim().length > 0) { // KV_NO_PAGE_TAB
+        const { estimateHtmlPublishCost, scanHtmlForPublish } = require('./html_chunks');
+        if (scanHtmlForPublish(pageHtml).ok) _pageChunks = estimateHtmlPublishCost(pageHtml).chunks;
+      }
+    } catch {}
+    const _totalKas = 5 + 1 + _chunkCount * 0.2 + _pageChunks * 0.2;
     const _ok = await new Promise((resolve) => {
       Alert.alert(
         'Publish cost',
-        '5 KAS pledge (yours, staked)\n1 KAS announce (burned)\n' + _chunkCount + ' config chunk(s) x 0.2 KAS (yours, staked)\n\nTotal: ~' + _totalKas.toFixed(1) + ' KAS + fees',
+        '5 KAS pledge (yours, staked)\n1 KAS announce (burned)\n' + _chunkCount + ' config chunk(s) x 0.2 KAS (yours, staked)\n' + (_pageChunks ? _pageChunks + ' page chunk(s) x 0.2 KAS (yours, staked)\n' : '') + '\nTotal: ~' + _totalKas.toFixed(1) + ' KAS + fees',
         [
           { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
           { text: 'Publish', onPress: () => resolve(true) },
@@ -4241,7 +4271,6 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       if (!_priv || !userPubkey || !_addr) throw new Error('wallet keys unavailable');
       const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: 'testnet-10' as any };
       const STORE_PLEDGE_SOMPI = 500_000_000n; // 5 KAS default stake
-      const _cfgHash = bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(storefrontConfig))));
       {
         const { scanObjectStrict: scanObject, scanTextStrict: scanText, reasonMessage } = require('./content_filter');
         const _hits = [
@@ -4251,7 +4280,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           scanObject(storefrontConfig),
         ].filter((r: any) => !r.ok);
         if (_hits.length) {
-          setPubStage('');
+          setPubStage(''); setIsPublishing(false); // KV_PUB_RESET
           Alert.alert('Cannot publish', reasonMessage(_hits[0].reason));
           console.warn('[Workspace] store content rejected:', _hits[0].reason, _hits[0].path || '');
           return;
@@ -4269,7 +4298,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         name: brandName,
         category: storeCategory,
         primaryLink,
-        configHash: _cfgHash,
+        // KV_CFG_HASH_FINAL: no configHash here - the config is not final until the store
+        // address/tx/page are known; the announce below carries the real hash.
       }, 0, STORE_PLEDGE_SOMPI);
       if (!_pub || _pub.success === false) throw new Error('store publish tx failed: ' + (_pub && _pub.error));
       console.log('[Workspace] KASPA store published — addr:', _pub.storeAddress, 'tx:', _pub.txId || '');
@@ -4279,7 +4309,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
 
       // Step 2a2: on-chain HTML page (optional). Publish first so its hash can
       // ride inside the storefront config the buyer already hash-verifies.
-      if (pageHtml && pageHtml.trim().length > 0) {
+      if (false && pageHtml && pageHtml.trim().length > 0) { // KV_NO_PAGE_TAB: page chunks are no longer published
         try {
           const { publishHtmlChunks, scanHtmlForPublish, htmlToChunkData } = require('./html_chunks');
           const _scan = scanHtmlForPublish(pageHtml);
@@ -4289,14 +4319,16 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           } else {
             setPageIssues([]);
             const _ph = htmlToChunkData(pageHtml).hash;
-            (storefrontConfig as any).pageHash = _ph;
             setPubStage('Publishing page...');
             const _pk: any = await publishHtmlChunks(_owner, _pub.storeAddress, pageHtml, { skipScan: true });
-            if (_pk.success) console.log('[Workspace] page on-chain:', _pk.totalChunks, 'chunks, hash', _ph.slice(0, 16));
-            else console.warn('[Workspace] page chunks incomplete:', _pk.error);
+            if (_pk.success && _pk.hash === _ph) { (storefrontConfig as any).pageHash = _ph; console.log('[Workspace] page on-chain:', _pk.totalChunks, 'chunks, hash', _ph.slice(0, 16)); } // KV_CFG_HASH_FINAL: only a fully published page is referenced
+            else console.warn('[Workspace] page chunks incomplete (not linked from config):', _pk.error);
           }
         } catch (e) { console.warn('[Workspace] page publish error (store still live):', e); }
       }
+
+      // KV_CFG_HASH_FINAL: hash the config only now that every field is set
+      const _cfgHash = bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(storefrontConfig))));
 
       // Step 2b: full config on-chain in gzip chunks - buyers render from these.
       // Non-fatal: store is live either way; failure = "config pending".
@@ -4313,7 +4345,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           let _stCoords: any = undefined;
           try {
             let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
-            const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(_pub.storeAddress) + '/utxos');
+            const ur = await fetch((String(_pub.storeAddress).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(_pub.storeAddress) + '/utxos');
             for (const u of (await ur.json()) || []) {
               const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
               if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
@@ -4337,7 +4369,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             console.log('[Workspace] store coords', _stCoords);
           } catch (de) { console.warn('[Workspace] store daa span skipped:', de); }
           const _dk = storeCategory === 'Academic' ? await SecureStore.getItemAsync('kv_dkim_domain') : null; // KV_DKIM_ANNOUNCE
-          const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _annHash, coords: _stCoords, ...(_dk ? { dkim: true, dkimDomain: _dk } : {}) } as any);
+          const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, brandName, storeCategory, 'store', { primaryLink, configHash: _annHash, coords: { ...(_stCoords || {}), colors: { bg: bannerStyle.bg === 'crest' ? '#44403c' : bannerStyle.bg, text: bannerStyle.text || '#ffffff' } } /* KV_ENVELOPE_COLORS */, ...(_dk ? { dkim: true, dkimDomain: _dk } : {}) } as any);
           if (!_ann || _ann.success === false) console.warn('[Workspace] registry announce failed (store still live):', _ann && _ann.error);
           else console.log('[Workspace] announced to registry:', _ann.registryAddr, 'cfgHash:', _annHash.slice(0, 16));
         } catch (e) { console.warn('[Workspace] registry announce error (store still live):', e); }
@@ -4425,7 +4457,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           style={wsStyles.toolbar}
           contentContainerStyle={wsStyles.toolbarContent}
         >
-          {['brand', 'layout', 'fonts', 'page', 'items', 'coupons', 'dapps', 'academic', 'preview'].map(view => (
+          {['brand', 'layout', 'fonts', 'items', 'coupons', 'dapps', 'academic', 'preview'].map(view => ( /* KV_NO_PAGE_TAB: custom HTML page removed for launch - stores are wallet-drawn */
             <TabButton
               key={view}
               label={view}
@@ -4581,7 +4613,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         )}
         
         {/* Page Tab - on-chain HTML */}
-          {activeView === 'page' && (
+          {false && activeView === 'page' && ( /* KV_NO_PAGE_TAB */
             <SectionCard title="On-Chain Page">
               <Text style={{ color: '#8B7355', fontSize: rs.font(11), marginBottom: rs.s(8), lineHeight: rs.font(16) }}>
                 Write a page in HTML. It publishes to Kaspa L1 as hash-pinned chunks and renders
@@ -5121,14 +5153,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               </Text>
             </View>
             
-            {/* Claude Code Link */}
-            <TouchableOpacity
-              style={wsStyles.ideBtn}
-              onPress={() => Linking.openURL('https://claude.ai/code')}
-            >
-              <Code size={rs.s(16)} color={COLORS.white} />
-              <Text style={wsStyles.ideBtnText}>Open Claude Code</Text>
-            </TouchableOpacity>
+            {/* KV_NO_CLAUDE_BTN removed */}
             
             {/* Quality Gate */}
             <TouchableOpacity
@@ -5210,7 +5235,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     let _dpCoords: any = undefined;
                     try {
                       let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
-                      const ur = await fetch('https://api-tn10.kaspa.org/addresses/' + encodeURIComponent(_pub.storeAddress) + '/utxos');
+                      const ur = await fetch((String(_pub.storeAddress).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(_pub.storeAddress) + '/utxos');
                       for (const u of (await ur.json()) || []) {
                         const dd = Number(u.utxoEntry?.blockDaaScore || u.blockDaaScore || 0);
                         if (dd > 0) { if (dd < lo) lo = dd; if (dd > hi) hi = dd; }
@@ -5812,3 +5837,5 @@ const wsStyles = StyleSheet.create({
 
 export default Workspace;
 
+
+// KV_NET_API (8)

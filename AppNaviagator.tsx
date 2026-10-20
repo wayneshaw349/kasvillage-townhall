@@ -7,7 +7,7 @@
 
 import { onUtxoRefresh } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { registerPushToken, setupNotificationHandlers, inscribePushToken } from './push_notifications';
 import {
   View,
@@ -19,6 +19,7 @@ import {
   ScrollView,
   Alert,
   TextInput,
+  AppState,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -70,6 +71,7 @@ type AppScreen =
   | 'booting'
   | 'onboarding'
   | 'biometric_gate'
+  | 'kv_locked'
   | 'quiz_gate'
   | 'dashboard'
   | 'send_kas'
@@ -282,33 +284,60 @@ const LoadingScreen: React.FC = () => (
 // BIOMETRIC GATE
 // ============================================================================
 
+// KV_WALLET_KEYS: every SecureStore slot that holds main-wallet key material
+const KV_WALLET_KEY_SLOTS = ['kv_private_key', 'kv_mnemonic', 'kv_l1_privkey_enc', 'kasvillage_private_key', 'kv_l1_privkey'];
+async function kvWalletKeysExist(): Promise<boolean> {
+  for (const k of KV_WALLET_KEY_SLOTS) {
+    try { if (await SecureStore.getItemAsync(k)) return true; } catch { return true; } // unreadable store -> fail closed
+  }
+  return false;
+}
+
+// KV_QUIZ_SESSION: set on a passed Sentry quiz; the identity ritual requires it (10 min)
+// before it may overwrite kv_avatar_recipe or reuse an existing wallet.
+const KV_QUIZ_WINDOW_MS = 10 * 60_000;
+function kvMarkQuizPassed() { (globalThis as any).__kvQuizPassedAt = Date.now(); }
+function kvQuizPassedRecently(): boolean {
+  const t = Number((globalThis as any).__kvQuizPassedAt || 0);
+  return t > 0 && Date.now() - t >= 0 && Date.now() - t < KV_QUIZ_WINDOW_MS;
+}
+
+// KV_DEVICE_AUTH: Face ID / fingerprint or the phone PIN/passcode. An unsupported /
+// not-enrolled answer only lets the user through when the OS reports the phone has
+// no lock at all (getEnrolledLevelAsync() === 0) — a PIN-only phone must still enter its PIN.
+async function kvDeviceAuth(promptMessage: string): Promise<boolean> {
+  let lvl: number | null = null;
+  const level = async () => {
+    if (lvl == null) { try { lvl = await LocalAuthentication.getEnrolledLevelAsync(); } catch { lvl = -1; } }
+    return lvl;
+  };
+  try {
+    const hasHardware = await LocalAuthentication.hasHardwareAsync();
+    const isEnrolled  = await LocalAuthentication.isEnrolledAsync();
+    if ((!hasHardware || !isEnrolled) && (await level()) === 0) return true; // phone has no lock at all - nothing to ask
+    const result = await LocalAuthentication.authenticateAsync({
+      promptMessage,
+      fallbackLabel:         'Use Passcode',
+      cancelLabel:           'Cancel',
+      disableDeviceFallback: false,
+    });
+    if (result.success) return true;
+    /* KV_GATE_NOTSUP */
+    if (/not_enrolled|not_available|passcode_not_set/.test(String((result as any).error || '')) && (await level()) === 0) return true;
+    return false;
+  } catch {
+    return false; /* KV_GATE_FAILCLOSED */
+  }
+}
+
 const BiometricGate: React.FC<{ onSuccess: () => void; onFail: () => void }> = ({
   onSuccess,
   onFail,
 }) => {
   useEffect(() => {
     (async () => {
-      try {
-        const hasHardware = await LocalAuthentication.hasHardwareAsync();
-        const isEnrolled  = await LocalAuthentication.isEnrolledAsync();
-
-        if (!hasHardware || !isEnrolled) { /* KV_GATE_PASSCODE: no Face ID -> still ask the phone passcode */
-          let lvl = 0; try { lvl = await LocalAuthentication.getEnrolledLevelAsync(); } catch { lvl = 0; }
-          if (!lvl) { onSuccess(); return; } // phone has no lock at all - nothing to ask
-        }
-
-        const result = await LocalAuthentication.authenticateAsync({
-          promptMessage:         'Verify your identity to enter Da Village',
-          fallbackLabel:         'Use Passcode',
-          cancelLabel:           'Cancel',
-          disableDeviceFallback: false,
-        });
-
-        if (!result.success && /not_enrolled|not_available|passcode_not_set/.test(String((result as any).error || ''))) { onSuccess(); return; } /* KV_GATE_NOTSUP */
-        result.success ? onSuccess() : onFail();
-      } catch {
-        onFail(); /* KV_GATE_FAILCLOSED */
-      }
+      /* KV_GATE_PASSCODE: no Face ID -> still ask the phone passcode */
+      (await kvDeviceAuth('Verify your identity to enter Da Village')) ? onSuccess() : onFail();
     })();
   }, [onSuccess, onFail]);
 
@@ -336,10 +365,13 @@ const QuizGate: React.FC<QuizGateProps> = ({ onSuccess, onFail }) => {
   const MAX_ATTEMPTS = 3;
   const LOCKOUT_KEY = 'kv_quiz_lockout';
   const FAIL_COUNT_KEY = 'kv_quiz_fail_count';
+  const ATTEMPTS_KEY = 'kv_quiz_attempts'; // KV_QUIZ_PERSIST: survives app kill
+  const lockoutTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   // Check for active lockout on mount
   useEffect(() => {
     checkLockout();
+    return () => { if (lockoutTimerRef.current) { clearInterval(lockoutTimerRef.current); lockoutTimerRef.current = null; } }; // KV_LOCKOUT_TIMER_CLEANUP
   }, []);
 
   
@@ -348,6 +380,10 @@ const QuizGate: React.FC<QuizGateProps> = ({ onSuccess, onFail }) => {
     try {
       const lockoutUntilStr = await SecureStore.getItemAsync(LOCKOUT_KEY);
       const failCountStr = await SecureStore.getItemAsync(FAIL_COUNT_KEY);
+      try { // KV_QUIZ_PERSIST: restore in-progress miss count
+        const a = parseInt((await SecureStore.getItemAsync(ATTEMPTS_KEY)) || '0', 10);
+        if (a > 0 && Number.isFinite(a)) setAttempts(a);
+      } catch {}
       
       if (lockoutUntilStr) {
         const lockoutUntil = parseInt(lockoutUntilStr, 10);
@@ -360,18 +396,22 @@ const QuizGate: React.FC<QuizGateProps> = ({ onSuccess, onFail }) => {
           setLockoutRemaining(remaining);
           
           // Countdown timer
+          if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current);
           const interval = setInterval(() => {
             const left = Math.ceil((lockoutUntil - Date.now()) / 1000);
             if (left <= 0) {
               clearInterval(interval);
+              lockoutTimerRef.current = null;
               setLockout(false);
               setLockoutRemaining(0);
               setAttempts(0);
+              SecureStore.deleteItemAsync(ATTEMPTS_KEY).catch(() => {});
               loadQuestion();
             } else {
               setLockoutRemaining(left);
             }
           }, 1000);
+          lockoutTimerRef.current = interval;
           return;
         }
         // Lockout expired, clear it
@@ -400,6 +440,7 @@ const QuizGate: React.FC<QuizGateProps> = ({ onSuccess, onFail }) => {
     const lockoutMs = await getLockoutDurationMs();
     const lockoutUntil = Date.now() + lockoutMs;
     await SecureStore.setItemAsync(LOCKOUT_KEY, lockoutUntil.toString());
+    await SecureStore.deleteItemAsync(ATTEMPTS_KEY).catch(() => {});
     
     return lockoutMs;
   };
@@ -407,6 +448,7 @@ const QuizGate: React.FC<QuizGateProps> = ({ onSuccess, onFail }) => {
   const clearFailCount = async () => {
     await SecureStore.deleteItemAsync(FAIL_COUNT_KEY);
     await SecureStore.deleteItemAsync(LOCKOUT_KEY);
+    await SecureStore.deleteItemAsync(ATTEMPTS_KEY).catch(() => {});
   };
   
   const loadQuestion = async () => {
@@ -421,8 +463,14 @@ const QuizGate: React.FC<QuizGateProps> = ({ onSuccess, onFail }) => {
         return;
       }
       
-      const recipe: AvatarRecipe = JSON.parse(recipeStr);
-      const colorMixHistory: ColorMix[] = mixHistoryStr ? JSON.parse(mixHistoryStr) : [];
+      // KV_QUIZ_PARSE_SAFE: this gate only runs after BiometricGate succeeded this session,
+      // so a missing/corrupt recipe skips the quiz (fail-open is bounded by that biometric pass)
+      // rather than locking the owner out of their own wallet. Parse errors never crash.
+      let recipe: AvatarRecipe | null = null;
+      try { recipe = JSON.parse(recipeStr); } catch { recipe = null; }
+      if (!recipe) { onSuccess(); return; }
+      let colorMixHistory: ColorMix[] = [];
+      try { colorMixHistory = mixHistoryStr ? JSON.parse(mixHistoryStr) : []; } catch { colorMixHistory = []; }
       
       // Get a random question from the 50-question bank
       const q = getReturnAuthQuestion(recipe, colorMixHistory);
@@ -455,8 +503,11 @@ const QuizGate: React.FC<QuizGateProps> = ({ onSuccess, onFail }) => {
       }, 1000);
     } else {
       setFeedback('wrong');
-      const newAttempts = attempts + 1;
+      let prior = attempts;
+      try { prior = Math.max(prior, parseInt((await SecureStore.getItemAsync(ATTEMPTS_KEY)) || '0', 10) || 0); } catch {}
+      const newAttempts = prior + 1;
       setAttempts(newAttempts);
+      try { await SecureStore.setItemAsync(ATTEMPTS_KEY, String(newAttempts)); } catch {} // KV_QUIZ_PERSIST: every miss
       
       if (newAttempts >= MAX_ATTEMPTS) {
         const lockoutMs = await recordFailedSession();
@@ -598,6 +649,16 @@ const QuizGate: React.FC<QuizGateProps> = ({ onSuccess, onFail }) => {
 
 export const AppNavigator: React.FC = () => {
   const [screen, setScreen] = useState<AppScreen>('booting');
+  // KV_NEW_ID_GUARD: does this phone hold wallet key material? (null = not checked yet -> fail closed)
+  const [welcomeKeys, setWelcomeKeys] = useState<boolean | null>(null);
+  const onboardAfterQuizRef = useRef(false); // "New identity" with an existing wallet: unlock -> quiz -> ritual
+  useEffect(() => {
+    if (screen !== 'welcome') return;
+    let live = true;
+    setWelcomeKeys(null);
+    kvWalletKeysExist().then((h) => { if (live) setWelcomeKeys(h); }).catch(() => { if (live) setWelcomeKeys(true); });
+    return () => { live = false; };
+  }, [screen]);
   const [user, setUser] = useState<SessionUser>({ apartment: '', xp: 0 });
   const [balance, setBalance] = useState(0);
   const [balanceSompi, setBalanceSompi] = useState(0n);
@@ -611,6 +672,8 @@ export const AppNavigator: React.FC = () => {
   const [snailPComplete, setSnailPComplete] = useState(0);
   const [snailDeadlocks, setSnailDeadlocks] = useState(0);
   const [vaultWires, setVaultWires] = useState<string[]>([]);
+  const balanceSompiRef = useRef<bigint>(0n); // KV_STALE_BAL: loadUserStats has [] deps, read latest balance via ref
+  useEffect(() => { balanceSompiRef.current = balanceSompi; }, [balanceSompi]);
 
   // ------------------------------------------------------------------
   // Load stats helper
@@ -663,6 +726,8 @@ export const AppNavigator: React.FC = () => {
           const balData = await balResp.json();
           sompi = BigInt(balData.balance);
           console.log('[AppNav] Balance loaded:', sompi.toString(), 'sompi');
+          const prevSompi = balanceSompiRef.current; // KV_STALE_BAL
+          balanceSompiRef.current = sompi;
           setBalanceSompi(sompi); // Show balance immediately
           // Fetch agreement data for financial summary
           try {
@@ -682,19 +747,19 @@ export const AppNavigator: React.FC = () => {
           // Sync UTXO ledger · tags new receives as 'free' + update financial summary
           try {
             const { syncLedger } = await import('./utxo_ledger');
-            const ledgerResult = await syncLedger(kaspaAddress);
+            const ledgerResult = await syncLedger(kaspaAddr); // KV_LEDGER_ADDR: was stale '' state from [] deps
             const committed = ledgerResult.committedBalance;
             const iouAlloc = ledgerResult.iouAllocated;
             if (committed > 0n) setInAgreementsSompi(committed);
             if (iouAlloc > 0n) setIousOwedSompi(iouAlloc);
           } catch {}
           // Merkle archive: snapshot only when balance CHANGES (new receive)
-          if (sompi !== balanceSompi) {
+          if (sompi !== prevSompi) {
             try {
               const utxoResp = await fetch(`${apiBase}/addresses/${kaspaAddr}/utxos`);
               if (utxoResp.ok) {
                 const utxos = await utxoResp.json();
-                onUtxoRefresh(utxos, 'testnet').catch(e => console.warn('[AppNav] UTXO snapshot failed:', e));
+                onUtxoRefresh(utxos, kaspaAddr.startsWith('kaspa:') ? 'mainnet' : 'testnet') /* KV_UTXO_NET */.catch(e => console.warn('[AppNav] UTXO snapshot failed:', e));
               }
             } catch (e) { /* non-fatal */ }
           }
@@ -754,7 +819,8 @@ export const AppNavigator: React.FC = () => {
         } catch(e){ console.log('[KeyCheck] failed:', String(e)); }
         // pubkey logged above
         const identityRaw: string = (await SecureStore.getItemAsync(STORE_KEYS.IDENTITY)) || '';
-        const identity = identityRaw ? JSON.parse(identityRaw) : null;
+        let identity: any = null; // KV_BOOT_TOLERANT: corrupt identity JSON must not drop a wallet into onboarding
+        try { identity = identityRaw ? JSON.parse(identityRaw) : null; } catch (pe) { console.warn('[AppNav] identity JSON corrupt, ignoring:', String(pe)); identity = null; }
 
         const resolvedAlias: string = aptAlias 
           || (identity?.identityHash
@@ -783,8 +849,14 @@ export const AppNavigator: React.FC = () => {
             } catch (_be) { console.warn('[AppNav] anchor backfill failed:', _be); }
           })();
         }
-      } catch {
-        setScreen('onboarding');
+      } catch (bootErr) {
+        // KV_BOOT_NO_ONBOARD: if any wallet key material exists, a boot error goes to the auth gate, never onboarding
+        console.warn('[AppNav] boot error:', String(bootErr));
+        let hasKeys = false;
+        for (const k of ['kv_private_key', 'kv_mnemonic', 'kv_l1_privkey_enc', STORE_KEYS.PRIVATE_KEY, 'kasvillage_private_key', 'kv_l1_privkey']) {
+          try { if (await SecureStore.getItemAsync(k)) { hasKeys = true; break; } } catch { hasKeys = true; break; } // unreadable store -> fail closed
+        }
+        setScreen(hasKeys ? 'biometric_gate' : 'onboarding');
       }
     })();
 
@@ -826,13 +898,42 @@ export const AppNavigator: React.FC = () => {
         console.warn('[DeviceAttestation] Check failed (non-fatal):', attErr);
       }
     })();
+    if (relockRef.current) { relockRef.current = false; setScreen(relockReturnRef.current || 'dashboard'); return; } // KV_RESUME_RELOCK: resume unlock goes straight back
     setScreen('quiz_gate');
   }, []);
 
-  const handleBiometricFail = useCallback(() => setScreen('onboarding'), []);
+  // KV_RESUME_RELOCK: re-lock wallet screens after > 5 min in background (a send, publish,
+  // camera/QR scan, share sheet or picker backgrounds the app briefly — those must not lose
+  // their screen), and after re-auth return to the SAME screen it locked from
+  const relockRef = useRef(false);
+  const relockReturnRef = useRef<AppScreen>('dashboard');
+  const screenRef = useRef<AppScreen>(screen);
+  useEffect(() => { screenRef.current = screen; }, [screen]);
+  const bgAtRef = useRef<number>(0);
+  useEffect(() => {
+    const NO_RELOCK: AppScreen[] = ['booting', 'welcome', 'onboarding', 'kv_locked', 'biometric_gate', 'quiz_gate', 'vault_recovery'];
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background') { bgAtRef.current = Date.now(); return; }
+      if (next === 'active') {
+        const away = bgAtRef.current ? Date.now() - bgAtRef.current : 0;
+        bgAtRef.current = 0;
+        const cur = screenRef.current;
+        if (away > 5 * 60_000 && !NO_RELOCK.includes(cur)) {
+          relockRef.current = true;
+          relockReturnRef.current = cur; // back to where the user was (the screen re-mounts after unlock)
+          setScreen('biometric_gate');
+        }
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  const handleBiometricFail = useCallback(() => { onboardAfterQuizRef.current = false; setScreen('kv_locked' as any); }, []); // KV_ONBOARD_REF_CLEAR // KV_LOCKED_SCREEN: a cancelled / failed unlock never reaches onboarding
 
   // After quiz succeeds, check snail poison then go to dashboard
   const handleQuizSuccess = useCallback(() => {
+    kvMarkQuizPassed(); // KV_QUIZ_SESSION
+    if (onboardAfterQuizRef.current) { onboardAfterQuizRef.current = false; setScreen('onboarding'); return; }
     if (snailMode && snailDelayMs > 0) {
       setScreen('snail_mode');
     } else {
@@ -840,7 +941,7 @@ export const AppNavigator: React.FC = () => {
     }
   }, [snailMode, snailDelayMs]);
 
-  const handleQuizFail = useCallback(() => setScreen('vault_recovery'), []);
+  const handleQuizFail = useCallback(() => { relockRef.current = false; onboardAfterQuizRef.current = false; (globalThis as any).__kvQuizPassedAt = 0; setScreen('vault_recovery'); }, []);
 
   const handleSnailModeComplete = useCallback(() => {
     setSnailMode(false);
@@ -849,6 +950,12 @@ export const AppNavigator: React.FC = () => {
 
   const openVaultBackup = useCallback(async () => {
     try {
+      // KV_BACKUP_REAUTH: fresh unlock before showing backup cards (KV_DEVICE_AUTH rules:
+      // not_enrolled / passcode_not_set pass only on a phone with no lock at all)
+      if (!(await kvDeviceAuth('Unlock to view your backup cards'))) {
+        Alert.alert('Locked', 'Backup cards need Face ID or your passcode.');
+        return;
+      }
       const mnemonic = await SecureStore.getItemAsync('kv_mnemonic');
       if (!mnemonic) {
         setScreen('generate_vault'); // no seed on this wallet -> offer to mint a backable one
@@ -1031,14 +1138,40 @@ export const AppNavigator: React.FC = () => {
           <Text style={{ color: '#8a8a8a', fontSize: 14, marginBottom: 36 }}>
             Start a new identity, or restore the one you already hold on cards.
           </Text>
-          <TouchableOpacity
-            onPress={() => setScreen('onboarding')}
-            style={{ backgroundColor: '#49b675', padding: 16, borderRadius: 10, marginBottom: 14 }}
-          >
-            <Text style={{ color: '#0d0d0f', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>
-              New identity
-            </Text>
-          </TouchableOpacity>
+          {/* KV_NEW_ID_GUARD: with wallet key material on the phone, "New identity" is only
+              offered after a passed Sentry quiz this session; otherwise unlock instead */}
+          {welcomeKeys === false || (welcomeKeys === true && kvQuizPassedRecently()) ? (
+            <TouchableOpacity
+              onPress={async () => {
+                if ((await kvWalletKeysExist()) && !kvQuizPassedRecently()) { setScreen('kv_locked'); return; }
+                setScreen('onboarding');
+              }}
+              style={{ backgroundColor: '#49b675', padding: 16, borderRadius: 10, marginBottom: 14 }}
+            >
+              <Text style={{ color: '#0d0d0f', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>
+                New identity
+              </Text>
+            </TouchableOpacity>
+          ) : welcomeKeys === true ? (
+            <>
+              <TouchableOpacity
+                onPress={() => { onboardAfterQuizRef.current = false; setScreen('kv_locked'); }}
+                style={{ backgroundColor: '#D4AF37', padding: 16, borderRadius: 10, marginBottom: 14 }}
+              >
+                <Text style={{ color: '#0d0d0f', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>
+                  Unlock existing wallet
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => { relockRef.current = false; onboardAfterQuizRef.current = true; setScreen('biometric_gate'); }}
+                style={{ borderColor: '#49b675', borderWidth: 1, padding: 16, borderRadius: 10, marginBottom: 14 }}
+              >
+                <Text style={{ color: '#49b675', fontSize: 15, fontWeight: '600', textAlign: 'center' }}>
+                  New identity (unlock + Sentry checkpoint first)
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
           <TouchableOpacity
             onPress={() => setScreen('vault_recovery')}
             style={{ borderColor: '#49b675', borderWidth: 1, padding: 16, borderRadius: 10 }}
@@ -1051,7 +1184,7 @@ export const AppNavigator: React.FC = () => {
       );
 
     case 'onboarding':
-      return <IdentityRitual onComplete={() => {
+      return <IdentityRitual onLocked={() => setScreen('kv_locked')} onComplete={() => {
         // Ritual finished — reload user data and go to dashboard
         (async () => {
           try {
@@ -1071,6 +1204,17 @@ export const AppNavigator: React.FC = () => {
           }
         })();
       }} />;
+
+    case 'kv_locked':
+      return (
+        <View style={{ flex: 1, backgroundColor: '#0a0a0a', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <Text style={{ color: '#D4AF37', fontSize: 24, fontWeight: '800', marginBottom: 10 }}>{'\u{1F512}'} Locked</Text>
+          <Text style={{ color: '#aaa', fontSize: 14, textAlign: 'center', marginBottom: 26 }}>Unlock with Face ID or your phone passcode to open your wallet.</Text>
+          <TouchableOpacity onPress={() => setScreen('biometric_gate')} style={{ backgroundColor: '#D4AF37', paddingHorizontal: 34, paddingVertical: 14, borderRadius: 10 }}>
+            <Text style={{ color: '#000', fontWeight: '800', fontSize: 16 }}>Unlock</Text>
+          </TouchableOpacity>
+        </View>
+      );
 
     case 'biometric_gate':
       return <BiometricGate onSuccess={handleBiometricSuccess} onFail={handleBiometricFail} />;
@@ -1284,8 +1428,27 @@ export const AppNavigator: React.FC = () => {
                   'Vault cards detected',
                   'These cards belong to your VAULT wallet. The vault key was restored to vault storage. Your main wallet was not changed.',
                 );
-                setScreen('dashboard');
+                // KV_VAULT_CARDS_GATE: vault cards never open the main wallet — unlock + quiz first
+                relockRef.current = false;
+                setScreen((await kvWalletKeysExist()) ? 'kv_locked' : 'welcome');
                 return;
+              }
+              // KV_RESTORE_CONFIRM: ask before replacing a different main wallet
+              const curMain = (await SecureStore.getItemAsync('kv_kaspa_address'))
+                || (await SecureStore.getItemAsync('kaspa_address')) || '';
+              const hasMainKeys = !!((await SecureStore.getItemAsync('kv_private_key'))
+                || (await SecureStore.getItemAsync('kv_l1_privkey_enc')));
+              if (curMain && hasMainKeys && preview?.address && preview.address !== curMain) {
+                const ok = await new Promise<boolean>((resolve) => Alert.alert(
+                  'Replace wallet?',
+                  'Replace your current wallet? The current one is kept as a backup slot.\n\nCurrent: ' + curMain.slice(0, 24) + '...\nCards: ' + preview.address.slice(0, 24) + '...',
+                  [
+                    { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                    { text: 'Replace', style: 'destructive', onPress: () => resolve(true) },
+                  ],
+                  { cancelable: true, onDismiss: () => resolve(false) },
+                ));
+                if (!ok) { setScreen('kv_locked'); return; } // never straight to dashboard: recovery is reachable from a quiz lockout
               }
               const res = await restoreWalletFromMnemonic(mnemonic, net);
               if (res.success) {
@@ -1298,7 +1461,12 @@ export const AppNavigator: React.FC = () => {
               }
             })();
           }}
-          onCancel={() => setScreen('welcome')}
+          onCancel={() => {
+            // KV_RECOVERY_CANCEL: with a wallet on the phone, Cancel goes to the lock screen
+            // (unlock -> quiz), never to welcome -> "New identity" -> ritual
+            relockRef.current = false;
+            kvWalletKeysExist().then((has) => setScreen(has ? 'kv_locked' : 'welcome')).catch(() => setScreen('kv_locked'));
+          }}
         />
       );
 

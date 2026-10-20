@@ -238,6 +238,8 @@ export function verifyFrostAddress(
   theirPubkey: string,
   network: KaspaNetwork
 ): { valid: boolean; expected: string; code: string } {
+  // KV_DEPRECATED: drops the agreement counter/agreementId, so it can "verify" the wrong address. No callers.
+  throw new Error('verifyFrostAddress deprecated - do not use (ignores agreement counter); use deriveAddress/assertLMatch from canonical_agreement_steps');
   const local = deriveFrostAddressLocal({ pubkeyA: myPubkey, pubkeyB: theirPubkey, network });
   return {
     valid: local.address === claimedAddress,
@@ -252,6 +254,8 @@ export function verifyFrostAddress(
 
 
 export function aggregatePartialSigs(sigA: string, sigB: string): string {
+  // KV_DEPRECATED: lifts x-only R with a guessed parity and never recomputes e - wrong R_agg. No callers.
+  throw new Error('aggregatePartialSigs deprecated - do not use (wrong R); use buyerAggregate/aggregateSigs from canonical_agreement_steps');
   const sigABytes = hexToBytes(sigA);
   const sigBBytes = hexToBytes(sigB);
 
@@ -586,6 +590,7 @@ export async function connectToWifiPeer(
   myName?: string,
   onProgress?: (p: ExchangeProgress) => void
 ): Promise<PeerInfo> {
+  if (ip !== null) throw new Error('Wi-Fi pairing was removed - use QR or paste'); /* KV_NO_LAN_FROST */
   onProgress?.({ phase: 'connecting', progress: 20, message: `Connecting to ${ip}...` });
   const response = await fetch(`http://${ip}:${port}/frost/pubkey`, {
     method: 'POST',
@@ -603,6 +608,7 @@ export async function connectToWifiPeer(
 // ----------------------------------------------------------------------------
 
 export async function getTailscaleIP(): Promise<string | null> {
+  if (Date.now() > 0) return null; /* KV_NO_LAN_TSIP: Tailscale removed */
   try {
     const ip = await getLocalIP();
     if (ip && ip.startsWith('100.') && parseInt(ip.split('.')[1]) >= 64) return ip;

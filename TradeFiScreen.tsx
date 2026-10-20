@@ -272,6 +272,17 @@ const TradeFiSection: React.FC<TradeFiSectionProps> = ({ onClose }) => {
             Kungenzeka ukuthi ukuthenga nokuthengisa amabhondi kungcono kunokuvota? (isiZulu)
           </Text>
           <Text style={styles.bantuAuthor}>— othile ofuna ukuba ngumuntu obalulekile</Text>
+
+          <View style={styles.bantuDivider} />
+
+          {/* KV_ODE_MALCOLM_X */}
+          <Text style={styles.bantuText}>
+            "Kura, au hati fungani kati ya nchi na raia wake."
+          </Text>
+          <Text style={styles.bantuTranslation}>
+            "A ballot, or a bond between a country and its citizens." (Kiswahili)
+          </Text>
+          <Text style={styles.bantuAuthor}>— Wayne Shaw, heshima kwa Malcolm X</Text>
         </View>
 
         {/* Multi-Bond DCA Calculator */}

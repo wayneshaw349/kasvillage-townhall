@@ -251,6 +251,135 @@ function SkeletonPulse({ style }: { style?: object }) {
   return <Animated.View style={[skeletonStyles.base, { opacity: pulseAnim }, style]} />;
 }
 
+// KV_ENVELOPE_CARDS v2: every Mailbox listing is the front of a business envelope -
+// return address (logo + name), address window (what it is), a color block in the
+// listing's header colors (facts + action), stamp + postmark. Full-width, one per row.
+const KV_BANNER_PALETTE = [
+  { bg: '#d97706', text: '#ffffff' }, { bg: '#3730a3', text: '#ffffff' }, { bg: '#166534', text: '#ffffff' },
+  { bg: '#1c1917', text: '#fbbf24' }, { bg: '#9a3412', text: '#fde68a' },
+];
+function kvMix(hex: string, a: number): string {
+  const h = /^#[0-9a-f]{6}$/i.test(hex) ? hex : '#d97706';
+  const n = parseInt(h.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  const m = (x: number) => Math.round(x + (255 - x) * a);
+  return 'rgb(' + m(r) + ',' + m(g) + ',' + m(b) + ')';
+}
+function kvEnvColors(item: any, seed: string): { bg: string; text: string } {
+  const c = (item && ((item.coords && item.coords.colors) || item.colors || (item.quad && item.quad.colors))) || null;
+  if (c && /^#[0-9a-f]{6}$/i.test(String(c.bg)) && /^#[0-9a-f]{6}$/i.test(String(c.text || '#ffffff'))) return { bg: String(c.bg), text: String(c.text || '#ffffff') };
+  let h = 0; const sd = String(seed || 'kv'); for (let i = 0; i < sd.length; i++) h = (h * 31 + sd.charCodeAt(i)) >>> 0;
+  return KV_BANNER_PALETTE[h % KV_BANNER_PALETTE.length];
+}
+function kvAgo(t: number): string {
+  if (!t) return '';
+  const h = Math.max(0, Math.round((Date.now() - t) / 3600000));
+  return h < 1 ? 'NOW' : h < 48 ? h + 'H AGO' : Math.round(h / 24) + 'D AGO';
+}
+function KvBizEnvelope({ name, cat, stamp, colors, verified, verifiedLabel, postedAt, lines, info, action, onPress, children }: any) {
+  const paper = kvMix(colors.bg, 0.9), acc = kvMix(colors.bg, 0.45);
+  const Wrap: any = onPress ? TouchableOpacity : View;
+  return (
+    <Wrap onPress={onPress} activeOpacity={0.85} style={{ marginBottom: rs.s(12), borderRadius: 8, overflow: 'hidden', backgroundColor: paper, borderWidth: 1, borderColor: kvMix(colors.bg, 0.7), shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3 }}>
+      <View style={{ minHeight: 172, position: 'relative', overflow: 'hidden' }}>
+        {/* color block (header colors), slanted like the reference envelope */}
+        <View pointerEvents="none" style={{ position: 'absolute', right: -40, top: 62, width: '58%', height: 260, backgroundColor: colors.bg, transform: [{ rotate: '-7deg' }] }} />
+        <View pointerEvents="none" style={{ position: 'absolute', right: -30, top: 40, width: '22%', height: 280, backgroundColor: acc, transform: [{ rotate: '12deg' }] }} />
+        {/* return address */}
+        <View style={{ position: 'absolute', left: 12, top: 12, right: 110, flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+            <Text style={{ color: colors.text, fontWeight: '900', fontSize: 18 }}>{String(name || '?').trim().charAt(0).toUpperCase()}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.bg, fontWeight: '900', fontSize: rs.font(15) }} numberOfLines={1}>{name}</Text>
+            <Text style={{ color: acc, fontSize: 9, fontWeight: '800', letterSpacing: 2 }} numberOfLines={1}>{String(cat || '').toUpperCase()}</Text>
+          </View>
+        </View>
+        {verified !== undefined ? (
+          <View style={{ position: 'absolute', left: 12, top: 52, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 9, backgroundColor: verified ? '#dcfce7' : '#fef3c7' }}>
+            <Text style={{ fontSize: 9, fontWeight: '900', color: verified ? '#15803d' : '#b45309' }}>{verified ? '✓ ' + (verifiedLabel || 'VERIFIED') : '⚠ UNVERIFIED'}</Text>
+          </View>
+        ) : null}
+        {/* stamp + postmark */}
+        <View pointerEvents="none" style={{ position: 'absolute', right: 10, top: 8, width: 30, height: 36, backgroundColor: '#fffaf0', borderWidth: 2, borderStyle: 'dashed', borderColor: '#7a5c34', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '4deg' }] }}>
+          <Text style={{ fontSize: 15 }}>{stamp}</Text>
+        </View>
+        <View pointerEvents="none" style={{ position: 'absolute', right: 46, top: 10, width: 46, height: 46, borderRadius: 23, borderWidth: 1.5, borderColor: 'rgba(60,50,40,0.35)', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-12deg' }] }}>
+          <Text style={{ color: 'rgba(60,50,40,0.5)', fontSize: 6, fontWeight: '800', textAlign: 'center' }}>{'KASVILLAGE\nPOST' + (postedAt ? '\n' + kvAgo(postedAt) : '')}</Text>
+        </View>
+        {/* address window */}
+        <View style={{ position: 'absolute', left: 12, bottom: 12, width: '50%', paddingHorizontal: 9, paddingVertical: 7, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.6)', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)' }}>
+          {(lines || []).filter(Boolean).slice(0, 3).map((l: any, i: number) => (
+            <Text key={i} style={{ color: '#3a3530', fontSize: 11, fontWeight: i === 0 ? '800' : '400' }} numberOfLines={1}>{l}</Text>
+          ))}
+        </View>
+        {/* facts + action on the color block */}
+        <View style={{ position: 'absolute', right: 10, bottom: 10, width: '38%' }}>
+          {(info || []).filter(Boolean).slice(0, 3).map((l: any, i: number) => (
+            <Text key={i} style={{ color: colors.text, fontSize: 10.5, lineHeight: 17 }} numberOfLines={1}>{l}</Text>
+          ))}
+          {action ? (
+            <TouchableOpacity onPress={action.onPress} disabled={!!action.disabled} style={{ marginTop: 4, borderRadius: 6, paddingVertical: 5, alignItems: 'center', backgroundColor: action.bg || colors.text, opacity: action.disabled ? 0.6 : 1 }}>
+              <Text style={{ color: action.fg || colors.bg, fontWeight: '900', fontSize: 11 }}>{action.label}</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+      {children ? <View style={{ paddingHorizontal: 12, paddingBottom: 10, paddingTop: 2, borderTopWidth: 1, borderTopColor: kvMix(colors.bg, 0.75), borderStyle: 'dashed' }}>{children}</View> : null}
+    </Wrap>
+  );
+}
+
+// KV_PARCEL_ENVELOPE: academics arrive as brown legal clasp envelopes (kraft shades vary per listing)
+const KV_KRAFT = ['#c8a26b', '#b5874f', '#d9bf7a', '#a8865a', '#c9a27e'];
+function KvParcelEnvelope({ title, lines, stampText, verified, postedAt, seed, action, onPress }: any) {
+  let h = 0; const sd = String(seed || title || 'kv'); for (let i = 0; i < sd.length; i++) h = (h * 31 + sd.charCodeAt(i)) >>> 0;
+  const kraft = KV_KRAFT[h % KV_KRAFT.length];
+  const flap = 'rgba(0,0,0,0.10)', seam = 'rgba(70,45,15,0.25)';
+  const Wrap: any = onPress ? TouchableOpacity : View;
+  return (
+    <Wrap onPress={onPress} activeOpacity={0.85} style={{ marginBottom: rs.s(12), borderRadius: 4, overflow: 'hidden', backgroundColor: kraft, borderWidth: 1, borderColor: seam, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3, minHeight: 176 }}>
+      {/* clasp flap */}
+      <View pointerEvents="none" style={{ position: 'absolute', left: '12%', right: '12%', top: 0, height: 34, backgroundColor: flap, borderBottomLeftRadius: 26, borderBottomRightRadius: 26, borderWidth: 1, borderTopWidth: 0, borderColor: seam }} />
+      {/* brass clasp */}
+      <View pointerEvents="none" style={{ position: 'absolute', top: 24, alignSelf: 'center', left: 0, right: 0, alignItems: 'center' }}>
+        <View style={{ width: 14, height: 14, backgroundColor: '#c9a227', borderWidth: 1, borderColor: '#8a6d12', transform: [{ rotate: '45deg' }] }} />
+        <View style={{ flexDirection: 'row', marginTop: -2 }}>
+          <View style={{ width: 9, height: 3, backgroundColor: '#b8921f', borderRadius: 2, transform: [{ rotate: '-25deg' }], marginRight: 2 }} />
+          <View style={{ width: 9, height: 3, backgroundColor: '#b8921f', borderRadius: 2, transform: [{ rotate: '25deg' }] }} />
+        </View>
+      </View>
+      {/* side seams */}
+      <View pointerEvents="none" style={{ position: 'absolute', left: 8, top: 40, bottom: 8, width: 1, backgroundColor: seam }} />
+      <View pointerEvents="none" style={{ position: 'absolute', right: 8, top: 40, bottom: 8, width: 1, backgroundColor: seam }} />
+      {/* white label */}
+      <View style={{ marginTop: 50, marginHorizontal: 20, backgroundColor: '#fbf8f1', borderRadius: 3, padding: 10, borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', transform: [{ rotate: '-1deg' }] }}>
+        <Text style={{ fontWeight: '900', fontSize: rs.font(14), color: '#2f2418' }} numberOfLines={1}>{title}</Text>
+        {(lines || []).filter(Boolean).slice(0, 3).map((l: any, i: number) => (
+          <Text key={i} style={{ fontSize: 11, color: '#5b4a36', marginTop: 1 }} numberOfLines={1}>{l}</Text>
+        ))}
+        <View style={{ height: 1, backgroundColor: 'rgba(0,0,0,0.08)', marginTop: 6 }} />
+      </View>
+      {/* ink stamp + verification */}
+      <View pointerEvents="none" style={{ position: 'absolute', right: 16, top: 8, borderWidth: 2, borderColor: 'rgba(160,30,30,0.55)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, transform: [{ rotate: '8deg' }] }}>
+        <Text style={{ color: 'rgba(160,30,30,0.7)', fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{stampText || 'RESEARCH'}</Text>
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 20, marginTop: 10, marginBottom: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 9, backgroundColor: verified ? '#dcfce7' : '#fef3c7', marginRight: 8 }}>
+            <Text style={{ fontSize: 9, fontWeight: '900', color: verified ? '#15803d' : '#b45309' }}>{verified ? '✓ DKIM VERIFIED' : '⚠ UNVERIFIED'}</Text>
+          </View>
+          {postedAt ? <Text style={{ fontSize: 9, color: 'rgba(60,40,20,0.6)', fontWeight: '800' }}>{'KASVILLAGE POST · ' + kvAgo(postedAt)}</Text> : null}
+        </View>
+        {action ? (
+          <TouchableOpacity onPress={action.onPress} style={{ backgroundColor: '#5a3d1c', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 5 }}>
+            <Text style={{ color: '#f6e7c8', fontWeight: '900', fontSize: 11 }}>{action.label}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </Wrap>
+  );
+}
+
 function SkeletonCard() {
   return (
     <View style={skeletonStyles.card}>
@@ -368,11 +497,21 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
     return () => { alive = false; };
   }, [item.o]);
   const pledge = item.quad && typeof item.quad.pledge_kas === 'number' ? item.quad.pledge_kas : null;
+  const [infoOpen, setInfoOpen] = R.useState(false); // KV_ENVELOPE_INFO_SHEET: details live in a sheet, the envelope stays clean
   return (
-    <View style={cardStyles.storefrontCard}>
-      <Text style={{ fontSize: 22 }}>🕹️</Text>
-      <Text style={{ fontWeight: '700', marginTop: 4 }} numberOfLines={1}>{item.name}</Text>
-      <Text style={{ color: '#666', fontSize: 11 }} numberOfLines={1}>{item.category || 'Game'} · on-chain · verified by hash</Text>
+    <>
+    <KvBizEnvelope name={item.name} cat={(item.category || 'Game') + ' \u00B7 on-chain'} stamp={'\u{1F3AE}'} colors={kvEnvColors(item, item.name || (item.quad && item.quad.head) || '')}
+      postedAt={Math.max(Number(item.t || 0), Number(item.keptAt || 0))}
+      lines={[(item.quad && item.quad.game) || item.name, 'verified by hash \u00B7 sandboxed', item.quad && item.quad.price ? item.quad.price + ' KAS / board' : 'first board free']}
+      info={[pledge != null ? '\u26D3 ' + pledge + ' KAS pledged' : '', 'dev XP ' + (xp != null ? xp : '\u2026'), Array.isArray(item.keepers) && item.keepers.length ? '\u{1F465} kept by ' + item.keepers.length : '']}
+      action={{ label: installing ? 'DOWNLOADING\u2026' : 'DOWNLOAD', onPress: () => onInstall(item), disabled: !!installing, ...(item.warn ? { bg: '#b91c1c', fg: '#fff' } : {}) }}
+      onPress={() => setInfoOpen(true)} />
+    <Modal visible={!!infoOpen} transparent animationType="slide" onRequestClose={() => setInfoOpen(false)}>
+      <TouchableOpacity activeOpacity={1} onPress={() => setInfoOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+        <TouchableOpacity activeOpacity={1} onPress={() => {}} style={{ backgroundColor: '#fffaf0', borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: '80%' }}>
+          <View style={{ alignItems: 'center', paddingTop: 8 }}><View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#d6c8a8' }} /></View>
+          <Text style={{ fontWeight: '900', fontSize: rs.font(16), textAlign: 'center', marginTop: 8, color: '#2f2418' }} numberOfLines={1}>{'\u{1F3AE} ' + (item.name || 'Game')}</Text>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12 }}>
       {(() => { const tg = item.quad && Array.isArray(item.quad.tags) ? item.quad.tags.map(String).filter((t: string) => { try { const cf = require('./content_filter'); const sc = cf.scanTextStrict || cf.scanText; return sc(t).ok !== false; } catch { return true; } }).slice(0, 4) : []; return tg.length ? <Text style={{ color: '#a16207', fontSize: 10, marginTop: 1 }} numberOfLines={1}>{tg.map((t: string) => '#' + t).join(' ')}</Text> : null; })()}
       <Text style={{ color: '#7c3aed', fontSize: 11, marginTop: 2 }} numberOfLines={1}>
         {'⛓ ' + (pledge != null ? pledge + ' KAS pledged' : 'pledge n/a') + ' · dev XP ' + (xp != null ? xp : '…')}
@@ -385,10 +524,6 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
       {item.warn ? (
         <Text style={{ color: '#dc2626', fontSize: 10, fontWeight: '700', marginTop: 2 }}>⚠ DIFFERENT PUBLISHER than first seen</Text>
       ) : null}
-      <TouchableOpacity onPress={() => onInstall(item)} disabled={!!installing}
-        style={{ marginTop: 8, backgroundColor: installing ? '#999' : (item.warn ? '#b91c1c' : '#7c3aed'), borderRadius: 8, paddingVertical: 6, alignItems: 'center' }}>
-        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{installing ? 'DOWNLOADING…' : 'DOWNLOAD'}</Text>
-      </TouchableOpacity>
       {/* KV_GAME_REPOST: keeper button + freshness */}
       {onRepost && item.quad ? (() => {
         const ageH = Math.max(0, Math.round((Date.now() - Math.max(Number(item.t || 0), Number(item.keptAt || 0))) / 3600000));
@@ -420,7 +555,7 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
       {item.quad ? (
         <TouchableOpacity onPress={() => { const f = (globalThis as any).__kvRunFlag; if (f) f({ arweaveTx: String(item.quad.head), id: String(item.quad.head), ownerPubkey: item.o || '', name: item.name || '' }, 'game'); }}
           style={{ marginTop: 6, borderColor: '#d97706', borderWidth: 1, borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}>
-          <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 11 }}>Flag (0.1 KAS)</Text>
+          <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 11 }}>Flag (0.2 KAS)</Text>
         </TouchableOpacity>
       ) : null}
       {item.quad && item.quad.contact ? (
@@ -430,7 +565,7 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
             if (!me) { try { const ps = require('./proposal_share'); const pk = await ps._kvResolvePrivHex(); const { bytesToHex, hexToBytes } = require('@noble/hashes/utils'); const { secp256k1 } = require('@noble/curves/secp256k1'); me = bytesToHex(secp256k1.getPublicKey(hexToBytes(pk), true)); g.__kvMyPub = me; } catch {} }
             const _p = Number(item.quad.price || 0), _fa = Number(item.quad.frostAbove || 20);
             const msg = 'Hi! I play ' + (item.name || item.quad.game) + ' on KasVillage and would like the next board' + (_p ? ' (' + _p + ' KAS)' : '') + '. ' + (_p && _p >= _fa ? 'It is ' + _fa + '+ KAS, so let\'s use a FROST agreement. ' : (_p ? 'I will send to the address on the game card and give you the txid. ' : '')) + 'My pubkey: ' + me;
-            try { await require('expo-clipboard').setStringAsync(msg); } catch { try { require('react-native').Clipboard.setString(msg); } catch {} }
+            try { await require('expo-clipboard').setStringAsync(msg); } catch { try { require('react-native').Clipboard.setStringAsync(msg); } catch {} }
             const c = String(item.quad.contact).trim(); const RN = require('react-native');
             let url = c;
             if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(c)) url = 'mailto:' + c + '?subject=' + encodeURIComponent('KasVillage board') + '&body=' + encodeURIComponent(msg);
@@ -451,7 +586,14 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
           <Text style={{ color: '#b9a6ff', fontWeight: '700', fontSize: 12 }}>{'💜 TIP THE DEV'}</Text>
         </TouchableOpacity>
       ) : null}
-    </View>
+          </ScrollView>
+          <TouchableOpacity onPress={() => setInfoOpen(false)} style={{ borderTopWidth: 1, borderTopColor: '#eadfc6', paddingVertical: 14, alignItems: 'center' }}>
+            <Text style={{ fontWeight: '800', color: '#57534e' }}>Close</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+    </>
   );
 }
 
@@ -518,27 +660,44 @@ const badgeStyles = StyleSheet.create({
 function DAppCard({ item, onPress }: { item: DAppEntry; onPress: () => void }) {
   const boardColors: Record<Board, string> = { Elite: COLORS.purple100, Main: COLORS.green100, Incubator: COLORS.amber100 };
   
+  const col = kvEnvColors(item, item.name || item.id);
   return (
-    <TouchableOpacity style={cardStyles.dappCard} onPress={onPress} activeOpacity={0.8}>
-      <View style={cardStyles.badgeContainer}>
-        {item.townhall.verified ? <VerifiedBadge /> : <UnverifiedBadge />}
-      </View>
-      <View style={[cardStyles.boardTag, { backgroundColor: boardColors[item.board] }]}>
-        <Text style={cardStyles.boardText}>{item.board}</Text>
-      </View>
-      <Text style={cardStyles.dappName} numberOfLines={1}>{item.name}</Text>
-      <Text style={cardStyles.dappCategory}>{item.category}</Text>
-      {item.templateVerified && (
-        <View style={cardStyles.sdkBadge}>
-          <Text style={cardStyles.sdkText}>SDK ✓</Text>
-        </View>
-      )}
-    </TouchableOpacity>
+    <KvBizEnvelope name={item.name} cat={'DApp · ' + (item.category || item.board)} stamp={'\u{1F9E9}'} colors={col}
+      verified={!!(item.townhall && item.townhall.verified)} postedAt={item.createdAt}
+      lines={[item.description || item.name, (item.templateVerified ? 'SDK ✓ · ' : '') + 'sandboxed', item.board + ' board']}
+      info={[(item.xpCommitment ? '⭐ ' + item.xpCommitment + ' XP' : ''), '\u{1F552} ' + (kvAgo(item.createdAt) || 'new').toLowerCase()]}
+      action={{ label: 'OPEN', onPress }} onPress={onPress} />
+  );
+}
+
+// KV_STORE_TIP_SHEET: same tip flow as the old card button, callable from the store sheet
+function kvTipStore(item: any) {
+  const tipAddr = item && item.coords && item.coords.tip_addr;
+  if (!tipAddr) return;
+  Alert.alert(
+    'Tip ' + (item.storeName || 'this store'),
+    'Send 1 KAS straight to the address this store declared in its announce?\n\n' + String(tipAddr)
+      + '\n\nNever send KAS to an address typed inside a page \u2014 only through prompts like this.',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Send 1 KAS', onPress: async () => {
+          try {
+            const ps = require('./proposal_share');
+            const SS = require('expo-secure-store');
+            const sender = await SS.getItemAsync('kaspa_address');
+            const priv = await ps._kvResolvePrivHex();
+            if (!sender || !priv) throw new Error('wallet identity unavailable');
+            const { sendKaspaViaRest } = require('./kaspa_rest_tx');
+            const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: String(tipAddr), amountSompi: 100000000n, privateKeyHex: priv, network: 'testnet-10' as any });
+            if (r && r.success) Alert.alert('Tip sent \u2713'); else Alert.alert('Tip failed', String((r && r.error) || 'unknown'));
+          } catch (e: any) { Alert.alert('Tip failed', String(e?.message || e)); }
+        } },
+    ],
   );
 }
 
 // Storefront Card
-function StorefrontCard({ item, onPress }: { item: StorefrontEntry; onPress: () => void }) {
+function StorefrontCard({ item, onPress, onRepost, reposting, onFlag, onTipKeeper }: { item: StorefrontEntry; onPress: () => void; onRepost?: (e: any) => void; reposting?: boolean; onFlag?: (e: any) => void; onTipKeeper?: (e: any, a: string) => void }) {
   const tipAddr = (item as any)?.coords?.tip_addr;
   const doTip = () => {
     if (!tipAddr) return;
@@ -567,22 +726,14 @@ function StorefrontCard({ item, onPress }: { item: StorefrontEntry; onPress: () 
       ],
     );
   };
+  const col = kvEnvColors(item, item.storeName || item.id);
+  const pl = (item as any)?.coords?.pledge_kas;
   return (
-    <TouchableOpacity style={cardStyles.storefrontCard} onPress={onPress} activeOpacity={0.8}>
-      {tipAddr ? (
-        <TouchableOpacity onPress={doTip}
-          style={{ position: 'absolute', right: 6, bottom: 6, zIndex: 20, borderColor: '#7c3aed', borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
-          <Text style={{ color: '#b9a6ff', fontSize: 10, fontWeight: '700' }}>{'\u{1F49C} TIP'}</Text>
-        </TouchableOpacity>
-      ) : null}
-      <View style={cardStyles.badgeContainer}>
-        {item.townhall.verified ? <VerifiedBadge /> : <UnverifiedBadge />}
-      </View>
-      <Text style={cardStyles.storeIcon}>🏪</Text>
-      <Text style={cardStyles.storeName} numberOfLines={1}>{item.storeName}</Text>
-      <Text style={cardStyles.storeDesc} numberOfLines={2}>{item.description}</Text>
-      <Text style={cardStyles.storeCategory}>{item.category}</Text>
-    </TouchableOpacity>
+    <KvBizEnvelope name={item.storeName} cat={item.category} stamp={'\u{1F3EA}'} colors={col}
+      verified={!!(item.townhall && item.townhall.verified)} postedAt={item.createdAt}
+      lines={[item.description || item.storeName, item.productCount ? item.productCount + ' items' : 'escrow · wallet-to-wallet', item.rating ? '★ ' + item.rating : '']}
+      info={[pl != null ? '\u{1F4B0} Pledge ' + pl + ' KAS' : '\u{1F4B0} pledge-anchored', '\u{1F552} ' + (kvAgo(item.createdAt) || 'new').toLowerCase()]}
+      action={{ label: 'OPEN STORE', onPress }} onPress={onPress} />
   );
 }
 
@@ -591,51 +742,36 @@ function CouponCard({ item, onPress }: { item: CouponEntry; onPress: () => void 
   const isExpired = item.expiresAt < Date.now();
   const daysLeft = Math.ceil((item.expiresAt - Date.now()) / (1000 * 60 * 60 * 24));
 
+  const col = kvEnvColors(item, item.storeName || item.title);
   return (
-    <TouchableOpacity style={[cardStyles.couponCard, isExpired && cardStyles.expired]} onPress={onPress} activeOpacity={0.8}>
-      <View style={cardStyles.couponLeft}>
-        <Text style={cardStyles.couponDiscount}>{item.discount}</Text>
-      </View>
-      <View style={cardStyles.couponContent}>
-        <Text style={cardStyles.couponTitle} numberOfLines={1}>{item.title}</Text>
-        <Text style={cardStyles.couponDesc} numberOfLines={1}>{item.description}</Text>
-        {isExpired ? (
-          <Text style={cardStyles.expiredText}>Expired</Text>
-        ) : (
-          <Text style={cardStyles.expiresText}>{daysLeft} days left</Text>
-        )}
-      </View>
-    </TouchableOpacity>
+    <KvBizEnvelope name={item.title} cat={'Coupon · ' + (item.storeName || '')} stamp={'\u{1F39F}️'} colors={col}
+      verified={!!(item.townhall && item.townhall.verified)} postedAt={item.createdAt}
+      lines={[item.discount + (item.storeName ? ' at ' + item.storeName : ''), item.description, 'Use in a Neighbor Agreement']}
+      info={[isExpired ? '↩ RETURN TO SENDER' : '\u{1F5D3} ' + daysLeft + ' days left', item.storeName ? '\u{1F3EA} ' + item.storeName : '']}
+      action={isExpired ? undefined : { label: 'GET CODE', onPress }} onPress={onPress} />
   );
 }
 
 // Academic Card
 function AcademicCard({ item, onPress }: { item: AcademicEntry; onPress: () => void }) {
   return (
-    <TouchableOpacity style={cardStyles.academicCard} onPress={onPress} activeOpacity={0.8}>
-      <View style={cardStyles.badgeContainer}>
-        {item.dkimVerified ? <VerifiedBadge label="DKIM" /> : <UnverifiedBadge />}
-      </View>
-      <Text style={cardStyles.academicIcon}>🎓</Text>
-      <Text style={cardStyles.academicTitle} numberOfLines={1}>{item.title}</Text>
-      <Text style={cardStyles.academicInstitution}>{item.institution}</Text>
-      <Text style={cardStyles.academicField}>{item.field}</Text>
-    </TouchableOpacity>
+    <KvParcelEnvelope title={item.title} seed={item.id || item.title}
+      lines={[item.institution, item.field, item.description]}
+      stampText={'RESEARCH \u00B7 ' + String(item.field || '').toUpperCase().slice(0, 14)}
+      verified={!!item.dkimVerified} postedAt={item.createdAt}
+      action={{ label: 'OPEN', onPress }} onPress={onPress} />
   );
 }
 
 // Service Card
 function ServiceCard({ item, onPress }: { item: ServiceEntry; onPress: () => void }) {
+  const col = kvEnvColors(item, item.title || item.id);
   return (
-    <TouchableOpacity style={cardStyles.serviceCard} onPress={onPress} activeOpacity={0.8}>
-      <View style={cardStyles.badgeContainer}>
-        {item.townhall.verified ? <VerifiedBadge /> : <UnverifiedBadge />}
-      </View>
-      <Text style={cardStyles.serviceCategory}>{item.category}</Text>
-      <Text style={cardStyles.serviceTitle} numberOfLines={1}>{item.title}</Text>
-      <Text style={cardStyles.serviceDesc} numberOfLines={2}>{item.description}</Text>
-      <Text style={cardStyles.serviceArea}>📍 {item.serviceArea}</Text>
-    </TouchableOpacity>
+    <KvBizEnvelope name={item.title} cat={'Service · ' + item.category} stamp={'\u{1F6E0}️'} colors={col}
+      verified={!!(item.townhall && item.townhall.verified)} postedAt={item.createdAt}
+      lines={[item.description || item.title, '\u{1F4CD} ' + item.serviceArea, item.priceLabel || '']}
+      info={[item.priceLabel ? '\u{1F4B0} ' + item.priceLabel : '', '\u{1F552} ' + (kvAgo(item.createdAt) || 'new').toLowerCase()]}
+      action={{ label: 'OPEN', onPress }} onPress={onPress} />
   );
 }
 
@@ -865,6 +1001,7 @@ export default function VillageMailbox() {
             if (r && r.k === 'delist' && r.d && r.d.head) return { delist: true, head: String(r.d.head), t: r.t || 0, o: r.o || '' }; // KV_DELIST_FILTER
             if (r && r.k === 'keep' && r.d && r.d.head) { try { if (typeof kp.verifyRecord === 'function' && !kp.verifyRecord(r)) return null; } catch { return null; } return { keep: true, head: String(r.d.head), d: r.d, t: r.t || 0, o: r.o || '' }; } // KV_GAME_KEEP
             if (!r || r.k !== 'registry' || !r.d) return null;
+            try { if (typeof kp.verifyRecord === 'function' && !kp.verifyRecord(r)) return null; } catch { return null; } // KV_ANN_SIGNED
             let quad: any = null; try { quad = r.d.primaryLink ? JSON.parse(r.d.primaryLink) : null; } catch {}
             if (!quad || !quad.head || !quad.manifestAddress || !quad.manifestHash) return null;
             if (String(r.d.category || '').toLowerCase() !== 'game') return null;
@@ -874,6 +1011,7 @@ export default function VillageMailbox() {
           // KV_MOD_PUBKEY: moderation key - its delists apply to any head. Rotate to a dedicated key before mainnet.
           const KV_MOD_PUBKEY = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
           const delistByHead = new Map<string, any>();
+          const _kvDl = (h: string, o: string) => { let best: any = null; for (const v of delistByHead.values()) if (v.head === h && (v.o === o || v.o === KV_MOD_PUBKEY) && (!best || v.t > best.t)) best = v; return best; }; // KV_DELIST_PERSIGNER
           const flagsByHead = new Map<string, Map<string, string>>(); // head -> flagger -> reason
           const grantRecs: any[] = [];
           const keepByHead = new Map<string, any>(); // KV_GAME_KEEP
@@ -884,11 +1022,11 @@ export default function VillageMailbox() {
             if (it.keep) { try { const ka = String((it.d && it.d.tip_addr) || ''); const own = require('./canonical_agreement_steps').deriveAddress(String(it.o).slice(2), 'testnet-10'); if (ka && ka === own) { let L = keepersByHead.get(it.head); if (!L) { L = []; keepersByHead.set(it.head, L); } if (L.indexOf(ka) < 0) L.push(ka); } } catch {} }
             if (it.keep) { const pk = keepByHead.get(it.head); if (!pk || Number(it.d.daa_to || 0) > Number(pk.d.daa_to || 0)) keepByHead.set(it.head, it); return; }
             if (it.grant) { grantRecs.push(it.rec); return; }
-            if (it.flag) { let m = flagsByHead.get(it.head); if (!m) { m = new Map(); flagsByHead.set(it.head, m); } m.set(String(it.o), it.reason); return; }
+            if (it.flag) { let m = flagsByHead.get(it.head); if (!m) { m = new Map(); flagsByHead.set(it.head, m); } if (!m.has(String(it.o)) && m.size >= 500) return; m.set(String(it.o), it.reason); return; } // KV_FLAG_CAP2: sanity cap; qualification checks are capped below
             if (it.undelist) { if (it.o === KV_MOD_PUBKEY) modLiftG.set(it.head, Math.max(modLiftG.get(it.head) || 0, it.t)); return; }
             if (it.delist && it.o === KV_MOD_PUBKEY) modHeadsG.set(it.head, Math.max(modHeadsG.get(it.head) || 0, it.t));
-            if (it.delist) { const p = delistByHead.get(it.head); if (!p || it.t > p.t) delistByHead.set(it.head, it); return; }
-            const prev = byHead.get(it.quad.head); if (!prev || it.t > prev.t) byHead.set(it.quad.head, it);
+            if (it.delist) { const _k = it.head + '|' + it.o; const p = delistByHead.get(_k); if (!p || it.t > p.t) delistByHead.set(_k, it); return; }
+            const prev = byHead.get(it.quad.head); if (!prev || (prev.o === it.o && it.t > prev.t)) byHead.set(it.quad.head, it); // KV_ANN_OWNER: first signer seen (device cache first) owns the card
           };
           // 2) device quad cache first - survives relay recycles until wipe
           try { const cRaw = await AS.getItem('kv_game_registry_cache'); (cRaw ? JSON.parse(cRaw) : []).forEach(take); } catch {}
@@ -899,14 +1037,16 @@ export default function VillageMailbox() {
           // its single setGames - minutes of blank cards over data we had all
           // along. Render what we know, then let the network refine it.
           // KV_PAINT_FILTER: the instant paint honors delists too
-          if (byHead.size) { try { setGames(Array.from(byHead.values()).filter((it: any) => { const d = delistByHead.get(it.quad.head); if (!d || !(d.t > it.t)) return true; if (d.o === KV_MOD_PUBKEY) return false; return !!(d.o && it.o && d.o !== it.o); }) as any); } catch {} }
+          if (byHead.size) { try { setGames(Array.from(byHead.values()).filter((it: any) => { const d = _kvDl(it.quad.head, it.o); if (!d || !(d.t > it.t)) return true; if (d.o === KV_MOD_PUBKEY) return false; return !!(d.o && it.o && d.o !== it.o); }) as any); } catch {} }
           // 1) relay records
           let rowsCount = 0;
           try {
             const fetchR = kp.fetchRecords || kp.fetchPayloadRecords || kp.fetchAddressRecords;
             const rows: any[] = (await fetchR(regAddr, 'testnet-10')) || [];
             rowsCount = rows.length;
-            rows.forEach((row: any) => take(parseAnn(row)));
+            // KV_ANN_OWNER: fetchRecords is newest-first - feed CHAIN order (oldest first) so the
+            // first signer really is the first publisher (block-scan below already walks forward)
+            rows.slice().reverse().forEach((row: any) => take(parseAnn(row)));
           } catch {}
           // 3) client scan from the rolling checkpoint when records are empty
           try {
@@ -1008,11 +1148,13 @@ export default function VillageMailbox() {
           // KV_GAME_FLAGS tally: 3 qualified flaggers (pledge or settled trade, not the owner) = hidden
           try {
             const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map();
+            // KV_FLAG_BUDGET: overall time budget for the network checks; kvFlaggerQualifies caches per flagger for the session
+            const _flagDeadline = Date.now() + 20000;
             for (const [h, m] of flagsByHead) {
               const it = byHead.get(h); if (!it) continue;
               m.delete(String(it.o));
               const ok: string[] = [];
-              for (const [fk, why] of m) { try { if (await kp.kvFlaggerQualifies(fk, 'testnet-10')) ok.push(why); } catch {} }
+              let _checks = 0; for (const [fk, why] of Array.from(m)) { if (ok.length >= 3) break; const _cached = !!(_g.__kvQualCache && _g.__kvQualCache.has(fk)); if (!_cached) { if (_checks >= 40 || Date.now() > _flagDeadline) continue; _checks++; } try { if (await kp.kvFlaggerQualifies(fk, 'testnet-10')) ok.push(why); } catch {} } // KV_FLAG_CAP2: cap network checks, stop at 3 qualified
               const info = { n: ok.length, reasons: Array.from(new Set(ok)), owner: String(it.o), name: String(it.name || '') };
               if (ok.length >= 3) { _g.__kvFlagInfo.set(h, { ...info, hidden: true }); byHead.delete(h); console.warn('[GamesLane] hidden by', ok.length, 'flags:', h.slice(0, 8), info.reasons.join(',')); }
               else if (ok.length) { _g.__kvFlagInfo.set(h, info); console.log('[GamesLane] flags', ok.length + '/3', h.slice(0, 8)); }
@@ -1031,7 +1173,7 @@ export default function VillageMailbox() {
           for (const [kh, kr] of keepByHead) { const it0 = byHead.get(kh); if (!it0) continue; const kd = kr.d || {}; if (kd.manifestHash && kd.manifestHash !== it0.quad.manifestHash) continue; if (/^[0-9a-f]{64}$/.test(String(kd.anchor_hash || '')) && Number(kd.daa_to || 0) > Number(it0.quad.daa_to || 0)) byHead.set(kh, { ...it0, quad: { ...it0.quad, anchor_hash: kd.anchor_hash, daa_from: kd.daa_from, daa_to: kd.daa_to }, keptBy: kr.o, keptAt: kr.t }); }
           for (const [kh2, L2] of keepersByHead) { const it2 = byHead.get(kh2); if (it2) byHead.set(kh2, { ...it2, keepers: L2 }); }
           const items = Array.from(byHead.values()).filter((it: any) => {
-            const d = delistByHead.get(it.quad.head);
+            const d = _kvDl(it.quad.head, it.o);
             if (!d) return true;
             if (!(d.t > it.t)) { try { console.log('[GamesLane] delist OUTRANKED for ' + it.quad.head.slice(0, 8) + ' delist.t=' + d.t + ' announce.t=' + it.t); } catch {} return true; }
             const keep = d.o === KV_MOD_PUBKEY ? false : !!(d.o && it.o && d.o !== it.o); // mod delist hides any head
@@ -1139,7 +1281,7 @@ export default function VillageMailbox() {
       } catch (_e) { console.warn('[Repost] strip replay failed (announce continues):', _e); }
       const r: any = await repostRecord(_keeper, rec, kind);
       if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
-      Alert.alert('Reposted \u2713', 'Re-announced to the chain' + (_stripN ? ' + ' + _stripN + ' content record(s) replayed' : '') + ' (' + ((1 + _stripN) * 0.1).toFixed(1) + ' KAS total). Your wallet is now its keeper - tips come to you.');
+      Alert.alert('Reposted \u2713', 'Re-announced to the chain' + (_stripN ? ' + ' + _stripN + ' content record(s) replayed' : '') + ' (' + ((1 + _stripN) * 0.2).toFixed(1) + ' KAS total). Your wallet is now its keeper - tips come to you.');
     } catch (e: any) { Alert.alert('Repost failed', String((e && e.message) || e)); }
     setRepostBusy(false);
   };
@@ -1204,7 +1346,7 @@ export default function VillageMailbox() {
       else if (ch.indexOf('whatsapp') >= 0) url = 'https://wa.me/' + hd.replace(/\D/g, '') + '?text=' + encodeURIComponent(msg);
       else if (ch.indexOf('twitter') >= 0 || ch === 'x' || ch.indexOf('x ') === 0) url = 'https://x.com/' + hd;
       if (!url && !rawHandle && cfg && cfg.repositoryUrl) url = String(cfg.repositoryUrl); // KV_QA_ALWAYS: no DM listed -> repo page
-      try { Clipboard.setString(msg); } catch {}
+      try { Clipboard.setStringAsync(msg); } catch {}
       setQaText('');
       console.log('[QA] question #' + n, 'ref', h.slice(0, 16), '->', url || '(copy only)');
       Alert.alert(n === 1 ? 'Question ready (free)' : 'Follow-up #' + n + ' ready', 'Message copied. ' + (url ? 'Opening ' + (cfg.qaChannel || 'their channel') + ' - paste it into the DM.' : (rawHandle ? 'Paste it into ' + (cfg.qaChannel || 'their channel') + ': ' + rawHandle : 'This researcher has not listed a DM channel yet - keep the copied message for when they do.')), [
@@ -1252,7 +1394,7 @@ export default function VillageMailbox() {
         } catch (e: any) { Alert.alert('Clear failed', String((e && e.message) || e)); }
       } });
       btns.push({ text: 'Cancel', style: 'cancel' });
-      require('./kv_prompt').kvChoose('Flag this listing? (0.1 KAS)', 'Flags are public, signed by your key, and counted by every wallet.', btns);
+      require('./kv_prompt').kvChoose('Flag this listing? (0.2 KAS)', 'Flags are public, signed by your key, and counted by every wallet.', btns);
     } catch (e: any) { Alert.alert('Flag failed', String((e && e.message) || e)); }
   };
   (globalThis as any).__kvRunFlag = runFlag; // KV_GAME_CARD_FLAG: game cards (separate component) reach runFlag
@@ -1514,9 +1656,9 @@ export default function VillageMailbox() {
             console.log('[Mailbox] modal open - cfgHash:', cfgHash ? cfgHash.slice(0, 16) : 'MISSING', 'addr:', item.arweaveTx.slice(0, 24));
             if (!cfgHash) { setStoreView(sv => sv ? { ...sv, loading: false } : sv); return; }
             const { fetchStoreConfig } = await import('./config_chunks');
-            let { config, error: _cfgErr } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined);
+            let { config, error: _cfgErr } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined, (item as any).ownerPubkey || undefined);
             // KV_CFG_RETRY: one retry - a transient API miss must not read as "not on-chain"
-            if (!config) { await new Promise((r) => setTimeout(r, 1500)); const _r2: any = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined); if (_r2 && _r2.config) { config = _r2.config; _cfgErr = _r2.error; } }
+            if (!config) { await new Promise((r) => setTimeout(r, 1500)); const _r2: any = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined, (item as any).ownerPubkey || undefined); if (_r2 && _r2.config) { config = _r2.config; _cfgErr = _r2.error; } }
             // KV_CFG_SCAN: config chunks (products, coupons, description) never render unscanned
             try { if (config) { const _cfm = require('./content_filter'); const scanObject = _cfm.scanObjectStrict || _cfm.scanObject; const _sc = scanObject(config); if (!_sc.ok) { console.warn('[Mailbox] store config BLOCKED:', _sc.reason, 'at', _sc.path); setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config: null, loading: false } : sv); return; } } } catch {}
             console.log('[Mailbox] cfg fetch result:', config ? 'OK brand=' + config.brandName : 'NULL err=' + _cfgErr);
@@ -1567,7 +1709,7 @@ export default function VillageMailbox() {
         }
       } else if (section === 'coupons') {
         // Copy coupon code
-        try { Clipboard.setString(item.code || item.title || ''); Alert.alert('Coupon Copied!', (item.code || item.title) + ' — use at checkout in a Neighbor Agreement'); } catch { Alert.alert('Coupon', item.title || item.code || 'No code'); }
+        try { Clipboard.setStringAsync(item.code || item.title || ''); Alert.alert('Coupon Copied!', (item.code || item.title) + ' — use at checkout in a Neighbor Agreement'); } catch { Alert.alert('Coupon', item.title || item.code || 'No code'); }
       } else if (section === 'services') {
         const svcLink = item.contactChannel || item.primaryLink || '';
         if (svcLink) Linking.openURL(svcLink.startsWith('http') ? svcLink : 'https://' + svcLink);
@@ -1579,7 +1721,7 @@ export default function VillageMailbox() {
     
     switch (section) {
       case 'dapps': return <DAppCard item={item} onPress={onPress} />;
-      case 'storefronts': return <StorefrontCard item={item} onPress={onPress} />;
+      case 'storefronts': return <StorefrontCard item={item} onPress={onPress} onRepost={(e: any) => runRepost(e, (e && e._kvKind) || 'store')} reposting={repostBusy} onFlag={(e: any) => runFlag(e, 'store')} onTipKeeper={tipKeeper} />;
       case 'coupons': return <CouponCard item={item} onPress={onPress} />;
       case 'academics': return <AcademicCard item={item} onPress={onPress} />;
       case 'services': return <ServiceCard item={item} onPress={onPress} />;
@@ -1694,9 +1836,9 @@ export default function VillageMailbox() {
             windowSize={7}
             removeClippedSubviews
             renderItem={renderItem}
-            numColumns={section === 'coupons' ? 1 : 2}
-            key={section === 'coupons' ? 'list' : 'grid'}
-            columnWrapperStyle={section !== 'coupons' ? mainStyles.gridRow : undefined}
+            numColumns={1} /* KV_ENVELOPE_CARDS: one envelope per row */
+            key={'list'}
+            columnWrapperStyle={undefined}
             contentContainerStyle={mainStyles.list}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={COLORS.purple600} />
@@ -1776,7 +1918,7 @@ export default function VillageMailbox() {
                   <Text style={{ color: '#92400e', backgroundColor: '#fef3c7', fontSize: rs.font(10), fontWeight: 'bold', textAlign: 'center', borderRadius: rs.s(8), padding: rs.s(6), marginBottom: rs.s(8) }}>{'\u2691 Flagged ' + _fi.n + '/3 \u2014 ' + _fi.reasons.join(', ')}</Text>
                 ) : null; })()}
                 <TouchableOpacity onPress={() => runFlag({ arweaveTx: gameView.addr, id: gameView.addr, name: gameView.name } as any, 'dapp')} style={{ alignSelf: 'center', borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(5), paddingHorizontal: rs.s(12), marginBottom: rs.s(10) }}>
-                  <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>Flag this game (0.1 KAS)</Text>
+                  <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>Flag this game (0.2 KAS)</Text>
                 </TouchableOpacity>
                 {gameView.game ? (
                   gameView.game.engine === 'scene'
@@ -1939,8 +2081,13 @@ export default function VillageMailbox() {
                         ))}
                       </View>
                     ) : null}
+                    {(storeView.entry as any)?.coords?.tip_addr ? ( /* KV_STORE_TIP_SHEET: tip moved off the envelope */
+                      <TouchableOpacity onPress={() => kvTipStore(storeView.entry)} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#7c3aed', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
+                        <Text style={{ color: '#7c3aed', fontSize: rs.font(11), fontWeight: 'bold' }}>{'\u{1F49C} Tip this store (1 KAS)'}</Text>
+                      </TouchableOpacity>
+                    ) : null}
                     <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
-                      <Text style={{ color: '#4f46e5', fontSize: rs.font(11), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.1 KAS)'}</Text>
+                      <Text style={{ color: '#4f46e5', fontSize: rs.font(11), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.2 KAS)'}</Text>
                     </TouchableOpacity>
 {(() => { // KV_FLAG_BADGE
                       const _fi = ((globalThis as any).__kvFlagInfo || new Map()).get(String((storeView.entry as any).arweaveTx || (storeView.entry as any).id));
@@ -1954,7 +2101,7 @@ export default function VillageMailbox() {
                     })()}
                     {/* KV_FLAG_BTN */}
                     <TouchableOpacity onPress={() => runFlag(storeView.entry as any, 'store')} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
-                      <Text style={{ color: '#d97706', fontSize: rs.font(11), fontWeight: 'bold' }}>Flag this listing (0.1 KAS)</Text>
+                      <Text style={{ color: '#d97706', fontSize: rs.font(11), fontWeight: 'bold' }}>Flag this listing (0.2 KAS)</Text>
                     </TouchableOpacity>
                     {/* KV_DELIST_OWNER */}
                     <TouchableOpacity onPress={() => runDelistOwner(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#b91c1c', borderRadius: rs.s(10), paddingVertical: rs.s(10), alignItems: 'center' }}>
@@ -1999,8 +2146,13 @@ export default function VillageMailbox() {
                         ))}
                       </View>
                     ) : null}
+                    {(storeView.entry as any)?.coords?.tip_addr ? ( /* KV_STORE_TIP_SHEET: tip moved off the envelope */
+                      <TouchableOpacity onPress={() => kvTipStore(storeView.entry)} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#7c3aed', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
+                        <Text style={{ color: '#7c3aed', fontSize: rs.font(11), fontWeight: 'bold' }}>{'\u{1F49C} Tip this store (1 KAS)'}</Text>
+                      </TouchableOpacity>
+                    ) : null}
                     <TouchableOpacity disabled={repostBusy} onPress={() => runRepost(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ borderWidth: 1, borderColor: '#4f46e5', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
-                      <Text style={{ color: '#4f46e5', fontSize: rs.font(10), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.1 KAS)'}</Text>
+                      <Text style={{ color: '#4f46e5', fontSize: rs.font(10), fontWeight: 'bold' }}>{repostBusy ? 'Reposting...' : 'Repost \u2014 keep this listing alive (0.2 KAS)'}</Text>
                     </TouchableOpacity>
 {(() => { // KV_FLAG_BADGE
                       const _fi = ((globalThis as any).__kvFlagInfo || new Map()).get(String((storeView.entry as any).arweaveTx || (storeView.entry as any).id));
@@ -2014,7 +2166,7 @@ export default function VillageMailbox() {
                     })()}
                     {/* KV_FLAG_BTN store */}
                     <TouchableOpacity onPress={() => runFlag(storeView.entry as any, 'store')} style={{ marginTop: rs.s(6), borderWidth: 1, borderColor: '#d97706', borderRadius: rs.s(10), paddingVertical: rs.s(7), alignItems: 'center' }}>
-                      <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>Flag this listing (0.1 KAS)</Text>
+                      <Text style={{ color: '#d97706', fontSize: rs.font(10), fontWeight: 'bold' }}>Flag this listing (0.2 KAS)</Text>
                     </TouchableOpacity>
                     {/* KV_DELIST_OWNER store */}
                     <TouchableOpacity onPress={() => runDelistOwner(storeView.entry as any, ((storeView.entry as any)._kvKind || 'store'))} style={{ marginTop: rs.s(6), borderWidth: 1, borderColor: '#b91c1c', borderRadius: rs.s(10), paddingVertical: rs.s(7), alignItems: 'center' }}>
@@ -2195,3 +2347,5 @@ const mainStyles = StyleSheet.create({
 });
 
 export { VillageMailbox };
+
+// KV_CLIP_ASYNC

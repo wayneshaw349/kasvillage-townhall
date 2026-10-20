@@ -68,6 +68,8 @@ export const VaultCosignScreen: React.FC<VaultCosignScreenProps> = ({
 
   const [display, setDisplay] = useState<{
     recipient: string; amountKas: string; changeKas: string; feeKas: string; inputs: number; selfSweep: boolean;
+    // [KV_VAULT_ALL_OUTPUTS] every output leaving the vault, not just the first
+    recipients: { address: string; amountKas: string }[];
   } | null>(null);
   const [frames, setFrames] = useState<string[]>([]);
   const [frameIdx, setFrameIdx] = useState(0);
@@ -102,7 +104,11 @@ export const VaultCosignScreen: React.FC<VaultCosignScreenProps> = ({
     return () => clearInterval(id);
   }, [step, frames.length]);
 
-  const fmt = (s: bigint) => (Number(s) / 1e8).toFixed(4);
+  // exact 8-decimal formatting (no float rounding of the amount the human approves)
+  const fmt = (s: bigint) => {
+    const neg = s < 0n; const a = neg ? -s : s;
+    return (neg ? '-' : '') + (a / 100000000n).toString() + '.' + (a % 100000000n).toString().padStart(8, '0');
+  };
 
   // -------------------------------------------------------------------------
   // Assemble template -> verify -> confirm screen
@@ -115,13 +121,20 @@ export const VaultCosignScreen: React.FC<VaultCosignScreenProps> = ({
 
     templateRef.current = template;
     const selfSweep = v.recipientScript === vault.escrowScript;
+    const recipients = (v.outputs || []).map((o) => ({
+      address: scriptToAddress(o.script, vault.network),
+      amountKas: fmt(o.sompi),
+    }));
+    if (!selfSweep && recipients.length === 0) { setError('Template has no recipient outputs'); setStep('error'); return; }
     setDisplay({
-      recipient: selfSweep ? vault.address + ' (this vault — consolidation)' : scriptToAddress(v.recipientScript!, vault.network),
+      recipient: selfSweep ? vault.address + ' (this vault — consolidation)' : recipients.map((r) => r.address).join('\n'),
       amountKas: fmt(v.amountSompi!),
       changeKas: fmt(v.changeSompi!),
-      feeKas: fmt(v.feeSompi!),
+      // [KV_VAULT_REAL_FEE] sum(inputs) - sum(outputs), verified == declared
+      feeKas: fmt(v.computedFeeSompi ?? v.feeSompi!),
       inputs: template.u.length,
       selfSweep,
+      recipients,
     });
     setStep('confirm');
   }, [vault]);
@@ -219,13 +232,27 @@ export const VaultCosignScreen: React.FC<VaultCosignScreenProps> = ({
             <ScrollView contentContainerStyle={styles.center}>
               <Text style={styles.stepTitle}>Confirm this payment</Text>
               <View style={styles.confirmCard}>
-                <Text style={styles.confirmLabel}>Pay to</Text>
-                <Text style={[styles.confirmValue, display.selfSweep && { color: '#4ADE80' }]}>{display.recipient}</Text>
-                <Text style={styles.confirmLabel}>Amount</Text>
+                {display.selfSweep ? (
+                  <>
+                    <Text style={styles.confirmLabel}>Pay to</Text>
+                    <Text style={[styles.confirmValue, { color: '#4ADE80' }]}>{display.recipient}</Text>
+                  </>
+                ) : (
+                  display.recipients.map((r, i) => (
+                    <View key={'rcp' + i}>
+                      <Text style={styles.confirmLabel}>
+                        {display.recipients.length > 1 ? 'Pay to (' + (i + 1) + ' of ' + display.recipients.length + ')' : 'Pay to'}
+                      </Text>
+                      <Text style={styles.confirmValue}>{r.address}</Text>
+                      <Text style={styles.confirmAmount}>{r.amountKas} KAS</Text>
+                    </View>
+                  ))
+                )}
+                <Text style={styles.confirmLabel}>{display.selfSweep ? 'Amount' : 'Total sent'}</Text>
                 <Text style={styles.confirmAmount}>{display.amountKas} KAS</Text>
                 <Text style={styles.confirmLabel}>Change back to vault</Text>
                 <Text style={styles.confirmValue}>{display.changeKas} KAS</Text>
-                <Text style={styles.confirmLabel}>Fee</Text>
+                <Text style={styles.confirmLabel}>Network fee (inputs − outputs)</Text>
                 <Text style={styles.confirmValue}>{display.feeKas} KAS</Text>
                 <Text style={styles.confirmLabel}>Inputs spent</Text>
                 <Text style={styles.confirmValue}>{display.inputs}</Text>

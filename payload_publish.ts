@@ -30,7 +30,7 @@ import {
 // storage-mass blowup tiny outputs cause (C/amount term).
 export const ANNOUNCE_SOMPI = 100_000_000n;
 // Keeper replays: probed on TN10 (accepted down to 0.05 KAS); 0.1 = 2x margin.
-export const REPOST_SOMPI = 10_000_000n;
+export const REPOST_SOMPI = 20_000_000n; // KV_REPOST_02: 0.2 KAS - a 0.1 KAS output alone hits the KIP-9 storage-mass limit
 
 export interface OwnerKeys {
   privateKeyHex: string;  // owner wallet key (signs txs AND records)
@@ -222,7 +222,7 @@ export async function flagListing(owner: OwnerKeys, head: string, reason: string
   const res = await sendKaspaViaRest({
     senderAddress: owner.address,
     recipientAddress: regAddr,
-    amountSompi: REPOST_SOMPI, // KV_FLAG_DUST: 0.1 KAS - cheap to report
+    amountSompi: REPOST_SOMPI, // KV_FLAG_DUST: 0.2 KAS (REPOST_SOMPI) - cheap to report
     privateKeyHex: owner.privateKeyHex,
     network: owner.network,
     payload: buildPayloadHex(rec),
@@ -255,7 +255,7 @@ export async function publishDelist(owner: OwnerKeys, kind: KvKind, storeNonce: 
   return sendKaspaViaRest({
     senderAddress: owner.address,
     recipientAddress: store.address,
-    amountSompi: 0n,
+    amountSompi: 20_000_000n, // KV_DELIST_DUST: 0n meant "send everything" in sendKaspaViaRest
     privateKeyHex: owner.privateKeyHex,
     network: owner.network,
     payload: buildPayloadHex(rec),
@@ -270,12 +270,13 @@ export async function withdrawPledge(owner: OwnerKeys, storeNonce: number) {
   const store = deriveStoreKeys(owner.privateKeyHex, storeNonce, owner.network);
   const live = await getPledgeSompi(store.address, owner.network);
   if (live === 0n) { console.log('[Withdraw] pledge already 0'); return null; }
-  // Fee comes out of the swept amount: send slightly less than the total.
-  const FEE_HEADROOM = 100_000n; // 0.001 KAS; sender's fee loop settles exact
+  // KV_WITHDRAW_FEE / [KV_SWEEP_ALL]: sweep EVERY store coin to the owner, fee taken from the
+  // swept total, so the pledge really reaches 0 (no residue -> store delists; no negative 2nd withdraw).
   return sendKaspaViaRest({
     senderAddress: store.address,
     recipientAddress: owner.address,
-    amountSompi: live - FEE_HEADROOM,
+    amountSompi: 0n,
+    sweepAll: true,
     privateKeyHex: store.privateKeyHex,
     network: owner.network,
   });
@@ -315,7 +316,7 @@ export async function probePayloadLimit(owner: OwnerKeys, sizes: number[] = [500
   return results;
 }
 
-// KV_GRANT_SEND: board/item grant, signed by the game's publisher key (0.1 KAS)
+// KV_GRANT_SEND: board/item grant, signed by the game's publisher key (0.2 KAS)
 export async function grantAccess(dev: OwnerKeys, toPub: string, game: string, item: string, txid: string) {
   const rec = signRecord({ v: 1, k: 'grant', t: Date.now(), o: dev.pubkeyHex, d: { game, item, to: toPub, txid } } as any, dev.privateKeyHex);
   const regAddr = registryAddress('game', dev.network);

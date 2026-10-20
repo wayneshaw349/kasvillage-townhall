@@ -123,9 +123,153 @@ export function decodePayloadHex(hex: string | null | undefined): KvRecord | nul
     s = decodeURIComponent(escape(s));
     if (!s.startsWith(KV_MAGIC)) return null;
     const r = JSON.parse(s.slice(KV_MAGIC.length));
-    if (!r || typeof r !== 'object' || !r.k || !r.o) return null;
-    return r as KvRecord;
+    if (!r || typeof r !== 'object' || Array.isArray(r) || !r.k || !r.o) return null;
+    return kvStripInternal(r) as KvRecord;
   } catch { return null; }
+}
+
+// KV_STRIP_INTERNAL: reader-side marker fields (_bv "batch-verified", _parent
+// "original signed batch") must never be trusted from chain JSON - a poster
+// could set _bv:1 to skip signature checks. Chain/cache records lose them on
+// decode; batch-verified expansions are tracked in a WeakSet instead.
+const KV_INTERNAL_KEYS = ['_bv', '_parent'];
+export function kvStripInternal<T>(r: T): T {
+  if (r && typeof r === 'object') for (const k of KV_INTERNAL_KEYS) { if (Object.prototype.hasOwnProperty.call(r, k)) delete (r as any)[k]; }
+  return r;
+}
+const _kvBatchVerified = new WeakSet<object>();
+const _kvSigOk = (r: any): boolean => !!r && typeof r === 'object' && (_kvBatchVerified.has(r) || verifyRecord(r));
+
+// KV_INFLATE_CAP: streaming inflate with a running output-size check (zip-bomb
+// guard). Throws once output exceeds maxOut; never allocates past ~maxOut+64KB.
+export const KV_PAGE_MAX_DECOMPRESSED = 2 * 1024 * 1024;   // pages / store configs / manifests
+export const KV_GAME_MAX_TOTAL = 16 * 1024 * 1024;         // whole game (all fragments)
+export function kvInflateCapped(bytes: Uint8Array, maxOut: number): Uint8Array {
+  const pako = require('pako');
+  const inf: any = new pako.Inflate();
+  const parts: Uint8Array[] = []; let total = 0;
+  inf.onData = (c: Uint8Array) => { total += c.length; if (total > maxOut) throw new Error('decompressed size exceeds ' + maxOut + ' bytes'); parts.push(c.slice()); };
+  inf.onEnd = (st: number) => { inf.err = st; };
+  const STEP = 16384;
+  if (!bytes.length) throw new Error('empty input');
+  for (let i = 0; i < bytes.length; i += STEP) {
+    inf.push(bytes.subarray(i, i + STEP), i + STEP >= bytes.length);
+    if (inf.err) throw new Error('inflate: ' + (inf.msg || inf.err));
+  }
+  if (!inf.ended) throw new Error('inflate: truncated stream');
+  const out = new Uint8Array(total); let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+export function kvB64ToBytes(b64: string): Uint8Array {
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const s2 = String(b64 || '').replace(/[^A-Za-z0-9+/]/g, '');
+  const out = new Uint8Array(Math.floor(s2.length * 3 / 4)); let n = 0;
+  let buf = 0, bits = 0;
+  for (let i = 0; i < s2.length; i++) { buf = ((buf << 6) | abc.indexOf(s2[i])) & 0xffffff; bits += 6; if (bits >= 8) { bits -= 8; out[n++] = (buf >> bits) & 255; } }
+  return n === out.length ? out : out.slice(0, n);
+}
+/** b64(gzip/zlib) -> utf8 text, bounded. */
+export function kvInflateB64Text(b64: string, maxOut: number): string {
+  return new TextDecoder().decode(kvInflateCapped(kvB64ToBytes(b64), maxOut));
+}
+/** KV_WALK_PAYTO: does a walked tx pay `addr`? null = outputs not exposed by the source (unknown). */
+export function kvTxPaysAddress(tx: any, addr?: string): boolean | null {
+  if (!addr) return null;
+  const outs: any[] | undefined = tx && Array.isArray(tx.outputs) ? tx.outputs : undefined;
+  if (!outs || !outs.length) return null; // KV_OUTS_EMPTY: no output data = unknown, not 'pays elsewhere'
+  for (const o of outs) {
+    const a = o && (o.script_public_key_address || o.address || (o.verboseData && o.verboseData.scriptPublicKeyAddress) || (o.verbose_data && o.verbose_data.script_public_key_address));
+    if (a && String(a) === String(addr)) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// KV_CHUNK_CANDIDATES: hash-driven chunk reassembly (anti chunk-spam)
+// ---------------------------------------------------------------------------
+// Anyone can send a dust tx carrying {seq, tot, h, c} to a store/slot address
+// with any `t`. "Newest record per seq" let one junk tx break every fresh
+// install with "hash mismatch". Instead: keep only signature-valid records
+// (and, when the caller knows it, only those signed by the expected owner),
+// then try candidate groupings until the inflated content hashes to h.
+// `recs` must be in CHAIN order, oldest first (block time / walk order - never
+// the attacker-chosen `t`): junk can only be posted after h is public, so the
+// original publish is tried first. Bounded by `maxAttempts` decode+hash tries.
+export function kvAssembleChunks(
+  recs: any[],
+  expectedHash: string,
+  decode: (b64: string) => string,
+  opts?: { ownerPub?: string; maxAttempts?: number; maxChunkChars?: number },
+): { text: string | null; error?: string } {
+  const maxAttempts = Math.max(1, Math.min(256, (opts && opts.maxAttempts) || 64));
+  // KV_INFLATE_CAP: bound the joined chunk text (compressed b64) before any decode;
+  // callers' decode() bounds the decompressed size. Default ~3 MB of b64.
+  const maxChunkChars = Math.max(1, (opts && opts.maxChunkChars) || 3_000_000);
+  let oversize = false;
+  const xo = (p: any) => String(p || '').toLowerCase().replace(/^0[23](?=[0-9a-f]{64}$)/, '');
+  const ownerX = opts && opts.ownerPub ? xo(opts.ownerPub) : '';
+  const ok: Array<{ r: any; ord: number }> = [];
+  for (let i = 0; i < (recs || []).length; i++) {
+    const r = recs[i]; const d = r && r.d;
+    if (!d || d.h !== expectedHash || typeof d.c !== 'string' || d.c.length > 65536) continue;
+    if (!Number.isInteger(d.seq) || !Number.isInteger(d.tot) || d.tot < 1 || d.tot > 4096 || d.seq < 0 || d.seq >= d.tot) continue;
+    if (ownerX && xo(r.o) !== ownerX) continue;
+    if (!verifyRecord(r)) continue;
+    ok.push({ r, ord: i });
+  }
+  if (!ok.length) return { text: null, error: 'no signed chunks' + (ownerX ? ' from owner' : '') };
+  let attempts = 0, sawComplete = false, best = 0, bestTot = 0;
+  const tryOne = (parts: string[]): string | null => {
+    let n = 0; for (const p of parts) n += p.length;
+    if (n > maxChunkChars) { oversize = true; attempts++; return null; }
+    attempts++;
+    try { const txt = decode(parts.join('')); if (bytesToHex(sha256(utf8ToBytes(txt))) === expectedHash) return txt; } catch {}
+    return null;
+  };
+  // per-seq candidate lists (deduped by content, chain order)
+  const lists = (rs: Array<{ r: any; ord: number }>, tot: number): string[][] | null => {
+    const per: string[][] = Array.from({ length: tot }, () => []);
+    for (const { r } of rs) { const L = per[r.d.seq]; if (L.indexOf(r.d.c) < 0) L.push(r.d.c); }
+    const have = per.filter((L) => L.length).length;
+    if (have > best) { best = have; bestTot = tot; }
+    return have < tot ? null : per;
+  };
+  // odometer over candidates (seq 0 varies fastest), bounded by maxAttempts
+  const search = (cands: string[][]): string | null => {
+    const idx = new Array(cands.length).fill(0);
+    while (attempts < maxAttempts) {
+      const hit = tryOne(cands.map((L, i) => L[idx[i]]));
+      if (hit !== null) return hit;
+      let k = 0;
+      while (k < idx.length) { idx[k]++; if (idx[k] < cands[k].length) break; idx[k] = 0; k++; }
+      if (k === idx.length) return null;
+    }
+    return null;
+  };
+  // group by tot; within a tot try each signer's own set first (a publish or a
+  // keeper repost is one signer), then the mixed set. Earliest group first.
+  const first = (rs: Array<{ ord: number }>) => rs.reduce((m, x) => Math.min(m, x.ord), Number.MAX_SAFE_INTEGER);
+  const byTot = new Map<number, Array<{ r: any; ord: number }>>();
+  for (const x of ok) { const L = byTot.get(x.r.d.tot) || []; L.push(x); byTot.set(x.r.d.tot, L); }
+  for (const rs of Array.from(byTot.values()).sort((a, b) => first(a) - first(b))) {
+    const tot = rs[0].r.d.tot;
+    const bySigner = new Map<string, Array<{ r: any; ord: number }>>();
+    for (const x of rs) { const k = xo(x.r.o); const L = bySigner.get(k) || []; L.push(x); bySigner.set(k, L); }
+    const groups = Array.from(bySigner.values()).sort((a, b) => first(a) - first(b));
+    if (groups.length > 1) groups.push(rs);
+    for (const g of groups) {
+      if (attempts >= maxAttempts) break;
+      const c = lists(g, tot);
+      if (!c) continue;
+      sawComplete = true;
+      const hit = search(c);
+      if (hit !== null) return { text: hit };
+    }
+  }
+  if (!sawComplete) return { text: null, error: 'incomplete: ' + best + '/' + bestTot + ' chunks' };
+  if (oversize) return { text: null, error: 'chunk set too large (> ' + maxChunkChars + ' chars)' };
+  return { text: null, error: 'hash mismatch - tampered or corrupt' + (attempts >= maxAttempts ? ' (gave up after ' + attempts + ' tries)' : '') };
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +366,7 @@ export async function fetchRecords(address: string, network = 'testnet-10', limi
     const AS = require('@react-native-async-storage/async-storage').default;
     const ck = 'kv_rec_cache_' + address.slice(-24);
     if (out.length > 0) { AS.setItem(ck, JSON.stringify(out.slice(0, 300))).catch(() => {});
-    } else { const raw = await AS.getItem(ck); if (raw) { for (const r of JSON.parse(raw)) out.push(r); } }
+    } else { const raw = await AS.getItem(ck); if (raw) { for (const r of JSON.parse(raw)) { if (r && r.record && typeof r.record === 'object') { kvStripInternal(r.record); out.push(r); } } } }
   } catch {}
   out.sort((a, b) => b.blockTime - a.blockTime);
   return out;
@@ -267,39 +411,73 @@ export interface DirectoryEntry {
 
 /**
  * INDEPENDENT SEARCH: rebuild a category directory from its registry address.
- * Dedupe by owner (newest wins), drop sig-invalid and delisted, then attach
+ * One entry per store address, owned by its first signer in chain order
+ * (KV_STORE_OWNER), newest announce from that owner; drop sig-invalid and delisted, then attach
  * live pledge per store. Ranking = caller sorts by pledgeSompi (+ reputation
  * from counterparty_scan on the owner key).
  */
 export async function rebuildDirectory(category: string, registryAddress: string, network = 'testnet-10'): Promise<DirectoryEntry[]> {
   // KV_BATCH_READ: page by time, then expand signed batch announces (verified once)
   const _annsRaw = await fetchRecords(registryAddress, network, 100, 5);
+  // KV_CHAIN_ORDER: fetchRecords is newest-first; every ownership / first-N
+  // decision below walks CHAIN order (oldest first).
   const anns: any[] = [];
   const _senderCount = new Map<string, number>();
-  for (const _a0 of _annsRaw) {
+  for (const _a0 of _annsRaw.slice().reverse()) {
     const _r0: any = _a0.record;
     if (_r0 && _r0.k === 'registry' && _r0.d && Array.isArray(_r0.d.batch)) {
       if (!verifyRecord(_r0)) continue;
       for (const _it of _r0.d.batch.slice(0, 12)) {
         if (!_it || !_it.storeAddress) continue;
-        anns.push({ ..._a0, record: { ..._r0, d: _it, _bv: 1, _parent: _r0 } });
+        const _ex: any = { ..._r0, d: _it, _parent: _r0 };
+        _kvBatchVerified.add(_ex); // KV_STRIP_INTERNAL: verified-batch marker lives off-record
+        anns.push({ ..._a0, record: _ex });
       }
     } else anns.push(_a0);
   }
-  // KV_DIR_BY_ADDR: one entry per STORE ADDRESS (newest announce wins).
-  // Dedupe by owner was wrong - it limited every publisher to a single
-  // listing across all their stores/services/abstracts.
-  const byAddr = new Map<string, { record: KvRecord; blockTime: number }>();
-  for (const a of anns) {
-    const r = a.record;
-    if (r.k !== 'registry') continue;
-    if (!(r as any)._bv && !verifyRecord(r)) continue;
-    // KV_SENDER_CAP: one wallet cannot occupy the directory scan
-    { const _sk = String((a as any).sender || r.o || ''); const _sc = (_senderCount.get(_sk) || 0) + 1; _senderCount.set(_sk, _sc); if (_sc > 30) continue; }
-    if (!r.d?.storeAddress || !r.d?.name) continue;
-    const _ak = String(r.d.storeAddress);
-    if (!byAddr.has(_ak)) byAddr.set(_ak, { record: r, blockTime: a.blockTime, sender: (a as any).sender || '' } as any); // newest first already
+  const _xo = (p: any) => String(p || '').toLowerCase().replace(/^0[23](?=[0-9a-f]{64}$)/, '');
+  // KV_SENDER_CAP: one wallet cannot occupy the directory scan (its NEWEST 30 count)
+  const _senderOk = new Set<any>();
+  for (let i = anns.length - 1; i >= 0; i--) {
+    const a = anns[i]; const r: any = a.record;
+    if (!r || r.k !== 'registry') continue;
+    const _sk = String((a as any).sender || r.o || ''); const _sc = (_senderCount.get(_sk) || 0) + 1; _senderCount.set(_sk, _sc);
+    if (_sc <= 30) _senderOk.add(a);
   }
+  // KV_DIR_BY_ADDR + KV_STORE_OWNER: one entry per STORE ADDRESS. The first
+  // signer seen in chain order owns the address; later announces only update
+  // it when signed by that same key (any key could otherwise take a listing
+  // over by announcing someone else's storeAddress).
+  const _candsByAddr = new Map<string, string[]>(); // addr -> distinct signers, chain order
+  const _latestBy = new Map<string, { record: KvRecord; blockTime: number; sender: string }>(); // addr|xo -> newest announce
+  for (const a of anns) {
+    const r: any = a.record;
+    if (!r || r.k !== 'registry' || !_senderOk.has(a)) continue;
+    if (!r.d?.storeAddress || !r.d?.name || !r.o) continue;
+    if (!_kvSigOk(r)) continue;
+    const _ak = String(r.d.storeAddress); const _ok = _xo(r.o);
+    const L = _candsByAddr.get(_ak) || []; if (L.indexOf(_ok) < 0) L.push(_ok); _candsByAddr.set(_ak, L);
+    _latestBy.set(_ak + '|' + _ok, { record: r, blockTime: a.blockTime, sender: (a as any).sender || '' }); // chain order: later replaces
+  }
+  // Contested address: prefer the claimant who provably funded the pledge at
+  // it from their own derived P2PK address (KV_FLAGGER_PROOF helpers); else first-seen.
+  const _ownerOf = new Map<string, string>(); // addr -> owner xonly
+  let _contested = 0; const _contestDeadline = Date.now() + 15000; // bounded: attacker-made contests cannot stall the scan
+  for (const [_ak, L] of _candsByAddr) {
+    let own = L[0];
+    if (L.length > 1 && _contested++ < 20 && Date.now() < _contestDeadline) {
+      try {
+        for (const c of L.slice(0, 4)) {
+          const fr = _latestBy.get(_ak + '|' + c);
+          if (fr && (await kvOwnFundedSompi(String(fr.record.o), _ak, String(network), 1)) > 0) { own = c; break; }
+        }
+      } catch {}
+      if (own !== L[0]) console.warn('[Directory] contested store ' + _ak.slice(-10) + ': funder ' + own.slice(0, 10) + ' preferred over first-seen ' + L[0].slice(0, 10));
+    }
+    _ownerOf.set(_ak, own);
+  }
+  const byAddr = new Map<string, { record: KvRecord; blockTime: number }>();
+  for (const [_ak, own] of _ownerOf) { const e = _latestBy.get(_ak + '|' + own); if (e) byAddr.set(_ak, e as any); }
   // KV_PROHIBITED_RENDER: reader-side enforcement - a modified client can
   // announce anything; this wallet simply will not display it.
   const KV_PROHIBITED = ['gambling', 'casino', 'betting', 'lottery'];
@@ -308,7 +486,7 @@ export async function rebuildDirectory(category: string, registryAddress: string
   const KV_FLAG_THRESHOLD = 3;
   const _kvFlagMod = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
   const _kvPublishers = new Set<string>();
-  for (const a of anns) { const r: any = a.record; if (r && r.k === 'registry' && r.o && (r._bv || verifyRecord(r))) _kvPublishers.add(String(r.o)); }
+  for (const a of anns) { const r: any = a.record; if (r && r.k === 'registry' && r.o && _kvSigOk(r)) _kvPublishers.add(String(r.o)); }
   const _kvClearT = new Map<string, number>();
   for (const a of anns) {
     const r: any = a.record;
@@ -323,8 +501,10 @@ export async function rebuildDirectory(category: string, registryAddress: string
     const h = String(r.d.head);
     // KV_NO_FLAG_CLEAR: flags cannot be cleared - no arbitration
     // KV_FLAG_TRADE_GATE: listed-publisher gate replaced by pledge-or-trade gate below
-    if (!verifyRecord(r)) continue;
     let m = _kvFlagsBy.get(h); if (!m) { m = new Map(); _kvFlagsBy.set(h, m); }
+    // KV_FLAG_CAP: only the first 10 distinct flaggers per head (chain order) are ever checked
+    if (!m.has(String(r.o)) && m.size >= 500) continue; // KV_FLAG_CAP2: sanity cap only - junk flaggers cannot fill the slots
+    if (!verifyRecord(r)) continue;
     m.set(String(r.o), String(r.d.reason || ''));
   }
   // KV_FLAG_PLEDGE_GATE: flagger must have a live pledge (>= 10 KAS at one of their store addresses)
@@ -336,33 +516,30 @@ export async function rebuildDirectory(category: string, registryAddress: string
       const _stores = new Map<string, string[]>();
       for (const a of anns) {
         const r: any = a.record;
-        if (r && r.k === 'registry' && r.o && r.d && r.d.storeAddress && _flaggers.has(String(r.o))) {
+        if (r && r.k === 'registry' && r.o && r.d && r.d.storeAddress && _flaggers.has(String(r.o)) && _kvSigOk(r)) { // KV_FLAGGER_PROOF: signed claims only
           const l = _stores.get(String(r.o)) || [];
           if (l.indexOf(String(r.d.storeAddress)) < 0) l.push(String(r.d.storeAddress));
           _stores.set(String(r.o), l);
         }
       }
-      const _g: any = globalThis as any; if (!_g.__kvPledgeCache) _g.__kvPledgeCache = new Map();
-      const _api = String(network).indexOf('testnet') >= 0 ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+      const _g: any = globalThis as any;
       const _pledged = new Set<string>();
-      for (const fk of _flaggers) {
-        for (const addr of (_stores.get(fk) || []).slice(0, 5)) {
-          let bal = -1;
-          const ch = _g.__kvPledgeCache.get(addr);
-          if (ch && Date.now() - ch.t < 600000) bal = ch.b;
-          else {
-            try {
-              const j: any = await (await fetch(_api + '/addresses/' + addr + '/balance')).json();
-              bal = Number((j && j.balance) || 0);
-              _g.__kvPledgeCache.set(addr, { b: bal, t: Date.now() });
-            } catch {}
-          }
-          if (bal >= KV_FLAG_MIN_PLEDGE) { _pledged.add(fk); break; }
-        }
+      // KV_FLAGGER_PROOF: balance of the flagger's OWN P2PK address, or capital the flagger
+      // provably put into a store they claim (UTXOs funded from their own address)
+      // KV_FLAG_BUDGET: per-session result cache per flagger + overall time budget;
+      // flaggers not reached inside the budget simply do not count this pass.
+      const _sess: Map<string, boolean> = _g.__kvFlagQualSession || (_g.__kvFlagQualSession = new Map());
+      const _deadline = Date.now() + 20000;
+      const _pending: string[] = [];
+      for (const fk of _flaggers) { const c = _sess.get(fk); if (c === true) _pledged.add(fk); else if (c === undefined) _pending.push(fk); }
+      for (const fk of _pending) {
+        if (Date.now() > _deadline) break;
+        if (await kvPledgeQualified(fk, _stores.get(fk) || [], String(network), KV_FLAG_MIN_PLEDGE)) { _pledged.add(fk); _sess.set(fk, true); }
       }
       // KV_FLAG_TRADE_GATE: no pledge? a settled escrow trade also qualifies
-      for (const fk of _flaggers) {
+      for (const fk of _pending) {
         if (_pledged.has(fk)) continue;
+        if (Date.now() > _deadline) break;
         try {
           const tc = _g.__kvTradeCache || (_g.__kvTradeCache = new Map());
           const hit = tc.get(fk);
@@ -375,19 +552,25 @@ export async function rebuildDirectory(category: string, registryAddress: string
             tc.set(fk, { n: settled, t: Date.now() });
           }
           if (settled >= 1) _pledged.add(fk);
+          _sess.set(fk, settled >= 1);
         } catch {}
       }
       for (const m of _kvFlagsBy.values()) for (const k of Array.from(m.keys())) if (!_pledged.has(k)) { m.delete(k); console.log('[Flags] ignored - flagger has no pledge or settled trade:', k.slice(0, 12)); }
     }
   } catch (e) { console.warn('[Flags] gate error', e); }
-  const delistByTarget = new Map<string, any>();
+  // KV_DELIST_PERSIGNER: newest delist per (store, signer); only the store's
+  // owner's or the mod key's delist is ever applied (a third party's high-t
+  // delist can no longer shadow the owner's).
+  const delistByTarget = new Map<string, Map<string, any>>();
+  const _dlPut = (r: any) => {
+    const tgt = String(r.d.head); let m = delistByTarget.get(tgt); if (!m) { m = new Map(); delistByTarget.set(tgt, m); }
+    const k = _xo(r.o); const p = m.get(k);
+    if (!p || (r.t || 0) > (p.t || 0)) m.set(k, r);
+  };
+  const _dlGet = (tgt: string, signer: string): any => { const m = delistByTarget.get(tgt); return m ? m.get(_xo(signer)) : undefined; };
   for (const a of anns) {
     const r: any = a.record;
-    if (r && r.k === 'delist' && r.d && r.d.head && verifyRecord(r)) {
-      const tgt = String(r.d.head);
-      const p = delistByTarget.get(tgt);
-      if (!p || (r.t || 0) > (p.t || 0)) delistByTarget.set(tgt, r);
-    }
+    if (r && r.k === 'delist' && r.d && r.d.head && r.o && verifyRecord(r)) _dlPut(r);
   }
   // KV_MOD_STICKY: latest cold-key action per store address (delist / undelist), cached on device
   const _kvModHeads = new Set<string>();
@@ -418,11 +601,11 @@ export async function rebuildDirectory(category: string, registryAddress: string
     const _dck = 'kv_store_delist_cache_' + String(registryAddress).slice(-16);
     const _old: any[] = JSON.parse((await _DAS.getItem(_dck)) || '[]');
     for (const r of _old) {
-      if (!r || r.k !== 'delist' || !r.d || !r.d.head || !verifyRecord(r)) continue;
-      const tgt = String(r.d.head); const p = delistByTarget.get(tgt);
-      if (!p || (r.t || 0) > (p.t || 0)) delistByTarget.set(tgt, r);
+      if (!r || r.k !== 'delist' || !r.d || !r.d.head || !r.o || !verifyRecord(r)) continue;
+      _dlPut(r);
     }
-    await _DAS.setItem(_dck, JSON.stringify(Array.from(delistByTarget.values())));
+    const _flat: any[] = []; for (const m of delistByTarget.values()) for (const r of m.values()) _flat.push(r);
+    await _DAS.setItem(_dck, JSON.stringify(_flat.slice(-2000)));
   } catch {}
   // KV_KEEPERS: every distinct wallet that announced each listing in the window
   const _keepersBy = new Map<string, string[]>();
@@ -454,10 +637,12 @@ export async function rebuildDirectory(category: string, registryAddress: string
     if (record.del) continue;
     if (KV_PROHIBITED.indexOf(String(record.d.category || '').toLowerCase()) >= 0) continue;
     if (_kvModHeads.has(String(record.d.storeAddress))) { // KV_MOD_STICKY: cold-key removal sticks (owner still told why)
-      try { const _md: any = delistByTarget.get(String(record.d.storeAddress)); const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map(); _g.__kvFlagInfo.set(String(record.d.storeAddress), { n: 0, reasons: [], owner: String(owner), name: String(record.d.name || ''), hidden: true, mod: true, modReason: String((_md && _md.o === KV_MOD_PUBKEY && _md.d && _md.d.reason) || 'moderator decision'), modNote: _kvModNotes.get(String(record.d.storeAddress)) || '' }); } catch {}
+      try { const _md: any = _dlGet(String(record.d.storeAddress), KV_MOD_PUBKEY); const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map(); _g.__kvFlagInfo.set(String(record.d.storeAddress), { n: 0, reasons: [], owner: String(owner), name: String(record.d.name || ''), hidden: true, mod: true, modReason: String((_md && _md.o === KV_MOD_PUBKEY && _md.d && _md.d.reason) || 'moderator decision'), modNote: _kvModNotes.get(String(record.d.storeAddress)) || '' }); } catch {}
       continue;
     }
-    const _dl = delistByTarget.get(String(record.d.storeAddress));
+    const _dlO = _dlGet(String(record.d.storeAddress), owner);
+    const _dlM = _xo(owner) === _xo(KV_MOD_PUBKEY) ? undefined : _dlGet(String(record.d.storeAddress), KV_MOD_PUBKEY);
+    const _dl = (_dlM && (_dlM.t || 0) > (record.t || 0)) ? _dlM : _dlO;
     // KV_MOD_OWNER_INFO: remember moderator removals so the owner is told why
     if (_dl && _dl.o === KV_MOD_PUBKEY && _dl.o !== owner && (_dl.t || 0) > (record.t || 0)) { try { const _g: any = globalThis as any; if (!_g.__kvFlagInfo) _g.__kvFlagInfo = new Map(); _g.__kvFlagInfo.set(String(record.d.storeAddress), { n: 0, reasons: [], owner: String(owner), name: String(record.d.name || ''), hidden: true, mod: true, modReason: String((_dl.d && _dl.d.reason) || 'unspecified') }); } catch {} }
     if (_dl && (_dl.o === owner || _dl.o === KV_MOD_PUBKEY) && (_dl.t || 0) > (record.t || 0)) continue;
@@ -537,15 +722,82 @@ export function makeDelist(kind: KvKind, ownerPubkey: string): KvRecord {
 // chunking (one board per tx) is designed assuming ~1KB is safe.
 // ---------------------------------------------------------------------------
 
+// KV_FLAGGER_PROOF: a claimed storeAddress proves nothing (anyone can sign a
+// registry record naming a rich address). Qualify only by
+//   (1) the balance of the P2PK address DERIVED from the flagger's own pubkey, or
+//   (2) unspent capital at a claimed store whose funding tx was sent FROM that
+//       derived address (the flagger provably locked it there).
+function _kvOwnAddr(pubkey: string, network: string): string {
+  try {
+    const xonly = String(pubkey || '').length === 66 ? String(pubkey).slice(2) : String(pubkey || '');
+    if (!/^[0-9a-fA-F]{64}$/.test(xonly)) return '';
+    return require('./canonical_agreement_steps').deriveAddress(xonly.toLowerCase(), network as any) || '';
+  } catch { return ''; }
+}
+const _kvApi = (network: string) => String(network).indexOf('testnet') >= 0 ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+const _kvPc = (): Map<string, { b: number; t: number }> => { const g: any = globalThis as any; return g.__kvPledgeCache || (g.__kvPledgeCache = new Map()); };
+const _kvCached = (k: string) => { const c = _kvPc().get(k); return c && Date.now() - c.t < 600000 ? c.b : null; };
+
+/** KV_FLAGGER_PROOF (2): unspent sompi at `addr` whose funding tx was sent entirely
+ *  FROM pubkey's derived P2PK address. Stops counting once >= minSompi. Cached 10 min. */
+export async function kvOwnFundedSompi(pubkey: string, addr: string, network: string, minSompi: number): Promise<number> {
+  const own = _kvOwnAddr(pubkey, network);
+  if (!own || !addr) return 0;
+  const api = _kvApi(network);
+  const ck = 'fund:' + own + ':' + addr;
+  let sum = _kvCached(ck);
+  if (sum !== null) return sum;
+  sum = 0;
+  try {
+    const utxos: any[] = (await (await fetch(api + '/addresses/' + encodeURIComponent(addr) + '/utxos')).json()) || [];
+    const fundedBy = new Map<string, boolean>();
+    for (const u of utxos.slice(0, 20)) {
+      const txid = String((u && u.outpoint && (u.outpoint.transactionId || u.outpoint.transaction_id)) || '');
+      const amt = Number((u && u.utxoEntry && u.utxoEntry.amount) || (u && u.amount) || 0);
+      if (!/^[0-9a-f]{64}$/.test(txid) || !amt) continue;
+      if (!fundedBy.has(txid)) {
+        let mine = false;
+        try {
+          const tj: any = await (await fetch(api + '/transactions/' + txid + '?inputs=true&outputs=false&resolve_previous_outpoints=light')).json();
+          const ins: any[] = (tj && tj.inputs) || [];
+          mine = ins.length > 0 && ins.every((i: any) => String(i && i.previous_outpoint_address || '') === own);
+        } catch {}
+        fundedBy.set(txid, mine);
+      }
+      if (fundedBy.get(txid)) sum += amt;
+      if (sum >= minSompi) break;
+    }
+  } catch {}
+  _kvPc().set(ck, { b: sum, t: Date.now() });
+  return sum;
+}
+
+async function kvPledgeQualified(pubkey: string, storeAddrs: string[], network: string, minSompi: number): Promise<boolean> {
+  const own = _kvOwnAddr(pubkey, network);
+  if (!own) return false;
+  const api = _kvApi(network);
+  // (1) own wallet balance
+  let bal = _kvCached('own:' + own);
+  if (bal === null) {
+    try { const j: any = await (await fetch(api + '/addresses/' + own + '/balance')).json(); bal = Number((j && j.balance) || 0); _kvPc().set('own:' + own, { b: bal, t: Date.now() }); } catch { bal = 0; }
+  }
+  if (bal >= minSompi) return true;
+  // (2) owner-funded pledge at a claimed store
+  for (const addr of storeAddrs.slice(0, 5)) {
+    if ((await kvOwnFundedSompi(pubkey, addr, network, minSompi)) >= minSompi) return true;
+  }
+  return false;
+}
+
 // KV_FLAGGER_QUALIFIES: shared reputation gate for flags (games lane; stores tally inline)
 export async function kvFlaggerQualifies(pubkey: string, network: string = 'testnet-10'): Promise<boolean> {
   const g: any = globalThis as any;
   const qc = g.__kvQualCache || (g.__kvQualCache = new Map());
   const hit = qc.get(pubkey);
-  if (hit && Date.now() - hit.t < 600000) return hit.ok;
+  if (hit) return hit.ok; // KV_FLAG_BUDGET: one answer per flagger per session
   let ok = false;
   try {
-    // (a) live pledge >= 10 KAS at one of their store addresses
+    // (a) live pledge >= 10 KAS: own P2PK address, or capital they provably put into a store they claim
     if (!g.__kvStoreRegRecs || Date.now() - g.__kvStoreRegRecs.t > 600000) {
       const reg = require('./payload_publish').registryAddress('store', network);
       g.__kvStoreRegRecs = { t: Date.now(), rows: (await (fetchRecords as any)(reg, network, 100, 5)) || [] };
@@ -554,23 +806,18 @@ export async function kvFlaggerQualifies(pubkey: string, network: string = 'test
     for (const a of g.__kvStoreRegRecs.rows) {
       const r: any = a && a.record;
       if (!r || r.k !== 'registry' || r.o !== pubkey || !r.d) continue;
+      if (!verifyRecord(r)) continue; // KV_FLAGGER_PROOF: unsigned/forged claims never count
       const its: any[] = Array.isArray(r.d.batch) ? r.d.batch : [r.d];
       for (const it of its) if (it && it.storeAddress && addrs.indexOf(String(it.storeAddress)) < 0) addrs.push(String(it.storeAddress));
     }
-    const api = String(network).indexOf('testnet') >= 0 ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
-    for (const addr of addrs.slice(0, 5)) {
-      try {
-        const j: any = await (await fetch(api + '/addresses/' + addr + '/balance')).json();
-        if (Number((j && j.balance) || 0) >= 1_000_000_000) { ok = true; break; }
-      } catch {}
-    }
+    ok = await kvPledgeQualified(pubkey, addrs, network, 1_000_000_000);
     // (b) at least one settled escrow trade
     if (!ok) {
       const { scanCounterparty } = require('./counterparty_scan');
       const sr: any = await scanCounterparty(pubkey, network, 40, true);
       ok = Number((sr && sr.settled) || 0) >= 1;
     }
-  } catch { ok = false; }
+  } catch { return false; } // KV_FLAG_NOCACHE_ERR: a network error is not a verdict
   qc.set(pubkey, { ok, t: Date.now() });
   return ok;
 }

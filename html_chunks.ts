@@ -17,7 +17,7 @@
 import * as pako from 'pako';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
-import { signRecord, buildPayloadHex, fetchRecords, KvRecord } from './kaspa_payload';
+import { signRecord, buildPayloadHex, fetchRecords, KvRecord, kvAssembleChunks, kvInflateCapped, kvTxPaysAddress, KV_PAGE_MAX_DECOMPRESSED } from './kaspa_payload';
 import { sendKaspaViaRest } from './kaspa_rest_tx';
 import type { OwnerKeys } from './payload_publish';
 
@@ -76,6 +76,25 @@ function findExternalRefs(html: string): string[] {
   return out;
 }
 
+// KV_PAGE_CONTENT_GATE: visible text (entity-decoded; tags stripped both with and
+// without spaces so "s<b></b>eed phrase" cannot hide), attribute text and script
+// string literals through the content filter. Fails CLOSED: a scan error blocks.
+export function scanHtmlContent(html: string): { ok: boolean; reason?: string } {
+  try {
+    const cf = require('./content_filter'); const scan = cf.scanObjectStrict || cf.scanObject;
+    const forms: string[] = typeof cf.htmlTextForms === 'function' ? cf.htmlTextForms(html)
+      : [html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')];
+    const visible = forms.map((f) => f.replace(/\s+/g, ' ').slice(0, 200000));
+    const dec = (x: string) => (typeof cf.decodeHtmlEntities === 'function' ? cf.decodeHtmlEntities(x) : x);
+    const attrs = dec((html.match(/(?:title|alt|placeholder|aria-label|content|value|label)\s*=\s*["'][^"']*["']/gi) || []).join(' ').slice(0, 50000));
+    const lits: string[] = []; const _re = /(["'`])((?:\\.|(?!\1)[^\\\n]){4,300})\1/g; let _m: any; let _n = 0;
+    while ((_m = _re.exec(html)) && _n < 20000) { _n++; if (/[a-z]{3,}[\s&;<>]+[a-z]{2,}|&#?[a-z0-9]+;|<\//i.test(_m[2])) lits.push(_m[2]); }
+    const r = scan({ text: visible, attrs, strings: lits });
+    if (r && r.ok === false) return { ok: false, reason: String(r.reason || 'blocked words') };
+    return { ok: true };
+  } catch (e: any) { return { ok: false, reason: 'content scan error: ' + String((e && e.message) || e).slice(0, 60) }; }
+}
+
 export function scanHtmlForPublish(html: string): { ok: boolean; issues: HtmlScanIssue[] } {
   const issues: HtmlScanIssue[] = [];
   for (const [re, code] of BLOCKED_PATTERNS) {
@@ -89,16 +108,8 @@ export function scanHtmlForPublish(html: string): { ok: boolean; issues: HtmlSca
     issues.push({ code: 'too_large', detail: utf8ToBytes(html).length + ' bytes' });
   }
   // KV_PAGE_CONTENT_GATE: words on screen, titles/alt text and script strings go through the content filter
-  try {
-    const cf = require('./content_filter'); const scan = cf.scanObjectStrict || cf.scanObject;
-    const visible = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').slice(0, 200000);
-    const attrs = (html.match(/(?:title|alt|placeholder|aria-label|content)\s*=\s*["'][^"']*["']/gi) || []).join(' ').slice(0, 50000);
-    const lits: string[] = []; const _re = /(["'`])((?:\\.|(?!\1)[^\\\n]){4,300})\1/g; let _m: any; let _n = 0;
-    while ((_m = _re.exec(html)) && _n < 20000) { _n++; if (/[a-z]{3,}\s+[a-z]{2,}/i.test(_m[2])) lits.push(_m[2]); }
-    const r = scan({ text: visible, attrs, strings: lits });
-    if (r && r.ok === false) issues.push({ code: 'content', detail: String(r.reason || 'blocked words') });
-  } catch {}
+  const cg = scanHtmlContent(html);
+  if (!cg.ok) issues.push({ code: 'content', detail: String(cg.reason || 'blocked words') });
   return { ok: issues.length === 0, issues };
 }
 
@@ -213,6 +224,7 @@ async function pageCacheGet(hash: string): Promise<string | null> {
     // Self-verifying: the key IS the content hash, so a match proves integrity
     // without needing the network or the announce.
     if (bytesToHex(sha256(utf8ToBytes(html))) !== hash) { await AS.removeItem('kv_page_' + hash); return null; }
+    if (!scanHtmlForPublish(html).ok) return null; // KV_DISPLAY_GATE: cached pages re-pass the current filter
     return html;
   } catch { return null; }
 }
@@ -227,6 +239,9 @@ async function pageCachePut(hash: string, html: string): Promise<void> {
 async function fetchHtmlPageViaWalk(
   expectedHash: string,
   coords: { anchor_hash?: string; daa_from?: number; daa_to?: number },
+  ownerPub?: string,
+  payTo?: string, // KV_WALK_PAYTO: the page's store address (outputs checked when the source exposes them)
+  maxBytes: number = KV_PAGE_MAX_DECOMPRESSED,
 ): Promise<{ html: string | null; error?: string }> {
   try {
     if (!coords || !coords.anchor_hash || !coords.daa_to) return { html: null, error: 'no coordinates' };
@@ -234,7 +249,7 @@ async function fetchHtmlPageViaWalk(
     const vdaa = Number(sink.virtual_daa_score || 0);
     const daaTo = Number(coords.daa_to);
     if (vdaa && vdaa - daaTo > 1100000) return { html: null, error: 'publish window (~30h) closed - needs a republish' };
-    const store: Record<number, { t: number; tot: number; c: string }> = {};
+    const found: any[] = []; // KV_CHUNK_CANDIDATES: every matching record, walk (chain) order
     let low = String(coords.anchor_hash);
     let pages = 0, retries = 0;
     while (pages < 450) {
@@ -244,6 +259,7 @@ async function fetchHtmlPageViaWalk(
       pages++;
       for (const b of page.blocks || []) for (const tx of b.txs || []) {
         try {
+          if (kvTxPaysAddress(tx, payTo) === false) continue;
           const hx = String(tx.payload_hex || '');
           let raw = '';
           for (let i = 0; i < hx.length; i += 2) raw += String.fromCharCode(parseInt(hx.substr(i, 2), 16));
@@ -251,60 +267,56 @@ async function fetchHtmlPageViaWalk(
           const rec = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw);
           const d = rec && rec.d;
           if (!d || rec.k !== 'cfg') continue;
-          if (d.ty === 'html' && d.h === expectedHash && typeof d.seq === 'number') {
-            if (!store[d.seq] || (rec.t || 0) > store[d.seq].t) store[d.seq] = { t: rec.t || 0, tot: d.tot, c: d.c };
-          }
+          if (d.ty === 'html' && d.h === expectedHash && typeof d.seq === 'number' && found.length < 4000) found.push(rec);
         } catch {}
       }
       if (page.done || !page.next_low_hash) break;
       low = page.next_low_hash;
     }
-    const first = store[0];
-    if (!first) return { html: null, error: 'walk found no page chunks in span' };
-    let b64 = '';
-    for (let i = 0; i < first.tot; i++) { const c = store[i]; if (!c) return { html: null, error: 'walk missing chunk ' + i }; b64 += c.c; }
-    const html = new TextDecoder().decode(pako.inflate(b64decode(b64)));
-    if (bytesToHex(sha256(utf8ToBytes(html))) !== expectedHash) return { html: null, error: 'walked page hash mismatch' };
+    if (!found.length) return { html: null, error: 'walk found no page chunks in span' };
+    const asm = kvAssembleChunks(found, expectedHash, inflateCapped(maxBytes), { ownerPub, maxChunkChars: chunkCharsFor(maxBytes) });
+    if (asm.text === null) return { html: null, error: 'walk: ' + asm.error };
+    const html = asm.text;
     const scan = scanHtmlForPublish(html);
     if (!scan.ok) return { html: null, error: 'page failed safety scan: ' + scan.issues.map(i => i.code).join(',') };
     return { html };
   } catch (e: any) { return { html: null, error: 'walk: ' + String(e?.message || e) }; }
 }
 
+// KV_INFLATE_CAP: bounded streaming inflate (pages: 2 MB; game fragments pass the 60 KB page cap)
+const inflateCapped = (maxBytes: number) => (b64: string) => new TextDecoder().decode(kvInflateCapped(b64decode(b64), maxBytes));
+const chunkCharsFor = (maxBytes: number) => Math.ceil(maxBytes * 4 / 3) + 65536;
+
 export async function fetchHtmlPage(
   storeAddress: string,
   expectedHash: string,
   network = 'testnet-10',
   coords?: { anchor_hash?: string; daa_from?: number; daa_to?: number },
+  ownerPub?: string, // KV_CHUNK_CANDIDATES: announce `o` when known - only its signed chunks count
+  opts?: { maxBytes?: number }, // KV_INFLATE_CAP: decompressed ceiling (default 2 MB)
 ): Promise<{ html: string | null; error?: string }> {
+  const maxBytes = Math.max(1, Math.min(KV_PAGE_MAX_DECOMPRESSED, (opts && opts.maxBytes) || KV_PAGE_MAX_DECOMPRESSED));
   try {
     const cachedPage = await pageCacheGet(expectedHash);
-    if (cachedPage) return { html: cachedPage };
+    if (cachedPage && cachedPage.length <= maxBytes) return { html: cachedPage };
     const wrapped: any[] = await fetchRecords(storeAddress, network, 400);
     // fetchRecords returns { record, txid, blockTime } wrappers - unwrap first
     const recs: any[] = wrapped.map(w => (w && w.record) ? w.record : w);
     const pageRecs = recs.filter(r => r && r.k === 'cfg' && r.d && r.d.ty === 'html' && r.d.h === expectedHash);
     if (pageRecs.length === 0) {
-      const w = await fetchHtmlPageViaWalk(expectedHash, coords || {});
+      const w = await fetchHtmlPageViaWalk(expectedHash, coords || {}, ownerPub, storeAddress, maxBytes);
       if (w.html) { await pageCachePut(expectedHash, w.html); return w; }
       return { html: null, error: 'no page chunks found; walk: ' + (w.error || 'failed') };
     }
-    const tot = pageRecs[0].d.tot;
-    const bySeq = new Map<number, any>();
-    for (const r of pageRecs) {
-      const prev = bySeq.get(r.d.seq);
-      if (!prev || r.t > prev.t) bySeq.set(r.d.seq, r);
+    // KV_CHUNK_CANDIDATES: signed (+owner) records only, try groupings until the hash matches.
+    // fetchRecords is newest-first by block time -> reverse to chain order.
+    const asm = kvAssembleChunks(pageRecs.slice().reverse(), expectedHash, inflateCapped(maxBytes), { ownerPub, maxChunkChars: chunkCharsFor(maxBytes) });
+    if (asm.text === null) {
+      const w = await fetchHtmlPageViaWalk(expectedHash, coords || {}, ownerPub, storeAddress, maxBytes);
+      if (w.html) { await pageCachePut(expectedHash, w.html); return w; }
+      return { html: null, error: String(asm.error) + (coords && coords.anchor_hash ? '; walk: ' + (w.error || 'failed') : '') };
     }
-    if (bySeq.size < tot) return { html: null, error: 'incomplete: ' + bySeq.size + '/' + tot + ' chunks' };
-    let b64 = '';
-    for (let i = 0; i < tot; i++) {
-      const r = bySeq.get(i);
-      if (!r) return { html: null, error: 'missing chunk ' + i };
-      b64 += r.d.c;
-    }
-    const html = new TextDecoder().decode(pako.inflate(b64decode(b64)));
-    const gotHash = bytesToHex(sha256(utf8ToBytes(html)));
-    if (gotHash !== expectedHash) return { html: null, error: 'hash mismatch - tampered or corrupt' };
+    const html = asm.text;
     // Second gate: re-scan what actually came off chain before it reaches a WebView.
     const scan = scanHtmlForPublish(html);
     if (!scan.ok) return { html: null, error: 'page failed safety scan: ' + scan.issues.map(i => i.code).join(',') };

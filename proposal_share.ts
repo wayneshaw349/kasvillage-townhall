@@ -56,8 +56,15 @@ export interface StoredAgreement {
 // ============================================================================
 
 function generateNonce(): string {
+  // [KV_NONCE_CSPRNG] crypto.getRandomValues (polyfilled in src/index.tsx), expo-crypto fallback.
   const bytes = new Uint8Array(8);
-  for (let i = 0; i < 8; i++) bytes[i] = Math.floor(Math.random() * 256);
+  const c: any = (globalThis as any).crypto;
+  if (c && typeof c.getRandomValues === 'function') {
+    c.getRandomValues(bytes);
+  } else {
+    const ExpoCrypto = require('expo-crypto');
+    bytes.set(ExpoCrypto.getRandomBytes(8));
+  }
   return bytesToHex(bytes);
 }
 
@@ -77,27 +84,60 @@ function hashProposal(p: Omit<TradeProposal, 'sig'> | TradeProposal): Uint8Array
 }
 
 // Hash for counter-signature (signs over the entire proposal including original sig)
-function hashCounterSign(proposal: TradeProposal): Uint8Array {
+function hashCounterSign(proposal: TradeProposal, counterAddr?: string): Uint8Array { // KV_COUNTERSIGN_V2: pay-to address is signed
   const canonical = JSON.stringify({
     proposalSig: proposal.sig,
     amount: proposal.amount,
     from: proposal.from,
     ts: proposal.ts,
     nonce: proposal.nonce,
+    ...(counterAddr !== undefined ? { counterAddr } : {}),
   });
-  return sha256(new TextEncoder().encode('KV_COUNTERSIGN_V1:' + canonical));
+  return sha256(new TextEncoder().encode((counterAddr !== undefined ? 'KV_COUNTERSIGN_V2:' : 'KV_COUNTERSIGN_V1:') + canonical));
 }
+export async function kvIsClosedIOU(nonce: string): Promise<boolean> { try { const AS = require('@react-native-async-storage/async-storage').default; const L = JSON.parse((await AS.getItem('kv_closed_ious')) || '[]'); return Array.isArray(L) && L.includes(String(nonce)); } catch { return false; } }
+export async function kvMarkClosedIOU(nonce: string): Promise<void> { try { const AS = require('@react-native-async-storage/async-storage').default; const L = JSON.parse((await AS.getItem('kv_closed_ious')) || '[]'); const n = (Array.isArray(L) ? L : []).filter((x: string) => x !== String(nonce)); n.push(String(nonce)); await AS.setItem('kv_closed_ious', JSON.stringify(n.slice(-500))); } catch {} }
 
 // ============================================================================
 // WALLET ACCESS
 // ============================================================================
 
+// [KV_PRIV_PUBCHECK] A candidate private key is accepted ONLY if its compressed
+// pubkey matches the wallet's stored public key (full 33-byte or x-only).
+// Without this, the XOR-envelope fallback (keystream = SHA256(deviceKey+ciphertext),
+// writer uses SHA256(deviceKey+plaintext)) yields 64 hex chars of garbage.
+async function _kvStoredPubkeys(): Promise<string[]> {
+  const out: string[] = [];
+  for (const k of ['kv_public_key', 'kaspa_pubkey', 'kv_l1_pubkey']) {
+    try {
+      const v = (await SecureStore.getItemAsync(k))?.trim().toLowerCase();
+      if (v && /^[0-9a-f]+$/.test(v) && (v.length === 64 || v.length === 66)) out.push(v);
+    } catch {}
+  }
+  return out;
+}
+export function _kvPrivMatchesPub(privHex: string, storedPubs: string[]): boolean {
+  try {
+    if (!/^[0-9a-fA-F]{64}$/.test(privHex)) return false;
+    const pub = secp256k1.getPublicKey(hexToBytes(privHex.toLowerCase()), true);
+    const full = bytesToHex(pub).toLowerCase();
+    const xOnly = full.slice(2);
+    return storedPubs.some((p) => (p.length === 66 ? p === full || p.slice(2) === xOnly : p === xOnly));
+  } catch { return false; }
+}
+
 export async function _kvResolvePrivHex(): Promise<string | null> {
   const isHex = (v: string | null): v is string => !!v && /^[0-9a-fA-F]{64}$/.test(v.trim());
-  // 1) plain-hex candidates
+  const storedPubs = await _kvStoredPubkeys();
+  // 1) plain-hex candidates — must match the stored pubkey when one exists
   for (const k of ['kv_private_key', 'kasvillage_private_key', 'kv_l1_privkey']) {
     const v = await SecureStore.getItemAsync(k);
-    if (isHex(v)) { console.log('[KVKey] using plain key:', k); return v.trim(); }
+    if (!isHex(v)) continue;
+    if (storedPubs.length && !_kvPrivMatchesPub(v.trim(), storedPubs)) {
+      console.warn('[KVKey] plain key does not match stored pubkey, skipping:', k);
+      continue;
+    }
+    console.log('[KVKey] using plain key:', k); return v.trim();
   }
   // 2) encrypted envelope (JSON { privateKeyEnc }) XOR scheme from avatar_arweave_upload
   try {
@@ -115,7 +155,9 @@ export async function _kvResolvePrivHex(): Promise<string | null> {
         out.push((eb ^ kb).toString(16).padStart(2, '0'));
       }
       const hex = out.join('');
-      if (isHex(hex)) { console.log('[KVKey] using decrypted envelope'); return hex; }
+      // Decrypted output is only trusted if it reproduces the stored pubkey.
+      if (isHex(hex) && _kvPrivMatchesPub(hex, storedPubs)) { console.log('[KVKey] using decrypted envelope'); return hex; }
+      console.warn('[KVKey] decrypted envelope does not match stored pubkey — rejecting');
     }
   } catch (e) { console.warn('[KVKey] envelope decrypt failed:', e); }
   console.warn('[KVKey] no valid private key found');
@@ -190,7 +232,7 @@ export async function createProposal(
   const creds = await getMyCredentials();
   if (!creds) return { error: 'Wallet not initialized' };
 
-  const amountSompi = BigInt(String(Math.floor(amountKAS * 1e8)));
+  const amountSompi = BigInt(String(Math.round(amountKAS * 1e8))) /* KV_SOMPI_ROUND */;
 
   // Balance check
   const balCheck = await checkBalance(creds.address, amountSompi, creds.network);
@@ -237,6 +279,16 @@ export async function createProposal(
 function b64e(str: string): string { return btoa(unescape(encodeURIComponent(str))); }
 function b64d(b64: string): string { try { return decodeURIComponent(escape(atob(b64))); } catch { return atob(b64); } }
 
+// KV_IOU_AMOUNT_GUARD: an amount of "0" (or junk) would reach Pay & Settle, where a zero
+// amount can mean "send all". Proposals must carry a plain positive integer sompi amount at
+// or above the 600-sompi dust floor.
+export const KV_MIN_PROPOSAL_SOMPI = 600n;
+export function isValidProposalAmount(amount: unknown): boolean {
+  const a = String(amount ?? '').trim();
+  if (!/^[0-9]{1,20}$/.test(a)) return false;
+  try { return BigInt(a) >= KV_MIN_PROPOSAL_SOMPI; } catch { return false; }
+}
+
 export function decodeProposal(encoded: string): TradeProposal | null {
   try {
     let json: string;
@@ -254,6 +306,7 @@ export function decodeProposal(encoded: string): TradeProposal | null {
     }
     const parsed = JSON.parse(json);
     if (parsed.v !== 1 || !parsed.sig || !parsed.from || !parsed.amount) return null;
+    if (!isValidProposalAmount(parsed.amount)) return null; // KV_IOU_AMOUNT_GUARD
     return parsed as TradeProposal;
   } catch {
     return null;
@@ -278,7 +331,8 @@ export function verifyAcceptance(a: CounterSignedProposal): { valid: boolean; er
   const inner = verifyProposal(a.proposal);
   if (!inner.valid) return { valid: false, error: 'Inner proposal invalid: ' + (inner.error || '') };
   try {
-    const hash = hashCounterSign(a.proposal);
+    if (!/^[0-9a-f]{32,66}$/.test(String(a.counterPubkey || ''))) return { valid: false, error: 'Acceptor pubkey too short' };
+    const hash = hashCounterSign(a.proposal, String(a.counterAddr || ''));
     const sig = (secp256k1 as any).Signature.fromCompact(hexToBytes(a.counterSig));
     for (const rec of [0, 1]) {
       try {
@@ -293,11 +347,13 @@ export function verifyAcceptance(a: CounterSignedProposal): { valid: boolean; er
 }
 
 export function verifyProposal(proposal: TradeProposal): { valid: boolean; error?: string } {
+  if (!isValidProposalAmount(proposal?.amount)) return { valid: false, error: 'Invalid amount (must be at least ' + KV_MIN_PROPOSAL_SOMPI.toString() + ' sompi)' }; // KV_IOU_AMOUNT_GUARD
   // Check timestamp (reject if older than 24 hours)
   const age = Date.now() - proposal.ts;
   if (age > 24 * 60 * 60 * 1000) return { valid: false, error: 'Proposal expired (>24h old)' };
   if (age < -60000) return { valid: false, error: 'Proposal timestamp is in the future' };
 
+  if (!/^[0-9a-f]{32,66}$/.test(String(proposal.from || ''))) return { valid: false, error: 'Sender pubkey too short' };
   // Verify signature
   try {
     const hash = hashProposal(proposal);
@@ -347,7 +403,7 @@ export async function acceptProposal(
   }
 
   // Counter-sign
-  const hash = hashCounterSign(proposal);
+  const hash = hashCounterSign(proposal, String(creds.address || ''));
   const sig = secp256k1.sign(hash, hexToBytes(creds.privkey));
 
   const counterSigned: CounterSignedProposal = {

@@ -774,7 +774,8 @@ export function parseTemplate(b64: string): TxTemplate | null {
  */
 export function verifyTemplate(
   template: TxTemplate,
-  myXOnly: string
+  myXOnly: string,
+  expected?: { buyerXOnly?: string; buyerAmountSompi?: bigint; sellerAmountSompi?: bigint }
 ): { valid: boolean; myOutputIdx: number; myAmount: bigint; error?: string } {
   // Find my output
   const myScript = p2pkScript(myXOnly);
@@ -804,6 +805,14 @@ export function verifyTemplate(
   if (totalOut + fee > totalIn) {
     return { valid: false, myOutputIdx: myIdx, myAmount, error: 'Inflation: outputs + fee exceed inputs' };
   }
+  // KV_TMPL_AMOUNTS: the stated fee must be the REAL fee. Any gap between inputs and
+  // outputs+fee is silently paid to miners on top of the stated fee.
+  if (totalOut + fee !== totalIn) {
+    return { valid: false, myOutputIdx: myIdx, myAmount, error: 'Outputs + fee (' + (totalOut + fee) + ') do not equal the escrow input total (' + totalIn + ') - hidden fee of ' + (totalIn - totalOut - fee) + ' sompi' };
+  }
+  if (fee > MAX_TEMPLATE_FEE_SOMPI) {
+    return { valid: false, myOutputIdx: myIdx, myAmount, error: 'Fee too high: ' + fee + ' sompi > max ' + MAX_TEMPLATE_FEE_SOMPI };
+  }
 
   // Check fee is reasonable
   const dynamicMinFee = BigInt(template.u.length * 115000 + template.o.length * 48000 + 5000);
@@ -811,7 +820,62 @@ export function verifyTemplate(
     return { valid: false, myOutputIdx: myIdx, myAmount, error: `Fee too low: ${fee} < ${dynamicMinFee}` };
   }
 
+  // KV_TMPL_AMOUNTS: check the split against the agreed amounts (when the caller knows them).
+  if (expected) {
+    const kind = classifyTemplateOutputs(template, myXOnly, expected.buyerXOnly);
+    const bAmt = expected.buyerAmountSompi ?? 0n;
+    const sAmt = expected.sellerAmountSompi ?? 0n;
+    if (kind === 'release') {
+      if (myAmount < sAmt) {
+        return { valid: false, myOutputIdx: myIdx, myAmount, error: 'Release pays you ' + myAmount + ' sompi, less than your agreed ' + sAmt + ' sompi' };
+      }
+    } else if (kind === 'cancel') {
+      const totalDeposit = bAmt + sAmt;
+      if (totalDeposit > 0n) {
+        const net = totalIn - fee;
+        const wantBuyer = (net * bAmt) / totalDeposit;
+        const wantSeller = net - wantBuyer;
+        const buyerIdx = myIdx === 0 ? 1 : 0;
+        const gotBuyer = BigInt(template.o[buyerIdx].v);
+        const tol = CANCEL_SPLIT_TOLERANCE_SOMPI;
+        const diff = (a: bigint, b: bigint) => (a > b ? a - b : b - a);
+        if (diff(myAmount, wantSeller) > tol || diff(gotBuyer, wantBuyer) > tol) {
+          return { valid: false, myOutputIdx: myIdx, myAmount, error: 'Cancel split does not match the agreed amounts: you ' + myAmount + ' (expected ' + wantSeller + '), buyer ' + gotBuyer + ' (expected ' + wantBuyer + ') sompi' };
+        }
+      }
+    } else {
+      return { valid: false, myOutputIdx: myIdx, myAmount, error: 'Template outputs are neither a release (1 output to you) nor a cancel (1 to buyer + 1 to you) - refusing' };
+    }
+  }
+
   return { valid: true, myOutputIdx: myIdx, myAmount };
+}
+
+/** KV_TMPL_AMOUNTS: max fee a co-signer will accept on a release/cancel template (0.1 KAS). */
+export const MAX_TEMPLATE_FEE_SOMPI = 10_000_000n;
+/** KV_TMPL_AMOUNTS: rounding slack for the proportional cancel split (KAS float -> sompi). */
+export const CANCEL_SPLIT_TOLERANCE_SOMPI = 1000n;
+
+/**
+ * KV_TMPL_AMOUNTS: label a template by its ACTUAL outputs, not by output count.
+ * release = exactly one output, paying me (the seller).
+ * cancel  = exactly two outputs, one paying me and one paying the buyer.
+ * other   = anything else (unknown payee, extra outputs, ...).
+ */
+export function classifyTemplateOutputs(
+  template: TxTemplate,
+  myXOnly: string,
+  buyerXOnly?: string,
+): 'release' | 'cancel' | 'other' {
+  const myScript = p2pkScript(myXOnly);
+  const o = template.o || [];
+  if (o.length === 1 && o[0].s === myScript) return 'release';
+  if (o.length === 2) {
+    const mine = o.filter((x) => x.s === myScript).length;
+    const other = o.find((x) => x.s !== myScript);
+    if (mine === 1 && other && (!buyerXOnly || other.s === p2pkScript(buyerXOnly))) return 'cancel';
+  }
+  return 'other';
 }
 
 /**
@@ -1096,6 +1160,9 @@ export function sellerSignTemplate(params: {
   buyerPubkey: string;
   counter: number;
   template: TxTemplate;
+  // KV_TMPL_AMOUNTS: agreed amounts; when given, the split is checked before signing.
+  expectedBuyerAmountSompi?: bigint;
+  expectedSellerAmountSompi?: bigint;
 }): {
   response: SellerResponse;
   responseB64: string;
@@ -1111,7 +1178,11 @@ export function sellerSignTemplate(params: {
 
   const sellerXOnly =
     sellerPubkey.length === 66 ? sellerPubkey.slice(2) : sellerPubkey;
-  const verification = verifyTemplate(template, sellerXOnly);
+  const buyerXOnlyForCheck = buyerPubkey.length === 66 ? buyerPubkey.slice(2) : buyerPubkey;
+  const verification = verifyTemplate(template, sellerXOnly,
+    (params.expectedBuyerAmountSompi !== undefined || params.expectedSellerAmountSompi !== undefined)
+      ? { buyerXOnly: buyerXOnlyForCheck || undefined, buyerAmountSompi: params.expectedBuyerAmountSompi, sellerAmountSompi: params.expectedSellerAmountSompi }
+      : undefined);
   if (!verification.valid) {
     return { error: verification.error || 'Template verification failed' };
   }

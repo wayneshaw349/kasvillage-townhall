@@ -577,17 +577,34 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
 
   const handleExportSeed = async () => {
     try {
-      const authResult = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Authenticate to view seed phrase',
-        disableDeviceFallback: false,
-      });
-      if (!authResult.success) {
-        Alert.alert('Authentication Required', 'Biometric auth is required to export your seed phrase.');
+      // KV_SEED_AUTH: Face ID / fingerprint or the phone PIN/passcode. A not_enrolled /
+      // passcode_not_set / not_available error lets the export through ONLY when the OS
+      // reports the phone has no lock at all (getEnrolledLevelAsync() === 0), like BiometricGate.
+      let _kvLvl: number | null = null;
+      const _kvLevel = async () => {
+        if (_kvLvl == null) { try { _kvLvl = await LocalAuthentication.getEnrolledLevelAsync(); } catch { _kvLvl = -1; } }
+        return _kvLvl;
+      };
+      let _kvOk = false;
+      const _kvHw = await LocalAuthentication.hasHardwareAsync().catch(() => false);
+      const _kvEn = await LocalAuthentication.isEnrolledAsync().catch(() => false);
+      if ((!_kvHw || !_kvEn) && (await _kvLevel()) === 0) _kvOk = true; // phone has no lock at all
+      if (!_kvOk) {
+        const authResult = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'Authenticate to view seed phrase',
+          fallbackLabel: 'Use Passcode',
+          disableDeviceFallback: false,
+        });
+        _kvOk = authResult.success
+          || (/not_enrolled|not_available|passcode_not_set/.test(String((authResult as any).error || '')) && (await _kvLevel()) === 0);
+      }
+      if (!_kvOk) {
+        Alert.alert('Authentication Required', 'Face ID or your phone passcode is required to export your seed phrase.');
         return;
       }
 
       const storedMnemonic = await SecureStore.getItemAsync('kv_mnemonic');
-      const storedAddress = await SecureStore.getItemAsync('kv_wallet_address');
+      const storedAddress = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || (await SecureStore.getItemAsync('kv_wallet_address')); // KV_PROFILE_ADDR
       const storedPubKey = await SecureStore.getItemAsync('kv_public_key');
 
       if (!storedMnemonic) {

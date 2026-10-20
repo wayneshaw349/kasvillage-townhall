@@ -103,8 +103,22 @@ const KV_AUDIO_KEEP = "(function(){try{var C=window.AudioContext||window.webkitA
 
 function injectCsp(raw: string, meta: string = CSP_META): string {
   // always inject: a page's own CSP can only tighten, never loosen ours
-  if (/<head(\s[^>]*)?>/i.test(raw)) return raw.replace(/<head(\s[^>]*)?>/i, (mm) => mm + meta); // word-boundary: never matches JS like i<heads.length
-  if (/<html[^>]*>/i.test(raw)) return raw.replace(/<html([^>]*)>/i, '<html$1><head>' + meta + '</head>');
+  // KV_CSP_NOCOMMENT + KV_CSP_FIRST: never search for "<head>" - it can sit inside
+  // an attribute (<p title="<head>">), a <title>, a <script> string or a comment,
+  // which would put our meta inside text. Instead put the meta FIRST: at index 0,
+  // or right after a leading <!doctype> (skipping only BOM / whitespace / comments
+  // before it, so standards mode is kept). A <meta> before <html> is valid - the
+  // parser opens the implied <html><head> and it lands in the document head,
+  // ahead of every page script and style.
+  let i = 0;
+  if (raw.charCodeAt(0) === 0xfeff) i = 1;
+  for (;;) {
+    while (i < raw.length && /\s/.test(raw[i])) i++;
+    if (raw.startsWith('<!--', i)) { const e = raw.indexOf('-->', i + 4); if (e < 0) break; i = e + 3; continue; }
+    break;
+  }
+  const dm = /^<!doctype[^>]*>/i.exec(raw.slice(i, i + 512));
+  if (dm) { const at = i + dm[0].length; return raw.slice(0, at) + meta + raw.slice(at); }
   return meta + raw;
 }
 
@@ -185,7 +199,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
               daa_from: (props.game as any).daa_from,
               daa_to: (props.game as any).daa_to,
             } : undefined)
-        : await fetchHtmlPage(storeAddress, pageHash, network, (props as any).coords);
+        : await fetchHtmlPage(storeAddress, pageHash, network, (props as any).coords, ownerPubkey || undefined); // KV_CHUNK_CANDIDATES: owner-signed chunks only when the announce key is known
       try { const _q: any = props.game; if (_q && _q.head) console.log('[KV] QUAD ' + JSON.stringify({ head: _q.head, anchor_hash: _q.anchor_hash, daa_from: _q.daa_from, daa_to: _q.daa_to, manifestAddress: _q.manifestAddress, manifestHash: _q.manifestHash })); } catch {}
       if (!alive) return;
       // Games: full inline-JS apps, verified by hash chain + scanner - the
@@ -220,6 +234,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       return;
     }
     if (path.startsWith('pay/')) {
+      if (require('react-native').Platform.OS === 'ios') { setNotice('Payments are not available inside games or pages on iPhone. Use Send in your wallet.'); return; } /* KV_IOS_PAY */
       // KV PAY - the ONE sanctioned payment surface for every on-chain page,
       // dapp and game. Format: kv://pay/<kaspa address>/<amount KAS>[?m=memo]
       // Convention users learn: KAS only ever moves through this sheet.
@@ -300,7 +315,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       const RN = require('react-native');
       RN.Alert.alert('Contact player', 'Your message is copied - paste it in the chat.\n\nAgree on the deal there, then settle wallet-to-wallet in KasVillage (direct send or a FROST agreement). Never pay an address you did not verify. The owner presses TRANSFER in the game after being paid.' + (url ? '' : '\n\nContact: ' + to), url ? [{ text: 'Cancel', style: 'cancel' }, { text: 'Open chat', onPress: () => { RN.Linking.openURL(url).catch(() => RN.Alert.alert('Could not open', to)); } }] : [{ text: 'OK' }]);
       return; } } catch {}
-    if (handleKvNetMessage(event.nativeEvent.data, (js) => webRef.current?.injectJavaScript(js))) return;
+    if (handleKvNetMessage(event.nativeEvent.data, (js) => webRef.current?.injectJavaScript(js), { sign: !!props.game })) return; // KV_WNET_SIGN: only chain games get signed requests
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.kv && /^kv:\/\//.test(String(msg.kv))) handleKvLink(msg.kv); // KV_MSG_FIX: status signals are not links

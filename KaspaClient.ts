@@ -396,9 +396,14 @@ export class KaspaClient {
     const utxos = utxoResponse.entries;
 
     // Create send params
+    // KV_SENDPARAMS_ORDER: real @kcoin/kaspa-web3.js ctor is
+    // (sender, amount: bigint, receiver, networkId, priorityFee?) — see
+    // node_modules/@kcoin/kaspa-web3.js/dist/send-param.d.ts. The local shim
+    // kaspa-web3.d.ts declares (from, to, amount, ...) which is wrong; keep the
+    // bigint (String(amount) would break the runtime call) and cast past the shim.
     const sendParams = new SendKasParams(
       senderAddress,
-      amount,
+      amount as unknown as string,
       recipientAddress,
       NETWORK_IDS[this.network],
       priorityFees

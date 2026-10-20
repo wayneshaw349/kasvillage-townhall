@@ -66,10 +66,10 @@ function visSort(a: { pledgeSompi: bigint; announcedAt: number }, b: { pledgeSom
 }
 
 // KV_DEAL_RANK: effective price = cheapest stash item after the best live coupon.
-async function kvEffMinKas(storeAddress: string, cfgHash: string, coords: any): Promise<number> {
+async function kvEffMinKas(storeAddress: string, cfgHash: string, coords: any, ownerPub?: string): Promise<number> {
   try {
     if (!cfgHash) return 0;
-    const { config } = await fetchStoreConfig(storeAddress, cfgHash, NET, coords || undefined);
+    const { config } = await fetchStoreConfig(storeAddress, cfgHash, NET, coords || undefined, ownerPub || undefined); // KV_CHUNK_CANDIDATES
     if (!config) return 0;
     const prices = (config.stash || []).map((i: any) => Number(i.kaspaPrice || 0)).filter((p: number) => p > 0);
     if (!prices.length) return 0;
@@ -93,7 +93,7 @@ async function kvDealRank(dir: any[], items: any[], maxCfg: number = 12): Promis
     const eff: number[] = new Array(items.length).fill(0);
     for (let i = 0; i < n; i++) {
       const e: any = dir[i];
-      eff[i] = await kvEffMinKas(e.storeAddress, e.configHash || (e.record && e.record.d && e.record.d.configHash) || '', e.record && e.record.d && e.record.d.coords);
+      eff[i] = await kvEffMinKas(e.storeAddress, e.configHash || (e.record && e.record.d && e.record.d.configHash) || '', e.record && e.record.d && e.record.d.coords, e.ownerPubkey);
       (items[i] as any).dealKas = eff[i];
     }
     const byCat: any = {};
@@ -264,7 +264,7 @@ export async function fetchCoupons(_cursor?: string): Promise<FetchResult<Coupon
     for (const e of dir.slice(0, 10) as any[]) {
       const cfgHash = e.record?.d?.configHash;
       if (!cfgHash) continue;
-      const { config } = await fetchStoreConfig(e.storeAddress, cfgHash, NET);
+      const { config } = await fetchStoreConfig(e.storeAddress, cfgHash, NET, undefined, e.ownerPubkey || undefined); // KV_CHUNK_CANDIDATES
       if (!config?.coupons?.length) continue;
       for (const c of config.coupons) {
         const expiresAt = (c.createdAt || 0) + (c.expiryDays || 30) * 86400000;

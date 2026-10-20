@@ -151,9 +151,9 @@ export class BluetoothBalanceTransfer {
     if (this.isInitialized) return;
     if (!await requestBluetoothPermissions()) throw new Error('Bluetooth permissions denied.');
     try {
-      const { BleManager } = require('react-native-ble-plx');
+      const { BleManager } = (null as any); /* KV_NO_BLE_TS */
       this.bleManager = new BleManager();
-      try { this.peripheralManager = require('react-native-ble-peripheral').default; } catch {}
+      try { this.peripheralManager = (null as any).default; } catch {}
       await new Promise<void>((resolve, reject) => {
         const t = setTimeout(() => reject(new Error('Bluetooth not ready')), 5000);
         const sub = this.bleManager.onStateChange((state: string) => {

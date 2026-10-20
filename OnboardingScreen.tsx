@@ -454,7 +454,22 @@ export const OnboardingScreen: React.FC<OnboardingProps> = ({
     return () => clearInterval(timer);
   }, [step, session]);
 
-  const handleQuizTimeout = () => {
+  const handleQuizTimeout = async () => {
+    // KV_TIMEOUT_FAILCOUNT: a timeout counts as a failed attempt (read from store; interval closure is stale)
+    try {
+      const prev = parseInt((await SecureStore.getItemAsync('kv_onboard_fails')) || '0', 10) || 0;
+      const newFails = prev + 1;
+      setFailAttempts(newFails);
+      await SecureStore.setItemAsync('kv_onboard_fails', newFails.toString());
+      if (newFails >= ONBOARDING_MAX_ATTEMPTS) {
+        const lockTime = Date.now() + ONBOARDING_LOCKOUT_DURATION;
+        await SecureStore.setItemAsync('kv_onboard_lockout', lockTime.toString());
+        setLockoutEnd(lockTime);
+        setStep('locked_out');
+        setTimeout(() => { onFail({ reason: 'locked_out', score: scoreRef.current }); }, 2000);
+        return;
+      }
+    } catch {}
     setStep('failed');
   };
 

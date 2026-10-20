@@ -189,46 +189,86 @@ function computeMass(inputCount: number, outputScripts: Uint8Array[], sigScriptL
 // ============================================================================
 // KIP-9 STORAGE MASS
 // ============================================================================
-function storageMass(inputValues: bigint[], outputValues: bigint[]): bigint {
-  // KIP-9 harmonic formula:
-  // storage_mass = C * (|O| * sum(1/v_i for inputs) - sum(1/v_j for outputs))
-  // where C = 10^12 (1 KAS = 10^8 sompi, C chosen to make mass ~1 for 1 KAS outputs)
-  // Simplified: if result < 0, storage_mass = 0
-  
-  const C = 10_000_000_000n; // 10^10 (adjusted constant for sompi)
-  
-  if (inputValues.length === 0 || outputValues.length === 0) return 0n;
-  
-  // Harmonic mean approach: sum of inverses
-  // Use integer math: 1/v ≈ C/v
-  let inputInverseSum = 0n;
-  for (const v of inputValues) {
-    if (v === 0n) continue;
-    inputInverseSum += C / v;
+// [KV_STORAGE_MASS_KIP9] rusty-kaspa consensus/core/src/mass calc_storage_mass:
+//   harmonic_outs = Σ C / v_out   (v_out == 0 -> u64::MAX, i.e. unpayable)
+//   relaxed (|O| == 1 OR |O| <= |I| <= 2): mass = max(0, harmonic_outs - Σ C / v_in)
+//   general:                                mass = max(0, harmonic_outs - |I| * (C / mean(v_in)))
+// C = STORAGE_MASS_PARAMETER = SOMPI_PER_KASPA * 10_000 = 10^12.
+export const STORAGE_MASS_PARAMETER = 1_000_000_000_000n;
+const U64_MAX = 18_446_744_073_709_551_615n;
+export function storageMass(inputValues: bigint[], outputValues: bigint[]): bigint {
+  const C = STORAGE_MASS_PARAMETER;
+  const outsLen = BigInt(outputValues.length);
+  const insLen = BigInt(inputValues.length);
+  if (outsLen === 0n) return 0n;
+  let harmonicOuts = 0n;
+  for (const v of outputValues) harmonicOuts += v > 0n ? C / v : U64_MAX;
+  if (harmonicOuts > U64_MAX) return U64_MAX;
+  if (insLen === 0n) return harmonicOuts;
+  let ins = 0n;
+  if (outsLen === 1n || (outsLen <= insLen && insLen <= 2n)) {
+    for (const v of inputValues) ins += v > 0n ? C / v : U64_MAX;
+  } else {
+    let sumIns = 0n;
+    for (const v of inputValues) sumIns += v;
+    const meanIns = sumIns / insLen;
+    ins = insLen * (meanIns > 0n ? C / meanIns : U64_MAX);
   }
-  
-  let outputInverseSum = 0n;
-  for (const v of outputValues) {
-    if (v === 0n) return MAXIMUM_STANDARD_TX_MASS; // zero-value output = max mass
-    outputInverseSum += C / v;
+  return harmonicOuts > ins ? harmonicOuts - ins : 0n;
+}
+
+/** Largest change (sompi) the builder will silently absorb into the fee to stay under the
+ *  storage-mass limit. C / 0.2 KAS = 50k mass, so larger change can never be the culprit. */
+export const KV_MAX_ABSORB_CHANGE = 20_000_000n;
+/**
+ * [KV_STORAGE_MASS_KIP9] Decide the output set for recipient + change under KIP-9.
+ * Returns whether change is kept, the storage mass of the chosen set, or an error.
+ */
+export function kvPlanOutputs(inputValues: bigint[], sendAmount: bigint, change: bigint, changeScriptLen: number):
+  { keepChange: boolean; storageMass: bigint; error?: string } {
+  const withChange = change > 0n && keepChange(change, changeScriptLen);
+  const outs = withChange ? [sendAmount, change] : [sendAmount];
+  const sm = storageMass(inputValues, outs);
+  if (sm <= MAXIMUM_STANDARD_TX_MASS) return { keepChange: withChange, storageMass: sm };
+  if (withChange) {
+    const sm1 = storageMass(inputValues, [sendAmount]);
+    if (sm1 <= MAXIMUM_STANDARD_TX_MASS) {
+      if (change <= KV_MAX_ABSORB_CHANGE) return { keepChange: false, storageMass: sm1 };
+      return { keepChange: true, storageMass: sm, error: `Change of ${Number(change) / 1e8} KAS would push storage mass to ${sm} (limit ${MAXIMUM_STANDARD_TX_MASS}). Adjust the amount.` };
+    }
   }
-  
-  // storage_mass = |outputs| * inputInverseSum - outputInverseSum
-  // This penalizes fan-out (many small outputs from few large inputs)
-  const numOutputs = BigInt(outputValues.length);
-  const mass = numOutputs * inputInverseSum;
-  
-  if (mass <= outputInverseSum) return 0n;
-  return mass - outputInverseSum;
+  return { keepChange: withChange, storageMass: sm, error: `Amount too small for KIP-9 storage mass: output of ${Number(sendAmount) / 1e8} KAS gives storage mass ${sm} (limit ${MAXIMUM_STANDARD_TX_MASS}). Send at least ~0.2 KAS.` };
 }
 
 // ============================================================================
 // DUST CHECK
 // ============================================================================
-function isDust(valueSompi: bigint, scriptLen: number): boolean {
-  // (value * 1000) / (3 * output_serialized_size) < MINIMUM_RELAY_TX_FEE
+// [KV_DUST_148] rusty-kaspa is_transaction_output_dust:
+//   (value * 1000) / (3 * (serialized_output_size + 148)) < MINIMUM_RELAY_TX_FEE
+// +148 = size of the input that will later spend it. P2PK (34-byte script) -> 600 sompi.
+export function isDust(valueSompi: bigint, scriptLen: number): boolean {
   const outputSize = 8n + 2n + 8n + BigInt(scriptLen); // value + version + length + script
-  return (valueSompi * 1000n) / (3n * outputSize) < MINIMUM_RELAY_TX_FEE;
+  return (valueSompi * 1000n) / (3n * (outputSize + 148n)) < MINIMUM_RELAY_TX_FEE;
+}
+/** Conservative fixed floor for change outputs; below it change is absorbed into the fee. */
+export const CHANGE_DUST_THRESHOLD = 600n;
+export function keepChange(change: bigint, scriptLen: number): boolean {
+  return change >= CHANGE_DUST_THRESHOLD && !isDust(change, scriptLen);
+}
+
+// [KV_TXID_TRUTH] the locally predicted txid is the truth for relay submits.
+// Returns the id to record, or an error when the relay reports a different id.
+export function kvResolveSubmittedTxId(predicted: string, reported: string | undefined | null):
+  { txId: string } | { error: string } {
+  const r = String(reported || '').trim().toLowerCase();
+  const p = String(predicted || '').trim().toLowerCase();
+  if (p) {
+    if (!r) return { txId: p };
+    if (r === p) return { txId: p };
+    return { error: 'Relay reported txid ' + r + ' but this transaction\'s id is ' + p + ' — treating as NOT sent.' };
+  }
+  if (r && /^[0-9a-f]{64}$/.test(r)) return { txId: r };
+  return { error: 'Submitted, but no transaction id could be confirmed — check the explorer before retrying.' };
 }
 
 // ============================================================================
@@ -359,7 +399,17 @@ export function computeSighashPayload(
 // SEND KASPA VIA REST API
 // ============================================================================
 // Decode Kaspa bech32m address to scriptPublicKey bytes
+export function kvAddressValid(address: string): boolean { // KV_ADDR_CHECKSUM: bech32 (40-bit polymod) + prefix + charset + length
+  const C = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'; const a = String(address || '');
+  const m = /^(kaspa|kaspatest|kaspadev|kaspasim):([a-z0-9]+)$/.exec(a); if (!m) return false;
+  const d: number[] = []; for (const ch of m[2]) { const v = C.indexOf(ch); if (v < 0) return false; d.push(v); }
+  if (d.length < 8 + 53) return false;
+  let c = 1n; for (const v of [...Array.from(m[1]).map((x) => x.charCodeAt(0) & 31), 0, ...d]) { const c0 = c >> 35n; c = ((c & 0x07ffffffffn) << 5n) ^ BigInt(v);
+    if (c0 & 1n) c ^= 0x98f2bc8e61n; if (c0 & 2n) c ^= 0x79b76d99e2n; if (c0 & 4n) c ^= 0xf33e5fb3c4n; if (c0 & 8n) c ^= 0xae2eabe2a8n; if (c0 & 16n) c ^= 0x1e4f43e470n; }
+  return (c ^ 1n) === 0n;
+}
 function addressToScript(address: string): Uint8Array {
+  if (!kvAddressValid(address)) throw new Error('Invalid Kaspa address (checksum failed) - check every character'); // KV_ADDR_CHECKSUM
   const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
   const colonIdx = address.indexOf(':');
   const dataPart = address.slice(colonIdx + 1);
@@ -400,10 +450,19 @@ export async function sendKaspaViaRest(params: {
   payload?: string;
   prepareOnly?: boolean;    // freeze + predict txid, do NOT broadcast
   fundingAgrId?: string;    // OWN-AGR-SPEND: UTXOs committed to THIS agreement are spendable by its own funding tx
+  sweepAll?: boolean;       // [KV_SWEEP_ALL] with amountSompi 0n: send EVERY coin (minus fee) to recipient
 }): Promise<RestTxResult> {
   const { senderAddress, recipientAddress, amountSompi, privateKeyHex, network, payload } = params;
   
   try {
+    // [KV_SWEEP_ALL] 0n = "send all" is only legal to self or with an explicit sweepAll flag.
+    // A kv://pay of 1e-9 KAS rounds to 0n and must not send a whole coin to a third party.
+    const _toSelf = recipientAddress === senderAddress;
+    const _sweep = amountSompi === 0n && (params.sweepAll === true || _toSelf);
+    const _sweepAllCoins = amountSompi === 0n && params.sweepAll === true;
+    if (amountSompi < 0n || (amountSompi === 0n && !_sweep)) return { success: false, error: 'Amount too small: ' + amountSompi + ' sompi' };
+    if (!_toSelf && amountSompi > 0n && amountSompi < CHANGE_DUST_THRESHOLD) return { success: false, error: 'Amount too small: ' + amountSompi + ' sompi is below the ~600 sompi dust limit' };
+    if (String(recipientAddress).split(':')[0] !== String(senderAddress).split(':')[0]) throw new Error('Wrong network: ' + String(recipientAddress).split(':')[0] + ' address from a ' + String(senderAddress).split(':')[0] + ' wallet'); // KV_ADDR_SAMENET
     // 1. Fetch raw UTXOs from L1 + filter through UTXO ledger
     const resp = await fetch(`${API_BASES[network]}/addresses/${senderAddress}/utxos`);
     if (!resp.ok) throw new Error(`UTXO fetch failed: ${resp.status}`);
@@ -468,7 +527,7 @@ export async function sendKaspaViaRest(params: {
       for (const u of utxos) {
         selectedUtxos.push(u);
         selectedAmount += BigInt(u.utxoEntry.amount);
-        if (selectedAmount >= totalNeeded) break;
+        if (!_sweepAllCoins && selectedAmount >= totalNeeded) break; // [KV_SWEEP_ALL] sweep takes every coin
       }
       
       console.log('[REST-TX] Fee attempt', attempt, '- need:', totalNeeded.toString(), 'have:', selectedAmount.toString(), 'fee:', fee.toString());
@@ -481,7 +540,10 @@ export async function sendKaspaViaRest(params: {
       const change = selectedAmount - loopSendAmount - fee;
       const outputScripts = [recipientScript];
       const outputValues = [loopSendAmount];
-      if (change > 0n) {
+      const inputValues = selectedUtxos.map(u => BigInt(u.utxoEntry.amount));
+      const plan = kvPlanOutputs(inputValues, loopSendAmount, change, senderScript.length); // [KV_STORAGE_MASS_KIP9]
+      if (plan.error) return { success: false, error: plan.error };
+      if (plan.keepChange) { // [KV_DUST_148] sub-600 change -> fee; KIP-9 small change -> fee
         outputScripts.push(senderScript);
         outputValues.push(change);
       }
@@ -489,14 +551,13 @@ export async function sendKaspaViaRest(params: {
       // Dust check
       for (let i = 0; i < outputValues.length; i++) {
         if (isDust(outputValues[i], outputScripts[i].length)) {
-          return { success: false, error: `Output ${i} is dust (${outputValues[i]} sompi). Minimum: ~546 sompi for P2PK.` };
+          return { success: false, error: `Output ${i} is dust (${outputValues[i]} sompi). Minimum: ~600 sompi for P2PK.` };
         }
       }
       
       // Compute mass
       const cMass = computeMass(selectedUtxos.length, outputScripts, sigScriptLen, payloadBytes.length);
-      const inputValues = selectedUtxos.map(u => BigInt(u.utxoEntry.amount));
-      const sMass = storageMass(inputValues, outputValues);
+      const sMass = plan.storageMass;
       const totalMass = cMass > sMass ? cMass : sMass;
       
       if (totalMass > MAXIMUM_STANDARD_TX_MASS) {
@@ -516,7 +577,7 @@ export async function sendKaspaViaRest(params: {
       fee = newFee; // Recalculate with higher fee
     }
     
-    // 4. Build final outputs (amountSompi=0 means send all back to self)
+    // 4. Build final outputs (amountSompi=0 means send all: to self, or to recipient with sweepAll)
     const sendAmount = amountSompi === 0n ? selectedAmount - fee : amountSompi;
     const change = selectedAmount - sendAmount - fee;
 
@@ -545,7 +606,10 @@ export async function sendKaspaViaRest(params: {
     const outputsData: { value: bigint; scriptVersion: number; script: Uint8Array }[] = [
       { value: sendAmount, scriptVersion: 0, script: recipientScript },
     ];
-    if (change > 0n && !isDust(change, senderScript.length)) {
+    if (sendAmount <= 0n || isDust(sendAmount, recipientScript.length)) return { success: false, error: 'Amount too small: ' + sendAmount + ' sompi after fee' };
+    const _finalPlan = kvPlanOutputs(selectedUtxos.map(u => BigInt(u.utxoEntry.amount)), sendAmount, change, senderScript.length); // [KV_STORAGE_MASS_KIP9]
+    if (_finalPlan.error) return { success: false, error: _finalPlan.error };
+    if (change > 0n && _finalPlan.keepChange) {
       outputsData.push({ value: change, scriptVersion: 0, script: senderScript });
     } else if (change > 0n) {
       fee += change; // Absorb dust change into fee (v2: locked value is balance-level, never rides a specific coin)
@@ -635,7 +699,13 @@ export async function sendKaspaViaRest(params: {
         console.error('[REST-TX] wRPC submit FAILED:', _w.error);
         return { success: false, error: 'wRPC submit failed: ' + _w.error };
       }
-      result = { transactionId: _w.transactionId };
+      // [KV_TXID_TRUTH] relay is untrusted: predicted id wins; a different id = failure.
+      const _rid = kvResolveSubmittedTxId(_predictedTxId, _w.transactionId);
+      if ('error' in _rid) {
+        console.error('[REST-TX] relay txid rejected:', _rid.error);
+        return { success: false, error: _rid.error };
+      }
+      result = { transactionId: _rid.txId };
     } else {
       const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
         method: 'POST',
@@ -654,7 +724,12 @@ export async function sendKaspaViaRest(params: {
       const _nodeTxId = result.transactionId || '';
       console.log('[REST-TX] PREDICT CHECK:', _predictedTxId === _nodeTxId ? 'MATCH ✓' : ('MISMATCH ✗ node=' + _nodeTxId));
     }
-    const txId = result.transactionId || bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(tx))));
+    // [KV_TXID_TRUTH] never fabricate an id (was sha256(JSON(tx))): empty -> predicted id.
+    const txId: string = result.transactionId || _predictedTxId || '';
+    if (!txId) {
+      for (const u of selectedUtxos) _spentOutpoints.add(((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0));
+      return { success: false, error: 'Submitted, but no transaction id could be confirmed — check the explorer before retrying.' };
+    }
     const explorerBase = network === 'mainnet' ? 'https://explorer.kaspa.org/txs/' : 'https://explorer-tn10.kaspa.org/txs/';
 
     /* re-anchor removed: v2 IOU locks are value-level; nothing coin-anchored to move */
@@ -680,10 +755,10 @@ export async function sendKaspaViaRest(params: {
       for (const u of selectedUtxos) {
         _spentOutpoints.add(((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0));
       }
-      const _sendAmt = amountSompi === 0n ? selectedAmount - fee : amountSompi;
-      const _chg = selectedAmount - _sendAmt - fee;
-      if (_chg > 0n) {
-        _pendingChange.set(txId + ':1', { txId, index: 1, amount: _chg.toString(), script: '20' + bytesToHex(xOnlyPubkey) + 'ac', address: senderAddress, at: Date.now() });
+      // chain only the change output that actually exists in this tx (index 1)
+      const _chgOut = outputsData.length > 1 ? outputsData[1] : null;
+      if (_chgOut && _chgOut.value > 0n && /^[0-9a-f]{64}$/i.test(txId)) {
+        _pendingChange.set(txId + ':1', { txId, index: 1, amount: _chgOut.value.toString(), script: '20' + bytesToHex(xOnlyPubkey) + 'ac', address: senderAddress, at: Date.now() });
       }
     } catch (e) { console.warn('[REST-TX] spent-track record failed:', e); }
     return { success: true, txId, explorerUrl: explorerBase + txId };
@@ -780,12 +855,27 @@ export async function broadcastPreparedTx(tx: any, network: KaspaNetwork): Promi
     let result: any;
     if (tx && tx.payload && tx.payload.length > 0) {
       console.log('[REST-TX] prepared tx carries payload -> wRPC broadcast');
-      const _w = await _wrpcSubmit(tx, network, (tx.__predictedTxId as string) || '');
+      // [KV_TXID_TRUTH] recompute the id from the frozen body itself
+      let _pred = (tx.__predictedTxId as string) || '';
+      try {
+        _pred = computeTxId({
+          version: 0,
+          inputs: (tx.inputs || []).map((i: any) => ({ prevTxId: i.previousOutpoint.transactionId, prevIndex: Number(i.previousOutpoint.index), sequence: BigInt(i.sequence || 0) })),
+          outputs: (tx.outputs || []).map((o: any) => ({ amount: BigInt(o.amount), scriptVersion: Number(o.scriptPublicKey?.version || 0), scriptHex: o.scriptPublicKey?.scriptPublicKey || '' })),
+          lockTime: BigInt(tx.lockTime || 0),
+          subnetworkId: tx.subnetworkId || SUBNETWORK_ID_NATIVE,
+          gas: BigInt(tx.gas || 0),
+          payloadHex: tx.payload || '',
+        });
+      } catch (e) { console.warn('[REST-TX] prepared txid recompute failed:', e); }
+      const _w = await _wrpcSubmit(tx, network, _pred);
       if (_w.error) {
         console.error('[REST-TX] Prepared wRPC submit FAILED:', _w.error);
         return { success: false, error: 'wRPC submit failed: ' + _w.error };
       }
-      result = { transactionId: _w.transactionId };
+      const _rid = kvResolveSubmittedTxId(_pred, _w.transactionId);
+      if ('error' in _rid) return { success: false, error: _rid.error };
+      result = { transactionId: _rid.txId };
     } else {
       const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
         method: 'POST',

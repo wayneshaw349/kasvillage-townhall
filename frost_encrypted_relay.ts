@@ -6,6 +6,8 @@
 import { secp256k1 as secp } from '@noble/curves/secp256k1';
 import { blake2b } from '@noble/hashes/blake2b';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
+import { sha256 } from '@noble/hashes/sha256';
+import { hmac } from '@noble/hashes/hmac';
 
 const KASPA_HASH_KEY = new TextEncoder().encode('TransactionSigningHash');
 function kaspaBlake2b(data: Uint8Array): Uint8Array {
@@ -57,11 +59,26 @@ function deriveEncryptionKey(sharedSecret: Uint8Array, ctx: EncryptionContext): 
 }
 
 // ============================================================================
-// Derive encryption nonce from key + R_hex (deterministic, no randomness)
+// KV_RELAY_AEAD: random 16-byte nonce per message + encrypt-then-MAC.
+// The old nonce was derived from key + R_hex; callers pass R_hex '' so every message
+// under one agreement reused the same keystream, and there was no authentication.
+// Wire format of `encrypted` (hex): nonce(16) || ciphertext || HMAC-SHA256 tag(32).
+// Separate stream / MAC keys are derived from the context-bound key with labels.
 // ============================================================================
-function deriveNonce(encKey: Uint8Array, R_hex: string): Uint8Array {
-  const rBytes = hexToBytes(R_hex.length > 64 ? R_hex.slice(0, 64) : R_hex);
-  return kaspaBlake2b(new Uint8Array([...encKey, ...rBytes])).slice(0, 12);
+const RELAY_NONCE_LEN = 16;
+const RELAY_TAG_LEN = 32;
+const RELAY_VERSION_LABEL = new TextEncoder().encode('KV-RELAY-v2');
+function labelKey(encKey: Uint8Array, label: string): Uint8Array {
+  return sha256(new Uint8Array([...new TextEncoder().encode(label), ...encKey]));
+}
+function relayTag(macKey: Uint8Array, nonce: Uint8Array, ct: Uint8Array): Uint8Array {
+  return hmac(sha256 as any, macKey, new Uint8Array([...RELAY_VERSION_LABEL, ...nonce, ...ct]));
+}
+function constEq(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
 }
 
 // ============================================================================
@@ -70,6 +87,7 @@ function deriveNonce(encKey: Uint8Array, R_hex: string): Uint8Array {
 // For longer data, chains multiple rounds
 // ============================================================================
 function xorCipher(data: Uint8Array, encKey: Uint8Array, nonce: Uint8Array): Uint8Array {
+  if (data.length > 255 * 32) throw new Error('relay payload too long for keystream'); // round counter is one byte
   const result = new Uint8Array(data.length);
   let offset = 0;
   let round = 0;
@@ -100,9 +118,24 @@ export function encryptPartialSig(params: {
   const { partialSig, myPrivKeyHex, counterpartyPubKeyHex, ctx } = params;
   const sharedSecret = deriveSharedSecret(myPrivKeyHex, counterpartyPubKeyHex);
   const encKey = deriveEncryptionKey(sharedSecret, ctx);
-  const nonce = deriveNonce(encKey, ctx.R_hex);
-  const encrypted = xorCipher(hexToBytes(partialSig), encKey, nonce);
-  return { encrypted: bytesToHex(encrypted), nonce: bytesToHex(nonce) };
+  const nonce = ((secp as any).utils.randomPrivateKey() as Uint8Array).slice(0, RELAY_NONCE_LEN); // KV_RELAY_AEAD: fresh CSPRNG bytes per message
+  const ct = xorCipher(hexToBytes(partialSig), labelKey(encKey, 'KV-RELAY-ENC'), nonce);
+  const tag = relayTag(labelKey(encKey, 'KV-RELAY-MAC'), nonce, ct);
+  return { encrypted: bytesToHex(new Uint8Array([...nonce, ...ct, ...tag])), nonce: bytesToHex(nonce) };
+}
+
+/** KV_RELAY_AEAD: verify the tag and return the plaintext bytes, or null if not authentic. */
+function openRelay(encryptedHex: string, myPrivKeyHex: string, counterpartyPubKeyHex: string, ctx: EncryptionContext, nonceHex?: string): Uint8Array | null {
+  let blob: Uint8Array;
+  try { blob = hexToBytes(encryptedHex); } catch { return null; }
+  if (blob.length <= RELAY_NONCE_LEN + RELAY_TAG_LEN) return null;
+  const nonce = blob.slice(0, RELAY_NONCE_LEN);
+  const ct = blob.slice(RELAY_NONCE_LEN, blob.length - RELAY_TAG_LEN);
+  const tag = blob.slice(blob.length - RELAY_TAG_LEN);
+  if (nonceHex && nonceHex.toLowerCase() !== bytesToHex(nonce)) return null; // separate nonce must agree with the prepended one
+  const encKey = deriveEncryptionKey(deriveSharedSecret(myPrivKeyHex, counterpartyPubKeyHex), ctx);
+  if (!constEq(tag, relayTag(labelKey(encKey, 'KV-RELAY-MAC'), nonce, ct))) return null;
+  return xorCipher(ct, labelKey(encKey, 'KV-RELAY-ENC'), nonce);
 }
 
 // ============================================================================
@@ -117,17 +150,27 @@ export function decryptPartialSig(params: {
   nonce: string;
 }): string {
   const { encrypted, myPrivKeyHex, counterpartyPubKeyHex, ctx, nonce } = params;
-  const sharedSecret = deriveSharedSecret(myPrivKeyHex, counterpartyPubKeyHex);
-  const encKey = deriveEncryptionKey(sharedSecret, ctx);
-  const decrypted = xorCipher(hexToBytes(encrypted), encKey, hexToBytes(nonce));
-  return bytesToHex(decrypted);
+  // KV_RELAY_AEAD: never return unauthenticated plaintext.
+  const pt = openRelay(encrypted, myPrivKeyHex, counterpartyPubKeyHex, ctx, nonce || undefined);
+  if (!pt) throw new Error('Relay message failed authentication (wrong key/context or tampered)');
+  return bytesToHex(pt);
 }
 
 // ============================================================================
 // VERIFY decrypted sig is plausible (not garbage from wrong key)
 // ============================================================================
-export function isValidDecryption(decryptedHex: string): boolean {
-  const bytes = hexToBytes(decryptedHex);
+export function isValidDecryption(
+  decryptedHex: string,
+  // KV_RELAY_AEAD: pass the received ciphertext + keys to also check the HMAC tag and
+  // that it decrypts to exactly decryptedHex. (decryptPartialSig already refuses bad tags.)
+  auth?: { encrypted: string; myPrivKeyHex: string; counterpartyPubKeyHex: string; ctx: EncryptionContext; nonce?: string },
+): boolean {
+  if (auth) {
+    const pt = openRelay(auth.encrypted, auth.myPrivKeyHex, auth.counterpartyPubKeyHex, auth.ctx, auth.nonce);
+    if (!pt || bytesToHex(pt) !== String(decryptedHex || '').toLowerCase()) return false;
+  }
+  let bytes: Uint8Array;
+  try { bytes = hexToBytes(decryptedHex); } catch { return false; }
   if (bytes.length !== 32 && bytes.length !== 64) return false;
   if (bytes.every(b => b === 0)) return false;
   if (bytes.every(b => b === 0xff)) return false;

@@ -276,6 +276,7 @@ function pubkeyToKaspaAddress(pubkey: Uint8Array, network: KaspaNetwork): string
 
 function isValidKaspaAddress(address: string): boolean {
   if (!address) return false;
+  try { if (!require('./kaspa_rest_tx').kvAddressValid(address.trim())) return false; } catch {} // KV_ADDR_UI
   return ['kaspa:', 'kaspatest:', 'kaspadev:'].some(p => address.startsWith(p));
 }
 
@@ -657,6 +658,13 @@ async function getNeighborAgreementInfo(agreementId: string): Promise<NeighborAg
 async function lockToNeighborAgreement(
   config: NeighborAgreementConfig, myRole: 'buyer' | 'seller'
 ): Promise<{ agreement: NeighborAgreement; lockTxId: string } | { error: string }> {
+  // [KV_MUTUAL_RELEASE_NI] the 2-of-2 address below is malformed (20-byte hash,
+  // not a 32-byte Kaspa P2SH) and there is no working release path — funds
+  // sent here could never come back. Refuse before any KAS moves.
+  const NEIGHBOR_P2SH_IMPLEMENTED: boolean = false; // flip only with a real 32-byte P2SH + release tx
+  if (!NEIGHBOR_P2SH_IMPLEMENTED) {
+    return { error: 'Neighbor 2-of-2 lock is not implemented (malformed P2SH, no release path)' };
+  }
   const authOk = await biometricAuth.authenticate('Collateralize funds for Agreement');
   if (!authOk) return { error: 'Authentication failed' };
 
@@ -730,22 +738,12 @@ async function requestMutualRelease(
 async function completeMutualRelease(
   agreementId: string, recipientAddress: string
 ): Promise<{ txId: string } | { error: string }> {
-  const agreement = await getNeighborAgreementInfo(agreementId);
-  if (!agreement) return { error: 'Agreement not found' };
-  if (!agreement.buyerSignedRelease || !agreement.sellerSignedRelease) {
-    return { error: 'Both parties must sign before release' };
-  }
-  try {
-    const combinedScriptSig = combineMultisigSignatures(
-      agreement.buyerSignedRelease, agreement.sellerSignedRelease, agreement.redeemScriptHex
-    );
-    const mockTxId = `release_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    agreement.status = 'released';
-    agreement.releasedAt = Date.now();
-    agreement.releaseTxId = mockTxId;
-    await storeAgreement(agreement);
-    return { txId: mockTxId };
-  } catch (e: any) { return { error: e.message }; }
+  // [KV_MUTUAL_RELEASE_NI] This used to mark the agreement 'released' with a
+  // MOCK txid and never built/broadcast a real spend (the 2-of-2 address it
+  // targets is also a malformed 20-byte-hash P2SH). It has no callers; it now
+  // throws so it can never be wired up by accident and report fake success.
+  void agreementId; void recipientAddress;
+  throw new Error('completeMutualRelease: not implemented (no real release tx is built; refusing to fake success)');
 }
 
 async function getActiveAgreements(): Promise<NeighborAgreement[]> {

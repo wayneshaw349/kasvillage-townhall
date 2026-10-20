@@ -258,6 +258,30 @@ async function uploadToIrys(
 // PRIVATE KEY DECRYPTION
 // =============================================================================
 
+// [KV_PRIV_PUBCHECK] A candidate private key is accepted ONLY if its compressed
+// pubkey matches the wallet's stored public key (full 33-byte or x-only).
+// Without this, the XOR-envelope fallback (keystream = SHA256(deviceKey+ciphertext),
+// writer uses SHA256(deviceKey+plaintext)) yields 64 hex chars of garbage.
+async function _avatarStoredPubkeys(): Promise<string[]> {
+  const out: string[] = [];
+  for (const k of ['kv_public_key', 'kaspa_pubkey', 'kv_l1_pubkey']) {
+    try {
+      const v = (await SecureStore.getItemAsync(k))?.trim().toLowerCase();
+      if (v && /^[0-9a-f]+$/.test(v) && (v.length === 64 || v.length === 66)) out.push(v);
+    } catch {}
+  }
+  return out;
+}
+function _avatarPrivMatchesPub(privHex: string, storedPubs: string[]): boolean {
+  try {
+    if (!/^[0-9a-fA-F]{64}$/.test(privHex)) return false;
+    const pub = secp256k1.getPublicKey(hexToBytes(privHex.toLowerCase()), true);
+    const full = bytesToHex(pub).toLowerCase();
+    const xOnly = full.slice(2);
+    return storedPubs.some((p) => (p.length === 66 ? p === full || p.slice(2) === xOnly : p === xOnly));
+  } catch { return false; }
+}
+
 async function decryptPrivateKey(
   encryptedJson: string,
   deviceKey: string,
@@ -306,9 +330,22 @@ export async function uploadAvatarToArweave(
     return { success: false, error: 'Wallet not found' };
   }
   
-  const privKeyHex = await decryptPrivateKey(privKeyEnc, deviceKey);
+  // [KV_PRIV_PUBCHECK] only a key that reproduces the stored pubkey is used.
+  const storedPubs = await _avatarStoredPubkeys();
+  let privKeyHex: string | null = null;
+  if (storedPubs.length) {
+    const dec = await decryptPrivateKey(privKeyEnc, deviceKey);
+    if (dec && _avatarPrivMatchesPub(dec, storedPubs)) privKeyHex = dec;
+    if (!privKeyHex) {
+      // envelope decrypt can't recover the key (keystream mismatch) — try plain slots, validated
+      for (const k of ['kv_private_key', 'kasvillage_private_key', 'kv_l1_privkey']) {
+        const v = (await SecureStore.getItemAsync(k))?.trim() || '';
+        if (_avatarPrivMatchesPub(v, storedPubs)) { privKeyHex = v.toLowerCase(); break; }
+      }
+    }
+  }
   if (!privKeyHex) {
-    return { success: false, error: 'Failed to decrypt wallet key' };
+    return { success: false, error: 'Failed to decrypt wallet key (no key matches stored pubkey)' };
   }
   
   // Build tags

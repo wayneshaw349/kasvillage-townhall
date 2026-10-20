@@ -163,11 +163,65 @@ function hasMixedScriptWord(raw: string): boolean {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// KV_ENTITY_DECODE: markup evasion. "s<b></b>eed phrase", "seed&nbsp;phrase"
+// and "&#115;eed phrase" render as the blocked words. Decode entities and
+// strip tags WITHOUT inserting spaces as an extra scan pass.
+// ---------------------------------------------------------------------------
+const KV_NAMED_ENT: Record<string, string> = {
+  nbsp: ' ', ensp: ' ', emsp: ' ', thinsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  shy: '', zwj: '', zwnj: '', lrm: '', rlm: '', period: '.', comma: ',', colon: ':', sol: '/', hyphen: '-', dash: '-',
+};
+export function decodeHtmlEntities(s: string): string {
+  let out = String(s || '');
+  // up to 3 rounds so &amp;#115; style double-encoding is caught; bounded
+  for (let round = 0; round < 3; round++) {
+    const next = out.replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z][a-z0-9]{1,15});?/gi, (m, e: string) => {
+      if (e[0] === '#') {
+        const cp = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+        if (!isFinite(cp) || cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return '';
+        if (cp === 0xa0) return ' ';
+        try { return String.fromCodePoint(cp); } catch { return ''; }
+      }
+      const v = KV_NAMED_ENT[e.toLowerCase()];
+      return v !== undefined ? v : m;
+    });
+    if (next === out) break;
+    out = next;
+  }
+  return out.replace(/\u00a0/g, ' ');
+}
+// KV_TIGHT_ALL: the tight form removes EVERY tag with no space. An allow-list of
+// "inline" tags was always incomplete (label, nobr, img, custom elements, CSS
+// display:inline on anything). The spaced form (tags -> ' ') is scanned too, so
+// words split across block tags are still read both ways.
+export function stripTagsTight(s: string): string {
+  return String(s || '').replace(/<!--[\s\S]*?(-->|$)/g, '').replace(/<[^>]*>/g, '');
+}
+/** Tags -> one space (the "spaced" form). */
+export function stripTagsSpaced(s: string): string {
+  return String(s || '').replace(/<!--[\s\S]*?(-->|$)/g, ' ').replace(/<[^>]*>/g, ' ');
+}
+/** Tag-stripped, entity-decoded forms of markup text: [spaced, tight]. */
+export function htmlTextForms(html: string): string[] {
+  const body = String(html || '').replace(/<!--[\s\S]*?-->/g, '').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  const spaced = decodeHtmlEntities(stripTagsSpaced(body)).replace(/\s+/g, ' ');
+  const tight = decodeHtmlEntities(stripTagsTight(body)).replace(/\s+/g, ' ');
+  return spaced === tight ? [spaced] : [spaced, tight];
+}
+
 /** Scan a single string. Runs against both the raw and folded forms. */
 export function scanText(raw: string): ScanResult {
   if (typeof raw !== 'string' || !raw) return { ok: true };
   if (hasMixedScriptWord(raw)) return { ok: false, reason: 'mixed_script' };
   const forms = [raw, fold(raw)];
+  if (/[<&]/.test(raw)) { // KV_ENTITY_DECODE
+    for (const dec of [decodeHtmlEntities(stripTagsTight(raw)), decodeHtmlEntities(stripTagsSpaced(raw))]) {
+      if (dec === raw || forms.indexOf(dec) >= 0) continue;
+      if (hasMixedScriptWord(dec)) return { ok: false, reason: 'mixed_script' };
+      forms.push(dec, fold(dec));
+    }
+  }
   for (const s of forms) {
     for (const re of CSAM) if (re.test(s)) return { ok: false, reason: 'child_safety' };
     for (const re of PHISH) if (re.test(s)) return { ok: false, reason: 'credential_phishing' };
@@ -183,7 +237,7 @@ export function scanText(raw: string): ScanResult {
 // Walk any object and scan every string value AND every key. Keys matter:
 // a material named after a slur renders nowhere but ships forever.
 // ---------------------------------------------------------------------------
-export function scanObject(obj: any, maxDepth = 24): ScanResult {
+export function scanObject(obj: any, maxDepth = 64): ScanResult { // KV_DEPTH_64: was 24
   const seen = new Set<any>();
   let hit: ScanResult | null = null;
 
@@ -262,7 +316,7 @@ function kvSquash(n: string): string {
   return o.join(' ');
 }
 function kvWalkStrings(o: any, path: string, out: Array<[string, string]>, depth: number = 0) {
-  if (depth > 8 || o == null) return;
+  if (depth > 64 || o == null || out.length > 200000) return; // KV_DEPTH_64: was 8 - nested strings went unscanned
   if (typeof o === 'string') { out.push([path, o]); return; }
   if (Array.isArray(o)) { o.forEach((v, i) => kvWalkStrings(v, path + '[' + i + ']', out, depth + 1)); return; }
   if (typeof o === 'object') for (const k of Object.keys(o)) kvWalkStrings(o[k], path + '.' + k, out, depth + 1);
@@ -286,7 +340,7 @@ export function scanObjectStrict(obj: any): any {
   if (!base || base.ok === false) return base;
   const strs: Array<[string, string]> = [];
   kvWalkStrings(obj, '', strs);
-  for (const [p, s] of strs) {
+  for (const [p, s0] of strs) for (const s of (/[<&]/.test(s0) ? [s0, decodeHtmlEntities(stripTagsTight(s0)), decodeHtmlEntities(stripTagsSpaced(s0))] : [s0])) { // KV_ENTITY_DECODE
     const n = kvNormalize(s);
     if (n !== String(s).toLowerCase()) {
       try { const r2: any = (scanText as any)(n); if (r2 && r2.ok === false) return { ...r2, path: p, leet: true }; } catch {}

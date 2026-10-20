@@ -158,6 +158,8 @@ import {
   ReleaseMode,
   MIN_FEE_SOMPI,
   SUBNETWORK_NATIVE,
+  classifyTemplateOutputs,
+  canTransition,
 } from './canonical_agreement_steps';
 
 declare var global: any;
@@ -426,6 +428,59 @@ interface Contract {
   verificationCode?: string;
   exchangeMethod?: ExchangeMethod;
   inscriptionTxId?: string;
+}
+
+// KV_STAT_V2_FIELDS: values bound into v2 stat records. Both phones must derive them
+// identically from the shared proposal: timeoutN is the proposal's N (buyer: floor(min*600),
+// seller: parsed N); description is the proposal's description text (buyer appends the
+// ' - Ship to:' suffix exactly as the proposal did; the seller's itemDescription already holds
+// the full proposal text). A resumed seller whose description fell back to the agrId binds ''.
+function kvStatTimeoutN(c: Contract): number {
+  const n = Number(c.timeoutN || 0);
+  return n > 0 ? Math.floor(n) : Math.floor((c.timeoutMinutes || 5) * DAA_PER_MIN);
+}
+function kvStatDescription(c: Contract): string {
+  const d = (c.itemDescription || '') + (c.shippingCenter ? ' - Ship to: ' + c.shippingCenter : '');
+  const id = c.agreementId || '';
+  return (id && (d === id || d === id.slice(0, 12))) ? '' : d;
+}
+// KV_FUND_CHAIN_CHECK: local kv_funded_ is only a hint (it is deleted on any broadcast error,
+// and a lost response leaves it unset even though the funding tx landed). Before anything
+// that could build a SECOND funding tx, ask the chain: the predicted funding txid, the escrow
+// UTXOs, and (optionally) whether the frozen funding tx's wallet inputs are still unspent.
+//   'funded'   - predicted tx is known to the indexer or its outpoint sits in the escrow.
+//   'unfunded' - definitively absent: no tx, escrow empty, inputs (if checked) still unspent.
+//   'unknown'  - network error or an ambiguous state; callers must NOT rebuild on this.
+async function kvCheckEscrowFunded(o: { network: string; frostAddr: string; predictedTxId: string; preparedTx?: any; walletAddr?: string }): Promise<'funded' | 'unfunded' | 'unknown'> {
+  const api = String(o.network || 'testnet-10').includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+  let unknown = false;
+  try {
+    if (o.predictedTxId) {
+      const r = await fetch(api + '/transactions/' + o.predictedTxId + '?resolve_previous_outpoints=no');
+      if (r.ok) { const j: any = await r.json().catch(() => null); if (j && (j.transaction_id || j.transactionId)) return 'funded'; }
+      else if (r.status !== 404) unknown = true;
+    }
+    if (!o.frostAddr || o.frostAddr.length < 20) return 'unknown';
+    const ur = await fetch(api + '/addresses/' + o.frostAddr + '/utxos');
+    if (!ur.ok) return 'unknown';
+    const uu: any = await ur.json();
+    if (Array.isArray(uu) && uu.length > 0) {
+      if (o.predictedTxId && uu.some((u: any) => u?.outpoint?.transactionId === o.predictedTxId)) return 'funded';
+      return 'unknown'; // escrow holds something we cannot attribute - never rebuild over it
+    }
+    const ins: any[] = Array.isArray(o.preparedTx?.inputs) ? o.preparedTx.inputs : [];
+    if (o.walletAddr && ins.length) {
+      const wr = await fetch(api + '/addresses/' + o.walletAddr + '/utxos');
+      if (!wr.ok) return 'unknown';
+      const wu: any = await wr.json();
+      const have = new Set((Array.isArray(wu) ? wu : []).map((u: any) => String(u?.outpoint?.transactionId) + ':' + Number(u?.outpoint?.index)));
+      if (ins.some((i: any) => !have.has(String(i?.previousOutpoint?.transactionId) + ':' + Number(i?.previousOutpoint?.index)))) return 'unknown'; // inputs spent: funding may be landing
+    }
+  } catch { return 'unknown'; }
+  return unknown ? 'unknown' : 'unfunded';
+}
+function kvStatEscrowTxId(templateB64: string): string {
+  try { const u0 = (JSON.parse(atob(templateB64)) as any)?.u?.[0]; return String((u0 && (u0.t || u0.txId)) || ''); } catch { return ''; }
 }
 
 interface UserStats {
@@ -1087,6 +1142,8 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   const [manualAgrId, setManualAgrId] = useState('');
   const [resumeAsCollateral, setResumeAsCollateral] = useState(false);
   const collateralRef = React.useRef(false);
+  const kvPsrLockRef = React.useRef(false); /* KV_INFLIGHT_LOCK: processSellerResponse */
+  const kvSignFundLockRef = React.useRef(false); /* KV_INFLIGHT_LOCK: seller Sign & Fund */
   const pastedTypeRef = React.useRef<'simple' | 'trade' | null>(null); /* TYPE-FIELD: explicit type from the last parsed KV proposal */
   const [manualLookupResult, setManualLookupResult] = useState<any>(null);
   const [manualVerCode, setManualVerCode] = useState('');
@@ -1697,7 +1754,10 @@ function parseClipboard(raw: string): {
               if (_escrowTxId === _k.predictedTxId) {
                 console.log('[Kill-Gate] Escrow still holds the seller-funded UTXO — broadcasting kill tx first');
                 const _kr = await fetch(apiBase + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_k.txBody) });
-                if (!_kr.ok) { const _t = await _kr.text(); console.warn('[Kill-Gate] Kill broadcast failed — NOT funding:', _t.slice(0, 200)); return; }
+                if (!_kr.ok) { const _t = await _kr.text(); /* KV_KILL_QUIET: a duplicate means the kill is already in - wait for the explorer */
+                  try { const _kid = killTxIdOf(_k.txBody); const _q = _kid ? await fetch(apiBase + '/transactions/' + _kid) : null; const _qj: any = _q && _q.ok ? await _q.json() : null;
+                    if ((_qj && _qj.is_accepted) || /already|orphan|double spend|spent/i.test(_t)) { console.log('[Kill-Gate] Kill already sent' + (_qj && _qj.is_accepted ? ' and accepted' : '') + ' - waiting for the explorer to show it, then funding'); return; } } catch {}
+                  console.warn('[Kill-Gate] Kill broadcast failed — NOT funding:', _t.slice(0, 200)); return; }
                 const _kres = await _kr.json();
                 console.log('[Kill-Gate] Kill broadcast:', _kres.transactionId, '— refund is now dead. Funding on the next poll.');
       laUpsert({ agrId: contract.agreementId || '', killTxId: _kres.transactionId }).then(() => laStep(contract.agreementId || '', 'kill_broadcast')).catch(() => {});
@@ -1787,7 +1847,8 @@ function parseClipboard(raw: string): {
             let txTemplateB64 = '';
             const pipePos = encSig.indexOf('|');
             if (pipePos > 0) { txTemplateB64 = encSig.slice(pipePos + 1); encSig = encSig.slice(0, pipePos); }
-            const decrypted = (() => { try { const d = decryptPartialSig({ encrypted: encSig, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: { agreementId: contract.agreementId || '', buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', multisigAddress: contract.multisigAddress || '', aggregatedPubkey: contract.frostData?.aggregatedPubkey || '', network: contract.frostData?.network || 'testnet-10', itemPriceKas: contract.itemPriceKas, sellerCommitmentKas: contract.sellerCommitmentKas, R_hex: '' }, nonce: match.nonce || '' }); console.log('[FROST] Decrypted counterparty partial sig'); return d; } catch (e) { console.warn('[FROST] Decrypt failed:', e); return match.signature; } })();
+            const decrypted = (() => { try { const d = decryptPartialSig({ encrypted: encSig, myPrivKeyHex: wallet.privKeyHex, counterpartyPubKeyHex: role === 'seller' ? (contract.buyerPubkey || '') : (contract.sellerPubkey || ''), ctx: { agreementId: contract.agreementId || '', buyerPubkey: contract.buyerPubkey || '', sellerPubkey: contract.sellerPubkey || '', multisigAddress: contract.multisigAddress || '', aggregatedPubkey: contract.frostData?.aggregatedPubkey || '', network: contract.frostData?.network || 'testnet-10', itemPriceKas: contract.itemPriceKas, sellerCommitmentKas: contract.sellerCommitmentKas, R_hex: '' }, nonce: match.nonce || '' }); console.log('[FROST] Decrypted counterparty partial sig'); return d; } catch (e) { console.warn('[FROST] Decrypt failed (MAC/context mismatch) - rejected, no raw fallback:', e); return ''; } })(); /* KV_RELAY_NO_RAW_FALLBACK */
+            if (!decrypted) throw new Error('Unauthenticated/undecryptable relay sig ignored'); // caught below; TownHall paths still run
             let buyerR = '';
             // R comes from clipboard, not TownHall
             console.log('[FROST-R] R is clipboard-only, checking AsyncStorage');
@@ -2364,6 +2425,40 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
     setLocalLoading(false);
   };
 
+  // KV_PASTE_GUARD: a pasted KV-STEP header may only move the step along the state machine
+  // (canTransition, or at most one step forward / back to an earlier step) and may never
+  // contradict a role that is already set.
+  const kvPasteGuard = async (kind: string): Promise<boolean> => {
+    const _target = kind === 'TEMPLATES' || kind === 'COSIG' ? 3 : kind === 'RESPONSE' || kind === 'TEMPLATE' ? 5 : -1;
+    const _impliedRole = kind === 'TEMPLATES' || kind === 'RESPONSE' ? 'buyer' : kind === 'COSIG' || kind === 'TEMPLATE' ? 'seller' : null;
+    if (_target < 0 || !_impliedRole) return true; // unknown kinds are handled by the caller
+    if (role && role !== _impliedRole) {
+      Alert.alert('Wrong Side', 'This ' + kind + ' payload is for the ' + _impliedRole + ', but you are the ' + role + ' in this agreement. Nothing was changed.');
+      return false;
+    }
+    let _ok = _target <= step + 1;
+    if (!_ok) { try { _ok = canTransition(step as any, _target as any, null).ok; } catch { _ok = false; } }
+    // KV_PASTE_GUARD_FUNDED: a seller stuck at step 3 (funding poll amount mismatch) must still be
+    // able to paste the buyer's release TEMPLATE once their escrow is verifiably funded.
+    if (!_ok && kind === 'TEMPLATE' && step === 3 && _impliedRole === 'seller') {
+      const _ga = contract.agreementId || '';
+      try {
+        if (_ga && (await SecureStore.getItemAsync('kv_funded_' + _ga))) _ok = true;
+        else if (_ga) {
+          let _gp = ''; try { const _gr = await SecureStore.getItemAsync('kv_refund_' + _ga); _gp = _gr ? String(JSON.parse(_gr).predictedTxId || '') : ''; } catch {}
+          const _gfa = contract.multisigAddress || contract.frostData?.address || '';
+          if (_gp && _gfa) _ok = (await kvCheckEscrowFunded({ network: String(contract.frostData?.network || 'testnet-10'), frostAddr: _gfa, predictedTxId: _gp })) === 'funded';
+        }
+      } catch { _ok = false; }
+      if (_ok) console.log('[KV_PASTE_GUARD] seller 3->5 allowed: escrow verifiably funded');
+    }
+    if (!_ok) {
+      Alert.alert('Out of Order', 'This ' + kind + ' payload belongs to step ' + _target + ', but this agreement is at step ' + step + '. Resume the agreement to the right step first, then paste again. Nothing was changed.');
+      return false;
+    }
+    return true;
+  };
+
   const handleBannerPaste = async () => { /* BANNER-PASTE: one-tap clipboard routing for ceremony payloads */
     try {
       const txt = (await Clipboard.getStringAsync()) || '';
@@ -2378,6 +2473,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
           const _rkind = _rm[2]; const _rhAgr = _rm[3].trim();
           const _rcur = contract.agreementId || '';
           if (_rhAgr && _rcur && _rhAgr !== _rcur) { Alert.alert('Different Agreement', 'This payload is for ' + _rhAgr + ' but ' + _rcur + ' is open. Switch via the Active tab first.'); return; }
+          if (!(await kvPasteGuard(_rkind))) return; // KV_PASTE_GUARD
           if (_rkind === 'TEMPLATES') { recordPayload((_rhAgr || contract.agreementId || ''), 'templates', _rbody, 'in').catch(()=>{}); setStagedCosign(_rbody); if (!role) setRole('buyer'); setStep(3); Alert.alert('Routed', 'Seller templates staged. Review and co-sign below.'); return; }
           if (_rkind === 'COSIG') { recordPayload((_rhAgr || contract.agreementId || ''), 'cosig', _rbody, 'in').catch(()=>{}); setStagedSig(_rbody); if (!role) setRole('seller'); setStep(3); Alert.alert('Routed', 'Buyer co-signature staged.'); return; }
           if (_rkind === 'RESPONSE') { recordPayload((_rhAgr || contract.agreementId || ''), 'response', _rbody, 'in').catch(()=>{}); setSellerResponseB64(_rbody); if (!role) setRole('buyer'); setStep(5); Alert.alert('Routed', 'Seller response staged.'); return; }
@@ -2489,8 +2585,8 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
 const { template: _cTmpl, description: _cDesc, nonces: _cNonces } = buildReleaseTemplateFn({
           utxos: utxos.map((u) => ({ txId: u.outpoint.transactionId, index: u.outpoint.index, amount: u.utxoEntry.amount, scriptPubKey: u.utxoEntry.scriptPublicKey.scriptPublicKey })),
           partyA_xOnly: _bx, partyB_xOnly: _sx,
-          partyA_depositSompi: BigInt(Math.floor(contract.itemPriceKas * 1e8)),
-          partyB_depositSompi: BigInt(Math.floor(contract.sellerCommitmentKas * 1e8)),
+          partyA_depositSompi: BigInt(Math.round(contract.itemPriceKas * 1e8)),
+          partyB_depositSompi: BigInt(Math.round(contract.sellerCommitmentKas * 1e8)),
           mode: releaseMode,
 privateKeyHex: wallet.privKeyHex,
 buyerPubkey: contract.buyerPubkey || '',
@@ -2502,7 +2598,7 @@ agrId: contract.agreementId || '',
 await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: _cNonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })), createdAt: Date.now() }));
         await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(_cTmpl));
         const _b64 = encodeTemplate(_cTmpl);
-        let _ssigC = ''; try { const _srecC = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: String(((JSON.parse(atob(_b64)) as any).u?.[0]?.txId) || ''), escrowDaaScore: 0, myPubkey: contract.buyerPubkey || '', cpPubkey: contract.sellerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(_b64)) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: Number((contract as any).timeoutN || 0), descriptionHash: srDescHash((contract as any).description || ''), outcome: ((((JSON.parse(atob(_b64)) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, frostCounter: Number(contract.frostData?.frostCounter || 0), anchor: null }); _ssigC = srSign(_srecC, wallet.privKeyHex); await SecureStore.setItemAsync('kv_statrec_my_' + (contract.agreementId || ''), JSON.stringify({ rec: _srecC, mySig: _ssigC })); } catch (_se) { console.warn('[StatSig] build/sign failed:', _se); }
+        let _ssigC = ''; try { const _srecC = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: kvStatEscrowTxId(_b64), escrowDaaScore: 0, myPubkey: contract.buyerPubkey || '', cpPubkey: contract.sellerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(_b64)) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: kvStatTimeoutN(contract), descriptionHash: srDescHash(kvStatDescription(contract)), outcome: ((((JSON.parse(atob(_b64)) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, frostCounter: Number(contract.frostData?.frostCounter || 0), anchor: null }); _ssigC = srSign(_srecC, wallet.privKeyHex); await SecureStore.setItemAsync('kv_statrec_my_' + (contract.agreementId || ''), JSON.stringify({ rec: _srecC, mySig: _ssigC })); } catch (_se) { console.warn('[StatSig] build/sign failed:', _se); }
         try { await Clipboard.setStringAsync('KV-STEP-6-TEMPLATE|' + (contract.agreementId || '') + (_ssigC ? '|STATSIG:' + _ssigC : '') + '\n' + _b64); } catch {}
         setTemplateBuilt(true);
         console.log('[Ceremony] ' + releaseMode + ' template built:', _b64.length, 'chars,', _cDesc);
@@ -2516,8 +2612,8 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
         sellerPubkey: contract.sellerPubkey || '',
         counter: contract.frostData?.frostCounter || 0,
         utxos: utxos.map((u: any) => ({ txId: u.outpoint.transactionId, index: u.outpoint.index, amount: u.utxoEntry.amount, scriptPubKey: u.utxoEntry.scriptPublicKey.scriptPublicKey })),
-        buyerAmountSompi: BigInt(Math.floor(contract.itemPriceKas * 1e8)),
-        sellerAmountSompi: BigInt(Math.floor(contract.sellerCommitmentKas * 1e8)),
+        buyerAmountSompi: BigInt(Math.round(contract.itemPriceKas * 1e8)),
+        sellerAmountSompi: BigInt(Math.round(contract.sellerCommitmentKas * 1e8)),
         releaseMode: releaseMode,
         agrId: contract.agreementId,
       });
@@ -2525,7 +2621,7 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
       // v2: one k per input, array order == template u[] order.
       await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: result.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })), createdAt: Date.now() }));
       await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(result.template));
-      let _ssig = ''; try { const _srec = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: String(((JSON.parse(atob(result.templateB64)) as any).u?.[0]?.txId) || ''), escrowDaaScore: 0, myPubkey: contract.buyerPubkey || '', cpPubkey: contract.sellerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(result.templateB64)) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: Number((contract as any).timeoutN || 0), descriptionHash: srDescHash((contract as any).description || ''), outcome: ((((JSON.parse(atob(result.templateB64)) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, frostCounter: Number(contract.frostData?.frostCounter || 0), anchor: null }); _ssig = srSign(_srec, wallet.privKeyHex); await SecureStore.setItemAsync('kv_statrec_my_' + (contract.agreementId || ''), JSON.stringify({ rec: _srec, mySig: _ssig })); } catch (_se) { console.warn('[StatSig] build/sign failed:', _se); }
+      let _ssig = ''; try { const _srec = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: kvStatEscrowTxId(result.templateB64), escrowDaaScore: 0, myPubkey: contract.buyerPubkey || '', cpPubkey: contract.sellerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(result.templateB64)) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: kvStatTimeoutN(contract), descriptionHash: srDescHash(kvStatDescription(contract)), outcome: ((((JSON.parse(atob(result.templateB64)) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, frostCounter: Number(contract.frostData?.frostCounter || 0), anchor: null }); _ssig = srSign(_srec, wallet.privKeyHex); await SecureStore.setItemAsync('kv_statrec_my_' + (contract.agreementId || ''), JSON.stringify({ rec: _srec, mySig: _ssig })); } catch (_se) { console.warn('[StatSig] build/sign failed:', _se); }
       try { await Clipboard.setStringAsync('KV-STEP-6-TEMPLATE|' + (contract.agreementId || '') + (_ssig ? '|STATSIG:' + _ssig : '') + '\n' + result.templateB64); } catch {}
 
       console.log('[Ceremony] Template built:', result.templateB64.length, 'chars');
@@ -2537,6 +2633,11 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
 
   // === PROCESS SELLER RESPONSE ===
   const processSellerResponse = async () => {
+    if (kvPsrLockRef.current) { console.log('[KV_INFLIGHT_LOCK] processSellerResponse already running - ignored'); return; }
+    kvPsrLockRef.current = true;
+    try { await _processSellerResponseInner(); } finally { kvPsrLockRef.current = false; }
+  };
+  const _processSellerResponseInner = async () => {
     try {
       let pastedText = sellerResponseB64 || '';
       if (!pastedText) { try { const CB = await import('expo-clipboard'); pastedText = await CB.getStringAsync() || ''; } catch {} }
@@ -2548,7 +2649,7 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
         if (!_cpSig) { try { const _ro = JSON.parse(atob(stripKvHeader(pastedText))); if (_ro && typeof _ro.ss === 'string' && _ro.ss.length >= 100) { _cpSig = _ro.ss; console.log('[StatSig] sig recovered from response body (ss)'); } } catch {} }
         if (_cpSig) {
           const _mj = await SecureStore.getItemAsync('kv_statrec_my_' + (contract.agreementId || ''));
-          if (_mj) { const _m = JSON.parse(_mj); const _r = await srAppend(_m.rec, _m.mySig, _cpSig); console.log('[StatSig] seller attestation ' + (_r.ok ? 'CHAINED' : 'REJECTED: ' + _r.error)); }
+          if (_mj) { const _m = JSON.parse(_mj); const _r = await srAppend(_m.rec, _m.mySig, _cpSig, (await loadMainWallet())?.privKeyHex || undefined); console.log('[StatSig] seller attestation ' + (_r.ok ? 'CHAINED' : 'REJECTED: ' + _r.error)); }
         } else { console.log('[StatSig] no seller sig in response header (older sender)'); }
       } catch (_se) { console.warn('[StatSig] buyer append failed:', _se); }
       if (!resp || !resp.R || !resp.s || !Array.isArray(resp.s)) {
@@ -2562,17 +2663,33 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
       if (!nonceJson) { Alert.alert('Error', 'Buyer nonce not found — did you build the template first?'); return; }
       try { await SecureStore.setItemAsync('kv_paste_resp_' + (contract.agreementId || ''), sellerResponseB64 || ''); } catch {} // CAPTURE seller response
       const savedNonce = JSON.parse(nonceJson);
+      const tmplJson = await SecureStore.getItemAsync('kv_frost_template_' + contract.agreementId);
+      if (!tmplJson) { Alert.alert('Error', 'Original template not found — rebuild template first'); return; }
+      const template = JSON.parse(tmplJson);
+
+      // KV_NONCE_ONCE: a k may back AT MOST ONE partial signature. Once aggregation has
+      // produced signatures the k is wiped from SecureStore and only the finished txBody
+      // is kept, bound to the exact seller response it was made with. Re-pasting the SAME
+      // response re-broadcasts that stored txBody (no signing). A DIFFERENT response would
+      // mean a second partial under the same k (key leak) - refused; a fresh template
+      // (fresh k) must be exchanged instead.
+      let aggResult: any;
+      if (savedNonce?.used) {
+        if (savedNonce.usedResp !== JSON.stringify(resp) || !savedNonce.txBody) {
+          Alert.alert('Re-Exchange Required', 'Your signing nonce for this template was already used with a different seller response. Signing again would expose your private key, so it was refused.\n\nTap Build TX Template again (fresh nonce) and send the NEW template to the seller, then paste their new response.');
+          setTemplateBuilt(false); // KV_NONCE_ONCE: re-enable Build TX Template
+          return;
+        }
+        console.log('[KV_NONCE_ONCE] Same seller response as the consumed nonce - re-using stored signed txBody, no new signature.');
+        aggResult = { txBody: savedNonce.txBody, signatures: savedNonce.signatures || [] };
+      } else {
 // A v1 blob holds ONE k. Reconstituting it would sign every input with the same
 // k and publish the wallet key by division. There is no migration - one k cannot
 // become N. Refuse and make them rebuild.
 if (!Array.isArray(savedNonce?.nonces)) { Alert.alert('Rebuild the Template', 'The stored nonce is from the old single-k format and cannot be used safely. Tap Build TX Template again.'); return; }
 const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_tweaked: BigInt('0x' + n.d_tweaked), R_hex: n.R_hex }));
 
-      const tmplJson = await SecureStore.getItemAsync('kv_frost_template_' + contract.agreementId);
-      if (!tmplJson) { Alert.alert('Error', 'Original template not found — rebuild template first'); return; }
-      const template = JSON.parse(tmplJson);
-
-      const aggResult = buyerAggregate({
+      aggResult = buyerAggregate({
         nonces,
         buyerPubkey: contract.buyerPubkey || '',
         sellerPubkey: contract.sellerPubkey || '',
@@ -2582,6 +2699,20 @@ const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_twe
       });
 
       if ('error' in aggResult) { Alert.alert('Aggregation Failed', aggResult.error); return; }
+        // KV_NONCE_ONCE: signatures exist -> consume the k NOW, before any broadcast.
+        try {
+          await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: [], used: true, usedResp: JSON.stringify(resp), txBody: aggResult.txBody, signatures: aggResult.signatures, usedAt: Date.now() }));
+          const _chk = JSON.parse((await SecureStore.getItemAsync('kv_frost_nonce_' + contract.agreementId)) || '{}');
+          if (!_chk.used) throw new Error('read-back mismatch');
+          console.log('[KV_NONCE_ONCE] Buyer nonces consumed for', contract.agreementId);
+        } catch (_ne) {
+          console.warn('[KV_NONCE_ONCE] Could not persist nonce consumption:', _ne);
+          await SecureStore.deleteItemAsync('kv_frost_nonce_' + contract.agreementId).catch(() => {});
+          Alert.alert('Storage Failed', 'Could not record that your signing nonce was used, so it was deleted and nothing was broadcast. Tap Build TX Template again and re-exchange with the seller.');
+          setTemplateBuilt(false);
+          return;
+        }
+      }
       // [FROST-DEBUG-AGG] Granular ceremony logging (testnet only)
       console.log('[FROST-DEBUG-AGG] Inputs:', aggResult.txBody?.transaction?.inputs?.length);
       console.log('[FROST-DEBUG-AGG] Outputs:', aggResult.txBody?.transaction?.outputs?.length);
@@ -2774,7 +2905,18 @@ const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_twe
         setStep(7);
         Alert.alert('Funds Released!', 'TX: ' + txId.slice(0, 16) + '...');
       } else {
-        const l1Error = await submitResp.text(); console.log('[FROST-L1-REJECT]', l1Error.slice(0, 500)); Alert.alert('L1 Failed', l1Error.slice(0, 300));
+        const l1Error = await submitResp.text(); console.log('[FROST-L1-REJECT]', l1Error.slice(0, 500));
+        // KV_L1_PERMANENT_REJECT: the stored signed txBody can never be re-signed (KV_NONCE_ONCE), so a
+        // PERMANENT rejection would leave the buyer stuck. Transient failures (5xx/429/network/orphan,
+        // mempool duplicates) keep the record so the same tx can be re-broadcast.
+        const _l1Transient = submitResp.status >= 500 || submitResp.status === 429 || /timeout|timed out|unavailable|network|ECONN|rate limit|too many|orphan|already in the mempool|already accepted|duplicate/i.test(l1Error);
+        if (_l1Transient) {
+          Alert.alert('L1 Failed', l1Error.slice(0, 300) + '\n\nLooks temporary - paste the SAME seller response again to re-broadcast the same signed tx.');
+        } else {
+          await SecureStore.deleteItemAsync('kv_frost_nonce_' + contract.agreementId).catch(() => {});
+          setTemplateBuilt(false);
+          Alert.alert('L1 Rejected - Re-Exchange Required', l1Error.slice(0, 300) + '\n\nThe network permanently rejected this release. Its signing nonce is used up and cannot sign again. Tap Build TX Template (fresh nonce), send the NEW template to the seller, and paste their NEW response.');
+        }
       }
     } catch (e: any) {
       console.error('[Ceremony-Buyer] Error:', e);
@@ -3160,6 +3302,39 @@ const nextActionMsg = (ph: string, rl: string): string => {
               { /* REUSE-GUARD: never rebuild a frozen template - a rebuild invalidates the buyer cosign */
         const _rgP = await SecureStore.getItemAsync('kv_refund_pending_' + agrId);
         const _rgB = await SecureStore.getItemAsync('kv_refund_b64_' + agrId);
+        // KV_NONCE_ONCE: frozen templates whose nonces were already consumed by a signature
+        // can never be co-signed again. If nothing was funded, drop them so fresh templates
+        // (fresh nonces) are built below for the buyer to co-sign.
+        let _rgUsed = false; try { _rgUsed = !!(_rgP && JSON.parse(_rgP).noncesUsed); } catch {}
+        if (_rgUsed && !(await SecureStore.getItemAsync('kv_funded_' + agrId))) {
+          // KV_FUND_CHAIN_CHECK: kv_funded_ may be missing although the funding tx landed (lost
+          // response / error-path delete). Rebuilding now would freeze a SECOND funding tx -> double
+          // fund, wrong kv_refund_, kill never sent. Ask the chain first.
+          let _rgPp: any = {}; try { _rgPp = JSON.parse(_rgP || '{}'); } catch {}
+          const _rgFs = await kvCheckEscrowFunded({ network: String(_rgPp.network || wallet.network || 'testnet-10'), frostAddr: String(_rgPp.frostAddr || frostData?.address || ''), predictedTxId: String(_rgPp.predictedTxId || ''), preparedTx: _rgPp.preparedTx, walletAddr: wallet.address });
+          console.log('[KV_FUND_CHAIN_CHECK] used-nonce templates, local kv_funded_ missing -> chain says:', _rgFs);
+          if (_rgFs === 'funded') {
+            await SecureStore.setItemAsync('kv_funded_' + agrId, String(_rgPp.predictedTxId || '')).catch(() => {});
+            if (!(await SecureStore.getItemAsync('kv_refund_' + agrId)) && _rgPp.signedRefundTxBody) {
+              await SecureStore.setItemAsync('kv_refund_' + agrId, JSON.stringify({ txBody: _rgPp.signedRefundTxBody, lockTime: String(BigInt(_rgPp.currentDAA || 0) + BigInt(_rgPp.N || 0)), predictedTxId: _rgPp.predictedTxId, amountSompi: _rgPp.amountSompi, frostAddr: _rgPp.frostAddr, network: _rgPp.network, agrId, createdAt: Date.now() })).catch(() => {});
+            }
+            let _rgKill: any = null; try { const _kj = await SecureStore.getItemAsync('kv_killsend_' + agrId); _rgKill = _kj ? JSON.parse(_kj).txBody : null; } catch {}
+            if (!_rgKill && _rgPp.signedKillTxBody) { _rgKill = _rgPp.signedKillTxBody; await SecureStore.setItemAsync('kv_killsend_' + agrId, JSON.stringify({ txBody: _rgKill, predictedTxId: _rgPp.predictedTxId, createdAt: Date.now() })).catch(() => {}); }
+            laUpsert({ agrId, escrowTxId: String(_rgPp.predictedTxId || '') }).then(() => laStep(agrId, 'seller_funded')).catch(() => {});
+            setSellerLocked(true);
+            setContract(prev => ({ ...prev, sellerLockTxId: String(_rgPp.predictedTxId || '') }));
+            if (_rgKill) { try { await Clipboard.setStringAsync(JSON.stringify(_rgKill)); } catch {} }
+            Alert.alert('Already Funded', 'Your collateral is already in escrow on-chain (the earlier funding went through). Nothing was rebuilt or re-sent.' + (_rgKill ? '\n\nThe KILL TX is on your clipboard again - send it to the buyer (their GREEN box).' : ''));
+            setIsLoading(false); setAcceptingId(null); return;
+          }
+          if (_rgFs === 'unknown') {
+            Alert.alert('Cannot Verify Funding', 'Could not confirm on-chain whether your earlier funding landed, so nothing was rebuilt (a rebuild could fund twice). Wait a minute and tap Accept again. If the escrow stays empty, use Abort Pending Agreement.');
+            setIsLoading(false); setAcceptingId(null); return;
+          }
+          console.log('[KV_NONCE_ONCE] Frozen templates have consumed nonces - rebuilding with fresh nonces.');
+          await SecureStore.deleteItemAsync('kv_refund_pending_' + agrId).catch(() => {});
+          await SecureStore.deleteItemAsync('kv_refund_b64_' + agrId).catch(() => {});
+        } else
         if (_rgP && _rgB) {
           try { await Clipboard.setStringAsync(_rgB); } catch {}
           console.log('[Refund] REUSE-GUARD - frozen template exists, re-copied same templates, not re-preparing');
@@ -3975,6 +4150,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               const _rcur = contract.agreementId || '';
                               if (!_rcur) { Alert.alert('No Agreement Open', 'This payload belongs to ' + _rhAgr + '. Open that agreement first (Active tab or Resume), then paste again.'); return; }
                               if (_rhAgr && _rhAgr !== _rcur) { Alert.alert('Different Agreement', 'This payload is for ' + _rhAgr + ' but ' + _rcur + ' is open. Switch via the Active tab, then paste again.'); return; }
+                              if (!(await kvPasteGuard(_rkind))) return; // KV_PASTE_GUARD
                               if (_rkind === 'TEMPLATES') { recordPayload((_rhAgr || contract.agreementId || ''), 'templates', _rbody, 'in').catch(()=>{}); setStagedCosign(_rbody); if (!role) setRole('buyer'); setStep(3); Alert.alert('Routed', 'Seller templates staged. Review and tap Co-sign when ready.'); return; }
                               if (_rkind === 'COSIG') { recordPayload((_rhAgr || contract.agreementId || ''), 'cosig', _rbody, 'in').catch(()=>{}); setStagedSig(_rbody); if (!role) setRole('seller'); setStep(3); Alert.alert('Routed', 'Buyer co-signature staged. Review and tap Sign & Fund when ready.'); return; }
                               if (_rkind === 'TEMPLATE') { if (!role) setRole('seller'); setStep(5); try { await Clipboard.setStringAsync(_rbody); } catch {} Alert.alert('Routed', 'Buyer template is on your clipboard. Paste it into the template box to sign.'); return; }
@@ -4611,7 +4787,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           value={stagedSig} /* AUTOFILL-VALUE */ onChangeText={(txt) => { const _sv = stripKvHeader(txt); setStagedSig(_sv); }}
                         />
                         {stagedSig.length >= 20 && (
-                          <TouchableOpacity onPress={async () => { const v = stagedSig; setStagedSig('');
+                          <TouchableOpacity onPress={async () => { if (kvSignFundLockRef.current) { console.log('[KV_INFLIGHT_LOCK] Sign & Fund already running - ignored'); return; } kvSignFundLockRef.current = true; const v = stagedSig; setStagedSig('');
                             const _agrId = contract.agreementId || '';
                             try {
                               setIsLoading(true);
@@ -4624,12 +4800,28 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               const _killResp = parseResponse(_rp[1]);
                               try { await SecureStore.setItemAsync('kv_paste_sig_' + _agrId, v); } catch {} // CAPTURE buyer cosig
                               if (!_resp || !_killResp) { Alert.alert('Error', 'Invalid signature format'); setIsLoading(false); return; }
+                              // KV_NONCE_ONCE: once the refund/kill nonces have produced signatures they are
+                              // wiped from the pending blob and only the signed txBodies remain, bound to the
+                              // exact co-signature they were made with. Same co-signature -> reuse the stored
+                              // signed txs (no new partial). Different co-signature -> a second partial under
+                              // the same k would hand the buyer your private key -> refused.
+                              let _agg: any; let _killAgg: any;
+                              const _cosigKey = JSON.stringify([_resp, _killResp]);
+                              if (_p.noncesUsed) {
+                                if (_p.usedCosig !== _cosigKey || !_p.signedRefundTxBody || !_p.signedKillTxBody) {
+                                  Alert.alert('Re-Exchange Required', 'Your signing nonces for these templates were already used with a different buyer co-signature. Signing again would expose your private key, so it was refused. Nothing was sent.\n\nTap Accept again to build FRESH refund+kill templates (new nonces), send them to the buyer, and paste their NEW co-signature.');
+                                  setIsLoading(false); return;
+                                }
+                                console.log('[KV_NONCE_ONCE] Same co-signature as consumed nonces - re-using stored signed refund+kill, no new signature.');
+                                _agg = { txBody: _p.signedRefundTxBody, signatures: [] };
+                                _killAgg = { txBody: _p.signedKillTxBody, signatures: [] };
+                              } else {
 // v1 pending blob: single k for refund AND kill. Cannot be signed safely, and
 // nothing has moved yet, so refusing costs only a re-accept.
 if (!Array.isArray(_p.nonces) || !Array.isArray(_p.killNonces)) { Alert.alert('Re-accept Required', 'This pending refund was frozen under the old single-k format and cannot be signed safely. Your collateral was NOT sent - re-accept the agreement to start over.'); setIsLoading(false); return; }
 const _nonces = _p.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_tweaked: BigInt('0x' + n.d_tweaked), R_hex: n.R_hex }));
                               // Party mapping mirrors buildSellerRefund: funder (me) in the buyerPubkey slot.
-                              const _agg = buyerAggregate({
+                              _agg = buyerAggregate({
 nonces: _nonces,
                                 buyerPubkey: _p.sellerPubkey,
                                 sellerPubkey: _p.buyerPubkey,
@@ -4646,7 +4838,7 @@ nonces: _nonces,
                               // bad, the seller must not fund at all — a live refund with no kill is
                               // exactly the setup that lets a seller strand the buyer's payment.
 const _killNonces = _p.killNonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_tweaked: BigInt('0x' + n.d_tweaked), R_hex: n.R_hex }));
-                              const _killAgg = buyerAggregate({
+                              _killAgg = buyerAggregate({
 nonces: _killNonces,
                                 buyerPubkey: _p.sellerPubkey,
                                 sellerPubkey: _p.buyerPubkey,
@@ -4654,10 +4846,24 @@ nonces: _killNonces,
                                 template: _p.killTemplate,
                                 sellerResponse: _killResp,
                               });
-                              if ('error' in _killAgg) {
-                                console.warn('[Kill-Agg] FAILED:', _killAgg.error);
-                                Alert.alert('Kill Aggregation Failed', _killAgg.error + '\n\nNothing was sent.');
+                              // KV_NONCE_ONCE: the refund signature now exists -> consume BOTH nonce sets
+                              // before anything is stored, uploaded or broadcast.
+                              const _killOk = !('error' in _killAgg);
+                              try {
+                                await SecureStore.setItemAsync('kv_refund_pending_' + _agrId, JSON.stringify({ ..._p, nonces: [], killNonces: [], noncesUsed: true, usedCosig: _cosigKey, signedRefundTxBody: _agg.txBody, signedKillTxBody: _killOk ? _killAgg.txBody : null, noncesUsedAt: Date.now() }));
+                                const _nchk = JSON.parse((await SecureStore.getItemAsync('kv_refund_pending_' + _agrId)) || '{}');
+                                if (!_nchk.noncesUsed) throw new Error('read-back mismatch');
+                                console.log('[KV_NONCE_ONCE] Refund+kill nonces consumed for', _agrId);
+                              } catch (_ne) {
+                                console.warn('[KV_NONCE_ONCE] Could not persist nonce consumption:', _ne);
+                                Alert.alert('Storage Failed', 'Could not record that your signing nonces were used. Nothing was sent. Tap Abort Pending Agreement, then accept again to build fresh templates.');
                                 setIsLoading(false); return;
+                              }
+                              if (!_killOk) {
+                                console.warn('[Kill-Agg] FAILED:', _killAgg.error);
+                                Alert.alert('Kill Aggregation Failed', _killAgg.error + '\n\nNothing was sent. Your nonces for these templates are now used up - tap Accept again to build fresh refund+kill templates and have the buyer co-sign the NEW ones.');
+                                setIsLoading(false); return;
+                              }
                               }
                               const _lockTime = String(BigInt(_p.currentDAA) + BigInt(_p.N));
                               // 5c: the signed refund MUST be durable BEFORE the collateral moves.
@@ -4688,7 +4894,11 @@ nonces: _killNonces,
                                   agrId: _agrId,
                                   createdAt: Date.now(),
                                 });
-                                if (await SecureStore.getItemAsync('kv_funded_' + _agrId)) { console.log('[Refund] FUND-SENTINEL - already funded, skipping re-inscribe + re-fund'); setIsLoading(false); return; }
+                                if (await SecureStore.getItemAsync('kv_funded_' + _agrId)) { console.log('[Refund] FUND-SENTINEL - already funded, skipping re-inscribe + re-fund');
+                                  /* KV_KILL_RESURFACE: a crash after funding can leave the kill undelivered - persist + copy it again. */
+                                  try { let _skj = await SecureStore.getItemAsync('kv_killsend_' + _agrId); if (!_skj && _killAgg?.txBody) { _skj = JSON.stringify({ txBody: _killAgg.txBody, predictedTxId: _p.predictedTxId, createdAt: Date.now() }); await SecureStore.setItemAsync('kv_killsend_' + _agrId, _skj); console.log('[Kill] FUND-SENTINEL: kill persisted (kv_killsend_)'); }
+                                    const _skb = _skj ? JSON.parse(_skj).txBody : null; if (_skb) { try { await Clipboard.setStringAsync(JSON.stringify(_skb)); } catch {} Alert.alert('Already Funded - Kill Tx Copied', 'Your collateral was already sent. The signed KILL TX is on your clipboard again - send it to the buyer (their GREEN box) if they do not have it yet.'); } } catch (_ske) { console.warn('[Kill] FUND-SENTINEL resurface failed:', _ske); }
+                                  setIsLoading(false); return; }
       const _arRes = await uploadToIrys(_arBody, [
                                   { name: 'App-Name', value: 'KasVillage' },
                                   { name: 'Content-Type', value: 'application/json' },
@@ -4725,7 +4935,13 @@ nonces: _killNonces,
       await SecureStore.setItemAsync(_sentK, _p.predictedTxId);
       let _br: any = await broadcastPreparedTx(_p.preparedTx, _p.network);
       if (!_br.success && /already in the mempool/i.test(String(_br.error || ''))) { console.log('[Refund] FUND-SENTINEL: already-in-mempool -> success'); _br = { success: true, txId: _p.predictedTxId }; }
-      if (!_br.success) { await SecureStore.deleteItemAsync(_sentK).catch(() => {}); }
+      if (!_br.success) { /* KV_FUND_CHAIN_CHECK: the error may hide a landed tx (lost response, already spent/accepted, orphan). Ask the chain before declaring failure. */
+        let _bfs: 'funded' | 'unfunded' | 'unknown' = 'unknown';
+        for (let _bi = 0; _bi < 2 && _bfs !== 'funded'; _bi++) { if (_bi) await new Promise(r => setTimeout(r, 2500)); _bfs = await kvCheckEscrowFunded({ network: String(_p.network || 'testnet-10'), frostAddr: String(_p.frostAddr || ''), predictedTxId: String(_p.predictedTxId || '') }); }
+        console.log('[KV_FUND_CHAIN_CHECK] broadcast error "' + String(_br.error || '').slice(0, 80) + '" -> chain says:', _bfs);
+        if (_bfs === 'funded') { _br = { success: true, txId: _p.predictedTxId }; }
+        else { await SecureStore.deleteItemAsync(_sentK).catch(() => {}); }
+      }
                               if (!_br.success) {
                                 console.warn('[Refund] Funding broadcast failed:', _br.error);
                                 Alert.alert('Funding Failed', (_br.error || 'Broadcast failed') + '\n\nYour collateral was NOT sent.');
@@ -4737,20 +4953,24 @@ nonces: _killNonces,
                               if (!_match) {
                                 Alert.alert('WARNING — txid mismatch', 'Collateral was sent, but the broadcast txid differs from the prediction, so the stored refund will not spend it. Do not rely on the reclaim for this agreement.');
                               }
-                              await SecureStore.deleteItemAsync('kv_refund_pending_' + _agrId).catch(() => {});
+                              // KV_KILL_DURABLE: the signed kill lives only in the pending record until here.
+                              // Persist it BEFORE deleting that record, so a crash in between cannot lose it.
+                              let _killSaved = false;
+                              try { await SecureStore.setItemAsync('kv_killsend_' + _agrId, JSON.stringify({ txBody: _killAgg.txBody, predictedTxId: _p.predictedTxId, createdAt: Date.now() })); _killSaved = !!(await SecureStore.getItemAsync('kv_killsend_' + _agrId)); console.log('[Kill] Signed kill persisted (kv_killsend_)'); } catch (_ke) { console.warn('[Kill] killsend persist failed:', _ke); }
+                              if (_killSaved) { await SecureStore.deleteItemAsync('kv_refund_pending_' + _agrId).catch(() => {}); }
+                              else { console.warn('[Kill] kv_killsend_ not confirmed - KEEPING kv_refund_pending_ (holds signedKillTxBody)'); }
                               setSellerLocked(true);
                               setContract(prev => ({ ...prev, sellerLockTxId: _br.txId }));
                               updateFrostEntry(_agrId, { timeoutN: Number(_p.N) });
                               // Paste 4: the buyer needs this to fund. Safe to hand over — it can only
                               // move the collateral from escrow back to escrow, never to a person.
-                              try { await SecureStore.setItemAsync('kv_killsend_' + _agrId, JSON.stringify({ txBody: _killAgg.txBody, predictedTxId: _p.predictedTxId, createdAt: Date.now() })); console.log('[Kill] Signed kill persisted (kv_killsend_)'); } catch (_ke) { console.warn('[Kill] killsend persist failed:', _ke); }
                               recordPayload(_agrId, 'kill', JSON.stringify(_killAgg.txBody), 'out').catch(() => {});
                               try { await Clipboard.setStringAsync(JSON.stringify(_killAgg.txBody)); } catch {}
                               Alert.alert('Collateral Sent — Send Kill Tx', 'Reclaim secured, then funded.\nTX: ' + (_br.txId || '').slice(0, 16) + '...\n\nThe KILL TX is now on your clipboard. Send it to the buyer — they cannot fund without it.\n\nIf they never fund, reclaim after ' + (Number(_p.N) / DAA_PER_MIN) + ' min.');
                             } catch (e) {
                               console.error('[Refund-Agg] Error:', e);
                               Alert.alert('Error', e instanceof Error ? e.message : 'Aggregate failed');
-                            } finally { setIsLoading(false); }
+                            } finally { setIsLoading(false); kvSignFundLockRef.current = false; }
                           }} style={{ backgroundColor: '#16a34a', borderRadius: 8, padding: 12, marginTop: 8, alignItems: 'center' }}>
                             <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: rs.font(13) }}>{'Review OK — Sign & Fund ' + contract.sellerCommitmentKas + ' KAS'}</Text>
                           </TouchableOpacity>
@@ -5174,9 +5394,15 @@ nonces: _killNonces,
                                   const who = (_sx && scr.includes(_sx)) ? 'YOU (seller)' : (_bx && scr.includes(_bx)) ? 'Buyer' : (_unknown = true, 'UNKNOWN ADDRESS');
                                   return (Number(out.v || out.amount || 0) / 1e8).toFixed(4) + ' KAS \u2192 ' + who;
                                 });
-                                const _kind = _outs.length === 1 ? 'RELEASE \u2014 trade complete' : 'CANCEL \u2014 collateral returned';
+                                // KV_TMPL_AMOUNTS: label by the ACTUAL outputs, and show escrow total + real fee.
+                                const _cls = classifyTemplateOutputs(tmpl, _sx, _bx || undefined);
+                                const _kind = _cls === 'release' ? 'RELEASE \u2014 all to you (seller)' : _cls === 'cancel' ? 'CANCEL \u2014 split between buyer and you' : 'UNRECOGNISED \u2014 do not sign';
+                                const _inTot: bigint = ((tmpl as any).u || []).reduce((s: bigint, u: any) => s + BigInt(u.a || 0), 0n);
+                                const _outTot: bigint = _outs.reduce((s: bigint, o: any) => s + BigInt(o.v || 0), 0n);
+                                const _realFee: bigint = _inTot - _outTot;
+                                const _feeLine = '\n\nEscrow total: ' + (Number(_inTot) / 1e8).toFixed(4) + ' KAS\nNetwork fee: ' + (Number(_realFee) / 1e8).toFixed(6) + ' KAS' + (_realFee !== BigInt((tmpl as any).f || 0) ? ' (\u26a0 stated fee ' + (Number(BigInt((tmpl as any).f || 0)) / 1e8).toFixed(6) + ')' : '');
                                 const _warn = _unknown ? '\n\n\u26a0 An output pays an address that is neither party. Refuse unless you expect this.' : '';
-                                Alert.alert('Co-Sign: ' + _kind, _lines.join('\n') + _warn + '\n\nYour signature is final. Sign only if this matches what you agreed.', [
+                                Alert.alert('Co-Sign: ' + _kind, _lines.join('\n') + _feeLine + _warn + '\n\nYour signature is final. Sign only if this matches what you agreed.', [
                                   { text: 'Refuse', style: 'cancel', onPress: () => res(false) },
                                   { text: 'Sign', onPress: () => res(true) },
                                 ], { cancelable: false });
@@ -5194,14 +5420,16 @@ nonces: _killNonces,
                               buyerPubkey: contract.buyerPubkey || '',
                               counter: contract.frostData?.frostCounter || 0,
                               template: tmpl,
+                              expectedBuyerAmountSompi: BigInt(Math.round((contract.itemPriceKas || 0) * 1e8)), // KV_TMPL_AMOUNTS
+                              expectedSellerAmountSompi: BigInt(Math.round((contract.sellerCommitmentKas || 0) * 1e8)),
                             });
                             if ('error' in result) { Alert.alert('Verification Failed', result.error); setIsLoading(false); return; }
                             let _mySSig = ''; try {
                               const _inSig = ((v.match(/STATSIG:([0-9a-fA-F]{100,})/) || [])[1]) || '';
-                              const _sRec = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: String(((JSON.parse(atob(stripKvHeader(v))) as any).u?.[0]?.txId) || ''), escrowDaaScore: 0, myPubkey: contract.sellerPubkey || '', cpPubkey: contract.buyerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(stripKvHeader(v))) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: Number((contract as any).timeoutN || 0), descriptionHash: srDescHash((contract as any).description || ''), outcome: ((((JSON.parse(atob(stripKvHeader(v))) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, frostCounter: Number(contract.frostData?.frostCounter || 0), anchor: null });
+                              const _sRec = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: kvStatEscrowTxId(stripKvHeader(v)), escrowDaaScore: 0, myPubkey: contract.sellerPubkey || '', cpPubkey: contract.buyerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(stripKvHeader(v))) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: kvStatTimeoutN(contract), descriptionHash: srDescHash(kvStatDescription(contract)), outcome: ((((JSON.parse(atob(stripKvHeader(v))) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, frostCounter: Number(contract.frostData?.frostCounter || 0), anchor: null });
                               if (_inSig) { const _r = await srAppend(_sRec, '', _inSig); console.log('[StatSig] buyer attestation ' + (_r.ok ? 'CHAINED' : 'REJECTED: ' + _r.error)); } else { console.log('[StatSig] no buyer sig in template header (older sender)'); }
                               _mySSig = srSign(_sRec, wallet.privKeyHex);
-                              const _pr = await (await import('./stat_records')).loadChain(); const _mine = _pr.find((c: any) => c.agrId === (contract.agreementId || '')); if (_mine) { _mine.mySignature = _mySSig; await (await import('@react-native-async-storage/async-storage')).default.setItem('kv_stat_chain_v1', JSON.stringify(_pr)); }
+                              const _pr = await (await import('./stat_records')).loadChain(); const _mine = _pr.find((c: any) => c.agrId === (contract.agreementId || '')); if (_mine) { _mine.mySignature = (_mine.v === 2) ? _mySSig : srSign(_mine, wallet.privKeyHex); /* KV_STAT_V1_RESIGN: stored as v1 -> sign v1 bytes */ await (await import('@react-native-async-storage/async-storage')).default.setItem('kv_stat_chain_v1', JSON.stringify(_pr)); }
                             } catch (_se) { console.warn('[StatSig] seller side failed:', _se); }
                             try { const _hdr = 'KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + (_mySSig ? '|STATSIG:' + _mySSig : ''); if (_mySSig) { try { const _ro: any = JSON.parse(atob(result.responseB64)); _ro.ss = _mySSig; (result as any).responseB64 = btoa(JSON.stringify(_ro)); console.log('[StatSig] ss embedded in response body'); } catch (_ee) { console.warn('[StatSig] ss embed failed:', _ee); } } console.log('[StatSig-Emit]', _hdr.slice(0, 90)); await Clipboard.setStringAsync(_hdr + '\n' + result.responseB64); } catch {}
                             recordPayload((contract.agreementId || ''), 'response', result.responseB64, 'out').catch(()=>{});

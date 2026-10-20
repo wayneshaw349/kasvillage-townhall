@@ -49,13 +49,15 @@ export function buildChainBundle(srcHtml: string, game: string): ChainBuild {
   for (const f of frags) { try { const r = scanHtmlForPublish(f.text); for (const x of (r.issues || [])) issues.push('fragment ' + f.i + ': ' + x.code); } catch {} }
   try {
     const cf = require('./content_filter'); const scan = cf.scanObjectStrict || cf.scanObject;
-    const visible = srcHtml.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 200000);
+    // KV_ENTITY_DECODE: entity-decoded, tags stripped with AND without spaces ("s<b></b>eed phrase")
+    const visible: string[] = (typeof cf.htmlTextForms === 'function' ? cf.htmlTextForms(srcHtml)
+      : [srcHtml.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')]).map((v: string) => v.replace(/\s+/g, ' ').slice(0, 200000));
     // KV_SCRIPT_STRINGS: canvas games draw text from JS - scan string literals too
     const lits: string[] = []; const _re = /(["'`])((?:\\.|(?!\1)[^\\\n]){4,300})\1/g; let _m: any; let _n = 0;
-    while ((_m = _re.exec(srcHtml)) && _n < 20000) { _n++; if (/[a-z]{3,}\s+[a-z]{2,}/i.test(_m[2])) lits.push(_m[2]); }
+    while ((_m = _re.exec(srcHtml)) && _n < 20000) { _n++; if (/[a-z]{3,}[\s&;<>]+[a-z]{2,}|&#?[a-z0-9]+;|<\//i.test(_m[2])) lits.push(_m[2]); }
     const r = scan({ text: visible, strings: lits });
     if (r && r.ok === false) issues.push('content: ' + r.reason);
-  } catch {}
+  } catch (e: any) { issues.push('content scan error: ' + String((e && e.message) || e).slice(0, 60)); }
 
   const manifest = {
     kind: 'kv_game_manifest', v: 2, game, build: game, source_sha256: srcSha,

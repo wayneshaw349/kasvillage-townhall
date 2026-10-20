@@ -6,6 +6,8 @@
 
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
+import { schnorr as thSchnorr } from '@noble/curves/secp256k1';
+import { sha256 as thSha256 } from '@noble/hashes/sha256';
 import {
   TOWN_HALL_ENDPOINTS,
   AptRegisterRequest,
@@ -132,20 +134,28 @@ async function getStoredPublicKey(): Promise<string | null> {
 }
 
 async function signMessage(message: string): Promise<string> {
-  // In production: use secp256k1 signing with stored private key
-  // For now: SHA256 HMAC with private key as key
+  // KV_TH_SCHNORR: BIP340 Schnorr over sha256(utf8(message)), 64-byte sig as hex.
+  // Previously returned sha256(privKey + ":" + message), which is not a signature
+  // (nobody can verify it without the private key). Only the primitive (BIP340 Schnorr,
+  // secp256k1) is shared with src/game_rooms.rs; the MESSAGE FORMAT is NOT the relay's
+  // KV_RELAY_V1 digest (no method/path/body-hash/minute bucket), and the TownHall
+  // endpoints that receive these sigs do NOT verify them today. A server that wants to
+  // verify must rebuild the exact signed string from the request (callers below send the
+  // signed `ts` in the body for that) and check it against the sent pubkey (publicKey
+  // field / X-Pubkey header). Field names unchanged.
   const privateKey = await getStoredPrivateKey();
   if (!privateKey) {
     throw new Error('No private key stored');
   }
-  
-  // Simplified signature (replace with proper secp256k1 in production)
-  const combined = `${privateKey}:${message}`;
-  const hash = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    combined
-  );
-  return hash;
+  const priv = privateKey.trim().replace(/^0x/, '');
+  if (!/^[0-9a-fA-F]{64}$/.test(priv)) {
+    throw new Error('Stored private key is not 32-byte hex');
+  }
+  const digest = thSha256(new TextEncoder().encode(message));
+  const privBytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) privBytes[i] = parseInt(priv.slice(i * 2, i * 2 + 2), 16);
+  const sig = thSchnorr.sign(digest, privBytes);
+  return Array.from(sig as Uint8Array).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 // ============================================================================
@@ -495,10 +505,13 @@ export class TownHallClient {
     abstractText?: string;
   }): Promise<AcademicVerifyResponse> {
     const pubkey = await getStoredPublicKey();
-    const sig = await signMessage(JSON.stringify({ apt: params.ownerApt, ts: Date.now() }));
+    const ts = Date.now();
+    // Signed string: JSON.stringify({ apt, ts }) - `ts` is sent below so a server can rebuild it.
+    const sig = await signMessage(JSON.stringify({ apt: params.ownerApt, ts }));
     return request<AcademicVerifyResponse>(TOWN_HALL_ENDPOINTS.VERIFY_ACADEMIC, {
       method: 'POST',
       body: {
+        ts,
         owner_apt: params.ownerApt,
         email_headers: params.emailHeaders,
         dkim_signature: params.dkimSignature,
@@ -516,10 +529,13 @@ export class TownHallClient {
     reviews: string[];
   }): Promise<ServiceVerifyResponse> {
     const pubkey = await getStoredPublicKey();
-    const sig = await signMessage(JSON.stringify({ sid: params.serviceId, ts: Date.now() }));
+    const ts = Date.now();
+    // Signed string: JSON.stringify({ sid, ts }) - `ts` is sent below so a server can rebuild it.
+    const sig = await signMessage(JSON.stringify({ sid: params.serviceId, ts }));
     return request<ServiceVerifyResponse>(TOWN_HALL_ENDPOINTS.VERIFY_SERVICE, {
       method: 'POST',
       body: {
+        ts,
         service_id: params.serviceId,
         owner_apt: params.ownerApt,
         service_type: params.serviceType,
@@ -818,6 +834,8 @@ export async function queryCounterpartyAgreed(opts: {
   myPubkey: string;
   frostAddress?: string;
 }): Promise<boolean> {
+  // KV_DEPRECATED: trusts self-asserted Arweave tags (anyone can post KV-Pubkey/KV-Status). No callers.
+  throw new Error('queryCounterpartyAgreed deprecated - do not use (trusts unauthenticated tags)');
   if (!opts.agreementId || !opts.counterpartyPubkey) return false;
   const tagFilters = [
     '{ name: "App-Name", values: ["KasVillage"] }',

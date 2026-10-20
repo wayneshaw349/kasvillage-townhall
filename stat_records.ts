@@ -34,7 +34,7 @@ export interface ChainAnchor {                 // filled post-broadcast; NOT in 
 }
 
 export interface StatRecord {
-  v: 1;
+  v: 1 | 2;                   // 1 = legacy (weaker: cp sig covers core only); 2 = KV_STAT_V2 (also binds escrow/timeout/description)
   agrId: string;
   frostAddr: string;          // escrow address — binds record to this exact agreement
   escrowTxId: string;         // funding/escrow outpoint txid (replay binding)
@@ -74,6 +74,25 @@ const unhex = (h: string) => { const o = new Uint8Array(h.length / 2); for (let 
  *  prevHash is NOT here: the counterparty cannot know your chain tip. Chain linkage is
  *  structural (selfHash covers core+prevHash; next record commits to selfHash). */
 export function signedBytes(r: StatRecord): Uint8Array {
+  // KV_STAT_V2: v2 records additionally bind escrowTxId, escrowDaaScore, timeoutN and
+  // descriptionHash under the counterparty signature. escrowTxId comes from the shared
+  // template's first input (field `t`), timeoutN/description from the shared proposal.
+  // escrowDaaScore is NOT available pre-ceremony (templates carry no DAA) and is signed as 0
+  // by current callers - it binds nothing until a caller supplies a real, shared value.
+  // prevHash stays OUT for the reason above (each party has its own chain tip); it is bound
+  // structurally by selfHash + the next record's prevHash. v1 bytes are unchanged so
+  // existing stored records keep verifying.
+  if (r.v === 2) {
+    const s2 = [
+      'KVSTAT4', r.agrId, r.frostAddr,
+      xonly(r.myPubkey) < xonly(r.cpPubkey) ? xonly(r.myPubkey) : xonly(r.cpPubkey),
+      xonly(r.myPubkey) < xonly(r.cpPubkey) ? xonly(r.cpPubkey) : xonly(r.myPubkey),
+      r.buyerAmountSompi, r.sellerAmountSompi, r.network, r.agreementType,
+      r.outcome,
+      String(r.escrowTxId || ''), String(Number(r.escrowDaaScore || 0)), String(Number(r.timeoutN || 0)), String(r.descriptionHash || ''),
+    ].join('|');
+    return new TextEncoder().encode(s2);
+  }
   const s = [
     'KVSTAT3', r.agrId, r.frostAddr,
     xonly(r.myPubkey) < xonly(r.cpPubkey) ? xonly(r.myPubkey) : xonly(r.cpPubkey), // party order canonical:
@@ -117,12 +136,28 @@ export async function chainTip(): Promise<string> {
 
 /** Build the next record (prevHash auto-filled from tip). Both sides call with mirrored my/cp. */
 export async function buildRecord(p: Omit<StatRecord, 'v' | 'prevHash' | 'ts'>): Promise<StatRecord> {
-  return { v: 1, ...p, ts: Date.now(), prevHash: await chainTip() };
+  return { v: 2, ...p, ts: Date.now(), prevHash: await chainTip() }; // KV_STAT_V2: new records are v2
 }
 
 /** Append once counterparty sig is in hand and verified. Idempotent per agrId+outcome. */
-export async function appendRecord(r: StatRecord, mySigHex: string, cpSigHex: string): Promise<{ ok: boolean; error?: string }> {
-  if (!verifyRecordSig(r, cpSigHex, r.cpPubkey)) return { ok: false, error: 'cp signature invalid' };
+export async function appendRecord(r: StatRecord, mySigHex: string, cpSigHex: string, myPrivKeyHex?: string): Promise<{ ok: boolean; error?: string }> {
+  if (!verifyRecordSig(r, cpSigHex, r.cpPubkey)) {
+    // KV_STAT_V2: a counterparty on an older build signs v1 bytes. Accept it, but store the
+    // record as v1 (legacy / weaker binding) so the bundle verifies honestly as v1.
+    const legacy: StatRecord = { ...r, v: 1 };
+    if (r.v === 2 && verifyRecordSig(legacy, cpSigHex, r.cpPubkey)) {
+      console.log('[StatChain] cp signed legacy v1 bytes - storing record as v1 (weaker binding)');
+      r = legacy;
+      // KV_STAT_V1_RESIGN: mySignature was made over v2 bytes; it would not verify against the
+      // stored v1 record. Re-sign the v1 bytes when we have the key, else drop the stale sig.
+      if (mySigHex) {
+        try { mySigHex = myPrivKeyHex ? signRecord(legacy, myPrivKeyHex) : ''; }
+        catch { mySigHex = ''; }
+      }
+    } else {
+      return { ok: false, error: 'cp signature invalid' };
+    }
+  }
   const chain = await loadChain();
   if (chain.some(c => c.agrId === r.agrId && c.outcome === r.outcome)) return { ok: true }; // already recorded
   const tip = chain.length ? chain[chain.length - 1].selfHash : GENESIS;
@@ -176,16 +211,17 @@ export async function exportBundle(): Promise<string> {
 /** Full local verification of someone else's bundle: sigs, chain continuity, per-record binding.
  *  ownerPubkey = the identity whose reputation is claimed (their myPubkey in every record). */
 export function verifyBundle(bundleJson: string, ownerPubkey: string): {
-  ok: boolean; total: number; complete: number; deadlocks: number; errors: string[];
+  ok: boolean; total: number; complete: number; deadlocks: number; errors: string[]; legacy?: number;
 } {
   const errors: string[] = [];
   let records: ChainedRecord[] = [];
   try { const b = JSON.parse(bundleJson); records = b.records || []; if (b.kind !== 'KVSTAT-BUNDLE') errors.push('not a stat bundle'); }
   catch { return { ok: false, total: 0, complete: 0, deadlocks: 0, errors: ['unparseable'] }; }
-  let prev = GENESIS; let complete = 0; let deadlocks = 0;
+  let prev = GENESIS; let complete = 0; let deadlocks = 0; let legacy = 0;
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
     if (xonly(r.myPubkey) !== xonly(ownerPubkey)) errors.push('#' + i + ' not owned by claimed identity');
+    if (r.v !== 2) legacy++; // KV_STAT_V2: v1 = legacy, cp sig does not cover escrow/timeout/description
     if (r.prevHash !== prev) errors.push('#' + i + ' chain break (gap or reorder)');
     if (recordHash(r) !== r.selfHash) errors.push('#' + i + ' selfHash mismatch');
     if (!verifyRecordSig(r, r.cpSignature, r.cpPubkey)) errors.push('#' + i + ' cp signature invalid');
@@ -193,7 +229,7 @@ export function verifyBundle(bundleJson: string, ownerPubkey: string): {
     if (r.outcome === 'complete') complete++;
     if (r.outcome === 'deadlock') deadlocks++;
   }
-  return { ok: errors.length === 0, total: records.length, complete, deadlocks, errors };
+  return { ok: errors.length === 0, total: records.length, complete, deadlocks, errors, legacy };
 }
 // Residual risks by design: tail-truncation (owner can drop newest records — mitigate later
 // with a signed count anchor or pledge-payload commitment) and record-count claims require

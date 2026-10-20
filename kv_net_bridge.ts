@@ -9,7 +9,8 @@
 // Wire into any WebView that renders a chain game (EngineHost / OnChainPageView):
 //   <WebView
 //     injectedJavaScriptBeforeContentLoaded={KV_WNET_INJECT}
-//     onMessage={(e) => { if (handleKvNetMessage(e.nativeEvent.data, (js) => ref.current?.injectJavaScript(js))) return; /* existing handling */ }}
+//     onMessage={(e) => { if (handleKvNetMessage(e.nativeEvent.data, (js) => ref.current?.injectJavaScript(js), { sign: isGame })) return; /* existing handling */ }}
+//   opts.sign (default false) is the ONLY way relay requests get signed with the wallet key.
 //   />
 
 import * as Clipboard from 'expo-clipboard';
@@ -118,8 +119,82 @@ export function kvSessionDigest(): null | {
 
 export function kvSessionEnd() { _kvSess = null; }
 
+// ---------------------------------------------------------------------------
+// KV_RELAY_SIG - the wallet (never the game) signs requests to KasVillage relay
+// nodes so the relay can bind a seat to this wallet's key. Headers:
+//   X-KV-Pub  33-byte compressed secp256k1 pubkey (hex)
+//   X-KV-Ts   unix seconds
+//   X-KV-Sig  BIP340 Schnorr over sha256("KV_RELAY_V2\n" + host + "\n" + METHOD
+//             + "\n" + pathAndQuery + "\n" + sha256hex(body) + "\n" + floor(ts/60))
+//             host = URL.host of the target (V2 binds the node: no cross-node replay)
+// The text-tagged sha256 domain can never be a Kaspa tx sighash (blake2b,
+// keyed "TransactionSigningHash"). Only relay hosts are signed for: the
+// KasVillage *.app.runonflux.io apps and plain-IPv4 relay-port nodes. No key
+// -> the request goes out unsigned, exactly as before. Signing happens only
+// when the WebView host opts in: handleKvNetMessage(raw, inject, { sign: true }).
+// ---------------------------------------------------------------------------
+import { schnorr as _kvSchnorr, secp256k1 as _kvSecp } from '@noble/curves/secp256k1';
+import { hexToBytes as _kvH2B } from '@noble/hashes/utils';
+
+const KV_RELAY_HTTPS = KV_WNET_ALLOW.https.filter((h) => /^kasvillage[a-z0-9_-]*\.app\.runonflux\.io$/.test(h));
+
+export function kvIsRelayUrl(url: string): boolean {
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  if (!kvNetAllowed(url, KV_WNET_ALLOW)) return false;
+  if (u.protocol === 'https:') return KV_RELAY_HTTPS.includes(u.hostname);
+  if (u.protocol === 'http:') return KV_WNET_ALLOW.ipv4Ports.includes(+u.port);
+  return false;
+}
+
+export function kvRelaySigMessage(host: string, method: string, pathAndQuery: string, body: string, ts: number): Uint8Array {
+  const bh = _kvHex(_kvSha(_kvU8(body)));
+  return _kvSha(_kvU8('KV_RELAY_V2\n' + host.toLowerCase() + '\n' + method + '\n' + pathAndQuery + '\n' + bh + '\n' + Math.floor(ts / 60)));
+}
+
+/** Pure signer (exported for tests): returns the three relay auth headers. */
+export function kvRelaySign(privHex: string, method: string, url: string, body: string, ts: number): Record<string, string> {
+  const u = new URL(url);
+  const priv = _kvH2B(privHex);
+  const msg = kvRelaySigMessage(u.host, method, u.pathname + u.search, body, ts);
+  return {
+    'X-KV-Pub': _kvHex(_kvSecp.getPublicKey(priv, true)),
+    'X-KV-Ts': String(ts),
+    'X-KV-Sig': _kvHex(_kvSchnorr.sign(msg, priv)),
+  };
+}
+
+let _kvKeyCache: { hex: string | null; at: number } | null = null;
+async function _kvRelayKey(): Promise<string | null> {
+  const t = Date.now();
+  if (_kvKeyCache && t - _kvKeyCache.at < 60_000) return _kvKeyCache.hex;
+  let hex: string | null = null;
+  try { hex = await require('./proposal_share')._kvResolvePrivHex(); } catch { hex = null; }
+  if (typeof hex !== 'string' || !/^[0-9a-fA-F]{64}$/.test(hex)) hex = null;
+  _kvKeyCache = { hex, at: t };
+  return hex;
+}
+
+async function _kvRelayHeaders(method: string, url: string, body: string | null): Promise<Record<string, string>> {
+  if (method !== 'POST' || !kvIsRelayUrl(url)) return {};   // reads need no auth; never sign for other hosts
+  try {
+    const priv = await _kvRelayKey();
+    if (!priv) return {};
+    return kvRelaySign(priv, method, url, body || '', Math.floor(Date.now() / 1000));
+  } catch { return {}; }
+}
+
+export type KvNetOpts = {
+  /** Sign relay POSTs with the wallet key. Default false = never sign. */
+  sign?: boolean;
+  /** Host allowlist override (tests). */
+  allow?: typeof KV_WNET_ALLOW;
+};
+
 /** Returns true if the message was a KV_WNET message (handled here). */
-export function handleKvNetMessage(raw: string, inject: (js: string) => void, allow = KV_WNET_ALLOW): boolean {
+export function handleKvNetMessage(raw: string, inject: (js: string) => void, opts?: KvNetOpts): boolean {
+  const allow = opts?.allow ?? KV_WNET_ALLOW;
+  const sign = opts?.sign === true;
   let m: any;
   try { m = JSON.parse(raw); } catch { return false; }
   if (!m || typeof m.kvwnet !== 'string') return false;
@@ -149,7 +224,10 @@ export function handleKvNetMessage(raw: string, inject: (js: string) => void, al
       const headers: Record<string, string> = {};
       const ct = m.headers && m.headers['Content-Type'];
       if (typeof ct === 'string' && ct.length < 100) headers['Content-Type'] = ct;
-      const r = await fetch(m.url, { method, headers, body: method === 'POST' ? m.body : undefined, signal: c.signal });
+      const body0 = method === 'POST' && typeof m.body === 'string' ? m.body : null;
+      if (sign) Object.assign(headers, await _kvRelayHeaders(method, String(m.url), body0)); // KV_RELAY_SIG (opt-in)
+      const r = await fetch(m.url, { method, headers, body: method === 'POST' ? (body0 ?? undefined) : undefined, signal: c.signal });
+      if (r.url && r.url !== m.url && !kvNetAllowed(String(r.url), allow)) { reply({ error: 'blocked redirect: ' + String(r.url).slice(0, 80) }); return; } // KV_NET_REDIRECT
       const body = await r.text();
       if (body.length > MAX_RESP) { reply({ error: 'response too large' }); return; }
       reply({ status: r.status, body });

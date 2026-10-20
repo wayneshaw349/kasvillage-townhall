@@ -19,7 +19,6 @@
           "faceIDPermission": "KasVillage uses Face ID to secure your wallet."
         }
       ],
-      "react-native-ble-plx",
       [
         "expo-notifications",
         {
@@ -28,24 +27,37 @@
       ],
       "expo-router",
       "expo-splash-screen",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "KasVillage uses the camera to scan QR codes: payment addresses, vault backup cards and agreement handoffs.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "ios": {
       "bundleIdentifier": "com.kasvillage.mobile",
       "infoPlist": {
         "NSFaceIDUsageDescription": "KasVillage uses Face ID to secure your wallet.",
-        "NSBluetoothAlwaysUsageDescription": "KasVillage uses Bluetooth to send KAS to nearby users.",
-        "NSBluetoothPeripheralUsageDescription": "KasVillage uses Bluetooth to receive KAS from nearby users.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
       }
     },
     "android": {
       "package": "com.kasvillage.mobile",
       "permissions": [
-        "BLUETOOTH_SCAN",
-        "BLUETOOTH_CONNECT",
-        "BLUETOOTH_ADVERTISE",
-        "ACCESS_FINE_LOCATION",
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
         "android.permission.USE_BIOMETRIC",
@@ -57,7 +69,15 @@
           "armeabi-v7a"
         ]
       },
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "blockedPermissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_ADVERTISE",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "extra": {
       "eas": {
