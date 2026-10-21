@@ -412,7 +412,9 @@ pub async fn blocks_page(q: web::Query<BlocksQ>) -> impl Responder {
                     let txs: Vec<serde_json::Value> = b.transactions.iter().filter_map(|t| {
                         if t.payload.is_empty() { return None; }
                         let id = t.verbose_data.as_ref().map(|v| v.transaction_id.to_string()).unwrap_or_default();
-                        Some(json!({ "id": id, "payload_hex": hex::encode(&t.payload) }))
+                        // KV_BLOCK_OUTPUTS: expose who each payload tx pays, so clients can drop junk sent elsewhere
+                        let outs: Vec<serde_json::Value> = t.outputs.iter().filter_map(|o| o.verbose_data.as_ref().map(|v| json!({ "address": v.script_public_key_address.to_string() }))).collect();
+                        Some(json!({ "id": id, "payload_hex": hex::encode(&t.payload), "outputs": outs }))
                     }).collect();
                     if !txs.is_empty() {
                         blocks.push(json!({ "hash": b.header.hash.to_string(), "daa_score": daa, "txs": txs }));
