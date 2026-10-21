@@ -19,7 +19,6 @@ import { schnorr } from '@noble/curves/secp256k1';
 import * as secp from '@noble/secp256k1';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useKaspaPrice } from './useKaspaPrice';
-import { useBluetoothPay } from './bluetooth_p2p';
 import { createProposal, decodeProposal, verifyProposal, acceptProposal, shareProposal, shareAcceptance } from './proposal_share';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -29,7 +28,7 @@ const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
 // TYPES
 // ============================================================================
 
-type Mode = 'choose' | 'ble_send' | 'ble_receive' | 'send_proposal' | 'receive_proposal' | 'tally' | 'catalog' | 'shop' | 'verify';
+type Mode = 'choose' | 'ble_receive' | 'send_proposal' | 'receive_proposal' | 'tally' | 'catalog' | 'shop' | 'verify' | 'tab_setup' | 'tab_customer';
 interface CatalogItem { id: string; name: string; priceKas: number; }
 interface CartLine { item: CatalogItem; qty: number; }
 
@@ -89,6 +88,45 @@ export const QRPayNearby: React.FC<{ onClose: () => void; onNavigateSend?: (addr
   const [verifyResult, setVerifyResult] = useState<'valid'|'invalid'|null>(null);
   const [scannedReceipt, setScannedReceipt] = useState<any>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  // KV_TAB_METER: open-tab / metered payments (laundry, parking, arcade time, bar tab).
+  // The store shows a signed tab QR (description + rate per minute + optional deposit).
+  // The customer scans it; the meter runs on their phone from the moment of the scan.
+  // Payments go through the normal Send screen and are recorded on the tab when sent.
+  const [tabDesc, setTabDesc] = useState('');
+  const [tabRate, setTabRate] = useState('');
+  const [tabDeposit, setTabDeposit] = useState('');
+  const [tabQR, setTabQR] = useState('');
+  const [activeTab, setActiveTab] = useState<any>(null);
+  const [tabNow, setTabNow] = useState(Date.now());
+  useEffect(() => { (async () => { try { const t = await AsyncStorage.getItem('kv_active_tab'); if (t) setActiveTab(JSON.parse(t)); } catch {} })(); }, []);
+  useEffect(() => { if (!activeTab) return; const iv = setInterval(() => setTabNow(Date.now()), 1000); return () => clearInterval(iv); }, [activeTab]);
+  const saveActiveTab = (t: any) => { setActiveTab(t); (t ? AsyncStorage.setItem('kv_active_tab', JSON.stringify(t)) : AsyncStorage.removeItem('kv_active_tab')).catch(() => {}); };
+  const kvSignTab = async (id: string, desc: string, ratePerMin: number, depositKas: number): Promise<{ sig: string; pubkey: string } | null> => {
+    try {
+      const { loadMainWallet } = await import('./kasvillage_cold_wallet');
+      const w = await (loadMainWallet as any)();
+      if (!w?.privKeyHex) return null;
+      const priv = hexToBytesQ(w.privKeyHex);
+      const msg = sha256(new TextEncoder().encode(`tab|${id}|${desc}|${ratePerMin}|${depositKas}|${address}`));
+      const sig = schnorr.sign(msg, priv);
+      return { sig: bytesToHex(sig), pubkey: bytesToHex(schnorr.getPublicKey(priv)) };
+    } catch (e) { console.warn('[TabSign] failed:', e); return null; }
+  };
+  const kvVerifyTab = (t: any): boolean => {
+    try {
+      const msg = sha256(new TextEncoder().encode(`tab|${t.id}|${t.desc}|${t.ratePerMin}|${t.depositKas}|${t.address}`));
+      return schnorr.verify(hexToBytesQ(t.sig), msg, hexToBytesQ(t.pubkey));
+    } catch { return false; }
+  };
+  const kvTabPay = (kas: number, closing: boolean) => {
+    if (!activeTab) return;
+    if (!(kas > 0)) { if (closing) { saveActiveTab(null); Alert.alert('Tab closed', 'All settled — nothing owed.'); } return; }
+    const rounded = Math.max(0.0001, Math.round(kas * 1e4) / 1e4);
+    const addr = activeTab.address;
+    saveActiveTab(closing ? null : { ...activeTab, paidKas: (activeTab.paidKas || 0) + rounded });
+    if (onNavigateSend) onNavigateSend(addr, Math.round(rounded * 1e8));
+    else { Clipboard.setStringAsync(addr).catch(() => {}); Alert.alert('Pay ' + rounded.toFixed(4) + ' KAS', 'Store address copied — paste it in Send KAS.'); }
+  };
   const bytesToHex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
   const hexToBytesQ = (h: string) => { const a = new Uint8Array(h.length/2); for (let i=0;i<a.length;i++) a[i]=parseInt(h.substr(i*2,2),16); return a; };
   const signItem = async (id: string, name: string, priceKas: number): Promise<{ sig: string; pubkey: string } | null> => {
@@ -116,7 +154,9 @@ export const QRPayNearby: React.FC<{ onClose: () => void; onNavigateSend?: (addr
   const removeFromCart = (id: string) => setCart(prev => prev.map(l => l.item.id === id ? { ...l, qty: l.qty - 1 } : l).filter(l => l.qty > 0));
   const [pasteInput, setPasteInput] = useState('');
   const [resolvedAddress, setResolvedAddress] = useState('');
-  const { scanning, advertising, payees, startReceiving, stopReceiving, startScanning, stopScanning } = useBluetoothPay();
+  // KV_NO_BLE_PAY: Bluetooth removed from Pay Nearby (store readiness). The receive
+  // screen is QR-only; these no-ops keep the existing flow wiring intact.
+  const startReceiving = (..._a: any[]) => {}; const stopReceiving = () => {};
   const [selectedPeer, setSelectedPeer] = useState<any>(null);
   const [proposalAmount, setProposalAmount] = useState('');
   const [proposalDesc, setProposalDesc] = useState('');
@@ -230,28 +270,27 @@ export const QRPayNearby: React.FC<{ onClose: () => void; onNavigateSend?: (addr
 
             
 
-            {/* Bluetooth Option */}
-            <View style={{ marginTop: rs(8), borderTopWidth: 1, borderTopColor: '#222', paddingTop: rs(12) }}>
-              <Text style={{ color: '#666', fontSize: rs(11), textAlign: 'center', marginBottom: rs(8) }}>Pair via QR + Bluetooth — works iPhone & Android</Text>
-              <View style={{ flexDirection: 'row', gap: rs(8) }}>
-                <TouchableOpacity
-                  style={{ flex: 1, backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#4169E1' }}
-                  onPress={() => { setMode('ble_receive'); try { startReceiving(address, avatarName); } catch(e) { console.warn('[BLE] Not available:', e); } }}
-                >
-                  <Text style={{ color: '#4169E1', fontSize: rs(13), fontWeight: '600' }}>📶 BLE Receive</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={{ flex: 1, backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#4CAF50' }}
-                  onPress={() => { setMode('ble_send'); try { startScanning(20000); } catch(e) { console.warn('[BLE] Not available:', e); } }}
-                >
-                  <Text style={{ color: '#4CAF50', fontSize: rs(13), fontWeight: '600' }}>📶 BLE Send</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            {/* KV_NO_BLE_PAY: QR receive (Bluetooth removed) */}
+            <TouchableOpacity
+              style={{ marginTop: rs(8), backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#4169E1' }}
+              onPress={() => setMode('ble_receive')}
+            >
+              <Text style={{ color: '#4169E1', fontSize: rs(13), fontWeight: '600' }}>📷 Receive (show my QR)</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity style={{ marginTop: rs(8), backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#49d6aa' }} onPress={() => setMode('tally')}>
                 <Text style={{ color: '#49d6aa', fontSize: rs(13), fontWeight: '600' }}>🧮 Store Tally / Cash Register</Text>
               </TouchableOpacity>
+
+            {/* KV_TAB_METER: tab / meter entry points */}
+            <View style={{ flexDirection: 'row', gap: rs(8), marginTop: rs(8) }}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#9B59B6' }} onPress={() => { setTabQR(''); setMode('tab_setup'); }}>
+                <Text style={{ color: '#9B59B6', fontSize: rs(13), fontWeight: '600' }}>⏱ Open a Tab (store)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#9B59B6' }} onPress={() => setMode('tab_customer')}>
+                <Text style={{ color: '#9B59B6', fontSize: rs(13), fontWeight: '600' }}>⏱ {activeTab ? 'My Running Tab' : 'Scan a Tab'}</Text>
+              </TouchableOpacity>
+            </View>
             
 
             <TouchableOpacity style={{ marginTop: rs(8), backgroundColor: '#1A1A2E', borderRadius: rs(12), padding: rs(14), alignItems: 'center', borderWidth: 1, borderColor: '#49d6aa' }} onPress={() => { setCart([]); setMode('shop'); }}>
@@ -540,6 +579,134 @@ export const QRPayNearby: React.FC<{ onClose: () => void; onNavigateSend?: (addr
             )}
           </View>
         )}
+        {/* KV_TAB_METER: store opens a tab */}
+        {mode === 'tab_setup' && (
+          <View>
+            <TouchableOpacity onPress={() => setMode('choose')} style={{ marginBottom: rs(12) }}>
+              <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={{ color: '#9B59B6', fontSize: rs(18), fontWeight: '700', marginBottom: rs(12) }}>Open a Tab / Meter</Text>
+            {!tabQR ? (
+              <View style={{ backgroundColor: '#1A1A2E', borderRadius: rs(16), padding: rs(16), borderWidth: 1, borderColor: '#333' }}>
+                <Text style={{ color: '#888', fontSize: rs(12), marginBottom: rs(6) }}>What is being metered?</Text>
+                <TextInput value={tabDesc} onChangeText={setTabDesc} placeholder="Arcade time, parking, bar tab..." placeholderTextColor="#555" style={{ backgroundColor: '#0A0A14', borderRadius: rs(10), padding: rs(12), color: '#FFF', borderWidth: 1, borderColor: '#333', marginBottom: rs(10) }} />
+                <Text style={{ color: '#888', fontSize: rs(12), marginBottom: rs(6) }}>Rate (KAS per minute)</Text>
+                <TextInput value={tabRate} onChangeText={setTabRate} placeholder="0.10" placeholderTextColor="#555" keyboardType="decimal-pad" style={{ backgroundColor: '#0A0A14', borderRadius: rs(10), padding: rs(12), color: '#FFF', borderWidth: 1, borderColor: '#333', marginBottom: rs(4) }} />
+                {parseFloat(tabRate) > 0 && <Text style={{ color: '#666', fontSize: rs(11), marginBottom: rs(6) }}>= {(parseFloat(tabRate) * 60).toFixed(2)} KAS per hour{kasPrice?.usdPerKas > 0 ? ' (~$' + (parseFloat(tabRate) * 60 * kasPrice.usdPerKas).toFixed(2) + '/hr)' : ''}</Text>}
+                <Text style={{ color: '#888', fontSize: rs(12), marginBottom: rs(6), marginTop: rs(6) }}>Deposit up front (KAS, optional)</Text>
+                <TextInput value={tabDeposit} onChangeText={setTabDeposit} placeholder="0" placeholderTextColor="#555" keyboardType="decimal-pad" style={{ backgroundColor: '#0A0A14', borderRadius: rs(10), padding: rs(12), color: '#FFF', borderWidth: 1, borderColor: '#333', marginBottom: rs(12) }} />
+                <TouchableOpacity
+                  style={{ backgroundColor: '#9B59B6', borderRadius: rs(12), padding: rs(14), alignItems: 'center' }}
+                  onPress={async () => {
+                    const r = parseFloat(tabRate); const d = parseFloat(tabDeposit) || 0;
+                    if (!tabDesc.trim() || !(r > 0)) { Alert.alert('Invalid', 'Enter a description and a rate per minute'); return; }
+                    const id = 't' + Date.now();
+                    const s = await kvSignTab(id, tabDesc.trim(), r, d);
+                    if (!s) { Alert.alert('Error', 'Could not sign the tab'); return; }
+                    setTabQR(JSON.stringify({ type: 'kv_tab', id, desc: tabDesc.trim(), ratePerMin: r, depositKas: d, address, store: storeName || avatarName, pubkey: s.pubkey, sig: s.sig }));
+                  }}
+                >
+                  <Text style={{ color: '#FFF', fontWeight: '700', fontSize: rs(15) }}>Show Tab QR</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={{ backgroundColor: '#1A1A2E', borderRadius: rs(16), padding: rs(20), alignItems: 'center', borderWidth: 2, borderColor: '#9B59B6' }}>
+                <Text style={{ color: '#FFF', fontSize: rs(16), fontWeight: '700' }}>{tabDesc}</Text>
+                <Text style={{ color: '#9B59B6', fontSize: rs(13), marginTop: rs(4) }}>{parseFloat(tabRate).toFixed(4)} KAS/min{parseFloat(tabDeposit) > 0 ? ' · ' + parseFloat(tabDeposit).toFixed(2) + ' KAS deposit' : ''}</Text>
+                <View style={{ backgroundColor: '#FFF', padding: rs(12), borderRadius: rs(10), marginTop: rs(14) }}>
+                  <QRCode value={tabQR} size={rs(200)} />
+                </View>
+                <Text style={{ color: '#87CEEB', fontSize: rs(11), marginTop: rs(10), textAlign: 'center' }}>Customer scans to open the tab.{'\n'}Their meter starts at the scan. Signed — the rate can't be forged.</Text>
+                <TouchableOpacity onPress={() => setTabQR('')} style={{ marginTop: rs(14), backgroundColor: '#333', borderRadius: rs(10), padding: rs(12), paddingHorizontal: rs(28) }}>
+                  <Text style={{ color: '#FFF', fontSize: rs(13) }}>New Tab</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+        {/* KV_TAB_METER: customer scans + runs the meter */}
+        {mode === 'tab_customer' && (
+          <View>
+            <TouchableOpacity onPress={() => setMode('choose')} style={{ marginBottom: rs(12) }}>
+              <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>← Back</Text>
+            </TouchableOpacity>
+            {!activeTab ? (
+              !cameraPermission?.granted ? (
+                <TouchableOpacity onPress={requestCameraPermission} style={{ backgroundColor: '#9B59B6', borderRadius: rs(10), padding: rs(14), alignItems: 'center' }}>
+                  <Text style={{ color: '#FFF', fontWeight: '700' }}>Allow Camera</Text>
+                </TouchableOpacity>
+              ) : (
+                <View>
+                  <Text style={{ color: '#888', fontSize: rs(12), textAlign: 'center', marginBottom: rs(8) }}>Scan the store's tab QR — your meter starts at the scan</Text>
+                  <View style={{ borderRadius: rs(12), overflow: 'hidden', height: rs(260) }}>
+                    <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                      onBarcodeScanned={({ data }) => {
+                        try {
+                          const t = JSON.parse(data);
+                          if (t.type === 'kv_tab' && t.id && t.address && !activeTab) {
+                            if (!t.sig || !t.pubkey || !kvVerifyTab(t)) { console.warn('[Tab] rejected unsigned/forged tab'); return; }
+                            saveActiveTab({ ...t, startTs: Date.now(), paidKas: 0 });
+                          }
+                        } catch {}
+                      }}
+                    />
+                  </View>
+                </View>
+              )
+            ) : (() => {
+              const mins = Math.max(0, (tabNow - activeTab.startTs) / 60000);
+              const accrued = mins * activeTab.ratePerMin;
+              const paid = activeTab.paidKas || 0;
+              const owed = Math.max(0, accrued - paid);
+              const mm = Math.floor(mins); const ss = Math.floor((mins - mm) * 60);
+              const deposit = activeTab.depositKas || 0;
+              return (
+                <View style={{ backgroundColor: '#1A1A2E', borderRadius: rs(16), padding: rs(20), borderWidth: 2, borderColor: '#9B59B6' }}>
+                  <Text style={{ color: '#FFF', fontSize: rs(16), fontWeight: '700' }}>{activeTab.desc}</Text>
+                  <Text style={{ color: '#888', fontSize: rs(12), marginTop: rs(2) }}>{activeTab.store || 'Store'} · {Number(activeTab.ratePerMin).toFixed(4)} KAS/min</Text>
+                  <View style={{ alignItems: 'center', marginVertical: rs(16) }}>
+                    <Text style={{ color: '#9B59B6', fontSize: rs(38), fontWeight: '900', fontVariant: ['tabular-nums'] }}>{mm}:{String(ss).padStart(2, '0')}</Text>
+                    <Text style={{ color: '#FFF', fontSize: rs(22), fontWeight: '700', marginTop: rs(6) }}>{accrued.toFixed(4)} KAS</Text>
+                    {kasPrice?.usdPerKas > 0 && <Text style={{ color: '#666', fontSize: rs(12) }}>~${(accrued * kasPrice.usdPerKas).toFixed(2)}</Text>}
+                    <Text style={{ color: paid > 0 ? '#10B981' : '#666', fontSize: rs(12), marginTop: rs(6) }}>Paid so far: {paid.toFixed(4)} KAS · Owed: {owed.toFixed(4)} KAS</Text>
+                  </View>
+                  {deposit > 0 && paid === 0 && (
+                    <TouchableOpacity style={{ backgroundColor: '#F59E0B', borderRadius: rs(12), padding: rs(14), alignItems: 'center', marginBottom: rs(8) }} onPress={() => kvTabPay(deposit, false)}>
+                      <Text style={{ color: '#000', fontWeight: '700', fontSize: rs(14) }}>Pay deposit — {deposit.toFixed(2)} KAS</Text>
+                    </TouchableOpacity>
+                  )}
+                  {owed > 0.001 && (
+                    <TouchableOpacity style={{ backgroundColor: '#333', borderRadius: rs(12), padding: rs(14), alignItems: 'center', marginBottom: rs(8), borderWidth: 1, borderColor: '#9B59B6' }} onPress={() => kvTabPay(owed, false)}>
+                      <Text style={{ color: '#9B59B6', fontWeight: '700', fontSize: rs(14) }}>Pay so far — {owed.toFixed(4)} KAS (tab keeps running)</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#9B59B6', borderRadius: rs(12), padding: rs(16), alignItems: 'center' }}
+                    onPress={() => {
+                      Alert.alert('Close tab?', owed > 0.001 ? 'Pay the remaining ' + owed.toFixed(4) + ' KAS and finish.' : 'Nothing owed — the tab just closes.', [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: owed > 0.001 ? 'Pay & Close' : 'Close', onPress: () => kvTabPay(owed, true) },
+                      ]);
+                    }}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: '700', fontSize: rs(15) }}>Close tab{owed > 0.001 ? ' — pay ' + owed.toFixed(4) + ' KAS' : ''}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ marginTop: rs(10), alignItems: 'center' }}
+                    onPress={() => {
+                      Alert.alert('Abandon tab?', 'This clears the tab WITHOUT paying what is owed. The store will remember.', [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Abandon', style: 'destructive', onPress: () => saveActiveTab(null) },
+                      ]);
+                    }}
+                  >
+                    <Text style={{ color: '#FF6B6B', fontSize: rs(12) }}>Abandon tab (no payment)</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
+          </View>
+        )}
         {/* STORE TALLY */}
         {mode === 'tally' && (
           <View>
@@ -618,19 +785,18 @@ export const QRPayNearby: React.FC<{ onClose: () => void; onNavigateSend?: (addr
             ))}
           </View>
         )}
-        {/* BLE RECEIVE */}
+        {/* RECEIVE (QR) */}
         {mode === 'ble_receive' && (
           <View style={{ alignItems: 'center' }}>
             <TouchableOpacity onPress={() => { stopReceiving(); setMode('choose'); }} style={{ alignSelf: 'flex-start', marginBottom: rs(12) }}>
               <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>← Back to QR</Text>
             </TouchableOpacity>
             <View style={{ backgroundColor: '#1A1A2E', borderWidth: 2, borderColor: '#4169E1', borderRadius: rs(16), padding: rs(24), alignItems: 'center', width: '100%' }}>
-              {advertising && <Text style={{ color: '#4169E1', fontSize: rs(40), marginBottom: rs(12) }}>📡</Text>}
               <Text style={{ color: '#4169E1', fontSize: rs(18), fontWeight: '700' }}>
-                {advertising ? 'Broadcasting...' : 'Starting BLE...'}
+                Receive
               </Text>
               <Text style={{ color: '#87CEEB', fontSize: rs(12), marginTop: rs(8), textAlign: 'center' }}>
-                Your address is visible to nearby senders via Bluetooth
+                Let the sender scan this QR code
               </Text>
               <Text style={{ color: '#666', fontSize: rs(10), marginTop: rs(12), textAlign: 'center' }}>{address}</Text>
               <View style={{ backgroundColor: '#FFF', padding: rs(12), borderRadius: rs(10), marginTop: rs(16) }}>
@@ -663,44 +829,6 @@ export const QRPayNearby: React.FC<{ onClose: () => void; onNavigateSend?: (addr
             >
               <Text style={{ color: '#FFF', fontSize: rs(14) }}>Stop Receiving</Text>
             </TouchableOpacity>
-          </View>
-        )}
-
-        {/* BLE SEND */}
-        {mode === 'ble_send' && (
-          <View>
-            <TouchableOpacity onPress={() => { stopScanning(); setMode('choose'); }} style={{ marginBottom: rs(12) }}>
-              <Text style={{ color: '#F59E0B', fontSize: rs(14) }}>← Back to QR</Text>
-            </TouchableOpacity>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: rs(12) }}>
-              <Text style={{ color: '#4CAF50', fontSize: rs(16), fontWeight: '700' }}>
-                {scanning ? 'Scanning... ' : 'Scan complete '}
-              </Text>
-              <Text style={{ color: '#4CAF50', fontSize: rs(14) }}>Found {payees.length} nearby</Text>
-              <TouchableOpacity onPress={() => { stopScanning(); setMode('choose'); }} style={{ marginLeft: 'auto' }}>
-                <Text style={{ color: '#FF6B6B', fontSize: rs(14) }}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-            {payees.length === 0 && scanning && (
-              <Text style={{ color: '#666', textAlign: 'center', marginTop: rs(30), fontSize: rs(13) }}>
-                Looking for nearby KasVillage users...
-              </Text>
-            )}
-            {payees.map((p: any) => (
-              <TouchableOpacity
-                key={p.id}
-                style={{ backgroundColor: '#1A1A1A', borderRadius: rs(12), padding: rs(14), marginBottom: rs(8), borderWidth: 1, borderColor: '#333' }}
-                onPress={() => {
-                  setResolvedAddress(p.kaspaAddress);
-                  stopScanning();
-                  setMode('send_proposal');
-                  setPasteInput(p.kaspaAddress);
-                }}
-              >
-                <Text style={{ color: '#FFF', fontSize: rs(15), fontWeight: '600' }}>{p.displayName}</Text>
-                <Text style={{ color: '#888', fontSize: rs(11), marginTop: rs(2) }}>{p.kaspaAddress.slice(0, 30)}...</Text>
-              </TouchableOpacity>
-            ))}
           </View>
         )}
 

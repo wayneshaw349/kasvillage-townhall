@@ -129,6 +129,21 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const webRef = useRef<any>(null);
+  // KV_PAGE_RELOAD: games call location.reload() (KasCity does right after
+  // host/join — "Reloading into multiplayer...") but our fake
+  // https://kv-game.local origin resolves nowhere, so the reload died (silently
+  // on iOS, ERR_NAME_NOT_RESOLVED on Android) and the page hung. Catch the
+  // attempt and remount the WebView with the same HTML — a true reload;
+  // localStorage (same origin) survives. Rate-limited so a page can't remount-spin.
+  const kvPageUpRef = useRef(false);
+  const kvReloadAtRef = useRef(0);
+  const [kvReloadN, setKvReloadN] = useState(0);
+  const kvDoReload = useCallback(() => {
+    const now = Date.now();
+    if (!kvPageUpRef.current || now - kvReloadAtRef.current < 1500) return;
+    kvReloadAtRef.current = now; kvPageUpRef.current = false;
+    setTimeout(() => setKvReloadN((n) => n + 1), 0);
+  }, []);
   const [paySheet, setPaySheet] = useState<any>(null);
   const [rot, setRot] = useState(false);
   const [land, setLand] = useState<boolean | null>(null);
@@ -326,11 +341,15 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   // Hard block: nothing navigates. kv:// is routed, everything else refused.
   const onShouldStartLoadWithRequest = useCallback((req: any) => {
     const url = String(req?.url || '');
-    if (url.startsWith('about:blank') || url === '' || url.startsWith('data:text/html') || url.startsWith('https://kv-game.local')) return true;
+    if (url.startsWith('about:blank') || url === '' || url.startsWith('data:text/html')) return true;
+    if (url.startsWith('https://kv-game.local')) {
+      if (!kvPageUpRef.current) return true; // initial load (iOS routes it through here)
+      kvDoReload(); return false;            // KV_PAGE_RELOAD: the page asked to reload itself
+    }
     if (url.startsWith('kv://')) { handleKvLink(url); return false; }
     setNotice('External links are disabled inside on-chain pages.');
     return false;
-  }, [handleKvLink]);
+  }, [handleKvLink, kvDoReload]);
 
   if (error) {
     return (
@@ -363,15 +382,21 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       try { outerRef.current.measureInWindow((_x: number, y: number) => done(Math.max(0, Math.round(ins - (y || 0))))); } catch { done(0); } }}>
       {props.game && (land === null || !wv || topPad === null) ? null : (
       <WebView
-        key={'kvwv' + (land ? 1 : 0)}
+        key={'kvwv' + (land ? 1 : 0) + '_r' + kvReloadN}
         source={{ html, baseUrl: 'https://kv-game.local/' }}
         originWhitelist={['https://kv-game.local']}
         ref={webRef}
         injectedJavaScriptBeforeContentLoaded={(props.game && land && wv ? 'window.__kvRealW=' + Math.round(wv.w) + ';window.__kvRealH=' + Math.round(wv.h) + ';' + KV_LAND_SHIM : (props.game && land === false ? 'window.__kvLandOff=1;' : '')) /* KV_LAND_FIX */ + CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? ('try{window.KV_GRANTS=' + JSON.stringify((globalThis as any).__kvGrantsAll || {}) + ';window.KV_MY_CONTACT=' + JSON.stringify(String((globalThis as any).__kvDevContact || '').slice(0, 80)) + ';}catch(e){};') : '') /* KV_GRANTS */}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
+        onLoadEnd={() => { kvPageUpRef.current = true; }}
+        onError={(e: any) => { const u = String(e?.nativeEvent?.url || ''); if (u.startsWith('https://kv-game.local')) kvDoReload(); }}
         javaScriptEnabled
-        domStorageEnabled={false}
+        // KV_ANDROID_DOMSTORE: iOS WKWebView always has localStorage; this prop
+        // is Android-only and false left localStorage null there, crashing any
+        // game that persists its table (KasCity). Storage is sandboxed to the
+        // kv-game.local origin inside this WebView, so parity with iOS is safe.
+        domStorageEnabled={true}
         thirdPartyCookiesEnabled={false}
         sharedCookiesEnabled={false}
         allowFileAccess={false}

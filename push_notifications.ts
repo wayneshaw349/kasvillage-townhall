@@ -3,9 +3,26 @@
 // Token registered → encrypted with user's pubkey → inscribed on Arweave
 // Counterparty queries Arweave for token → decrypts → sends via Expo Push API
 
-import * as Notifications from 'expo-notifications';
+// KV_PUSH_LAZY: expo-notifications throws at import time in Expo Go on Android
+// (remote push was removed from Expo Go in SDK 53), which killed the whole app
+// at startup. Load it lazily and skip push entirely there; iOS Expo Go and the
+// real EAS build are unaffected.
+import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+
+const KV_PUSH_OFF =
+  Platform.OS === 'android' &&
+  ((Constants as any)?.appOwnership === 'expo' || (Constants as any)?.executionEnvironment === 'storeClient');
+let _kvNotif: any = null;
+async function kvNotifications(): Promise<any | null> {
+  if (KV_PUSH_OFF) return null;
+  if (!_kvNotif) {
+    try { _kvNotif = await import('expo-notifications'); }
+    catch (e) { console.warn('[Push] expo-notifications unavailable:', e); return null; }
+  }
+  return _kvNotif;
+}
 
 // ============================================================================
 // TYPES
@@ -44,6 +61,8 @@ const EVENT_MESSAGES: Record<FrostEvent, { title: string; body: string }> = {
 
 export async function registerPushToken(): Promise<PushToken | null> {
   try {
+    const Notifications = await kvNotifications();
+    if (!Notifications) { console.log('[Push] push disabled (Expo Go on Android)'); return null; }
     // Request permission
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -228,34 +247,41 @@ export async function sendPushToCounterparty(params: {
 // ============================================================================
 
 export function setupNotificationHandlers(onEvent: (event: FrostEvent, data: any) => void): () => void {
-  // Handle notification when app is in foreground
-  const foregroundSub = Notifications.addNotificationReceivedListener(notification => {
-    const data = notification.request.content.data;
-    if (data?.event) {
-      onEvent(data.event as FrostEvent, data);
-    }
-  });
+  const subs: Array<{ remove: () => void }> = [];
+  let gone = false;
+  (async () => {
+    const Notifications = await kvNotifications();
+    if (!Notifications || gone) return;
 
-  // Handle notification tap (app was in background)
-  const responseSub = Notifications.addNotificationResponseReceivedListener(response => {
-    const data = response.notification.request.content.data;
-    if (data?.event) {
-      onEvent(data.event as FrostEvent, data);
-    }
-  });
+    // Handle notification when app is in foreground
+    subs.push(Notifications.addNotificationReceivedListener((notification: any) => {
+      const data = notification.request.content.data;
+      if (data?.event) {
+        onEvent(data.event as FrostEvent, data);
+      }
+    }));
 
-  // Configure how notifications appear when app is in foreground
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
+    // Handle notification tap (app was in background)
+    subs.push(Notifications.addNotificationResponseReceivedListener((response: any) => {
+      const data = response.notification.request.content.data;
+      if (data?.event) {
+        onEvent(data.event as FrostEvent, data);
+      }
+    }));
+
+    // Configure how notifications appear when app is in foreground
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+  })();
 
   return () => {
-    foregroundSub.remove();
-    responseSub.remove();
+    gone = true;
+    for (const s of subs) { try { s.remove(); } catch {} }
   };
 }
 

@@ -24,6 +24,28 @@ export const KV_WNET_ALLOW = {
   ipv4Ports: [35816],
 };
 const MAX_BODY = 64 * 1024, MAX_RESP = 2 * 1024 * 1024, TIMEOUT_MS = 10_000;
+// KV_DEAD_HOST: Flux nodes rotate, so games carry stale http://IP:35816 mirrors.
+// A mirror that fails a connection is marked dead for 8 minutes and fails
+// instantly afterwards, and plain-IP mirrors get a short 3.5s timeout - the
+// live relay then gets its turn well inside the game's own 9s lobby window.
+const KV_DEAD_MS = 8 * 60_000, KV_IP_TIMEOUT_MS = 3_500;
+const _kvDeadHosts = new Map<string, number>();
+/** KV_RELAY_VIA_DOMAIN: plain-IP relay mirrors are blocked by iOS ATS and many
+ *  mobile carriers. The https Flux domain load-balances onto the same nodes, so a
+ *  failed http://IP:35816 call is retried once through the domain - the game's own
+ *  reseed/gossip logic already copes with rooms living on different nodes. */
+export function kvRelayFallbackUrl(url: string, allow = KV_WNET_ALLOW): string | null {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' || !/^\d+\.\d+\.\d+\.\d+$/.test(u.hostname)) return null;
+    if (!allow.ipv4Ports.includes(+u.port)) return null;
+    return 'https://' + KV_RELAY_HTTPS[0] + u.pathname + u.search;
+  } catch { return null; }
+}
+export function kvHostTimeout(url: string): number {
+  try { const u = new URL(url); if (u.protocol === 'http:' && /^\d+\.\d+\.\d+\.\d+$/.test(u.hostname)) return KV_IP_TIMEOUT_MS; } catch {}
+  return TIMEOUT_MS;
+}
 
 export function kvNetAllowed(url: string, allow = KV_WNET_ALLOW): boolean {
   let u: URL;
@@ -211,29 +233,44 @@ export function handleKvNetMessage(raw: string, inject: (js: string) => void, op
     inject(`window.__kvWnetReply(${m.id}, ${js}); true;`);
   };
   const method = String(m.method || 'GET').toUpperCase();
-  if (!kvNetAllowed(String(m.url), allow)) { reply({ error: 'blocked host: ' + String(m.url).slice(0, 80) }); return true; }
+  // KV_WNET_TRACE (dev builds only): every game request + outcome, visible in Metro
+  const _trace = (msg: string) => { try { if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('[KV_WNET]', method, String(m.url).slice(0, 96), '->', msg); } catch {} };
+  if (!kvNetAllowed(String(m.url), allow)) { _trace('BLOCKED (host not allowed)'); reply({ error: 'blocked host: ' + String(m.url).slice(0, 80) }); return true; }
   if (method !== 'GET' && method !== 'POST') { reply({ error: 'method not allowed' }); return true; }
   if (m.body != null && (typeof m.body !== 'string' || m.body.length > MAX_BODY)) { reply({ error: 'body too large' }); return true; }
 
   if (method === 'POST') { try { _kvSessNote(String(m.url), typeof m.body === 'string' ? m.body : null); } catch {} }
 
   (async () => {
-    const c = new AbortController();
-    const t = setTimeout(() => c.abort(), TIMEOUT_MS);
-    try {
-      const headers: Record<string, string> = {};
-      const ct = m.headers && m.headers['Content-Type'];
-      if (typeof ct === 'string' && ct.length < 100) headers['Content-Type'] = ct;
-      const body0 = method === 'POST' && typeof m.body === 'string' ? m.body : null;
-      if (sign) Object.assign(headers, await _kvRelayHeaders(method, String(m.url), body0)); // KV_RELAY_SIG (opt-in)
-      const r = await fetch(m.url, { method, headers, body: method === 'POST' ? (body0 ?? undefined) : undefined, signal: c.signal });
-      if (r.url && r.url !== m.url && !kvNetAllowed(String(r.url), allow)) { reply({ error: 'blocked redirect: ' + String(r.url).slice(0, 80) }); return; } // KV_NET_REDIRECT
-      const body = await r.text();
-      if (body.length > MAX_RESP) { reply({ error: 'response too large' }); return; }
-      reply({ status: r.status, body });
-    } catch (e: any) {
-      reply({ error: String(e?.message || e) });
-    } finally { clearTimeout(t); }
+    const body0 = method === 'POST' && typeof m.body === 'string' ? m.body : null;
+    const tryOnce = async (url: string): Promise<{ ok: true; status: number; body: string } | { ok: false; err: string }> => {
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), kvHostTimeout(url));
+      try {
+        const headers: Record<string, string> = {};
+        const ct = m.headers && m.headers['Content-Type'];
+        if (typeof ct === 'string' && ct.length < 100) headers['Content-Type'] = ct;
+        if (sign) Object.assign(headers, await _kvRelayHeaders(method, url, body0)); // KV_RELAY_SIG (opt-in; re-signed per host)
+        const r = await fetch(url, { method, headers, body: method === 'POST' ? (body0 ?? undefined) : undefined, signal: c.signal });
+        if (r.url && r.url !== url && !kvNetAllowed(String(r.url), allow)) return { ok: false, err: 'blocked redirect: ' + String(r.url).slice(0, 80) }; // KV_NET_REDIRECT
+        const body = await r.text();
+        if (body.length > MAX_RESP) return { ok: false, err: 'response too large' };
+        try { _kvDeadHosts.delete(new URL(url).host); } catch {} // KV_DEAD_HOST: it answered
+        return { ok: true, status: r.status, body };
+      } catch (e: any) {
+        try { const _u = new URL(url); if (_u.protocol === 'http:' && /^\d+\.\d+\.\d+\.\d+$/.test(_u.hostname)) _kvDeadHosts.set(_u.host, Date.now() + KV_DEAD_MS); } catch {} // KV_DEAD_HOST
+        return { ok: false, err: String(e?.message || e) };
+      } finally { clearTimeout(t); }
+    };
+    const primary = String(m.url);
+    const fb = kvRelayFallbackUrl(primary, allow); // KV_RELAY_VIA_DOMAIN
+    let dead = false;
+    try { dead = (_kvDeadHosts.get(new URL(primary).host) || 0) > Date.now(); } catch {}
+    let res = dead ? { ok: false as const, err: 'dead host (cached)' } : await tryOnce(primary);
+    let via = '';
+    if (!res.ok && fb) { via = ' [via domain]'; res = await tryOnce(fb); }
+    if (res.ok) { _trace('HTTP ' + res.status + via + ' (' + res.body.length + 'b) ' + res.body.slice(0, 80).replace(/\s+/g, ' ')); reply({ status: res.status, body: res.body }); }
+    else { _trace('ERROR' + via + ' ' + res.err.slice(0, 80)); reply({ error: res.err }); }
   })();
   return true;
 }
