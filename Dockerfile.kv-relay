@@ -1,0 +1,18 @@
+# kv-relay — slim KasVillage game relay for third-party developers.
+# Game rooms only: no TownHall, no keys, no disk state.
+FROM rust:latest AS builder
+WORKDIR /app
+RUN apt-get update && apt-get install -y pkg-config libssl-dev cmake && rm -rf /var/lib/apt/lists/*
+COPY Cargo.toml Cargo.lock* ./
+COPY src/ src/
+RUN cargo build --release --bin kv_relay
+RUN ls -la target/release/kv_relay
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/target/release/kv_relay /app/kv-relay
+ENV PORT=35816
+ENV RUST_LOG=info
+EXPOSE 35816
+CMD ["/app/kv-relay"]
