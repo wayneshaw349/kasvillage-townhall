@@ -236,7 +236,25 @@ fn relay_msg_digest(host: &str, method: &str, path_and_query: &str, body: &[u8],
 /// Host names this node accepts in a V2 signature. KV_RELAY_HOSTS (comma list,
 /// e.g. "1.2.3.4:35816,kasvillage.app.runonflux.io") pins them; otherwise the
 /// Host / X-Forwarded-Host / URI authority of the request itself.
+/// v68 (KV_SIG_PUBLIC_HOSTS): the public Flux app domains. A wallet that falls
+/// back to the domain (iOS without the ATS exception, or a dead node IP) signs
+/// for the domain name, but the Flux gateway forwards to the node under the
+/// node's own address, so the signed host never matched and every bound move
+/// was refused (403 "wallet is bound"). The domain is the load-balanced front of
+/// this very app, so a domain-signed request is meant for any of its nodes.
+const KV_PUBLIC_HOSTS: &[&str] = &[
+    "kasvillage.app.runonflux.io",
+    "kasvillage_1.app.runonflux.io",
+    "kasvillage_2.app.runonflux.io",
+];
+
 fn sig_hosts(req: &HttpRequest) -> Vec<String> {
+    let mut v = sig_hosts_own(req);
+    for h in KV_PUBLIC_HOSTS { let h = h.to_string(); if !v.contains(&h) { v.push(h); } }
+    v
+}
+
+fn sig_hosts_own(req: &HttpRequest) -> Vec<String> {
     let norm = |s: &str| s.trim().trim_end_matches('.').to_ascii_lowercase();
     if let Ok(v) = std::env::var("KV_RELAY_HOSTS") {
         let l: Vec<String> = v.split(',').map(norm).filter(|s| !s.is_empty()).collect();
@@ -1465,6 +1483,30 @@ mod tests {
         // the same wallet signing for another node is not authenticated here
         let (s, b) = post!(&app, "/api/game/room/create", json!({"room":"v59host2","wallet":"kcwA","seed_commit":"x"}), Some(11), Some("1.1.1.1:35816"));
         assert_eq!(s, 200); assert_eq!(b["bound"], json!(false));
+        // v68: signed for the public Flux domain (the gateway forwards under the node's address) -> accepted
+        let (s, b) = post!(&app, "/api/game/room/create", json!({"room":"v68dom1","wallet":"kcwA","seed_commit":"x"}), Some(11), Some("kasvillage.app.runonflux.io"));
+        assert_eq!(s, 200); assert_eq!(b["bound"], json!(true));
+    }
+
+    #[actix_web::test]
+    async fn v68_domain_signed_moves_accepted_for_bound_wallet() {
+        // a bound wallet whose moves arrive through the domain gateway must not be refused
+        let app = at::init_service(App::new().configure(configure)).await;
+        let r = "v68dom2";
+        post!(&app, "/api/game/room/create", json!({"room":r,"wallet":"kcwA","seed_commit":"x"}), Some(41), None);
+        let (js, jb) = post!(&app, &format!("/api/game/room/{}/join", r), json!({"wallet":"kcwB"}), Some(42), Some("kasvillage.app.runonflux.io"));
+        assert_eq!(js, 200, "{}", jb);
+        let (s, b) = post!(&app, &format!("/api/game/room/{}/start", r), json!({"roster":["kcwA","kcwB"], "turn_order": rules_json()}), Some(41), Some("kasvillage.app.runonflux.io"));
+        assert_eq!(s, 200, "{}", b);
+        let ap = format!("/api/game/room/{}/append", r);
+        let (s, b) = post!(&app, &ap, json!({"wallet":"kcwA","kind":"gun","body":{"startDaa":1}}), Some(41), Some("kasvillage.app.runonflux.io"));
+        assert_eq!(s, 200, "{}", b); assert_eq!(b["stored"], json!(true), "{}", b);
+        // a different (wrong) host is still refused for the bound wallet
+        let (s, _) = post!(&app, &format!("/api/game/room/{}/join", r), json!({"wallet":"kcwB"}), Some(42), Some("1.1.1.1:35816"));
+        assert_eq!(s, 403);
+        // and so is an unsigned request for the bound wallet
+        let (s, _) = post!(&app, &format!("/api/game/room/{}/join", r), json!({"wallet":"kcwB"}), None, None);
+        assert_eq!(s, 403);
     }
 
     #[actix_web::test]
