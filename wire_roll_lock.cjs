@@ -1,0 +1,28 @@
+// wire_roll_lock.cjs - Roll only shows when the CHAIN says it is your roll.
+//
+// Seen in room kcf3d92e40: after a resync (relay corrected dice) the board went back
+// to 'about to roll' although P2 had already rolled and bought; Roll reappeared, the
+// extra taps moved the pawn locally, the relay refused them (3x) and the board snapped
+// back - it looked like a double turn. Roll also stayed up after the final bell.
+// The lock mirrors the game's own roll gate (a later buy/pass/end/court closes a
+// roll): closed -> only the next seat; open or in flight -> nobody; sealed -> nobody.
+// UI only - posts nothing, changes no game state. CONTINUE ignores a locked Roll.
+//
+// Verified in Chromium against KasCity v416 (9 chain states + CONTINUE).
+// Works with or without wire_end_guard / wire_roll_probe7 applied.
+//
+// Run from the repo root:   node wire_roll_lock.cjs
+const fs = require('fs');
+const PLAN = [{"file":"OnChainPageView.tsx","hunks":[["// KV_ROLL_RESCUE v3: the CONTINUE button posts what the CHAIN is owed.\n","// KV_ROLL_LOCK: the Roll button only shows when the CHAIN says this seat rolls next.\n// A resync (e.g. \"relay corrected dice\") can put the engine back to \"about to roll\"\n// after the player already rolled, so Roll reappears; another tap moves the pawn\n// locally, the relay refuses it and the board snaps back - it looks like a double\n// turn. After the final bell Roll also stayed up. Mirrors the game's own roll gate:\n// the last roll is closed by a later buy/pass/end/court from the same seat; closed\n// -> only the next seat may roll; open -> nobody; sealed -> nobody. A roll this\n// device just sent counts at once (no double tap while it is in flight). Before the\n// first roll it stays out of the way. Locked Roll gets data-kvlock (hidden and\n// untappable). UI only: it posts nothing and changes no game state.\nconst KV_ROLL_LOCK = \"(function(){try{var css=document.createElement('style');css.textContent='[data-kvlock]{visibility:hidden!important;pointer-events:none!important}';var addCss=function(){try{(document.head||document.documentElement).appendChild(css);}catch(e){}};if(document.head)addCss();else document.addEventListener('DOMContentLoaded',addCss);var ok=function(r){return !!(r&&(r.__acked||r.acked));};var roller=function(){var M=window.KV_MP2;if(!M||!M.room||!M.started)return 0;if(window.KV_SEALED)return -1;var mv=window.KV_MOVES||[],lr=null,li=-1;for(var i=mv.length-1;i>=0;i--){var r=mv[i];if(!r)continue;var a=String(r.a||'');if(ok(r)&&a==='end_game')return -1;if((a==='roll'&&(ok(r)||(r.__sent&&!r.__dropped)))||(a==='opener'&&ok(r))){lr=r;li=i;break;}}if(!lr)return 0;if(String(lr.a)==='opener')return +lr.s;for(var j=li+1;j<mv.length;j++){var e=mv[j];if(ok(e)&&+e.s===+lr.s&&/^(buy|pass|end|court)$/.test(String(e.a||'')))return (+lr.s%4)+1;}return -1;};var lastWhy='';setInterval(function(){try{var R=roller();var f=(window.KV_FLAGS&&window.KV_FLAGS())||{};var eng=((f.turn||0)%4)+1;var lock=(R!==0)&&!(R>0&&R===eng);var ds=document.querySelectorAll('div[data-i]');var any=false;for(var i=0;i<ds.length;i++){var d=ds[i];if(!/\\\\broll\\\\b/i.test(d.textContent||''))continue;any=true;if(lock)d.setAttribute('data-kvlock','1');else d.removeAttribute('data-kvlock');}var big=document.getElementById('kvbigroll');if(big){if(lock)big.setAttribute('data-kvlock','1');else big.removeAttribute('data-kvlock');}var why=(lock&&any)?(R===-1?'turn in progress or game sealed':'the chain expects P'+R):'';if(why&&why!==lastWhy){try{console.log('[KV_ROLL_LOCK] Roll held - '+why);}catch(e){}}lastWhy=why;}catch(e){}},250);}catch(e){}})();true;\";\n\n// KV_ROLL_RESCUE v3: the CONTINUE button posts what the CHAIN is owed.\n"],["(props.game ? KV_ROLL_RESCUE : '') /* KV_ROLL_RESCUE */","(props.game ? KV_ROLL_LOCK : '') /* KV_ROLL_LOCK */ + (props.game ? KV_ROLL_RESCUE : '') /* KV_ROLL_RESCUE */"],["if(/\\\\broll\\\\b/i.test(d.textContent||'')&&d.offsetParent){d.click();return true;}","if(/\\\\broll\\\\b/i.test(d.textContent||'')&&d.offsetParent&&!d.hasAttribute('data-kvlock')){d.click();return true;}"],["for(var i=0;i<ds.length;i++)if(ds[i].offsetParent)return true;var os=document.querySelectorAll('div');for(var j=0;j<os.length;j++){var st=os[j].getAttribute&&os[j].getAttribute('style');if(st&&/z-index:\\\\s*76/.test(st)&&getComputedStyle(os[j]).display!=='none')return true;}","for(var i=0;i<ds.length;i++)if(ds[i].offsetParent&&!ds[i].hasAttribute('data-kvlock'))return true;var os=document.querySelectorAll('div');for(var j=0;j<os.length;j++){var st=os[j].getAttribute&&os[j].getAttribute('style');if(st&&/z-index:\\\\s*76/.test(st)&&getComputedStyle(os[j]).display!=='none')return true;}"]]}];
+let okF = 0, skipF = 0, badF = 0;
+for (const p of PLAN) {
+  if (!fs.existsSync(p.file)) { console.log('  MISSING ' + p.file); badF++; continue; }
+  const raw = fs.readFileSync(p.file, 'utf8'); const CRLF = raw.includes('\r\n'); let s = raw.replace(/\r\n/g, '\n');
+  if (s.includes('const KV_ROLL_LOCK = ')) { console.log('  skip  ' + p.file + ' (already done)'); skipF++; continue; }
+  let fail = '';
+  for (const [o, n] of p.hunks) { const c = s.split(o).length - 1; if (c !== 1) { fail = 'change ' + (p.hunks.indexOf(p.hunks.find((h) => h[0] === o)) + 1) + ' matched ' + c + 'x'; break; } s = s.replace(o, () => n); }
+  if (fail) { console.log('  FAIL  ' + p.file + ' - ' + fail + ' (file left unchanged)'); badF++; continue; }
+  fs.copyFileSync(p.file, p.file + '.bak_rolllock'); fs.writeFileSync(p.file, CRLF ? s.replace(/\n/g, '\r\n') : s, 'utf8');
+  console.log('  ok    ' + p.file + ' (' + p.hunks.length + ' changes)'); okF++;
+}
+console.log('\n' + okF + ' files patched, ' + skipF + ' already done, ' + badF + ' failed' + (badF ? '  <- send me this output' : ''));
