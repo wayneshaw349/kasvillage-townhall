@@ -1,0 +1,20 @@
+// wire_v417_start.cjs - KasCity v417: "GAME ON!" banner + chime + buzz on every device the moment a multiplayer game starts
+//   node wire_v417_start.cjs   (project folder; safe to run twice; edits the v417 files in place, backups *.bak_start)
+const fs = require('fs');
+const MARK = '__KV_V417_START';
+const ANCHOR = '  setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);\n';
+const BLOCK = "\n  // ---- __KV_V417_START: tell every player the moment the game starts ----\n  (function(){\n    var was = null;\n    function beep(){\n      try {\n        var A = window.AudioContext || window.webkitAudioContext; if (!A) return;\n        var c = window.__kvStartAC || (window.__kvStartAC = new A()); if (c.state === \"suspended\") c.resume();\n        [[660, 0], [880, 0.16], [1175, 0.32]].forEach(function(n){\n          var o = c.createOscillator(), g = c.createGain(); o.type = \"square\"; o.frequency.value = n[0];\n          g.gain.setValueAtTime(0.0001, c.currentTime + n[1]); g.gain.exponentialRampToValueAtTime(0.12, c.currentTime + n[1] + 0.02);\n          g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + n[1] + 0.14);\n          o.connect(g); g.connect(c.destination); o.start(c.currentTime + n[1]); o.stop(c.currentTime + n[1] + 0.16);\n        });\n      } catch(e){}\n    }\n    // unlock audio on the first tap (iPhone only plays sound after a touch)\n    [\"pointerdown\", \"touchstart\"].forEach(function(t){ document.addEventListener(t, function u(){ try { var A = window.AudioContext || window.webkitAudioContext; if (A && !window.__kvStartAC) window.__kvStartAC = new A(); if (window.__kvStartAC) window.__kvStartAC.resume(); } catch(e){} }, { once: true, capture: true }); });\n    setInterval(function(){\n      var M = window.KV_MP2; if (!(M && M.room)) { was = null; return; }\n      var now = !!M.started;\n      if (was === false && now){\n        var inPlay = (window.KV_MOVES || []).some(function(m){ return m && m.__acked && String(m.a) === \"roll\"; });\n        if (!inPlay && !(window.__kvBack && window.__kvBack.rejoined)){\n          var me = M.seat || \"?\", col = {1:\"#d94f4f\",2:\"#4f7fd9\",3:\"#4fd98a\",4:\"#d9c14f\"}[me] || \"#f0c860\";\n          var d = document.createElement(\"div\");\n          d.style.cssText = \"position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);z-index:2147483600;background:#14100c;border:3px solid \" + col +\n            \";border-radius:12px;padding:14px 26px;text-align:center;box-shadow:0 8px 28px rgba(0,0,0,.7);pointer-events:none\";\n          d.innerHTML = \"<div style='font:900 30px Impact,sans-serif;letter-spacing:3px;color:#f0c860'>GAME ON!</div>\" +\n            \"<div style='font:700 14px monospace;color:\" + col + \";margin-top:4px'>you are P\" + me + \"</div>\";\n          document.body.appendChild(d); setTimeout(function(){ try { d.remove(); } catch(e){} }, 2600);\n          beep();\n          try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch(e){}\n          try { if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({ kvhaptic: \"start\" })); } catch(e){}\n        }\n      }\n      was = now;\n    }, 250);\n  })();\n";
+const FILES = ['showcase_kascity_v417.html', 'dev_kascity_v417_browser.html', 'tools/v417/v417_runtime.js'];
+let bad = 0;
+for (const f of FILES) {
+  if (!fs.existsSync(f)) { console.log('  skip  ' + f + ' (not found)'); continue; }
+  const raw = fs.readFileSync(f, 'utf8'); const crlf = /\r\n/.test(raw);
+  let t = crlf ? raw.replace(/\r\n/g, '\n') : raw;
+  if (t.includes(MARK)) { console.log('  done  ' + f + ' (already patched)'); continue; }
+  if (t.split(ANCHOR).length !== 2) { console.log('  FAIL  ' + f + ' (anchor not found, left untouched)'); bad++; continue; }
+  t = t.replace(ANCHOR, () => ANCHOR + BLOCK);
+  fs.writeFileSync(f + '.bak_start', raw);
+  fs.writeFileSync(f, crlf ? t.replace(/\n/g, '\r\n') : t);
+  console.log('  ok    ' + f);
+}
+console.log(bad ? '\n' + bad + ' file(s) failed' : '\nDone. Publish showcase_kascity_v417.html (never the dev_ copy).');

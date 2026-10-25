@@ -15980,6 +15980,45 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
   setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
 
+  // ---- __KV_V417_START: tell every player the moment the game starts ----
+  (function(){
+    var was = null;
+    function beep(){
+      try {
+        var A = window.AudioContext || window.webkitAudioContext; if (!A) return;
+        var c = window.__kvStartAC || (window.__kvStartAC = new A()); if (c.state === "suspended") c.resume();
+        [[660, 0], [880, 0.16], [1175, 0.32]].forEach(function(n){
+          var o = c.createOscillator(), g = c.createGain(); o.type = "square"; o.frequency.value = n[0];
+          g.gain.setValueAtTime(0.0001, c.currentTime + n[1]); g.gain.exponentialRampToValueAtTime(0.12, c.currentTime + n[1] + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + n[1] + 0.14);
+          o.connect(g); g.connect(c.destination); o.start(c.currentTime + n[1]); o.stop(c.currentTime + n[1] + 0.16);
+        });
+      } catch(e){}
+    }
+    // unlock audio on the first tap (iPhone only plays sound after a touch)
+    ["pointerdown", "touchstart"].forEach(function(t){ document.addEventListener(t, function u(){ try { var A = window.AudioContext || window.webkitAudioContext; if (A && !window.__kvStartAC) window.__kvStartAC = new A(); if (window.__kvStartAC) window.__kvStartAC.resume(); } catch(e){} }, { once: true, capture: true }); });
+    setInterval(function(){
+      var M = window.KV_MP2; if (!(M && M.room)) { was = null; return; }
+      var now = !!M.started;
+      if (was === false && now){
+        var inPlay = (window.KV_MOVES || []).some(function(m){ return m && m.__acked && String(m.a) === "roll"; });
+        if (!inPlay && !(window.__kvBack && window.__kvBack.rejoined)){
+          var me = M.seat || "?", col = {1:"#d94f4f",2:"#4f7fd9",3:"#4fd98a",4:"#d9c14f"}[me] || "#f0c860";
+          var d = document.createElement("div");
+          d.style.cssText = "position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);z-index:2147483600;background:#14100c;border:3px solid " + col +
+            ";border-radius:12px;padding:14px 26px;text-align:center;box-shadow:0 8px 28px rgba(0,0,0,.7);pointer-events:none";
+          d.innerHTML = "<div style='font:900 30px Impact,sans-serif;letter-spacing:3px;color:#f0c860'>GAME ON!</div>" +
+            "<div style='font:700 14px monospace;color:" + col + ";margin-top:4px'>you are P" + me + "</div>";
+          document.body.appendChild(d); setTimeout(function(){ try { d.remove(); } catch(e){} }, 2600);
+          beep();
+          try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch(e){}
+          try { if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({ kvhaptic: "start" })); } catch(e){}
+        }
+      }
+      was = now;
+    }, 250);
+  })();
+
   // ---- __KV_V417_BACK: smooth leave / smooth return ----
   // a) a phone that leaves and comes back must not throw the roll-off again: once the chain
   //    has the seat's roll-for-first (or play has started) a new "first" is dropped locally
