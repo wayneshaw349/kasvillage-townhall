@@ -15976,6 +15976,56 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
   setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
 
+  // ---- __KV_V417_SYNC: show when a turn is being resumed / caught up, chime when it lands on you ----
+  (function(){
+    var pill = null, hideT = 0;
+    var COLS = {1:"#d94f4f",2:"#4f7fd9",3:"#4fd98a",4:"#d9c14f"};
+    function show(txt, seat){
+      if (!pill){
+        pill = document.createElement("div");
+        pill.style.cssText = "position:fixed;left:50%;top:46px;transform:translateX(-50%);z-index:2147483500;pointer-events:none;" +
+          "background:rgba(20,16,12,.92);color:#f4e4c1;border:1px solid #caa64c;border-radius:14px;padding:4px 12px;font:700 11px monospace;" +
+          "white-space:nowrap;box-shadow:0 3px 12px rgba(0,0,0,.5);transition:opacity .3s;opacity:0";
+        document.body.appendChild(pill);
+      }
+      pill.innerHTML = "<span style='display:inline-block;animation:kvspin 1s linear infinite'>⟳</span> " + txt;
+      pill.style.borderColor = COLS[seat] || "#caa64c";
+      pill.style.opacity = "1";
+      clearTimeout(hideT); hideT = setTimeout(function(){ if (pill) pill.style.opacity = "0"; }, 2500);
+    }
+    var st = document.createElement("style"); st.textContent = "@keyframes kvspin{to{transform:rotate(360deg)}}";
+    (document.head || document.documentElement).appendChild(st);
+    function chime(){
+      try {
+        var A = window.AudioContext || window.webkitAudioContext; if (!A) return;
+        var c = window.__kvStartAC || (window.__kvStartAC = new A()); if (c.state === "suspended") c.resume();
+        [[784, 0], [1047, 0.12]].forEach(function(n){
+          var o = c.createOscillator(), g = c.createGain(); o.type = "triangle"; o.frequency.value = n[0];
+          g.gain.setValueAtTime(0.0001, c.currentTime + n[1]); g.gain.exponentialRampToValueAtTime(0.14, c.currentTime + n[1] + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + n[1] + 0.18);
+          o.connect(g); g.connect(c.destination); o.start(c.currentTime + n[1]); o.stop(c.currentTime + n[1] + 0.2);
+        });
+      } catch(e){}
+      try { if (navigator.vibrate) navigator.vibrate(90); } catch(e){}
+      try { if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({ kvhaptic: "turn" })); } catch(e){}
+    }
+    function seen(txt){
+      txt = String(txt || ""); var m;
+      if (/^YOUR TURN/.test(txt)){ chime(); return; }
+      if (/RESYNC|resyncing|self-heal|half-open turn|holding your roll|drifted/.test(txt)){
+        m = txt.match(/engine to P(\d)/) || txt.match(/closing P(\d)/) || txt.match(/chain (?:expects|is on) P(\d)/) || txt.match(/\((P\d)\)/);
+        var s = m ? +String(m[1]).replace("P", "") : 0;
+        var me = window.KV_MP2 && window.KV_MP2.seat;
+        show(s ? (s === me ? "catching up — your turn is resuming" : "catching up — resuming P" + s + "'s turn") : "catching up with the table…", s);
+      }
+    }
+    setInterval(function(){
+      var f = window.KV_LOG; if (!f || f.__kvSyncWrap) return;
+      var g = function(txt){ try { if (window.KV_MP2 && window.KV_MP2.room) seen(txt); } catch(e){} return f.apply(this, arguments); };
+      g.__kvSyncWrap = true; window.KV_LOG = g;
+    }, 200);
+  })();
+
   // ---- __KV_V417_START: tell every player the moment the game starts ----
   (function(){
     var was = null;
