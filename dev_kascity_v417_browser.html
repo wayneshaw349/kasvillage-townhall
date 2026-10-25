@@ -15879,6 +15879,7 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
     else if (Math.abs(z) >= Math.abs(x)){ tz = (z > 0 ? W : -W) + (z > 0 ? 1 : -1) * across; tx = x + along; }
     else { tx = (x > 0 ? W : -W) + (x > 0 ? 1 : -1) * across; tz = z + along; }
     var dx = tx - x, dz = tz - z;
+    /*KV_LIFT*/var lift = (!cornerish && Math.abs(x) > Math.abs(z)) ? 0.35 : 0;   // side streets: camera looks across the lots, so stand taller
     var s = (tok.transform.scale && tok.transform.scale[0]) || 1;
     var th = ((tok.transform.rot && tok.transform.rot[1]) || 0) * Math.PI / 180;
     // world offset -> token-local offset (inverse yaw, inverse scale)
@@ -15888,8 +15889,9 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
       if (!e) return;
       var n = window.KV_NODE(e[0]); if (!n || !n.transform) return;
       var cur = n.transform.pos || [0, e[1], 0];
-      if (Math.abs(cur[0] - lx) > 1e-3 || Math.abs(cur[2] - lz) > 1e-3){
-        n.transform.pos = [lx, cur[1] != null ? cur[1] : e[1], lz];
+      var ly = e[1] + lift / s;
+      if (Math.abs(cur[0] - lx) > 1e-3 || Math.abs(cur[2] - lz) > 1e-3 || Math.abs((cur[1] || 0) - ly) > 1e-3){
+        n.transform.pos = [lx, ly, lz];
         try { delete n._world; } catch(x1){}
       }
       if (e[0].indexOf("tok_spr_") === 0){
