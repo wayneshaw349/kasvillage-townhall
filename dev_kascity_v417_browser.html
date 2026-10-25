@@ -15980,6 +15980,58 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
   setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
 
+  // ---- __KV_V417_RENO: renovate works on your own turn + "your turn" alert when you come back ----
+  function chime2(){
+    try {
+      var A = window.AudioContext || window.webkitAudioContext; if (!A) return;
+      var c = window.__kvStartAC || (window.__kvStartAC = new A()); if (c.state === "suspended") c.resume();
+      [[880, 0], [1175, 0.14]].forEach(function(n){
+        var o = c.createOscillator(), g = c.createGain(); o.type = "square"; o.frequency.value = n[0];
+        g.gain.setValueAtTime(0.0001, c.currentTime + n[1]); g.gain.exponentialRampToValueAtTime(0.1, c.currentTime + n[1] + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + n[1] + 0.12);
+        o.connect(g); g.connect(c.destination); o.start(c.currentTime + n[1]); o.stop(c.currentTime + n[1] + 0.14);
+      });
+    } catch(e){}
+  }
+  function dlgText(){ try { var D = window.DLG; return D ? JSON.stringify(D).slice(0, 400) : ""; } catch(e){ return ""; } }
+  // a) the "Tap to roll" prompt pauses the engine, so a renovation tapped on your own turn sat
+  //    queued until you rolled. Step the prompt aside for one beat: the renovation applies, then
+  //    the engine asks for your roll again. Buy/Pass and other choices are never touched.
+  setInterval(function(){
+    var f = window.KV_RENOVATE; if (!f || f.__kvReno) return;
+    var g = function(t){
+      var r = f.apply(this, arguments);
+      try {
+        var fl = (window.KV_FLAGS && window.KV_FLAGS()) || {};
+        if (window.DLG && fl.renov === t && /Tap to roll/i.test(dlgText())){
+          window.DLG = null; try { hideDialogue(); } catch(e){}
+          if (window.KV_SETSTATE) window.KV_SETSTATE("asked", 0);
+        } else if (window.DLG && fl.renov === t){
+          toast("Renovation queued<br><span style='font:400 11px monospace;color:#e8dcc0'>it starts as soon as you choose</span>", 2200);
+        }
+      } catch(e){}
+      return r;
+    };
+    g.__kvReno = true; window.KV_RENOVATE = g;
+  }, 300);
+  // b) back from a break and it is already your turn: say so
+  setTimeout(function(){ if (!(window.__kvBack && window.__kvBack.rejoined)) return;
+    var told = false, t0 = Date.now(), iv2 = setInterval(function(){
+      if (told || Date.now() - t0 > 45000){ clearInterval(iv2); return; }
+      var M = window.KV_MP2, fl = (window.KV_FLAGS && window.KV_FLAGS()) || {};
+      if (!(M && M.started && M.seat) || chainMoves().length === 0) return;
+      if (Date.now() - t0 < 2500) return;                                              // let the catch-up land first
+      told = true; clearInterval(iv2);
+      if (+fl.turn === +M.seat){
+        var col = {1:"#d94f4f",2:"#4f7fd9",3:"#4fd98a",4:"#d9c14f"}[M.seat] || "#f0c860";
+        var d = toast("<div style='font:900 24px Impact,sans-serif;letter-spacing:2px'>YOUR TURN</div><span style='font:400 11px monospace;color:#e8dcc0'>you're back in - roll when ready</span>", 2600);
+        d.style.borderColor = col; chime2();
+        try { if (navigator.vibrate) navigator.vibrate([100, 50, 100]); } catch(e){}
+        try { if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({ kvhaptic: "turn" })); } catch(e){}
+      }
+    }, 400);
+  }, 0);
+
   // ---- __KV_V417_SYNC: show when a turn is being resumed / caught up, chime when it lands on you ----
   (function(){
     var pill = null, hideT = 0;
