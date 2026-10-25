@@ -1053,11 +1053,22 @@ async fn append_log(req: HttpRequest, path: web::Path<String>, raw: web::Bytes) 
                 // v54: no rotation state yet -> the chain's derived opener goes first
                 if last.is_none() {
                     if let Some(fa) = rules.derive_opener_from.as_deref() {
-                        if let Some(open) = derive_opener(&r.log, fa, rules.seats) {
-                            if sv != open {
+                        match derive_opener(&r.log, fa, rules.seats) {
+                            Some(open) => {
+                                if sv != open {
+                                    return HttpResponse::Ok().json(json!({
+                                        "room": id, "stored": false, "reason": "not_the_opener",
+                                        "expect": open, "head": r.log.len(), "chain": r.chain
+                                    }));
+                                }
+                            }
+                            // v70: no rotation move before the roll-off is complete. Room
+                            // kcda4009e2: P4's first-roll never arrived, yet P1's roll was
+                            // stored - the opener check only ran once an opener existed.
+                            None => {
                                 return HttpResponse::Ok().json(json!({
-                                    "room": id, "stored": false, "reason": "not_the_opener",
-                                    "expect": open, "head": r.log.len(), "chain": r.chain
+                                    "room": id, "stored": false, "reason": "rolloff_incomplete",
+                                    "head": r.log.len(), "chain": r.chain
                                 }));
                             }
                         }
@@ -1591,5 +1602,30 @@ mod tests {
         assert_eq!(b["expect"], json!(2));
         assert_eq!(post!(&app, &ap, op(2), None, None).1["stored"], json!(true));
         assert_eq!(post!(&app, &ap, op(2), None, None).1["reason"], json!("opener_already_set"));
+    }
+
+    #[actix_web::test]
+    async fn v70_roll_refused_until_rolloff_complete() {
+        // room kcda4009e2: P4's first-roll never arrived, yet P1's roll was stored
+        let app = at::init_service(App::new().configure(configure)).await;
+        let r = "v70rolloff";
+        post!(&app, "/api/game/room/create", json!({"room":r,"wallet":"kcwA","seed_commit":"x"}), None, None);
+        post!(&app, &format!("/api/game/room/{}/join", r), json!({"wallet":"kcwB"}), None, None);
+        post!(&app, &format!("/api/game/room/{}/start", r), json!({"roster":["kcwA","kcwB"], "turn_order": rules_json()}), None, None);
+        let ap = format!("/api/game/room/{}/append", r);
+        let roll = |s: u8| json!({"wallet": if s == 2 {"kcwB"} else {"kcwA"}, "kind":"move","body":{"s":s,"a":"roll","v":7}});
+        // nobody has rolled for first yet
+        assert_eq!(post!(&app, &ap, roll(1), None, None).1["reason"], json!("rolloff_incomplete"));
+        for (seat, w, v) in [(1u8, "kcwA", 9), (2, "kcwB", 6), (3, "kcwA", 5)] {
+            post!(&app, &ap, json!({"wallet":w,"kind":"move","body":{"s":seat,"a":"first","v":v}}), None, None);
+        }
+        // seat 4 still missing: still refused, even for the current leader
+        assert_eq!(post!(&app, &ap, roll(1), None, None).1["reason"], json!("rolloff_incomplete"));
+        post!(&app, &ap, json!({"wallet":"kcwA","kind":"move","body":{"s":4,"a":"first","v":4,"snap":"1,1,1,1|0,0,0,0|"}}), None, None);
+        // complete: the wrong seat is told who opens, the winner's roll is stored
+        let (_, b) = post!(&app, &ap, roll(2), None, None);
+        assert_eq!(b["reason"], json!("not_the_opener"));
+        assert_eq!(b["expect"], json!(1));
+        assert_eq!(post!(&app, &ap, roll(1), None, None).1["stored"], json!(true));
     }
 }
