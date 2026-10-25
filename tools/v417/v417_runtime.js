@@ -1,6 +1,6 @@
 // ---- __KV_V417: sidewalk pieces, district street signs, slim roll-off banner ----
 (function(){
-  var W = 8.62;                                   // where pieces stand: inner half of the sidewalk
+  var W = 7.55; /*KV_GREEN*/                                   // where pieces stand: inner half of the sidewalk
   var LANE = [-0.66, -0.22, 0.22, 0.66];          // four players side by side along the street
   var DIST = window.KV_DISTRICTS || [];
   var COLS = {1:"#d94f4f", 2:"#4f7fd9", 3:"#4fd98a", 4:"#d9c14f"};
@@ -28,14 +28,14 @@
     var cornerish = Math.abs(Math.abs(x) - Math.abs(z)) < 1.2;
     if (!cornerish && Math.abs(x) > Math.abs(z) && slot.crowd > 1){   // side streets: the camera looks down the street, so pieces in a row hide each other -> 2-wide grid instead
       var rows = Math.ceil(slot.crowd / 2), row = Math.floor(slot.idx / 2);
-      across = (slot.idx % 2) ? -0.1 : -1.15; along = rows > 1 ? (row ? 0.8 : -0.8) : 0;
+      across = (slot.idx % 2) ? -0.05 : -0.85; along = rows > 1 ? (row ? 0.8 : -0.8) : 0;
     }
     if (cornerish){ tx = (x > 0 ? W : -W) + (x > 0 ? -1 : 1) * across; tz = (z > 0 ? W : -W) + (z > 0 ? -1 : 1) * along * 0.8; }
     else if (Math.abs(z) >= Math.abs(x)){ tz = (z > 0 ? W : -W) + (z > 0 ? 1 : -1) * across; tx = x + along; }
     else { tx = (x > 0 ? W : -W) + (x > 0 ? 1 : -1) * across; tz = z + along; }
     var dx = tx - x, dz = tz - z;
     /*KV_CLEAR*/(window.__kvPW = window.__kvPW || {})[p] = [tx, tz];
-    /*KV_LIFT*/var lift = (!cornerish && Math.abs(x) > Math.abs(z)) ? 0.35 : 0;   // side streets: camera looks across the lots, so stand taller
+    /*KV_LIFT*/var lift = 0;   // side streets: camera looks across the lots, so stand taller
     var s = (tok.transform.scale && tok.transform.scale[0]) || 1;
     var th = ((tok.transform.rot && tok.transform.rot[1]) || 0) * Math.PI / 180;
     // world offset -> token-local offset (inverse yaw, inverse scale)

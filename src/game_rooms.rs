@@ -1013,6 +1013,18 @@ async fn append_log(req: HttpRequest, path: web::Path<String>, raw: web::Bytes) 
             let a = a_claim.as_str();
             let sv = sv_claim;
             let exempt = rules.exempt.iter().any(|x| x == a);
+            // v71: the roll-off closes once it has decided the opener. A device that
+            // left and came back used to post a fresh roll-for-first mid-game (with a
+            // full clock), which every other seat then had to resync around.
+            if let Some(fa) = rules.derive_opener_from.as_deref() {
+                if a == fa && derive_opener(&r.log, fa, rules.seats).is_some() {
+                    return HttpResponse::Ok().json(json!({
+                        "room": id, "stored": false, "reason": "rolloff_closed",
+                        "expect": derive_rr_last(&r.log, &rules).map(|l| (l % rules.seats.max(1)) + 1),
+                        "head": r.log.len(), "chain": r.chain
+                    }));
+                }
+            }
             if rules.seed.iter().any(|x| x == a) {
                 // v59: while the roll-off is incomplete nothing can be checked, so
                 // nothing is stored — an early (possibly wrong) declaration used to
@@ -1627,5 +1639,29 @@ mod tests {
         assert_eq!(b["reason"], json!("not_the_opener"));
         assert_eq!(b["expect"], json!(1));
         assert_eq!(post!(&app, &ap, roll(1), None, None).1["stored"], json!(true));
+    }
+
+    #[actix_web::test]
+    async fn v71_rolloff_closes_once_decided() {
+        // room kc3b4b340a: a phone that left and came back posted a new roll-for-first at i17
+        let app = at::init_service(App::new().configure(configure)).await;
+        let r = "v71closed";
+        post!(&app, "/api/game/room/create", json!({"room":r,"wallet":"kcwA","seed_commit":"x"}), None, None);
+        post!(&app, &format!("/api/game/room/{}/join", r), json!({"wallet":"kcwB"}), None, None);
+        post!(&app, &format!("/api/game/room/{}/start", r), json!({"roster":["kcwA","kcwB"], "turn_order": rules_json()}), None, None);
+        let ap = format!("/api/game/room/{}/append", r);
+        let first = |s: u8, v: i64| json!({"wallet": if s == 2 {"kcwB"} else {"kcwA"}, "kind":"move","body":{"s":s,"a":"first","v":v}});
+        // a tie between P1 and P2: the tie-break re-rolls must still be accepted
+        for (s, v) in [(1u8, 9i64), (2, 9), (3, 5), (4, 4)] {
+            assert_eq!(post!(&app, &ap, first(s, v), None, None).1["stored"], json!(true));
+        }
+        assert_eq!(post!(&app, &ap, first(1, 3), None, None).1["stored"], json!(true));
+        assert_eq!(post!(&app, &ap, first(2, 8), None, None).1["stored"], json!(true));
+        // decided (P2 opens): any further roll-for-first is refused, before or after play starts
+        assert_eq!(post!(&app, &ap, first(3, 12), None, None).1["reason"], json!("rolloff_closed"));
+        let roll2 = json!({"wallet":"kcwB","kind":"move","body":{"s":2,"a":"roll","v":7}});
+        assert_eq!(post!(&app, &ap, roll2, None, None).1["stored"], json!(true));
+        let (_, b) = post!(&app, &ap, first(1, 7), None, None);
+        assert_eq!(b["reason"], json!("rolloff_closed"));
     }
 }
