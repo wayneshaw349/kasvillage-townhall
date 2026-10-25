@@ -15864,7 +15864,7 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
   function spots(n){
     if (n <= 1) return [[0, -0.15]];
     var out = [];
-    for (var i = 0; i < n; i++){ var f = i / (n - 1) * 2 - 1; out.push([0.8 * f, (i % 2 === 0) ? -0.38 : -0.04]); }
+    for (var i = 0; i < n; i++){ var f = i / (n - 1) * 2 - 1; out.push([(n > 2 ? 1.0 : 0.8) * f, (i % 2 === 0) ? -0.38 : -0.04]); }
     return out;
   }
   function onRing(x, z){ return !(Math.abs(x) < 8.6 && Math.abs(z) < 8.6); }
@@ -15875,10 +15875,15 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
     if (!onRing(x, z)) return;                                     // mid-animation off the ring
     var along = slot[0], across = slot[1], tx, tz;
     var cornerish = Math.abs(Math.abs(x) - Math.abs(z)) < 1.2;
+    if (!cornerish && Math.abs(x) > Math.abs(z) && slot.crowd > 1){   // side streets: the camera looks down the street, so pieces in a row hide each other -> 2-wide grid instead
+      var rows = Math.ceil(slot.crowd / 2), row = Math.floor(slot.idx / 2);
+      across = (slot.idx % 2) ? -0.1 : -1.15; along = rows > 1 ? (row ? 0.8 : -0.8) : 0;
+    }
     if (cornerish){ tx = (x > 0 ? W : -W) + (x > 0 ? -1 : 1) * across; tz = (z > 0 ? W : -W) + (z > 0 ? -1 : 1) * along * 0.8; }
     else if (Math.abs(z) >= Math.abs(x)){ tz = (z > 0 ? W : -W) + (z > 0 ? 1 : -1) * across; tx = x + along; }
     else { tx = (x > 0 ? W : -W) + (x > 0 ? 1 : -1) * across; tz = z + along; }
     var dx = tx - x, dz = tz - z;
+    /*KV_CLEAR*/(window.__kvPW = window.__kvPW || {})[p] = [tx, tz];
     /*KV_LIFT*/var lift = (!cornerish && Math.abs(x) > Math.abs(z)) ? 0.35 : 0;   // side streets: camera looks across the lots, so stand taller
     var s = (tok.transform.scale && tok.transform.scale[0]) || 1;
     var th = ((tok.transform.rot && tok.transform.rot[1]) || 0) * Math.PI / 180;
@@ -15911,7 +15916,7 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
     }
     Object.keys(groups).forEach(function(k){
       var g = groups[k], sp = spots(g.length);
-      g.forEach(function(p, i){ var sl = sp[i].slice(); sl.crowd = g.length; place(p, sl); });
+      g.forEach(function(p, i){ var sl = sp[i].slice(); sl.crowd = g.length; sl.idx = i; place(p, sl); });
     });
   }
 
@@ -15942,7 +15947,10 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
       var bonus = DIST[g].bonus;
       if (own >= 1 && own <= 4){ d.textContent = "P" + own + "'S BLOCK"; d.style.borderColor = COLS[own]; d.style.color = COLS[own]; }
       else { d.textContent = "+" + bonus; d.style.borderColor = "#2f7d46"; d.style.color = "#e8f2e4"; }   // short until owned: less clutter on phones
-      d.style.left = (r.left + q.x * sx) + "px"; d.style.top = (r.top + q.y * sy) + "px"; d.style.display = "block";
+      var Lx = r.left + q.x * sx, Ly = r.top + q.y * sy, near = false, PW = window.__kvPW || {};
+      for (var pp in PW){ var pq = window.KV_PROJECT({ x: PW[pp][0], y: 0.7, z: PW[pp][1] }); if (pq && Math.abs(r.left + pq.x * sx - Lx) < 46 && Math.abs(r.top + pq.y * sy - Ly) < 40) near = true; }
+      d.style.opacity = near ? "0.18" : "1";   // a piece is standing under the sign: let it show through
+      d.style.left = Lx + "px"; d.style.top = Ly + "px"; d.style.display = "block";
     }
   }
 
@@ -15970,6 +15978,21 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
   setInterval(function(){ try { placeAll(); } catch(e){} }, 120);
   setInterval(function(){ try { signs(); } catch(e){} }, 150);
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
+  setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
+  // street names on the lots fade while a piece stands under them, so the piece stays readable
+  var names = null;
+  function fadeNames(){
+    var PW = window.__kvPW, cv = document.querySelector("canvas"); if (!PW || !window.KV_PROJECT || !cv) return;
+    var r = cv.getBoundingClientRect(), sx = r.width / cv.width, sy = r.height / cv.height, pts = [];
+    for (var p in PW){ var q = window.KV_PROJECT({ x: PW[p][0], y: 0.7, z: PW[p][1] }); if (q) pts.push([r.left + q.x * sx, r.top + q.y * sy]); }
+    if (!names || !names.length) names = [].filter.call(document.querySelectorAll("body > div"), function(d){ return /z-index: 56/.test(d.style.cssText) && /width: 74px/.test(d.style.cssText); });
+    names.forEach(function(d){
+      if (d.style.display === "none") return;
+      var b = d.getBoundingClientRect(), cx = b.left + b.width / 2, cy = b.top + b.height / 2, near = false;
+      pts.forEach(function(t){ if (Math.abs(t[0] - cx) < 40 && Math.abs(t[1] - cy) < 22) near = true; });
+      var o = near ? "0.2" : ""; if (d.style.opacity !== o) d.style.opacity = o;
+    });
+  }
 })();
 
 </script>
