@@ -130,6 +130,77 @@
   setInterval(function(){ try { signs(); } catch(e){} }, 150);
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
   setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
+
+  // ---- __KV_V417_BACK: smooth leave / smooth return ----
+  // a) a phone that leaves and comes back must not throw the roll-off again: once the chain
+  //    has the seat's roll-for-first (or play has started) a new "first" is dropped locally
+  function chainMoves(){ return (window.KV_MOVES || []).filter(function(m){ return m && m.__acked; }); }
+  function rolloffClosedFor(seat, value){
+    var mv = chainMoves();
+    if (mv.some(function(m){ return String(m.a) === "roll"; })) return true;           // play has started
+    var mine = mv.filter(function(m){ return String(m.a) === "first" && +m.s === +seat; });
+    var L = ((window.KV_MP2 && window.KV_MP2.firstList) || {})[seat] || [];
+    return Math.max(mine.length, L.length) > 0 && __kvBack.rejoined;                    // a rejoin re-throwing a roll it already made
+  }
+  var __kvBack = window.__kvBack = { rejoined: false };
+  setInterval(function(){
+    var f = window.KV_MOVE; if (!f || f.__kvBackGuard) return;
+    var g = function(seat, action, value){
+      if (String(action) === "first" && window.KV_MP2 && window.KV_MP2.room && rolloffClosedFor(seat, value)) return;   // already on the chain
+      return f.apply(this, arguments);
+    };
+    g.__kvBackGuard = true; window.KV_MOVE = g;
+  }, 200);
+
+  // b) keep the "last table" fresh while playing, and forget it once the game is sealed
+  setInterval(function(){
+    try {
+      var M = window.KV_MP2; if (!(M && M.room && M.started)) return;
+      if (chainMoves().some(function(m){ return String(m.a) === "end_game"; })){ localStorage.removeItem("kv_last_table"); return; }
+      var o = JSON.parse(localStorage.getItem("kv_last_table") || "null");
+      if (o && o.room === M.room){ o.at = Date.now(); localStorage.setItem("kv_last_table", JSON.stringify(o)); }
+    } catch(e){}
+  }, 15000);
+
+  // c) coming back: no menu - straight back to your seat, with a short "welcome back"
+  function toast(txt, ms){
+    var d = document.createElement("div");
+    d.style.cssText = "position:fixed;left:50%;top:44%;transform:translate(-50%,-50%);z-index:2147483600;background:#14100c;color:#f0c860;" +
+      "border:2px solid #caa64c;border-radius:10px;padding:10px 18px;font:700 14px monospace;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.6)";
+    d.innerHTML = txt; document.body.appendChild(d);
+    setTimeout(function(){ try { d.remove(); } catch(e){} }, ms || 2500); return d;
+  }
+  try {
+    var boot = JSON.parse(localStorage.getItem("kv_mp2") || "null");
+    if (boot && boot.room && boot.back){
+      __kvBack.rejoined = true;
+      var t = toast("Welcome back<br><span style='font:400 11px monospace;color:#e8dcc0'>catching up on table " + boot.room + "…</span>", 6000);
+      var w = setInterval(function(){ if (chainMoves().length > 0 && window.KV_MP2 && window.KV_MP2.started){ clearInterval(w); setTimeout(function(){ try { t.remove(); } catch(e){} }, 900); } }, 300);
+    }
+  } catch(e){}
+  (function(){
+    var tries = 0, iv = setInterval(function(){
+      if (++tries > 40) { clearInterval(iv); return; }                                  // ~8s: the start screen never showed
+      var ov = window.__KV_LOBBY_OV; if (!ov || !ov.parentNode) return;
+      var b = [].filter.call(ov.querySelectorAll("button"), function(x){ return /Rejoin table kc/.test(x.textContent.trim()); })[0];
+      if (!b) return;
+      clearInterval(iv);
+      var o = null; try { o = JSON.parse(localStorage.getItem("kv_last_table") || "null"); } catch(e){}
+      if (!o || !o.room || Date.now() - o.at > 10 * 60e3) return;                        // older than a game: let them choose
+      if (o.autoAt && Date.now() - o.autoAt < 60e3) return;                              // just tried: never loop
+      o.autoAt = Date.now(); try { localStorage.setItem("kv_last_table", JSON.stringify(o)); } catch(e){}
+      var cancel = false, n = 3;
+      var t = toast("Back to your seat in <b id='kvbn'>3</b>…<br><button id='kvbc' style='margin-top:8px;padding:5px 14px;background:#2a2118;color:#f0c860;border:1px solid #6a5a34;border-radius:6px;font:700 12px monospace;cursor:pointer'>stay on menu</button>", 4000);
+      var c = t.querySelector("#kvbc"); if (c) c.onclick = function(e){ e.stopPropagation(); cancel = true; try { t.remove(); } catch(x){} };
+      var cd = setInterval(function(){
+        if (cancel){ clearInterval(cd); return; }
+        if (--n > 0){ var e = t.querySelector("#kvbn"); if (e) e.textContent = n; return; }
+        clearInterval(cd);
+        b.click();                                                                       // the lobby's own rejoin (it reloads in 200ms)
+        try { localStorage.setItem("kv_mp2", JSON.stringify({ room: o.room, role: o.role, back: 1 })); } catch(e){}
+      }, 1000);
+    }, 200);
+  })();
   // street names on the lots fade while a piece stands under them, so the piece stays readable
   var names = null;
   function fadeNames(){
