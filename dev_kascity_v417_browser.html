@@ -15984,6 +15984,46 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
   setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
 
+  // ---- __KV_V417_ROLLFB: tell the player what the record did with their roll ----
+  (function(){
+    var COL = {1:"#d94f4f",2:"#4f7fd9",3:"#4fd98a",4:"#d9c14f"}, seenI = null, lastNo = 0;
+    function me(){ var M = window.KV_MP2; return (M && M.room && M.started) ? M.seat : null; }
+    window.__kvRollNo = function(why){
+      if (Date.now() - lastNo < 1500) return; lastNo = Date.now();
+      var d = toast("<b style='font:900 15px monospace;color:#ff8a6a'>✗ ROLL NOT ACCEPTED</b><br><span style='font:400 11px monospace;color:#e8dcc0'>" + why + "</span>", 1600);
+      d.style.borderColor = "#ff8a6a";
+    };
+    setInterval(function(){
+      try {
+        var s = me(); if (!s) return;
+        var mv = window.KV_MOVES || [];
+        if (seenI === null){ seenI = 0; for (var k = 0; k < mv.length; k++) if (mv[k] && mv[k].__acked) seenI = Math.max(seenI, k); return; }   // only rolls from now on
+        for (var i = seenI + 1; i < mv.length; i++){
+          var r = mv[i]; if (!r || !r.__acked) break;
+          seenI = i;
+          if (String(r.a) === "roll" && +r.s === +s){
+            var dv = (r.d1 != null && r.d2 != null) ? (r.d1 + " + " + r.d2 + " = " + (+r.d1 + +r.d2)) : ("rolled " + r.v);
+            var d = toast("<b style='font:900 15px monospace;color:" + (COL[s] || "#f0c860") + "'>✓ ROLL RECORDED</b><br><span style='font:400 11px monospace;color:#e8dcc0'>" + dv + "</span>", 1500);
+            d.style.borderColor = COL[s] || "#caa64c"; d.style.top = "30%";
+          }
+        }
+      } catch(e){}
+    }, 250);
+    // the relay or the turn gate turned our own roll away
+    setInterval(function(){
+      var f = window.KV_LOG; if (!f || f.__kvFb) return;
+      var g = function(m){
+        try {
+          var s = me(), t = String(m || ""), x;
+          if (s && (x = t.match(/^dropped P(\d) roll — (.*)$/)) && +x[1] === +s) window.__kvRollNo(x[2]);
+          else if (s && (x = t.match(/^relay refused roll P(\d)/)) && +x[1] === +s) window.__kvRollNo("the relay did not take it — syncing");
+        } catch(e){}
+        return f.apply(this, arguments);
+      };
+      g.__kvFb = 1; window.KV_LOG = g;
+    }, 300);
+  })();
+
   // ---- __KV_V417_ONEROLL: one roll per turn on your screen ----
   // Your own taps on Roll only count when the chain says it is your turn and you have not rolled yet.
   // Extra taps used to move your piece again locally (the chain kept one roll, then a resync pulled you
@@ -16015,7 +16055,7 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
         e.preventDefault(); e.stopPropagation(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         if (Date.now() - lastNote > 1500 && e.type === "click"){
           lastNote = Date.now();
-          toast(st.rolled ? "You already rolled — finish your turn" : ("Waiting for P" + st.exp + "…"), 1300);
+          if (window.__kvRollNo) window.__kvRollNo(st.rolled ? "you already rolled — finish your turn" : ("waiting for P" + st.exp + "…")); else toast(st.rolled ? "You already rolled — finish your turn" : ("Waiting for P" + st.exp + "…"), 1300);
         }
       } catch(x){}
     }
