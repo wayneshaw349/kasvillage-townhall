@@ -416,7 +416,7 @@ const TradeFiSection: React.FC<TradeFiSectionProps> = ({ onClose }) => {
 
         {/* Can You Sell? */}
         <View style={styles.sellInfoBox}>
-          <Text style={styles.sellInfoTitle}>❓ Can You Sell Treasury Bonds?</Text>
+          <Text style={styles.sellInfoTitle}>Can You Sell Treasury Bonds?</Text>
           
           <View style={styles.sellInfoItem}>
             <View style={[styles.sellInfoBorder, { borderLeftColor: '#3B82F6' }]}>
