@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import { useStreamer, isStreamer, maskAddr, STREAMER_BAL, STREAMER_USD } from './streamer_mode'; // KV_STREAMER
 import {
   X,
   Eye,
@@ -169,6 +170,15 @@ const MnemonicExportModal: React.FC<MnemonicExportModalProps> = ({
   };
 
   if (!visible) return null;
+  if (isStreamer()) return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.overlay}><View style={styles.modal}>
+        <Text style={styles.title}>🎥 Streamer Mode is on</Text>
+        <Text style={{ color: '#A8A29E', marginVertical: 12 }}>Seed and key export are locked while streaming. Turn Streamer Mode off in Profile first.</Text>
+        <TouchableOpacity onPress={onClose} style={{ padding: 12, alignItems: 'center' }}><Text style={{ color: '#F59E0B', fontWeight: 'bold' }}>Close</Text></TouchableOpacity>
+      </View></View>
+    </Modal>
+  );
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>

@@ -20,6 +20,7 @@ import { storeSerialHash, getSerialHash, getDeviceHash } from './device_attestat
 import { deriveApt } from './apt_derivation';
 import { uploadToTurbo } from './arweave_upload';
 import * as Clipboard from 'expo-clipboard';
+import { useStreamer, setStreamer, STREAMER_BAL } from './streamer_mode'; // KV_STREAMER
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const rs = (size: number) => Math.round((size * SCREEN_WIDTH) / 375);
@@ -457,6 +458,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
   const [txId, setTxId] = useState<string | null>(null);
   const [kaspaAddress, setKaspaAddress] = useState<string | null>(null);
   const [showAvatar, setShowAvatar] = useState(false);
+  const __sm = useStreamer();
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarUploadTx, setAvatarUploadTx] = useState<string | null>(null);
   const [avatarIdentity, setAvatarIdentity] = useState<AvatarIdentity | null>(null);
@@ -676,6 +678,15 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
         {snailMode && <SnailModeBanner reason={stats.snail_mode_reason} />}
         {eliteMode && !snailMode && <EliteModeBanner />}
 
+        {/* Streamer Mode */}
+        <TouchableOpacity
+          onPress={() => setStreamer(!__sm)}
+          style={{ backgroundColor: __sm ? '#4c1d95' : '#1A1A1A', padding: 12, borderRadius: 8, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: __sm ? '#a78bfa' : '#333' }}
+        >
+          <Text style={{ color: '#fff', fontSize: 14 }}>🎥 Streamer Mode</Text>
+          <Text style={{ color: __sm ? '#a78bfa' : '#888', fontSize: 13, fontWeight: 'bold' }}>{__sm ? 'ON — balances hidden' : 'OFF'}</Text>
+        </TouchableOpacity>
+
         {/* Avatar Viewer (hidden by default) */}
         <TouchableOpacity
           onPress={() => setShowAvatar(!showAvatar)}
@@ -698,7 +709,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
         {kasBalance > 0 && (
           <View style={{ backgroundColor: '#1A1A1A', borderRadius: 8, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#333' }}>
             <Text style={{ color: '#888', fontSize: 12 }}>Balance</Text>
-            <Text style={{ color: '#10B981', fontSize: 18, fontWeight: 'bold' }}>{kasBalance.toFixed(4)} KASPA</Text>
+            <Text style={{ color: '#10B981', fontSize: 18, fontWeight: 'bold' }}>{__sm ? STREAMER_BAL : kasBalance.toFixed(4) + ' KASPA'}</Text>
           </View>
         )}
 

@@ -34,6 +34,7 @@ import type { IOULedger } from './IOUBalanceSheetShare';
 import { calculateNetPosition } from './IOUBalanceSheetShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getFinancialSummary } from './proposal_share';
+import { useStreamer, isStreamer, maskAddr, STREAMER_BAL, STREAMER_USD } from './streamer_mode'; // KV_STREAMER
 // TownHall stats fetched directly via /user-stats POST (no counterparty_lookup needed)
 
 // ============================================================================
@@ -1085,6 +1086,7 @@ const WalletOverview: React.FC<{
   console.log('[WalletUI] render balanceSompi:', balanceSompi.toString());
   const kasBalance = Number(balanceSompi) / 100_000_000;
   const usdValue = kasBalance * usdPerKas;
+  const __sm = useStreamer();
 
   return (
     <View style={walletStyles.container}>
@@ -1105,10 +1107,10 @@ const WalletOverview: React.FC<{
       <Card style={walletStyles.balanceCard}>
         <Text style={walletStyles.balanceLabel}>Balance</Text>
         <Text style={walletStyles.balanceValue}>
-          {kasBalance.toFixed(4)} KASPA
+          {__sm ? STREAMER_BAL : kasBalance.toFixed(4) + ' KASPA'}
         </Text>
         {usdPerKas > 0 && (
-          <Text style={walletStyles.usdValue}>≈ ${usdValue.toFixed(2)} USD</Text>
+          <Text style={walletStyles.usdValue}>{__sm ? STREAMER_USD : '≈ $' + usdValue.toFixed(2) + ' USD'}</Text>
         )}
         <View style={walletStyles.xpRow}>
           <Zap size={rs.s(14)} color={COLORS.amber600} />
@@ -1267,7 +1269,7 @@ const WalletOverview: React.FC<{
                 ) : collatRows.map((r) => (
                   <TouchableOpacity key={r.agreementId} onPress={() => { Clipboard.setStringAsync(r.agreementId); Alert.alert("Copied", r.agreementId); }} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#333" }}>
                     <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                      <Text style={{ color: "#D4AF37", fontSize: 13, fontWeight: "bold" }}>{(Number(r.sompi) / 1e8).toFixed(4)} KAS</Text>
+                      <Text style={{ color: "#D4AF37", fontSize: 13, fontWeight: "bold" }}>{isStreamer() ? STREAMER_BAL : (Number(r.sompi) / 1e8).toFixed(4) + ' KAS'}</Text>
                       <Text style={{ color: "#888", fontSize: 11 }}>{r.role} · {r.count} UTXO{r.count === 1 ? "" : "s"}</Text>
                     </View>
                     <Text style={{ color: "#aaa", fontSize: 11, marginTop: 2 }} numberOfLines={1}>{r.agreementId}</Text>
