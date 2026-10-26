@@ -237,11 +237,13 @@
     }
     setInterval(function(){
       try {
-        var M = window.KV_MP2; if (!(M && M.room && M.started)) return;
-        var mv = window.KV_MOVES || [];
-        if (seenI === null){ seenI = 0; for (var k = 0; k < mv.length; k++) if (mv[k] && mv[k].__acked) seenI = k; return; }   // history is not replayed
+        /* __KV_V417_EVSOLO: solo games have no relay, so their moves count as soon as they are recorded */
+        var M = window.KV_MP2, mp = !!(M && M.room); if (mp && !M.started) return;
+        var mv = window.KV_MOVES || [], okm = function(r){ return !!r && (mp ? !!r.__acked : true); };
+        if (seenI === null){ seenI = -1; for (var k = 0; k < mv.length; k++) if (okm(mv[k])) seenI = k; return; }   // history is not replayed
+        if (mv.length <= seenI) seenI = mv.length - 1;                                       // a new game started a fresh list
         for (var i = seenI + 1; i < mv.length; i++){
-          var r = mv[i]; if (!r || !r.__acked) break; seenI = i;
+          var r = mv[i]; if (!okm(r)) break; seenI = i;
           var ev = toEvent(r); if (ev) queue(ev);
         }
       } catch(e){}
