@@ -53,11 +53,16 @@ export function isOnline(): boolean { return true; }
 export function subscribeToNetworkChanges(_l: (online: boolean) => void): () => void { return () => {}; }
 export function initMailboxAPI(): () => void { return () => {}; }
 
-// Visibility sort: pledge (capped) + freshness half-life. XP joins later via StatSig.
+// KV_PLEDGE_BY_POST: the pledge is what publishing stakes (5 KAS, still yours). A listing whose
+// publish pledge is still in place gets full pledge points; one that spent it gets none. More KAS
+// does not buy rank, so the whale cap is no longer needed.
+export const KV_PLEDGE_FULL_KAS = 5;
+export function kvPledgeScore(pledgeKas: number): number { return Math.min(Math.max(pledgeKas || 0, 0) / KV_PLEDGE_FULL_KAS, 1); }
+// Visibility sort: pledge (in place or not) + freshness half-life. XP joins later via StatSig.
 function visSort(a: { pledgeSompi: bigint; announcedAt: number }, b: { pledgeSompi: bigint; announcedAt: number }): number {
   const score = (e: { pledgeSompi: bigint; announcedAt: number }) => {
     const pledgeKas = Number(e.pledgeSompi) / 1e8;
-    const pledgeScore = Math.min(pledgeKas / 2500, 1.0) * 0.4;
+    const pledgeScore = kvPledgeScore(pledgeKas) * 0.4;
     const ageHours = Math.max(0, (Date.now() / 1000 - e.announcedAt) / 3600);
     const fresh = Math.pow(0.5, ageHours / (24 * 7)) * 0.6; // 7-day half-life for directory
     return pledgeScore + fresh;
@@ -102,7 +107,7 @@ async function kvDealRank(dir: any[], items: any[], maxCfg: number = 12): Promis
     for (const k in byCat) { const a = byCat[k]; const m = a.reduce((x: number, y: number) => x + y, 0) / a.length; const sd = Math.sqrt(a.reduce((x: number, y: number) => x + (y - m) * (y - m), 0) / a.length); stats[k] = { m, sd: Math.max(sd, m * 0.1), n: a.length }; }
     const score = (i: number) => {
       const e: any = dir[i];
-      const pledge = Math.min(Number(e.pledgeSompi) / 1e8 / 2500, 1) * 0.30;
+      const pledge = kvPledgeScore(Number(e.pledgeSompi) / 1e8) * 0.30;
       const ageH = Math.max(0, (Date.now() / 1000 - e.announcedAt) / 3600);
       const fresh = Math.pow(0.5, ageH / 168) * 0.45;
       const st = stats[String(e.category || '').toLowerCase()];
@@ -116,6 +121,37 @@ async function kvDealRank(dir: any[], items: any[], maxCfg: number = 12): Promis
     dir.length = 0; (dir as any).push(...sd2);
     console.log('[DealRank]', n, 'priced of', items.length, Object.keys(stats).map((k) => k + ' n=' + stats[k].n + ' mu=' + stats[k].m.toFixed(1)).join(' | '));
   } catch (e) { console.log('[DealRank] skipped:', e); }
+}
+
+// KV_MY_RANK: the exact score the Mailbox ranks a store by (pledge 30% + freshness 45% + deal 25%),
+// so the Workspace card shows the real number, not an estimate.
+export async function kvMyStoreRank(storeAddress: string): Promise<any> {
+  const dir: any[] = await rebuildDirectory('store', registryAddress('store', NET), NET);
+  const me: any = dir.find((e: any) => e.storeAddress === storeAddress);
+  if (!me) return { listed: false };
+  const cat = String(me.category || '').toLowerCase();
+  const peers = dir.filter((e: any) => String(e.category || '').toLowerCase() === cat);
+  const pick = [me].concat(peers.filter((e: any) => e !== me).slice(0, 11));
+  const effs: number[] = [];
+  let myEff = 0;
+  for (const e of pick) {
+    const v = await kvEffMinKas(e.storeAddress, e.configHash || (e.record && e.record.d && e.record.d.configHash) || '', e.record && e.record.d && e.record.d.coords, e.ownerPubkey);
+    if (e === me) myEff = v;
+    if (v > 0) effs.push(v);
+  }
+  const pledgeKas = Number(me.pledgeSompi) / 1e8;
+  const ageH = Math.max(0, (Date.now() / 1000 - me.announcedAt) / 3600);
+  const pledge = kvPledgeScore(pledgeKas);
+  const fresh = Math.pow(0.5, ageH / 168);
+  let deal = 0.5, dealNote = 'neutral - fewer than 3 priced stores in your category';
+  if (effs.length >= 3 && myEff > 0) {
+    const m = effs.reduce((x, y) => x + y, 0) / effs.length;
+    const sd = Math.sqrt(effs.reduce((x, y) => x + (y - m) * (y - m), 0) / effs.length) || 1;
+    deal = Math.max(0, Math.min(1, 0.5 + ((m - myEff) / sd) / 4));
+    dealNote = 'your best price ' + myEff.toFixed(1) + ' KAS vs category avg ' + m.toFixed(1);
+  } else if (myEff <= 0) dealNote = 'neutral - no priced items yet';
+  const total = pledge * 0.30 + fresh * 0.45 + deal * 0.25;
+  return { listed: true, pledgeKas, ageH, pledge, fresh, deal, dealNote, total, peers: peers.length };
 }
 
 export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<StorefrontEntry>> {

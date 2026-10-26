@@ -3931,6 +3931,23 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   
   // Coupons
   const [coupons, setCoupons] = useState<any[]>([]);
+  // KV_MY_RANK: the real Mailbox score of this store (same formula the Mailbox ranks by)
+  const [myRank, setMyRank] = useState<any>(null);
+  useEffect(() => {
+    if (activeView !== 'coupons') return;
+    let live = true;
+    (async () => {
+      try {
+        const AS = require('@react-native-async-storage/async-storage').default;
+        const raw = await AS.getItem('kv_store_pub_' + hostId);
+        if (!raw) { if (live) setMyRank({ listed: false, unpublished: true }); return; }
+        const st = JSON.parse(raw);
+        const r = await require('./mailbox_kaspa_api').kvMyStoreRank(st.storeAddress);
+        if (live) setMyRank(r);
+      } catch (e: any) { if (live) setMyRank({ error: String(e?.message || e) }); }
+    })();
+    return () => { live = false; };
+  }, [activeView, hostId]);
   const [showCouponForm, setShowCouponForm] = useState(false);
   const [editingCoupon, setEditingCoupon] = useState<any>(null);
   const [couponForm, setCouponForm] = useState({ code: '', discountPercent: '', discountKas: '', maxUses: '10', expiryDays: '30', description: '' });
@@ -5069,22 +5086,24 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 This score determines how high your store ranks in buyer mailboxes.
               </Text>
               {(() => {
-                const avgUsd = stash.length > 0 ? stash.reduce((s, i) => s + (i.dollarPrice || 0), 0) / stash.length : 0;
-                const avgKas = stash.length > 0 ? stash.reduce((s, i) => s + (i.kaspaPrice || 0), 0) / stash.length : 0;
-                const vis = calcVisibilityScore(userXp, 80, avgUsd, avgKas, 0.08, 0, 1, coupons.length > 0);
+                const R: any = myRank;
+                if (!R) return <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, textAlign: 'center', marginVertical: rs.s(10) }}>Reading your listing from the chain...</Text>;
+                if (R.error) return <Text style={{ fontSize: rs.font(11), color: COLORS.red600, textAlign: 'center', marginVertical: rs.s(10) }}>Could not read the Mailbox right now - try again in a moment.</Text>;
+                if (!R.listed) return <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, textAlign: 'center', marginVertical: rs.s(10) }}>{R.unpublished ? 'Publish your store to get a Mailbox score.' : 'Your store is not in the Mailbox right now - announce it to get listed again.'}</Text>;
+                const total = Math.round(R.total * 100);
+                const days = R.ageH / 24;
+                const rows = [
+                  { label: 'Pledge (30%)', score: Math.round(R.pledge * 100), color: '#ec4899', tip: R.pledge >= 1 ? 'Publish pledge in place (' + R.pledgeKas.toFixed(1) + ' KAS, still yours)' : 'Publish pledge spent - republish to restore it' },
+                  { label: 'Freshness (45%)', score: Math.round(R.fresh * 100), color: '#1c1917', tip: 'Last announced ' + (days < 1 ? Math.round(R.ageH) + 'h' : days.toFixed(1) + ' days') + ' ago - halves every 7 days, Announce to refresh' },
+                  { label: 'Deal (25%)', score: Math.round(R.deal * 100), color: '#d97706', tip: R.dealNote + ' - coupons lower your price' },
+                ];
                 return (
                   <View>
                     <View style={{ alignItems: 'center', marginBottom: rs.s(12) }}>
-                      <Text style={{ fontSize: rs.font(42), fontWeight: '900', color: vis.total >= 60 ? COLORS.green600 : vis.total >= 30 ? COLORS.amber600 : COLORS.red600 }}>{vis.total}</Text>
-                      <Text style={{ fontSize: rs.font(11), color: COLORS.stone500 }}>out of 100</Text>
+                      <Text style={{ fontSize: rs.font(42), fontWeight: '900', color: total >= 60 ? COLORS.green600 : total >= 30 ? COLORS.amber600 : COLORS.red600 }}>{total}</Text>
+                      <Text style={{ fontSize: rs.font(11), color: COLORS.stone500 }}>out of 100 · live from the Mailbox</Text>
                     </View>
-                    {[
-                      { label: 'XP (30%)', score: vis.xpScore, color: '#4f46e5', tip: 'Complete agreements to earn XP' },
-                      { label: 'Runway (25%)', score: vis.runwayScore, color: '#16a34a', tip: 'Pledge duration remaining' },
-                      { label: 'Price (25%)', score: vis.priceScore, color: '#d97706', tip: 'Low USD (' + (vis.usdFactor || 0) + '%) + KAS discount (' + (vis.kasDiscountPct || 0) + '%) + coupons' },
-                      { label: 'Pledge (10%)', score: vis.pledgeScore, color: '#9333ea', tip: 'KAS pledged (max 2500)' },
-                      { label: 'Fresh (10%)', score: vis.freshnessScore, color: '#0891b2', tip: '24hr half-life decay' },
-                    ].map(row => (
+                    {rows.map(row => (
                       <View key={row.label} style={{ marginBottom: rs.s(8) }}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
                           <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: COLORS.stone600 }}>{row.label}</Text>
