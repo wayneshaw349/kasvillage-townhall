@@ -15509,6 +15509,16 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
       btn("BUY " + ((N[pos] && N[pos].n) || ("block " + pos)) + " \u00b7 " + price, "#9cd87c",
           function(){ close("buy", pos); });
     }
+    /* __KV_V417_WHY: say why there is nothing to buy, so PASS-only never looks like a bug */
+    if (!canBuy){
+      var why, nm = (N[pos] && N[pos].n) || null, COLS = {1:"#d94f4f",2:"#4f7fd9",3:"#4fd98a",4:"#d9c14f"};
+      if (!nm || !(price > 0)) why = ["🚧 Vacant lot — nothing to buy here", "🏚️ Condemned lot — nothing to buy here", "🌾 Empty field — nothing to buy here"][(+pos || 0) % 3];
+      else if (owner) why = "🏠 " + nm + " is owned by <b style='color:" + (COLS[owner] || "#f0c860") + "'>P" + owner + "</b>" + (+owner === +seat ? " (yours)" : " — rent paid");
+      else why = "💸 Not enough cash for " + nm + " — needs " + price;
+      var lb = document.createElement("div");
+      lb.style.cssText = "align-self:center;padding:8px 12px;background:rgba(20,16,12,.92);border:1px solid #6a5a34;border-radius:8px;font:12px monospace;color:#e8dcc0;max-width:260px;box-shadow:0 4px 18px rgba(0,0,0,.5)";
+      lb.innerHTML = why; p.appendChild(lb);
+    }
     btn("PASS", "#caa64c", function(){ close("pass", 0); });
   }
 
