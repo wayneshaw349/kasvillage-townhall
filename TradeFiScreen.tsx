@@ -277,10 +277,10 @@ const TradeFiSection: React.FC<TradeFiSectionProps> = ({ onClose }) => {
 
           {/* KV_ODE_MALCOLM_X */}
           <Text style={styles.bantuText}>
-            "Kura, au hati fungani kati ya nchi na raia wake."
+            "Kura na hati fungani kati ya nchi na raia wake."
           </Text>
           <Text style={styles.bantuTranslation}>
-            "A ballot, or a bond between a country and its citizens." (Kiswahili)
+            "A ballot and a bond between a country and its citizens." (Kiswahili)
           </Text>
           <Text style={styles.bantuAuthor}>— Wayne Shaw, heshima kwa Malcolm X</Text>
         </View>
