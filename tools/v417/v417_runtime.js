@@ -56,7 +56,7 @@
       }
       if (e[0].indexOf("tok_spr_") === 0){
         if (n.__kvBase == null) n.__kvBase = n.spriteSize || 1.5;
-        var want = slot.crowd > 2 ? n.__kvBase * 0.72 : (slot.crowd > 1 ? n.__kvBase * 0.82 : n.__kvBase);
+        var want = n.__kvHid ? 0.001 : (slot.crowd > 2 ? n.__kvBase * 0.72 : (slot.crowd > 1 ? n.__kvBase * 0.82 : n.__kvBase));   // __kvHid: a mishap is playing
         if (n.spriteSize !== want){ n.spriteSize = want; try { delete n._world; } catch(x2){} }
       }
     });
@@ -135,14 +135,91 @@
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
   setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
 
+  // ---- __KV_V417_MISHAP: a roll the record did not take becomes a funny mishap ----
+  // Instead of a banner and a snap-back, your piece is struck by lightning, blown away, swallowed by a
+  // sinkhole, slips, or gets chased off - then it is back on its real lot. Recorded rolls: nothing extra.
+  (function(){
+    var busy = 0, AC = null;
+    function ac(){ try { var A = window.AudioContext || window.webkitAudioContext; if (!A) return null; AC = window.__kvStartAC || AC || (window.__kvStartAC = new A()); if (AC.state === "suspended") AC.resume(); return AC; } catch(e){ return null; } }
+    function noise(c, dur){ var b = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate), d = b.getChannelData(0); for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; var s = c.createBufferSource(); s.buffer = b; return s; }
+    function env(c, node, t0, a, peak, rel){ var g = c.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0 + a); g.gain.exponentialRampToValueAtTime(0.0001, t0 + a + rel); node.connect(g); g.connect(c.destination); return g; }
+    function tone(c, type, f0, f1, t0, dur, vol){ var o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + dur); env(c, o, t0, 0.01, vol, dur); o.start(t0); o.stop(t0 + dur + 0.05); }
+    var SFX = {
+      bolt: function(c){ var t = c.currentTime, n = noise(c, 1.2), f = c.createBiquadFilter(); f.type = "lowpass"; f.frequency.setValueAtTime(6000, t); f.frequency.exponentialRampToValueAtTime(120, t + 1.1); n.connect(f); env(c, f, t, 0.005, 0.5, 1.1); n.start(t); tone(c, "square", 90, 40, t + 0.05, 0.5, 0.15); },
+      wind: function(c){ var t = c.currentTime, n = noise(c, 1.6), f = c.createBiquadFilter(); f.type = "bandpass"; f.Q.value = 2; f.frequency.setValueAtTime(300, t); f.frequency.exponentialRampToValueAtTime(1400, t + 0.7); f.frequency.exponentialRampToValueAtTime(250, t + 1.5); n.connect(f); env(c, f, t, 0.4, 0.35, 1.1); n.start(t); },
+      sink: function(c){ var t = c.currentTime; tone(c, "sine", 700, 60, t, 0.9, 0.25); tone(c, "triangle", 110, 40, t + 0.85, 0.35, 0.4); },
+      slip: function(c){ var t = c.currentTime; tone(c, "sine", 300, 1100, t, 0.18, 0.2); tone(c, "sine", 1100, 200, t + 0.2, 0.35, 0.2); tone(c, "square", 120, 60, t + 0.6, 0.15, 0.15); },
+      chase: function(c){ var t = c.currentTime; for (var i = 0; i < 9; i++) tone(c, "square", 220 + (i % 2) * 60, 160, t + i * 0.11, 0.06, 0.08); tone(c, "sawtooth", 500, 900, t + 0.2, 0.25, 0.06); }
+    };
+    var KINDS = [
+      { k: "bolt",  icon: "⚡", say: "Struck by lightning!" },
+      { k: "wind",  icon: "🌪️", say: "Blown away by the wind!" },
+      { k: "sink",  icon: "🕳️", say: "A sinkhole opened up!" },
+      { k: "slip",  icon: "🍌", say: "Slipped on a banana!" },
+      { k: "chase", icon: "🏃", say: "Chased off by a crowd!" }
+    ];
+    function el(css, html){ var d = document.createElement("div"); d.style.cssText = "position:fixed;pointer-events:none;z-index:2147483500;" + css; if (html != null) d.innerHTML = html; document.body.appendChild(d); return d; }
+    function anim(d, frames, ms){ try { return d.animate(frames, { duration: ms, easing: "ease-out", fill: "forwards" }); } catch(e){ return null; } }
+    function where(s){
+      try {
+        var cv = document.querySelector("canvas"), r = cv.getBoundingClientRect(), PW = (window.__kvPW || {})[s];
+        var tok = window.KV_NODE && window.KV_NODE("token_p" + s), wp = PW ? { x: PW[0], y: 0.7, z: PW[1] } : (tok && tok.worldPos ? { x: tok.worldPos.x, y: 0.7, z: tok.worldPos.z } : null);
+        var q = wp && window.KV_PROJECT && window.KV_PROJECT(wp); if (!q) return null;
+        return { x: r.left + q.x * r.width / cv.width, y: r.top + q.y * r.height / cv.height };
+      } catch(e){ return null; }
+    }
+    window.__kvMishap = function(s, kind){
+      if (Date.now() - busy < 2500) return; busy = Date.now();
+      var K = KINDS.filter(function(x){ return x.k === kind; })[0] || KINDS[Math.floor(Math.random() * KINDS.length)];
+      var p = where(s) || { x: innerWidth / 2, y: innerHeight / 2 };
+      (window.__kvHidePiece = window.__kvHidePiece || {})[s] = Date.now() + 1500;        // the piece vanishes while it happens
+      var c = ac(); if (c && SFX[K.k]) SFX[K.k](c);
+      try { if (navigator.vibrate) navigator.vibrate([60, 40, 120]); } catch(e){}
+      var bits = [];
+      if (K.k === "bolt"){
+        var fl = el("inset:0;background:#fff;opacity:0"); bits.push(fl); anim(fl, [{ opacity: 0 }, { opacity: .85 }, { opacity: 0 }, { opacity: .6 }, { opacity: 0 }], 420);
+        var b = el("left:" + (p.x - 22) + "px;top:0;width:44px;height:" + p.y + "px",
+          "<svg width='44' height='100%' viewBox='0 0 44 100' preserveAspectRatio='none'><polyline points='30,0 12,38 26,40 8,100' fill='none' stroke='#fff6a8' stroke-width='5'/><polyline points='30,0 12,38 26,40 8,100' fill='none' stroke='#ffd23f' stroke-width='2'/></svg>");
+        bits.push(b); anim(b, [{ opacity: 1 }, { opacity: 1, offset: .5 }, { opacity: 0 }], 600);
+        var sm = el("left:" + (p.x - 20) + "px;top:" + (p.y - 30) + "px;font-size:34px", "💥"); bits.push(sm); anim(sm, [{ transform: "scale(.4)", opacity: 1 }, { transform: "scale(1.6) translateY(-20px)", opacity: 0 }], 1100);
+      } else if (K.k === "wind"){
+        var tw = el("left:" + (p.x - 24) + "px;top:" + (p.y - 40) + "px;font-size:44px", "🌪️"); bits.push(tw);
+        anim(tw, [{ transform: "translateX(0) rotate(0)", opacity: 1 }, { transform: "translateX(" + (innerWidth * .5) + "px) rotate(720deg)", opacity: 0 }], 1500);
+        for (var i = 0; i < 4; i++){ var w = el("left:" + (p.x - 60) + "px;top:" + (p.y - 30 + i * 14) + "px;font-size:20px", "💨"); bits.push(w); anim(w, [{ transform: "translateX(0)", opacity: .9 }, { transform: "translateX(" + (180 + i * 40) + "px)", opacity: 0 }], 900 + i * 150); }
+      } else if (K.k === "sink"){
+        var h = el("left:" + (p.x - 30) + "px;top:" + (p.y - 6) + "px;width:60px;height:18px;border-radius:50%;background:radial-gradient(#000 40%,#2a1d12 70%,transparent 72%)"); bits.push(h);
+        anim(h, [{ transform: "scale(0)" }, { transform: "scale(1.3)", offset: .3 }, { transform: "scale(1.3)", offset: .75 }, { transform: "scale(0)" }], 1400);
+        var dn = el("left:" + (p.x - 16) + "px;top:" + (p.y - 34) + "px;font-size:28px", "😵"); bits.push(dn); anim(dn, [{ transform: "translateY(0) scale(1)", opacity: 1 }, { transform: "translateY(26px) scale(.2)", opacity: 0 }], 900);
+      } else if (K.k === "slip"){
+        var bn = el("left:" + (p.x - 14) + "px;top:" + (p.y - 8) + "px;font-size:26px", "🍌"); bits.push(bn); anim(bn, [{ opacity: 1 }, { opacity: 1, offset: .7 }, { opacity: 0 }], 1400);
+        var st = el("left:" + (p.x - 18) + "px;top:" + (p.y - 50) + "px;font-size:30px", "💫"); bits.push(st); anim(st, [{ transform: "rotate(0) translateY(0)", opacity: 1 }, { transform: "rotate(540deg) translateY(-30px)", opacity: 0 }], 1300);
+      } else {
+        for (var j = 0; j < 4; j++){ var r = el("left:" + (-50 - j * 36) + "px;top:" + (p.y - 30 + (j % 2) * 10) + "px;font-size:26px", "🏃"); bits.push(r); anim(r, [{ transform: "translateX(0)" }, { transform: "translateX(" + (p.x + 140 + j * 36) + "px)" }], 1300); }
+        var ex = el("left:" + (p.x - 10) + "px;top:" + (p.y - 50) + "px;font:900 26px Impact,sans-serif;color:#ffd23f", "!"); bits.push(ex); anim(ex, [{ transform: "scale(.5)", opacity: 1 }, { transform: "scale(1.5)", opacity: 0 }], 900);
+      }
+      var cap = el("left:50%;top:22%;transform:translateX(-50%);background:#14100c;border:2px solid #caa64c;border-radius:9px;padding:6px 14px;font:700 13px monospace;color:#f0c860;white-space:nowrap", K.icon + " " + K.say);
+      bits.push(cap); anim(cap, [{ opacity: 0, transform: "translateX(-50%) scale(.8)" }, { opacity: 1, transform: "translateX(-50%) scale(1)", offset: .15 }, { opacity: 1, offset: .8 }, { opacity: 0 }], 2000);
+      setTimeout(function(){ bits.forEach(function(d){ try { d.remove(); } catch(e){} }); }, 2200);
+      // bring the piece home from the record while it is out of sight
+      setTimeout(function(){ try { var M = window.KV_MP2; if (M && M.resync && (!window.__kvMishapRs || Date.now() - window.__kvMishapRs > 4000)){ window.__kvMishapRs = Date.now(); M.resync("mishap"); } } catch(e){} }, 300);
+    };
+    // the piece stays invisible while the mishap plays (placeAll sizes the sprite)
+    setInterval(function(){
+      var H = window.__kvHidePiece || {};
+      for (var s in H){ var n = window.KV_NODE && window.KV_NODE("tok_spr_" + s); if (!n) continue; n.__kvHid = Date.now() < H[s]; if (!n.__kvHid) delete H[s]; }
+    }, 60);
+  })();
+
   // ---- __KV_V417_ROLLFB: tell the player what the record did with their roll ----
   (function(){
     var COL = {1:"#d94f4f",2:"#4f7fd9",3:"#4fd98a",4:"#d9c14f"}, seenI = null, lastNo = 0;
     function me(){ var M = window.KV_MP2; return (M && M.room && M.started) ? M.seat : null; }
     window.__kvRollNo = function(why){
       if (Date.now() - lastNo < 1500) return; lastNo = Date.now();
-      var d = toast("<b style='font:900 15px monospace;color:#ff8a6a'>✗ ROLL NOT ACCEPTED</b><br><span style='font:400 11px monospace;color:#e8dcc0'>" + why + "</span>", 1600);
-      d.style.borderColor = "#ff8a6a";
+      if (/already rolled|waiting for/i.test(why)){                                    // a blocked tap: nothing moved, just a hint
+        var d = toast("<span style='font:400 12px monospace;color:#e8dcc0'>" + why + "</span>", 1200); d.style.padding = "5px 12px"; return;
+      }
+      var s = me(); if (s && window.__kvMishap) window.__kvMishap(s);                   // the record turned the roll away: make it part of the game
     };
     setInterval(function(){
       try {
@@ -152,7 +229,7 @@
         for (var i = seenI + 1; i < mv.length; i++){
           var r = mv[i]; if (!r || !r.__acked) break;
           seenI = i;
-          if (String(r.a) === "roll" && +r.s === +s){
+          if (false && String(r.a) === "roll" && +r.s === +s){   /* recorded rolls: nothing extra, by design */
             var dv = (r.d1 != null && r.d2 != null) ? (r.d1 + " + " + r.d2 + " = " + (+r.d1 + +r.d2)) : ("rolled " + r.v);
             var d = toast("<b style='font:900 15px monospace;color:" + (COL[s] || "#f0c860") + "'>✓ ROLL RECORDED</b><br><span style='font:400 11px monospace;color:#e8dcc0'>" + dv + "</span>", 1500);
             d.style.borderColor = COL[s] || "#caa64c"; d.style.top = "30%";
