@@ -135,6 +135,120 @@
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
   setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
 
+  // ---- __KV_V417_EVENTS: table life - everyone sees buys, renovations, offers and scenario cards play out ----
+  // Purely cosmetic: driven by confirmed moves in the record, never writes state, never posts anything.
+  (function(){
+    var COL = {1:"#d94f4f",2:"#4f7fd9",3:"#4fd98a",4:"#d9c14f"}, seenI = null, Q = [], playing = 0;
+    function ac(){ try { var A = window.AudioContext || window.webkitAudioContext; if (!A) return null; var c = window.__kvStartAC || (window.__kvStartAC = new A()); if (c.state === "suspended") c.resume(); return c; } catch(e){ return null; } }
+    function tone(c, type, f0, f1, t0, dur, vol){ var o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur); o.connect(g); g.connect(c.destination); o.start(t0); o.stop(t0 + dur + 0.05); }
+    var SND = {
+      sold:   function(c,t){ tone(c,"square",1320,1320,t,0.08,0.07); tone(c,"square",1760,1760,t+0.09,0.18,0.07); },
+      build:  function(c,t){ for (var i = 0; i < 5; i++) tone(c,"square",180,90,t+i*0.16,0.05,0.12); },
+      water:  function(c,t){ for (var i = 0; i < 4; i++) tone(c,"sine",900+i*120,400,t+i*0.22,0.12,0.09); },
+      picket: function(c,t){ for (var i = 0; i < 4; i++) tone(c,"sawtooth",220,200,t+i*0.25,0.14,0.05); },
+      tax:    function(c,t){ tone(c,"triangle",660,660,t,0.1,0.1); tone(c,"triangle",520,520,t+0.12,0.1,0.1); tone(c,"triangle",390,390,t+0.24,0.22,0.1); },
+      car:    function(c,t){ tone(c,"square",440,440,t,0.14,0.07); tone(c,"square",554,554,t+0.18,0.2,0.07); },
+      served: function(c,t){ tone(c,"sine",140,60,t,0.25,0.35); tone(c,"sine",140,60,t+0.32,0.25,0.35); },
+      alarm:  function(c,t){ for (var i = 0; i < 3; i++){ tone(c,"square",880,880,t+i*0.3,0.12,0.06); tone(c,"square",660,660,t+i*0.3+0.15,0.12,0.06); } },
+      cash:   function(c,t){ tone(c,"sine",1046,1568,t,0.25,0.09); }
+    };
+    // scenario id -> kind of scene + a short line
+    var SCN = {
+      union:["picket","Tenants are picketing!"], rent_late:["picket","Tenants are protesting the rent"], deposit:["picket","Tenant protest over a deposit"],
+      parking:["picket","Parking protest outside"], noise:["picket","Neighbours are out complaining"], vacancy:["picket","Nobody's home — the unit sits empty"],
+      squatter:["picket","A squatter moved in!"], sublet:["picket","Surprise sublet tenants!"],
+      roof_leak:["water","Water pouring off the roof!"], flood:["water","The basement flooded!"], damp:["water","Damp creeping through the walls"],
+      boiler:["build","The boiler died — repair crew on site"], wiring:["build","Electricians rewiring"], elevator:["build","Lift repair crew"],
+      partywall:["build","Shoring up the party wall"], asbestos:["build","Hazmat crew on site"], pest:["build","Pest control has arrived"],
+      contractor:["build","The contractor walked off the job!"], greenloan:["build","Green retrofit under way"],
+      assessment:["tax","The tax collector is here"], insurance:["tax","Insurance wants more"], utilities:["tax","The utility bill arrived"],
+      refinance:["tax","The bank is calling"], appraisal:["tax","The appraiser is here"], manager:["tax","The manager's books don't add up"],
+      buyer:["car","A rich investor pulls up!"], shortlet:["car","Short-let tourists arrive"], valuation:["car","A rival is talking you down"],
+      lawsuit:["served","You've been served — lawsuit!"], heirs:["served","Served — heirs contest the title!"], code:["served","Served — code violations!"],
+      zoning:["served","Zoning notice posted"], fire:["alarm","Fire safety alarm!"], security:["alarm","Break-in alarm!"], graffiti:["picket","Taggers hit the frontage"]
+    };
+    function names(){ return window.KV_NAMES || {}; }
+    function tileXY(t){
+      try { var nm = (names()[t] || {}).n; if (!nm) return null;
+        var ds = document.querySelectorAll("body > div");
+        for (var i = 0; i < ds.length; i++){ var d = ds[i]; if (d.textContent === nm && /z-index: 56/.test(d.style.cssText)){ var r = d.getBoundingClientRect(); if (r.width) return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; } }
+      } catch(e){} return null;
+    }
+    function pieceXY(s){
+      try { var cv = document.querySelector("canvas"), r = cv.getBoundingClientRect(), PW = (window.__kvPW || {})[s]; if (!PW || !window.KV_PROJECT) return null;
+        var q = window.KV_PROJECT({ x: PW[0], y: 0.7, z: PW[1] }); return q ? { x: r.left + q.x * r.width / cv.width, y: r.top + q.y * r.height / cv.height } : null; } catch(e){ return null; }
+    }
+    function el(css, html){ var d = document.createElement("div"); d.style.cssText = "position:fixed;pointer-events:none;z-index:2147483400;" + css; if (html != null) d.innerHTML = html; document.body.appendChild(d); return d; }
+    function go(d, fr, ms, delay){ try { d.animate(fr, { duration: ms, delay: delay || 0, easing: "ease-out", fill: "both" }); } catch(e){} }
+    function cap(txt, s){ var d = el("left:50%;top:14%;transform:translateX(-50%);background:#14100c;border:2px solid " + (COL[s] || "#caa64c") + ";border-radius:9px;padding:5px 12px;font:700 12px monospace;color:#f4e4c1;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis", txt);
+      go(d, [{ opacity: 0 }, { opacity: 1, offset: .12 }, { opacity: 1, offset: .85 }, { opacity: 0 }], 2200); return d; }
+    var SCENE = {
+      sold: function(p, s){ var b = [];
+        var sg = el("left:" + (p.x - 34) + "px;top:" + (p.y - 62) + "px;width:68px;text-align:center;font:900 11px monospace;background:#f4e4c1;color:#14100c;border:2px solid #5b4630;border-radius:4px;padding:3px 0", "FOR SALE");
+        var post = el("left:" + (p.x - 2) + "px;top:" + (p.y - 40) + "px;width:4px;height:34px;background:#5b4630"); b.push(sg, post);
+        go(sg, [{ transform: "rotateY(0)" }, { transform: "rotateY(90deg)", offset: .35 }, { transform: "rotateY(0)" }], 900, 500);
+        setTimeout(function(){ sg.textContent = "SOLD · P" + s; sg.style.background = COL[s] || "#f0c860"; sg.style.color = "#14100c"; }, 820);
+        var cn = el("left:" + (p.x - 10) + "px;top:" + (p.y - 30) + "px;font-size:20px", "🪙"); b.push(cn); go(cn, [{ transform: "translateY(0)", opacity: 0 }, { transform: "translateY(-46px)", opacity: 1, offset: .4 }, { transform: "translateY(-70px)", opacity: 0 }], 1200, 900);
+        return b; },
+      build: function(p){ var b = [el("left:" + (p.x - 30) + "px;top:" + (p.y - 64) + "px;font-size:34px", "🏗️"), el("left:" + (p.x + 4) + "px;top:" + (p.y - 30) + "px;font-size:22px", "🔨"), el("left:" + (p.x - 22) + "px;top:" + (p.y - 18) + "px;font-size:18px", "🧱")];
+        go(b[0], [{ transform: "translateY(20px)", opacity: 0 }, { transform: "translateY(0)", opacity: 1, offset: .2 }, { opacity: 1, offset: .85 }, { opacity: 0 }], 1900);
+        go(b[1], [{ transform: "rotate(0)" }, { transform: "rotate(-50deg)" }, { transform: "rotate(0)" }, { transform: "rotate(-50deg)" }, { transform: "rotate(0)" }, { transform: "rotate(-50deg)" }, { transform: "rotate(0)", opacity: 0 }], 1800);
+        for (var i = 0; i < 5; i++){ var d = el("left:" + (p.x - 20 + i * 9) + "px;top:" + (p.y - 6) + "px;width:8px;height:8px;border-radius:50%;background:#bfae93"); b.push(d); go(d, [{ transform: "translate(0,0) scale(.5)", opacity: .9 }, { transform: "translate(" + (i * 6 - 12) + "px,-26px) scale(1.6)", opacity: 0 }], 900, i * 260); }
+        go(b[2], [{ opacity: 1 }, { opacity: 1, offset: .8 }, { opacity: 0 }], 1900); return b; },
+      water: function(p){ var b = [el("left:" + (p.x - 16) + "px;top:" + (p.y - 70) + "px;font-size:28px", "🌧️")];
+        for (var i = 0; i < 7; i++){ var d = el("left:" + (p.x - 18 + (i % 4) * 11) + "px;top:" + (p.y - 46) + "px;font-size:13px", "💧"); b.push(d); go(d, [{ transform: "translateY(0)", opacity: 1 }, { transform: "translateY(40px)", opacity: 0 }], 600, i * 180); }
+        var pd = el("left:" + (p.x - 26) + "px;top:" + (p.y - 4) + "px;width:52px;height:12px;border-radius:50%;background:rgba(70,140,220,.55)"); b.push(pd);
+        go(pd, [{ transform: "scale(0)" }, { transform: "scale(1)", offset: .6 }, { transform: "scale(1)", opacity: 1, offset: .9 }, { opacity: 0 }], 1900); go(b[0], [{ opacity: 1 }, { opacity: 1, offset: .85 }, { opacity: 0 }], 1900); return b; },
+      picket: function(p){ var b = [];
+        for (var i = 0; i < 3; i++){ var d = el("left:" + (p.x - 44 + i * 30) + "px;top:" + (p.y - 44) + "px;font-size:20px;text-align:center", "<div style='font:900 8px monospace;background:#f4e4c1;color:#a02020;border:1px solid #5b4630;padding:1px 2px'>" + ["NO!", "FAIR RENT", "STRIKE"][i] + "</div>🧍");
+          b.push(d); go(d, [{ transform: "translateY(0)" }, { transform: "translateY(-6px)" }, { transform: "translateY(0)" }, { transform: "translateY(-6px)" }, { transform: "translateY(0)" }, { transform: "translateY(-6px)" }, { transform: "translateY(0)", opacity: 0 }], 1900, i * 120); }
+        return b; },
+      tax: function(p){ var b = [el("left:-40px;top:" + (p.y - 36) + "px;font-size:26px", "🕴️💼"), el("left:" + (p.x - 8) + "px;top:" + (p.y - 50) + "px;font-size:20px", "🧾")];
+        go(b[0], [{ transform: "translateX(0)" }, { transform: "translateX(" + (p.x - 10) + "px)", offset: .45 }, { transform: "translateX(" + (p.x - 10) + "px)", offset: .7 }, { transform: "translateX(" + (p.x + 120) + "px)", opacity: 0 }], 2000);
+        go(b[1], [{ opacity: 0, transform: "scale(.4)" }, { opacity: 0, offset: .45 }, { opacity: 1, transform: "scale(1.3)", offset: .55 }, { opacity: 0, transform: "translateY(-20px)" }], 2000); return b; },
+      car: function(p){ var b = [el("left:-60px;top:" + (p.y - 30) + "px;font-size:30px", "🚘"), el("left:" + (p.x + 12) + "px;top:" + (p.y - 54) + "px;font-size:20px", "💰")];
+        go(b[0], [{ transform: "translateX(0) scaleX(-1)" }, { transform: "translateX(" + (p.x + 20) + "px) scaleX(-1)", offset: .45 }, { transform: "translateX(" + (p.x + 20) + "px) scaleX(-1)", offset: .75 }, { transform: "translateX(" + (innerWidth + 80) + "px) scaleX(-1)" }], 2000);
+        go(b[1], [{ opacity: 0 }, { opacity: 0, offset: .45 }, { opacity: 1, transform: "scale(1.4)", offset: .55 }, { opacity: 0, transform: "translateY(-24px)" }], 2000); return b; },
+      served: function(p){ var b = [el("left:" + (innerWidth + 20) + "px;top:" + (p.y - 36) + "px;font-size:26px", "🧑‍💼📜"), el("left:" + (p.x - 30) + "px;top:" + (p.y - 64) + "px;font:900 14px Impact,sans-serif;color:#ffd23f;text-shadow:2px 2px 0 #14100c", "SERVED!")];
+        go(b[0], [{ transform: "translateX(0)" }, { transform: "translateX(" + (p.x - innerWidth - 40) + "px)", offset: .4 }, { transform: "translateX(" + (p.x - innerWidth - 40) + "px)", offset: .7 }, { transform: "translateX(40px)", opacity: 0 }], 2000);
+        go(b[1], [{ opacity: 0, transform: "scale(.3)" }, { opacity: 0, offset: .4 }, { opacity: 1, transform: "scale(1.2)", offset: .5 }, { opacity: 1, offset: .8 }, { opacity: 0 }], 2000); return b; },
+      alarm: function(p){ var b = [el("left:" + (p.x - 16) + "px;top:" + (p.y - 54) + "px;font-size:30px", "🚨")];
+        go(b[0], [{ opacity: 1 }, { opacity: .2 }, { opacity: 1 }, { opacity: .2 }, { opacity: 1 }, { opacity: 0 }], 1800); return b; },
+      offer: function(p){ return SCENE.car(p); }
+    };
+    function play(ev){
+      var s = ev.s, p = (ev.tile != null && tileXY(ev.tile)) || pieceXY(s) || { x: innerWidth / 2, y: innerHeight / 2 };
+      var c = ac(); if (c && SND[ev.snd]) SND[ev.snd](c, c.currentTime);
+      var bits = (SCENE[ev.scene] || SCENE.sold)(p, s) || []; bits.push(cap(ev.txt, s));
+      setTimeout(function(){ bits.forEach(function(d){ try { d.remove(); } catch(e){} }); }, 2400);
+    }
+    function pump(){ if (playing || !Q.length) return; playing = 1; play(Q.shift()); setTimeout(function(){ playing = 0; pump(); }, 2300); }
+    function queue(ev){ Q.push(ev); while (Q.length > 3) Q.shift(); pump(); }
+    function toEvent(r){
+      var a = String(r.a), s = +r.s, N = names(), m;
+      if (a === "buy"){ var t = +r.v; if (!(N[t] && N[t].n)) return null; return { s: s, tile: t, scene: "sold", snd: "sold", txt: "🪧 P" + s + " bought " + N[t].n }; }
+      if (a === "p2pbuy"){ var t2 = +r.v; return { s: s, tile: t2, scene: "sold", snd: "cash", txt: "🤝 P" + s + " bought " + ((N[t2] && N[t2].n) || "a block") + " in a deal" }; }
+      if (a === "renovate"){ var t3 = +r.v; return { s: s, tile: t3, scene: "build", snd: "build", txt: "🏗️ P" + s + " is renovating " + ((N[t3] && N[t3].n) || "a block") }; }
+      if ((m = a.match(/^bid:(\d+)$/))){ var t4 = +m[1]; return { s: s, tile: t4, scene: "car", snd: "car", txt: "🚘 P" + s + " offers " + r.v + " for " + ((N[t4] && N[t4].n) || "a block") }; }
+      if ((m = a.match(/^mgmt:([a-z_]+)$/))){ var k = SCN[m[1]]; if (!k) return null; var sc = { picket: "picket", water: "water", build: "build", tax: "tax", car: "car", served: "served", alarm: "alarm" }[k[0]];
+        return { s: s, tile: null, scene: sc, snd: k[0], txt: "P" + s + " · " + k[1] }; }
+      return null;
+    }
+    setInterval(function(){
+      try {
+        var M = window.KV_MP2; if (!(M && M.room && M.started)) return;
+        var mv = window.KV_MOVES || [];
+        if (seenI === null){ seenI = 0; for (var k = 0; k < mv.length; k++) if (mv[k] && mv[k].__acked) seenI = k; return; }   // history is not replayed
+        for (var i = seenI + 1; i < mv.length; i++){
+          var r = mv[i]; if (!r || !r.__acked) break; seenI = i;
+          var ev = toEvent(r); if (ev) queue(ev);
+        }
+      } catch(e){}
+    }, 300);
+    window.__kvEventDemo = function(a, v, s){ var ev = toEvent({ a: a, v: v, s: s || 1 }); if (ev) queue(ev); return !!ev; };   // for testing from the console
+  })();
+
   // ---- __KV_V417_MISHAP: a roll the record did not take becomes a funny mishap ----
   // Instead of a banner and a snap-back, your piece is struck by lightning, blown away, swallowed by a
   // sinkhole, slips, or gets chased off - then it is back on its real lot. Recorded rolls: nothing extra.
