@@ -11568,6 +11568,8 @@ async function __api_direct(path, opts){
     function esc(x){ return String(x).replace(/[<>&"']/g,function(c){return {"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;","'":"&#39;"}[c];}); }
     function nm(t){ var N=window.KV_NAMES||{}; return (N[t]&&N[t].n)||("block "+t); }
     function owners(){ var w=window.KV_WORLD; return (w&&w.owners)||{}; }
+    /* __KV_V417_STREAM */ function kvSM(){ try{ return window.__kvStreamer===true||localStorage.getItem("kv_streamer")==="1"; }catch(e){ return window.__kvStreamer===true; } }
+    function kvMask(c){ c=String(c||""); return c.length<5 ? "•••" : c.slice(0,2)+"•••"+c.slice(-2); }
     function myContact(){ try{ return localStorage.getItem("kv_contact")||window.KV_MY_CONTACT||""; }catch(e){ return window.KV_MY_CONTACT||""; } }
     function cleanContact(v){ return String(v||"").replace(/[<>"'`]/g,"").trim().slice(0,80); }
     var offers={}, seen={}, sentAt={};
@@ -11585,6 +11587,7 @@ async function __api_direct(path, opts){
     function openContact(o){
       var text="Hi! About "+nm(o.tile)+" in KasCity: you made an offer. Let's agree here, settle wallet-to-wallet in KasVillage (direct send or a FROST agreement), then I'll press TRANSFER in the game.";
       try{ if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage(JSON.stringify({ kvcontact:{ to:o.contact, text:text } })); return; } }catch(e){}
+      if(kvSM()){ var cp=o.contact+"  —  "+text; try{ navigator.clipboard.writeText(cp); log("🎥 P"+o.buyer+"'s contact ("+kvMask(o.contact)+") + message copied — paste it off-stream","#c4b5fd"); }catch(e){ log("🎥 streamer mode: turn it off to see P"+o.buyer+"'s contact","#c4b5fd"); } return; }
       try{ window.prompt("Contact P"+o.buyer+" and send this message:", o.contact+"  —  "+text); }catch(e){}
     }
     function render(force){
@@ -11593,11 +11596,11 @@ async function __api_direct(path, opts){
       scan();
       var ow=owners(), me=+M.seat, N=window.KV_NAMES||{};
       var h="<div class='mut' style='font-size:11px'>Deals are made outside the game. No prices or payments here — agree in chat, settle in your KasVillage wallet, then the owner presses TRANSFER.</div>";
-      h+="<h4>my contact</h4><div><input id='kvo_c' style='width:200px' value='"+esc(myContact())+"' placeholder='@telegram or email'> <button id='kvo_cs'>save</button></div>";
+      var sm=kvSM(); h+="<h4>my contact <button id='kvo_sm' style='font-size:11px;"+(sm?"background:#4c1d95;color:#fff":"")+"'>🎥 streamer "+(sm?"ON":"off")+"</button></h4><div><input id='kvo_c' type='"+(sm?"password":"text")+"' style='width:200px' value='"+esc(myContact())+"' placeholder='@telegram or email'> <button id='kvo_cs'>save</button></div>";
       h+="<h4>make an offer</h4>";
       var opts=""; Object.keys(N).forEach(function(t){ var o=+ow["t"+t]||0; if(me>=1 && o && o!==me) opts+="<option value='"+t+"'>"+esc(N[t].n)+" (P"+o+")</option>"; });
       h+= opts ? "<div><select id='kvo_t'>"+opts+"</select> <button id='kvo_send'>Make an offer</button></div><div id='kvo_m' style='font-size:11px'></div>" : "<div class='mut'>no blocks owned by other players yet</div>";
-      h+="<h4>offers on my blocks</h4>"; var any=0;
+      h+="<h4>offers on my blocks</h4><div style='font-size:11px;color:#e0a040'>⚠ Only trust the handle you open from here. Never pay first to someone who DMs you.</div>"; var any=0;
       Object.keys(offers).forEach(function(k){ var o=offers[k]; if(me<1 || o.seller!==me || (+ow["t"+o.tile]||0)!==me) return; any=1;
         h+="<div class='row'>P"+o.buyer+" wants "+esc(nm(o.tile))+(o.contact?" <button data-ct='"+esc(k)+"'>Contact P"+o.buyer+"</button>":" <span class='mut'>(no contact shared)</span>")+"</div>"; });
       if(!any) h+="<div class='mut'>none</div>";
@@ -11608,6 +11611,7 @@ async function __api_direct(path, opts){
       pan.innerHTML=h;
       var cs=document.getElementById("kvo_c"); if(cs) ["keydown","keyup","keypress","paste"].forEach(function(t){ cs.addEventListener(t,function(e){ e.stopPropagation(); }); });
       var sv=document.getElementById("kvo_cs"); if(sv) sv.onclick=function(){ try{ localStorage.setItem("kv_contact", cleanContact(document.getElementById("kvo_c").value)); }catch(e){} render(true); };
+      var smb=document.getElementById("kvo_sm"); if(smb) smb.onclick=function(){ var on=!kvSM(); try{ localStorage.setItem("kv_streamer", on?"1":"0"); }catch(e){} window.__kvStreamer=on; log(on?"🎥 streamer mode ON — contacts hidden":"streamer mode off","#c4b5fd"); render(true); };
       var sd=document.getElementById("kvo_send"); if(sd) sd.onclick=function(){
         var t=+document.getElementById("kvo_t").value, o=+ow["t"+t]||0, c=cleanContact(myContact()||(document.getElementById("kvo_c")||{}).value);
         var m=document.getElementById("kvo_m");
