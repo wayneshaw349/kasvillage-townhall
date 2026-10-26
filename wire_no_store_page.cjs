@@ -5,7 +5,7 @@
 const fs = require('fs');
 const F = 'VillageMailbox.tsx';
 const A = '                        {cfg.pageHash ? (\n';
-const B = '                        {false && cfg.pageHash ? ( /* KV_NO_STORE_PAGE: stores are wallet-drawn - legacy store pages no longer render */\n';
+const B = '                        {(globalThis as any).__kvStorePages === true && cfg.pageHash ? ( /* KV_NO_STORE_PAGE: stores are wallet-drawn - legacy store pages no longer render */\n';
 const raw = fs.readFileSync(F, 'utf8'); const crlf = /\r\n/.test(raw);
 let t = crlf ? raw.replace(/\r\n/g, '\n') : raw;
 if (t.includes('KV_NO_STORE_PAGE')) { console.log('  done  ' + F + ' (already changed)'); process.exit(0); }

@@ -2241,7 +2241,7 @@ export default function VillageMailbox() {
                     ) : (
                       <View>
                         {/* On-chain HTML page: hash-pinned, sandboxed, kv:// links only */}
-                        {false && cfg.pageHash ? ( /* KV_NO_STORE_PAGE: stores are wallet-drawn - legacy store pages no longer render */
+                        {(globalThis as any).__kvStorePages === true && cfg.pageHash ? ( /* KV_NO_STORE_PAGE: stores are wallet-drawn - legacy store pages no longer render */
                           <View style={{ height: rs.s(360), marginBottom: rs.s(10), borderRadius: rs.s(8), overflow: 'hidden', borderWidth: 1, borderColor: COLORS.stone200 }}>
                             <OnChainPageView
                               storeAddress={storeView.entry.arweaveTx}
