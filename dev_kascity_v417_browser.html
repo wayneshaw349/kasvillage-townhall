@@ -15984,6 +15984,44 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
   setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
 
+  // ---- __KV_V417_ONEROLL: one roll per turn on your screen ----
+  // Your own taps on Roll only count when the chain says it is your turn and you have not rolled yet.
+  // Extra taps used to move your piece again locally (the chain kept one roll, then a resync pulled you
+  // back), so the board showed two or three moves. Replays of other players (synthetic clicks) pass.
+  (function(){
+    function chainTurn(me){
+      var mv = (window.KV_MOVES || []), M = window.KV_MP2 || {}, lr = null, lri = -1;
+      for (var i = mv.length - 1; i >= 0; i--){ var r = mv[i]; if (r && String(r.a) === "roll" && (r.__acked || (r.__sent && +r.s === +me))){ lr = r; lri = i; break; } }
+      if (!lr){ var op = M.opener || null; return { exp: op, rolled: false }; }
+      var closed = false;
+      for (var j = lri + 1; j < mv.length; j++){ var q = mv[j]; if (q && q.__acked && +q.s === +lr.s && /^(buy|pass|end|court)$/.test(String(q.a))){ closed = true; break; } }
+      if (!closed) return { exp: +lr.s, rolled: +lr.s === +me };
+      return { exp: (+lr.s % 4) + 1, rolled: false };
+    }
+    function isRoll(el){
+      if (!el || !el.closest) return false;
+      if (el.closest("#kvbigroll")) return true;
+      var c = el.closest("div[data-i],button"); return !!(c && /^\s*▸?\s*Roll\b|^ROLL$/i.test((c.textContent || "").trim()));
+    }
+    var lastNote = 0;
+    function guard(e){
+      try {
+        if (!e.isTrusted) return;                                                   // engine replays are synthetic
+        var M = window.KV_MP2; if (!(M && M.room && M.started)) return;
+        if (!isRoll(e.target)) return;
+        var me = M.seat, st = chainTurn(me);
+        if (st.exp == null) return;                                                 // opener not known yet: leave it
+        if (st.exp === me && !st.rolled) return;                                    // your turn, first roll: go
+        e.preventDefault(); e.stopPropagation(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        if (Date.now() - lastNote > 1500 && e.type === "click"){
+          lastNote = Date.now();
+          toast(st.rolled ? "You already rolled — finish your turn" : ("Waiting for P" + st.exp + "…"), 1300);
+        }
+      } catch(x){}
+    }
+    ["pointerdown", "mousedown", "touchstart", "pointerup", "mouseup", "touchend", "click"].forEach(function(t){ document.addEventListener(t, guard, true); });
+  })();
+
   // ---- __KV_V417_QUIET: sync housekeeping stays in COPY LOG, off the player's screen ----
   (function(){
     var TECH = /RESYNC|resyncing|drifted|dropped P\d|self-heal|half-open|holding your roll|stall-scan|failsafe|relay divergence|reads pinned|fan-out|corrected dice|turnlock|blocked an outside|blocked P\d|cleared a stale|stuck modal|orderer|append: adopted|adopted (snapshot|relay)|engine (on|lagging|untouched)|mid-fuse|lag breaker|chain expects|the chain is on|clock re-anchored|relay (refused|nodes|:)|node discovery|chain polling|final bell — the chain|state updated from|update after move|adopted \w+ P\d @|armed —|observe mode|systems ok|^offers: |KV_RELAY|composer removed|retired —|derived from the chain|posts to the chain|play by play ready/i;

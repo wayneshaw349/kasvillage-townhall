@@ -48,14 +48,15 @@ async function wire(ctx){
         const vis = [...document.querySelectorAll('button,div[data-i]')].filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(b).visibility !== 'hidden'; });
         const pick = vis.find(b => /^\s*▸?\s*Buy\b/.test(b.textContent)) || vis.find(b => /^\s*▸?\s*Roll\b|^ROLL$|🎲/.test(b.textContent.trim())) ||
                      vis.find(b => /Continue|^OK|Keep it|Take the|Decline|^▸ Pass/.test(b.textContent.trim()));
-        if (pick && Math.random() < 0.7) pick.click();
-      }).catch(() => {});
+        if (pick && Math.random() < 0.7){ const r = pick.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
+        return null;
+      }).then(async xy => { if (xy) { await p.mouse.click(xy[0], xy[1]); if (Math.random() < 0.35) { await sleep(150); await p.mouse.click(xy[0], xy[1]); } } }).catch(() => {});
     }
     await sleep(1200 + Math.random() * 800);
   }
   const out = [];
   for (let k = 0; k < 4; k++) {
-    const r = await pages[k].evaluate(() => ({ seat: window.KV_MP2 && window.KV_MP2.seat, nl: (window.__kvAllNL || []).slice(), moves: (window.KV_MOVES || []).filter(Boolean).map(m => m.s + ':' + m.a + (m.__acked ? '' : '?')) })).catch(e => ({ err: String(e) }));
+    const r = await pages[k].evaluate(() => ({ sync: window.__kvSyncStats, seat: window.KV_MP2 && window.KV_MP2.seat, nl: (window.__kvAllNL || []).slice(), moves: (window.KV_MOVES || []).filter(Boolean).map(m => m.s + ':' + m.a + (m.__acked ? '' : '?')) })).catch(e => ({ err: String(e) }));
     r.errs = pages[k].__err || 0; r.roll = pages[k].__roll; out.push(r);
   }
   fs.writeFileSync('result_' + TAG + '.json', JSON.stringify(out, null, 1));
@@ -68,5 +69,8 @@ async function wire(ctx){
   console.log('self-heal    ', cnt(/self-heal/).join(','));
   console.log('half-open    ', cnt(/half-open/).join(','));
   console.log('holding      ', cnt(/holding your roll/).join(','));
+  const ownLocal = out.map(o => (o.nl || []).filter(x => new RegExp('P' + o.seat + '  rolled').test(x)).length);
+  const ownChain = out.map(o => (o.moves || []).filter(m => m === o.seat + ':roll').length);
+  console.log('own rolls on screen vs chain', ownLocal.join(','), ' vs ', ownChain.join(','));
   await b.close(); srv.close(); process.exit(0);
 })();
