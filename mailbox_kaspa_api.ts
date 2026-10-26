@@ -58,7 +58,50 @@ export function initMailboxAPI(): () => void { return () => {}; }
 // does not buy rank, so the whale cap is no longer needed.
 export const KV_PLEDGE_FULL_KAS = 5;
 export function kvPledgeScore(pledgeKas: number): number { return Math.min(Math.max(pledgeKas || 0, 0) / KV_PLEDGE_FULL_KAS, 1); }
-// Visibility sort: pledge (in place or not) + freshness half-life. XP joins later via StatSig.
+// KV_RANK_XP: publisher XP from the chain - the same consensus scan the Dashboard uses
+// (10 XP per settled agreement, -50 per deadlock). Full XP points at KV_XP_FULL so veterans
+// lead without locking newcomers out. Cached 1h per publisher; a failed scan counts as 0.
+export const KV_XP_FULL = 500;
+export function kvXpScore(xp: number): number { return Math.min(Math.max(xp || 0, 0) / KV_XP_FULL, 1); }
+export async function kvPublisherXp(ownerPub: string): Promise<number> {
+  if (!ownerPub) return 0;
+  const g: any = globalThis as any;
+  const C: Map<string, any> = g.__kvXpCache || (g.__kvXpCache = new Map());
+  const hit = C.get(ownerPub);
+  if (hit && Date.now() - hit.at < 3600000) return hit.p;
+  const p = (async () => {
+    try {
+      const scan = require('./counterparty_scan').scanCounterparty(String(ownerPub), NET, 40);
+      const r: any = await Promise.race([scan, new Promise((res) => setTimeout(() => res(null), 6000))]);
+      if (!r || r.error) return 0;
+      return Math.max(0, Number(r.settled || 0) * 10 - Number(r.deadlocked || 0) * 50);
+    } catch { return 0; }
+  })();
+  C.set(ownerPub, { at: Date.now(), p });
+  return p;
+}
+async function kvXpOf(entries: any[], max: number = 24): Promise<number[]> {
+  const out: number[] = new Array(entries.length).fill(0);
+  await Promise.all(entries.slice(0, max).map(async (e: any, i: number) => { out[i] = await kvPublisherXp(e.ownerPubkey); }));
+  return out;
+}
+// KV_RANK_XP: sections without a price (DApps, Academics): pledge 30% + freshness 50% + XP 20%.
+async function kvXpRank(items: any[], byId: Map<string, any>): Promise<void> {
+  try {
+    const ents = items.map((it: any) => byId.get(it.id) || {});
+    const xp = await kvXpOf(ents);
+    const sc = (i: number) => {
+      const e: any = ents[i];
+      const pledge = kvPledgeScore(Number(e.pledgeSompi || 0) / 1e8) * 0.30;
+      const fresh = Math.pow(0.5, Math.max(0, (Date.now() / 1000 - (e.announcedAt || 0)) / 3600) / 168) * 0.50;
+      return pledge + fresh + kvXpScore(xp[i]) * 0.20;
+    };
+    items.forEach((it: any, i: number) => { it.publisherXp = xp[i]; });
+    const idx = items.map((_: any, i: number) => i).sort((a: number, b: number) => sc(b) - sc(a));
+    const si = idx.map((i: number) => items[i]); items.length = 0; items.push(...si);
+  } catch (e) { console.log('[XpRank] skipped:', e); }
+}
+// Visibility sort: pledge (in place or not) + freshness half-life - the first pass; XP re-ranks after (KV_RANK_XP).
 function visSort(a: { pledgeSompi: bigint; announcedAt: number }, b: { pledgeSompi: bigint; announcedAt: number }): number {
   const score = (e: { pledgeSompi: bigint; announcedAt: number }) => {
     const pledgeKas = Number(e.pledgeSompi) / 1e8;
@@ -89,7 +132,7 @@ async function kvEffMinKas(storeAddress: string, cfgHash: string, coords: any, o
     return eff;
   } catch { return 0; }
 }
-// KV_DEAL_RANK: re-rank in place - pledge 0.30 + freshness 0.45 + deal 0.25.
+// KV_DEAL_RANK: re-rank in place - pledge 0.25 + freshness 0.35 + deal 0.20 + XP 0.20 (KV_RANK_XP).
 // deal is a capped z-score against the CATEGORY's mean effective price, so a
 // fake rock-bottom price scores no better than an honestly cheap one.
 async function kvDealRank(dir: any[], items: any[], maxCfg: number = 12): Promise<void> {
@@ -105,15 +148,18 @@ async function kvDealRank(dir: any[], items: any[], maxCfg: number = 12): Promis
     for (let i = 0; i < items.length; i++) { if (eff[i] > 0) { const k = String((dir[i] as any).category || '').toLowerCase(); (byCat[k] = byCat[k] || []).push(eff[i]); } }
     const stats: any = {};
     for (const k in byCat) { const a = byCat[k]; const m = a.reduce((x: number, y: number) => x + y, 0) / a.length; const sd = Math.sqrt(a.reduce((x: number, y: number) => x + (y - m) * (y - m), 0) / a.length); stats[k] = { m, sd: Math.max(sd, m * 0.1), n: a.length }; }
+    const xps = await kvXpOf(dir);   // KV_RANK_XP
+    for (let i = 0; i < items.length; i++) (items[i] as any).publisherXp = xps[i];
     const score = (i: number) => {
       const e: any = dir[i];
-      const pledge = kvPledgeScore(Number(e.pledgeSompi) / 1e8) * 0.30;
+      const pledge = kvPledgeScore(Number(e.pledgeSompi) / 1e8) * 0.25;
       const ageH = Math.max(0, (Date.now() / 1000 - e.announcedAt) / 3600);
-      const fresh = Math.pow(0.5, ageH / 168) * 0.45;
+      const fresh = Math.pow(0.5, ageH / 168) * 0.35;
+      const xpPart = kvXpScore(xps[i]) * 0.20;
       const st = stats[String(e.category || '').toLowerCase()];
-      let deal = 0.125; // neutral
-      if (eff[i] > 0 && st && st.n >= 3) { const z = (st.m - eff[i]) / st.sd; deal = Math.max(0, Math.min(1, 0.5 + z / 4)) * 0.25; }
-      return pledge + fresh + deal;
+      let deal = 0.10; // neutral
+      if (eff[i] > 0 && st && st.n >= 3) { const z = (st.m - eff[i]) / st.sd; deal = Math.max(0, Math.min(1, 0.5 + z / 4)) * 0.20; }
+      return pledge + fresh + deal + xpPart;
     };
     const idx = items.map((_: any, i: number) => i).sort((a: number, b: number) => score(b) - score(a));
     const si = idx.map((i: number) => items[i]); const sd2 = idx.map((i: number) => dir[i]);
@@ -123,7 +169,7 @@ async function kvDealRank(dir: any[], items: any[], maxCfg: number = 12): Promis
   } catch (e) { console.log('[DealRank] skipped:', e); }
 }
 
-// KV_MY_RANK: the exact score the Mailbox ranks a store by (pledge 30% + freshness 45% + deal 25%),
+// KV_MY_RANK: the exact score the Mailbox ranks a store by (pledge 25% + freshness 35% + deal 20% + XP 20%),
 // so the Workspace card shows the real number, not an estimate.
 export async function kvMyStoreRank(storeAddress: string): Promise<any> {
   const dir: any[] = await rebuildDirectory('store', registryAddress('store', NET), NET);
@@ -150,8 +196,10 @@ export async function kvMyStoreRank(storeAddress: string): Promise<any> {
     deal = Math.max(0, Math.min(1, 0.5 + ((m - myEff) / sd) / 4));
     dealNote = 'your best price ' + myEff.toFixed(1) + ' KAS vs category avg ' + m.toFixed(1);
   } else if (myEff <= 0) dealNote = 'neutral - no priced items yet';
-  const total = pledge * 0.30 + fresh * 0.45 + deal * 0.25;
-  return { listed: true, pledgeKas, ageH, pledge, fresh, deal, dealNote, total, peers: peers.length };
+  const xp = await kvPublisherXp(me.ownerPubkey);
+  const xpS = kvXpScore(xp);
+  const total = pledge * 0.25 + fresh * 0.35 + deal * 0.20 + xpS * 0.20;
+  return { listed: true, pledgeKas, ageH, pledge, fresh, deal, dealNote, xp, xpS, total, peers: peers.length };
 }
 
 export async function fetchStorefronts(_cursor?: string): Promise<FetchResult<StorefrontEntry>> {
@@ -285,6 +333,7 @@ export async function fetchDApps(_cursor?: string): Promise<FetchResult<DAppEntr
         record: e.record, repostedBy: e.repostedBy || '', keepers: e.keepers || [], // KV_REPOST_ITEM
       } as any;
     }));
+    await kvXpRank(items as any[], new Map((dir as any[]).map((e: any) => [e.storeAddress, e])));   // KV_RANK_XP
     return { items, hasMore: false, fromCache: false };
   } catch (e: any) {
     throw new MailboxError('dapp scan failed: ' + String(e?.message || e), 'SCAN');
@@ -357,6 +406,7 @@ export async function fetchAcademics(_cursor?: string): Promise<FetchResult<Acad
           record: e.record, repostedBy: e.repostedBy || '', keepers: e.keepers || [], // KV_REPOST_ITEM
         } as any;
       });
+    await kvXpRank(items as any[], new Map((dir as any[]).map((e: any) => [e.storeAddress, e])));   // KV_RANK_XP
     console.log('[Academics] matched:', items.length, items.map((i: any) => (i.title || '(untitled)') + '/' + (i.institution || '-')).join(' | '));
     return { items, hasMore: false, fromCache: false };
   } catch (e: any) {

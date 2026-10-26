@@ -665,7 +665,7 @@ function DAppCard({ item, onPress }: { item: DAppEntry; onPress: () => void }) {
     <KvBizEnvelope name={item.name} cat={'DApp · ' + (item.category || item.board)} stamp={'\u{1F9E9}'} colors={col}
       verified={!!(item.townhall && item.townhall.verified)} postedAt={item.createdAt}
       lines={[item.description || item.name, (item.templateVerified ? 'SDK ✓ · ' : '') + 'sandboxed', item.board + ' board']}
-      info={[(item.xpCommitment ? '⭐ ' + item.xpCommitment + ' XP' : ''), '\u{1F552} ' + (kvAgo(item.createdAt) || 'new').toLowerCase()]}
+      info={[((item as any).publisherXp != null ? '⭐ ' + (item as any).publisherXp + ' XP' : ''), (item.xpCommitment ? '⛓ pledge in place' : ''), '\u{1F552} ' + (kvAgo(item.createdAt) || 'new').toLowerCase()]}
       action={{ label: 'OPEN', onPress }} onPress={onPress} />
   );
 }

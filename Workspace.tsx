@@ -5093,9 +5093,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 const total = Math.round(R.total * 100);
                 const days = R.ageH / 24;
                 const rows = [
-                  { label: 'Pledge (30%)', score: Math.round(R.pledge * 100), color: '#ec4899', tip: R.pledge >= 1 ? 'Publish pledge in place (' + R.pledgeKas.toFixed(1) + ' KAS, still yours)' : 'Publish pledge spent - republish to restore it' },
-                  { label: 'Freshness (45%)', score: Math.round(R.fresh * 100), color: '#1c1917', tip: 'Last announced ' + (days < 1 ? Math.round(R.ageH) + 'h' : days.toFixed(1) + ' days') + ' ago - halves every 7 days, Announce to refresh' },
-                  { label: 'Deal (25%)', score: Math.round(R.deal * 100), color: '#d97706', tip: R.dealNote + ' - coupons lower your price' },
+                  { label: 'XP (20%)', score: Math.round((R.xpS || 0) * 100), color: '#4f46e5', tip: (R.xp || 0) + ' XP from settled agreements on the chain (+10 each, -50 per deadlock) - full at 500' },
+                  { label: 'Pledge (25%)', score: Math.round(R.pledge * 100), color: '#ec4899', tip: R.pledge >= 1 ? 'Publish pledge in place (' + R.pledgeKas.toFixed(1) + ' KAS, still yours)' : 'Publish pledge spent - republish to restore it' },
+                  { label: 'Freshness (35%)', score: Math.round(R.fresh * 100), color: '#1c1917', tip: 'Last announced ' + (days < 1 ? Math.round(R.ageH) + 'h' : days.toFixed(1) + ' days') + ' ago - halves every 7 days, Announce to refresh' },
+                  { label: 'Deal (20%)', score: Math.round(R.deal * 100), color: '#d97706', tip: R.dealNote + ' - coupons lower your price' },
                 ];
                 return (
                   <View>
