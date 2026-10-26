@@ -33,6 +33,10 @@
     if (cornerish){ tx = (x > 0 ? W : -W) + (x > 0 ? -1 : 1) * across; tz = (z > 0 ? W : -W) + (z > 0 ? -1 : 1) * along * 0.8; }
     else if (Math.abs(z) >= Math.abs(x)){ tz = (z > 0 ? W : -W) + (z > 0 ? 1 : -1) * across; tx = x + along; }
     else { tx = (x > 0 ? W : -W) + (x > 0 ? 1 : -1) * across; tz = z + along; }
+    /*KV_GLIDE*/ var Gl = (window.__kvGlide = window.__kvGlide || {}), G = Gl[p] || (Gl[p] = { x: tx, z: tz });
+    if (Math.hypot(tx - G.x, tz - G.z) > 3 && !G.a) G.a = { x: G.x, z: G.z, t0: Date.now() };   // a jump (resync, card move): slide, never teleport
+    if (G.a){ var gk = Math.min(1, (Date.now() - G.a.t0) / 450); gk = gk * (2 - gk); tx = G.a.x + (tx - G.a.x) * gk; tz = G.a.z + (tz - G.a.z) * gk; if (gk >= 1) G.a = null; }
+    G.x = tx; G.z = tz;
     var dx = tx - x, dz = tz - z;
     /*KV_CLEAR*/(window.__kvPW = window.__kvPW || {})[p] = [tx, tz];
     /*KV_LIFT*/var lift = 0;   // side streets: camera looks across the lots, so stand taller
@@ -126,10 +130,22 @@
     }
   }
 
-  setInterval(function(){ try { placeAll(); } catch(e){} }, 120);
+  setInterval(function(){ try { placeAll(); } catch(e){} }, 50);
   setInterval(function(){ try { signs(); } catch(e){} }, 150);
   setInterval(function(){ try { slim(); } catch(e){} }, 250);
   setInterval(function(){ try { fadeNames(); } catch(e){} }, 200);
+
+  // ---- __KV_V417_QUIET: sync housekeeping stays in COPY LOG, off the player's screen ----
+  (function(){
+    var TECH = /RESYNC|resyncing|drifted|dropped P\d|self-heal|half-open|holding your roll|stall-scan|failsafe|relay divergence|reads pinned|fan-out|corrected dice|turnlock|blocked an outside|blocked P\d|cleared a stale|stuck modal|orderer|append: adopted|adopted (snapshot|relay)|engine (on|lagging|untouched)|mid-fuse|lag breaker|chain expects|the chain is on|clock re-anchored|relay (refused|nodes|:)|node discovery|chain polling|final bell — the chain|state updated from|update after move|adopted \w+ P\d @|armed —|observe mode|systems ok|^offers: |KV_RELAY|composer removed|retired —|derived from the chain|posts to the chain|play by play ready/i;
+    function scrub(n){
+      try { if (n && n.nodeType === 1 && n.tagName === "DIV" && /border-left:\s*4px solid/.test(n.getAttribute("style") || "") && TECH.test(n.textContent || "")) n.style.display = "none"; } catch(e){}
+    }
+    try {
+      new MutationObserver(function(ms){ ms.forEach(function(m){ for (var i = 0; i < m.addedNodes.length; i++) scrub(m.addedNodes[i]); }); })
+        .observe(document.body, { childList: true, subtree: true });
+    } catch(e){}
+  })();
 
   // ---- __KV_V417_RENO: renovate works on your own turn + "your turn" alert when you come back ----
   function chime2(){
