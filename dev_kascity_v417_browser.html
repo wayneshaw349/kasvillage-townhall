@@ -15472,7 +15472,9 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
     try { owner = (pos != null && window.KV_OWNER) ? window.KV_OWNER(pos) : null; } catch(e){}
     var price = 0;
     try { price = (pos != null && N[pos]) ? ((window.KV_INTRINSIC && window.KV_INTRINSIC(pos)) || N[pos].p || 0) : 0; } catch(e){}
-    var canBuy = (pos != null && N[pos] && !owner && price > 0 && cashOf(seat) >= price);
+    var SN = window.__kvLrSnap; if (SN){ owner = SN.own[pos] || null; }
+    var cashNow = (SN && isFinite(SN.cash)) ? SN.cash : cashOf(seat);
+    var canBuy = (pos != null && N[pos] && !owner && price > 0 && cashNow >= price);
 
     var p = ensure();
     p.innerHTML = "";
@@ -15524,6 +15526,13 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
         if (/buy|pass|deed|block/i.test(txt)){ hide(); return; }
       }
       var pos = flags()["p" + m.seat];
+      /* __KV_V417_BUYFIX: the engine may still be catching up - read where you landed, who owns what and your cash
+         from the chain record of your roll, so BUY is offered whenever the record says you can buy */
+      window.__kvLrSnap = null;
+      try { var sp = String(lr.snap || "").split("|"); if (sp.length >= 3){ var P = sp[1].split(","), C = sp[0].split(","), own = {};
+        (sp[2] || "").split(",").forEach(function(x){ var q = x.match(/^t(\d+)>(\d)$/); if (q) own[+q[1]] = +q[2]; });
+        var cp = +P[m.seat - 1]; if (cp >= 0 && isFinite(cp)) pos = cp;
+        window.__kvLrSnap = { own: own, cash: +C[m.seat - 1] }; } } catch(eS){}
       var key = m.seat + "/" + lr.i + "/" + pos;
       if (key === shownKey) return;
       shownKey = key;
