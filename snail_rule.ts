@@ -10,7 +10,7 @@ const g: any = globalThis as any;
 const NONE: KvTrust = { snail: false, waitMs: 0, newUser: true, reason: '', xp: 0, pComplete: 0.5, deadlocks: 0, samples: 0 };
 export const SNAIL_MIN_SAMPLES = 3;
 export const SNAIL_PASS_MS = 30 * 60_000;
-export const SNAIL_GATED = new Set<string>(['mailbox', 'workspace', 'entertainment', 'town_hall', 'bathroom', 'node_register', 'dapp']); // entertainment = EC incl. the bookshelf tab; dapp:<id> = each DApp/game opened
+export const SNAIL_GATED = new Set<string>(['mailbox', 'workspace', 'entertainment', 'town_hall', 'bathroom', 'node_register', 'dapp', 'agreement_new']); // entertainment = EC incl. the bookshelf tab; dapp:<id> = each DApp/game opened
 
 export function trustFromStats(st: { xp?: number; successes?: number; deadlocks?: number }): KvTrust {
   const s = Math.max(0, Number(st.successes) || 0), d = Math.max(0, Number(st.deadlocks) || 0);

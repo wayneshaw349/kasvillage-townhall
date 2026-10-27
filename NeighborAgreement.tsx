@@ -1121,6 +1121,7 @@ export const NeighborAgreement: React.FC<NeighborAgreementProps> = ({
   const [step, setStep] = useState(1);
   const [role, setRole] = useState<'buyer' | 'seller' | null>(null);
   const [agreementType, setAgreementType] = useState<'simple' | 'trade' | 'join' | null>(null);
+  const [, setKvNaTick] = useState(0); // KV_SNAIL_NEW_AGREEMENT
   const [inboxAgreements, setInboxAgreements] = useState<any[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxSort, setInboxSort] = useState<'recent'|'buyerHigh'|'sellerLow'|'name'>('recent');
@@ -4278,7 +4279,17 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
               </View>
             )}
 
-            {step === 1 && agreementType && agreementType !== 'join' && (
+            {/* KV_SNAIL_NEW_AGREEMENT: only STARTING a new agreement waits in the slow lane.
+                Resume, settle, release, refund, cancel and sends are never delayed. */}
+            {step === 1 && agreementType && agreementType !== 'join' && (() => {
+              const _sr = require('./snail_rule'); const _w = _sr.snailGateRemaining('agreement_new');
+              if (_w <= 0) return null;
+              const { SnailModeScreen } = require('./SnailModeScreen'); const _t = _sr.getTrust();
+              return <SnailModeScreen key="snail-agreement-new" reason={_t.reason} delayMs={_w} xp={_t.xp} pComplete={_t.pComplete} deadlocks={_t.deadlocks}
+                onDelayComplete={() => { _sr.snailMarkPassed('agreement_new'); setKvNaTick((n: number) => n + 1); }}
+                onBack={() => setAgreementType(null)} />;
+            })()}
+            {step === 1 && agreementType && agreementType !== 'join' && require('./snail_rule').snailGateRemaining('agreement_new') <= 0 && (
               <View>
                 <TouchableOpacity onPress={() => setAgreementType(null)} style={{ marginBottom: 8 }}>
                   <Text style={{ color: COLORS.stone400, fontSize: rs.font(11) }}>{'< Change agreement type'}</Text>
