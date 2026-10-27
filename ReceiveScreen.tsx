@@ -26,6 +26,7 @@ import {
 
 import { getBalance, formatKAS } from './kaspa_unified';
 import { useKaspaPrice } from './useKaspaPrice';
+import { useStreamer, isStreamer, maskAddr, STREAMER_BAL, STREAMER_USD } from './streamer_mode'; // KV_STREAMER
 
 const SECURESTORE_KEYS = {
   KASPA_ADDRESS: 'kv_kaspa_address',
@@ -61,6 +62,7 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
   const [recvSource, setRecvSource] = useState<'hot' | 'vault'>('hot');
   const [balance, setBalance] = useState<bigint>(0n);
   const [copied, setCopied] = useState(false);
+  const __sm = useStreamer();
   const { usdPerKas } = useKaspaPrice();
 
   useEffect(() => {
@@ -100,6 +102,7 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
 
   const handleShare = async () => {
     if (!shownAddress) return;
+    if (isStreamer()) return;
     await Share.share({ message: `My Kaspa address: ${shownAddress}` });
   };
 
@@ -138,7 +141,7 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
           ))}
         </View>
       ) : null}
-      {address && (
+      {address && !__sm && (
             <View style={styles.qrContainer}>
               <View style={styles.qrWrapper}>
                 <QRCode
@@ -153,7 +156,7 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
 
           <View style={styles.addressBox}>
             <Text style={styles.addressLabel}>Your Kaspa Address</Text>
-            <Text style={styles.addressText} selectable>{shortAddress}</Text>
+            <Text style={styles.addressText} selectable={!__sm}>{__sm ? maskAddr(shownAddress) : shortAddress}</Text>
 
             <View style={styles.addressActions}>
               <TouchableOpacity style={styles.actionBtn} onPress={handleCopy}>
@@ -174,8 +177,8 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
 
           <View style={styles.balanceBox}>
             <Text style={styles.balanceLabel}>Current Balance</Text>
-            <Text style={styles.balanceAmount}>{formatKAS(balance)}</Text>
-            {usdPerKas ? (
+            <Text style={styles.balanceAmount}>{__sm ? STREAMER_BAL : formatKAS(balance)}</Text>
+            {usdPerKas && !__sm ? (
               <Text style={styles.balanceUsd}>
                 {String.fromCharCode(8776)} {'$' + (Number(balance) / 1e8 * usdPerKas).toFixed(2)} USD
               </Text>
