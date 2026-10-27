@@ -33,6 +33,7 @@ import IOUBalanceSheetModal from './IOUBalanceSheetShare';
 import { PhoneProofScreen } from './PhoneProofScreen';
 import { SnailModeScreen } from './SnailModeScreen';
 import { computeTrust, snailGateRemaining, snailMarkPassed } from './snail_rule'; // KV_SNAIL_RULE
+import { DisclaimerGate, KV_DISCLAIMER_KEY } from './DisclaimerGate'; // KV_DISCLAIMER
 import { TownHallScreen } from './TownHallScreen';
 import { TransactionHistory } from './TransactionHistory';
 import VillageMailbox from './VillageMailbox';
@@ -673,6 +674,8 @@ export const AppNavigator: React.FC = () => {
   const [snailPComplete, setSnailPComplete] = useState(0);
   const [snailDeadlocks, setSnailDeadlocks] = useState(0);
   const [, setSnailTick] = useState(0); // KV_SNAIL_GATE re-render when a gate opens
+  const [disclaimerOk, setDisclaimerOk] = useState<boolean | null>(null); // KV_DISCLAIMER
+  useEffect(() => { (async () => { try { const AS = require('@react-native-async-storage/async-storage').default; setDisclaimerOk(!!(await AS.getItem(KV_DISCLAIMER_KEY))); } catch { setDisclaimerOk(false); } })(); }, []);
   const [vaultWires, setVaultWires] = useState<string[]>([]);
   const balanceSompiRef = useRef<bigint>(0n); // KV_STALE_BAL: loadUserStats has [] deps, read latest balance via ref
   useEffect(() => { balanceSompiRef.current = balanceSompi; }, [balanceSompi]);
@@ -1117,6 +1120,10 @@ export const AppNavigator: React.FC = () => {
   // ------------------------------------------------------------------
   // RENDER
   // ------------------------------------------------------------------
+  // KV_DISCLAIMER: shown on entry until accepted once (bump KV_DISCLAIMER_KEY to re-show)
+  if (disclaimerOk === false && screen !== 'booting') {
+    return <DisclaimerGate onAccept={() => setDisclaimerOk(true)} />;
+  }
   // KV_SNAIL_GATE: apps/screens wait in the slow lane; money screens never do (see snail_rule.ts)
   const __snailWait = snailGateRemaining(screen);
   if (__snailWait > 0) {
