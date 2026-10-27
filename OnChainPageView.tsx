@@ -170,6 +170,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
+  const [, setKvSnailTick] = useState(0); // KV_SNAIL_DAPP
   const webRef = useRef<any>(null);
   // KV_PAGE_RELOAD: games call location.reload() (KasCity does right after
   // host/join — "Reloading into multiplayer...") but our fake
@@ -398,6 +399,19 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
     setNotice('External links are disabled inside on-chain pages.');
     return false;
   }, [handleKvLink, kvDoReload]);
+
+  // KV_SNAIL_DAPP: slow-lane users wait before each DApp/game opens (dev previews are exempt)
+  if (!props.previewHtml) {
+    const _sk = 'dapp:' + ((props.game && props.game.head) || pageHash || storeAddress);
+    const _sw = require('./snail_rule').snailGateRemaining(_sk);
+    if (_sw > 0) {
+      const { SnailModeScreen } = require('./SnailModeScreen');
+      const _t = require('./snail_rule').getTrust();
+      return <SnailModeScreen key={_sk} reason={_t.reason} delayMs={_sw} xp={_t.xp} pComplete={_t.pComplete} deadlocks={_t.deadlocks}
+        onDelayComplete={() => { require('./snail_rule').snailMarkPassed(_sk); setKvSnailTick((n: number) => n + 1); }}
+        onBack={props.onClose} />;
+    }
+  }
 
   if (error) {
     return (

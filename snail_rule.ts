@@ -10,7 +10,7 @@ const g: any = globalThis as any;
 const NONE: KvTrust = { snail: false, waitMs: 0, newUser: true, reason: '', xp: 0, pComplete: 0.5, deadlocks: 0, samples: 0 };
 export const SNAIL_MIN_SAMPLES = 3;
 export const SNAIL_PASS_MS = 30 * 60_000;
-export const SNAIL_GATED = new Set<string>(['mailbox', 'workspace', 'entertainment', 'town_hall', 'bathroom', 'node_register', 'profile']) // entertainment = EC incl. the bookshelf tab;
+export const SNAIL_GATED = new Set<string>(['mailbox', 'workspace', 'entertainment', 'town_hall', 'bathroom', 'node_register', 'dapp']); // entertainment = EC incl. the bookshelf tab; dapp:<id> = each DApp/game opened
 
 export function trustFromStats(st: { xp?: number; successes?: number; deadlocks?: number }): KvTrust {
   const s = Math.max(0, Number(st.successes) || 0), d = Math.max(0, Number(st.deadlocks) || 0);
@@ -41,7 +41,7 @@ export function publicTrust(): { snail: boolean; waitMs: number; newUser: boolea
 // Screen gate: remaining wait for this screen (0 = open). Leaving and coming back does not restart the clock.
 export function snailGateRemaining(screen: string): number {
   const t = getTrust();
-  if (!t.snail || !SNAIL_GATED.has(screen)) return 0;
+  if (!t.snail || !SNAIL_GATED.has(String(screen).split(':')[0])) return 0;
   const m: Record<string, { start?: number; passed?: number }> = (g.__kvSnailGate = g.__kvSnailGate || {});
   const e = (m[screen] = m[screen] || {}), now = Date.now();
   if (e.passed && now - e.passed < SNAIL_PASS_MS) return 0;
