@@ -2949,8 +2949,9 @@ const nextActionMsg = (ph: string, rl: string): string => {
         if (!_cpk) { _line = 'Counterparty key unavailable - cannot look up history.'; }
         else {
           const _sc = await (await import('./counterparty_scan')).scanCounterparty(_cpk, String(agreement.network || 'testnet-10'), 15);
+          const _snl = require('./snail_rule').trustFromStats({ successes: _sc.settled, deadlocks: _sc.deadlocked }); // KV_SNAIL_BADGE
           _line = _sc.total > 0
-            ? _sc.settled + ' settled\n' + (_sc.deadlocked + _sc.open) + ' unresolved\n' + _sc.total + (_sc.truncated ? '+' : '') + ' escrows total\n\nTraded with ' + _sc.distinctCounterparties + ' distinct part' + (_sc.distinctCounterparties === 1 ? 'y' : 'ies') + '\n\nRead from Kaspa consensus. Unresolved means the trade did not settle - it does not say who walked away.'
+            ? (_snl.snail ? '🐌 SLOW LANE - only ' + Math.round(_snl.pComplete * 100) + '% of their deals finished. Be careful.\n\n' : '') + _sc.settled + ' settled\n' + (_sc.deadlocked + _sc.open) + ' unresolved\n' + _sc.total + (_sc.truncated ? '+' : '') + ' escrows total\n\nTraded with ' + _sc.distinctCounterparties + ' distinct part' + (_sc.distinctCounterparties === 1 ? 'y' : 'ies') + '\n\nRead from Kaspa consensus. Unresolved means the trade did not settle - it does not say who walked away.'
             : 'No escrow history found on-chain for this key.';
         }
       } catch (_qe) { console.warn('[Scan] accept-gate lookup failed:', _qe); _line = 'On-chain history unavailable right now.'; }
@@ -4197,8 +4198,9 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                               const _cpPk = String((_rolePaste === 'buyer' ? parsed.sellerPubkey : parsed.buyerPubkey) || '');
                               if (_cpPk) {
                                 const _sc = await (await import('./counterparty_scan')).scanCounterparty(_cpPk, String(parsed.network || 'testnet-10'), 15);
+                                const _snl = require('./snail_rule').trustFromStats({ successes: _sc.settled, deadlocks: _sc.deadlocked }); // KV_SNAIL_BADGE
                                 _kvScanLine = _sc.total > 0
-                                  ? '\n\nOn-chain history\n' + _sc.settled + ' settled, ' + (_sc.deadlocked + _sc.open) + ' unresolved of ' + _sc.total + (_sc.truncated ? '+' : '') + '\nTraded with ' + _sc.distinctCounterparties + ' distinct part' + (_sc.distinctCounterparties === 1 ? 'y' : 'ies')
+                                  ? (_snl.snail ? '\n\n🐌 SLOW LANE - only ' + Math.round(_snl.pComplete * 100) + '% of their deals finished. Be careful.' : '') + '\n\nOn-chain history\n' + _sc.settled + ' settled, ' + (_sc.deadlocked + _sc.open) + ' unresolved of ' + _sc.total + (_sc.truncated ? '+' : '') + '\nTraded with ' + _sc.distinctCounterparties + ' distinct part' + (_sc.distinctCounterparties === 1 ? 'y' : 'ies')
                                   : '\n\nOn-chain history: none found';
                               }
                             } catch (_qe) { console.warn('[Scan] pre-trade lookup failed:', _qe); _kvScanLine = '\n\nOn-chain history: unavailable'; }
