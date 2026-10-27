@@ -138,8 +138,9 @@ const getNextTier = (xp: number) => {
   return XP_TIERS[XP_TIERS.length - 1];
 };
 
-const isSnailMode = (xp: number, pComplete: number) => 
-  xp < SNAIL_THRESHOLD || pComplete < 0.5;
+// KV_SNAIL_FAIR: same rule as the unlock/agreement gates - new users (<3 deals) and N/A stats never show snail
+const isSnailMode = (xp: number, pComplete: number, samples: number = 0) => 
+  samples >= 3 && pComplete >= 0 && (xp < SNAIL_THRESHOLD || pComplete < 0.5);
 
 const isEliteMode = (xp: number) => xp >= ELITE_THRESHOLD;
 
@@ -601,7 +602,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
               transactions_completed: realStats.successes + realStats.deadlocks,
               successful_completions: realStats.successes,
               deadlock_count: realStats.deadlocks,
-              in_snail_mode: realStats.xp < 150 || pComplete < 0.5,
+              in_snail_mode: (realStats.successes + realStats.deadlocks) >= 3 && (realStats.xp < 150 || pComplete < 0.5),
               tier: (realStats as any).citadel_tier || prev.tier,
             }));
           }
@@ -615,7 +616,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
   const [publicKey, setPublicKey] = useState('');
 
   const traitCount = stats.trait_count;
-  const snailMode = isSnailMode(stats.xp, stats.p_complete);
+  const snailMode = isSnailMode(stats.xp, stats.p_complete, Number((stats as any).transactions_completed) || 0);
   const eliteMode = isEliteMode(stats.xp);
 
   const onRefresh = async () => {
