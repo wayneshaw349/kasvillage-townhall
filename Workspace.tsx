@@ -947,7 +947,7 @@ const KvChainGamePublish: React.FC = () => {
           try {
             const k = String(t || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase();
             const mp = bytesToHex(secp256k1.getPublicKey(hexToBytes(k), true));
-            if (mp !== '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4') { Alert.alert('Wrong key', 'That key does not match the moderation public key.'); return; }
+            if (mp !== '0268c16db707f28883ebd4217d20ffb02a38d3227159dd34bdb4d40a3a715e9483') { Alert.alert('Wrong key', 'That key does not match the moderation public key.'); return; }
             const { _kvResolvePrivHex } = require('./proposal_share');
             const priv = await _kvResolvePrivHex(); if (!priv || !myAddr) throw new Error('wallet keys unavailable');
             const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
