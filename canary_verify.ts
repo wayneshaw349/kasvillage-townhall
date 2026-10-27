@@ -17,8 +17,12 @@ const TOWNHALL_URL = __DEV__
   ? 'http://localhost:8080'
   : 'https://kasvillage.app.runonflux.io';
 
-// ---- pin after Flux deploy (GET /api/canary/pubkey). Empty = TOFU with warn.
-export const PINNED_ATTEST_PUBKEY: string = '7480a21cc3f6cb6d98947202b2ae4081ea0d481d3e3619971969c224afb4fe42';
+// ---- KV_ATTEST_RETIRED: the attest key was exposed in the public Flux spec, so TOWNHALL_ATTEST_SK
+// was removed from the deployment and the canary now returns UNSIGNED verdicts (advisory only).
+// Real protection is local: the wallet enforces the same scan patterns on-device, pages are
+// hash-verified and sandboxed, stats use ZK proofs, moderation uses KV_MOD_PUBKEY. Nothing pins here.
+// If a signed canary ever returns (key kept OFF the public spec), pin its pubkey again via wire_attest_pin.cjs.
+export const PINNED_ATTEST_PUBKEY: string = '';
 
 export interface CanaryFinding {
   code: string;
