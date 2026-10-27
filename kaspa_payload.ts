@@ -481,10 +481,10 @@ export async function rebuildDirectory(category: string, registryAddress: string
   // KV_PROHIBITED_RENDER: reader-side enforcement - a modified client can
   // announce anything; this wallet simply will not display it.
   const KV_PROHIBITED = ['gambling', 'casino', 'betting', 'lottery'];
-  const KV_MOD_PUBKEY = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
+  const KV_MOD_PUBKEY = '0268c16db707f28883ebd4217d20ffb02a38d3227159dd34bdb4d40a3a715e9483';
   // KV_FLAGS_TALLY: every wallet counts flags itself - no server, no single judge.
   const KV_FLAG_THRESHOLD = 3;
-  const _kvFlagMod = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
+  const _kvFlagMod = '0268c16db707f28883ebd4217d20ffb02a38d3227159dd34bdb4d40a3a715e9483';
   const _kvPublishers = new Set<string>();
   for (const a of anns) { const r: any = a.record; if (r && r.k === 'registry' && r.o && _kvSigOk(r)) _kvPublishers.add(String(r.o)); }
   const _kvClearT = new Map<string, number>();

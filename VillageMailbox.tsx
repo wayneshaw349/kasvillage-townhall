@@ -1009,7 +1009,7 @@ export default function VillageMailbox() {
           };
           const byHead = new Map<string, any>();
           // KV_MOD_PUBKEY: moderation key - its delists apply to any head. Rotate to a dedicated key before mainnet.
-          const KV_MOD_PUBKEY = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
+          const KV_MOD_PUBKEY = '0268c16db707f28883ebd4217d20ffb02a38d3227159dd34bdb4d40a3a715e9483';
           const delistByHead = new Map<string, any>();
           const _kvDl = (h: string, o: string) => { let best: any = null; for (const v of delistByHead.values()) if (v.head === h && (v.o === o || v.o === KV_MOD_PUBKEY) && (!best || v.t > best.t)) best = v; return best; }; // KV_DELIST_PERSIGNER
           const flagsByHead = new Map<string, Map<string, string>>(); // head -> flagger -> reason
@@ -1410,7 +1410,7 @@ export default function VillageMailbox() {
       const { secp256k1 } = require('@noble/curves/secp256k1');
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
       // KV_MOD_REASON: moderator path (mod key, not the owner) - reason + evidence hash on chain
-      const _KV_MOD = '0357e12aa00272e78f0f10b95b877a7cdb7c39280ba6f2a3b3f39855b8cafaf1a4';
+      const _KV_MOD = '0268c16db707f28883ebd4217d20ffb02a38d3227159dd34bdb4d40a3a715e9483';
       const _modFlow = (_mPriv: string, _mPub: string) => { // KV_COLD_MOD
         const _head = String(entry.arweaveTx || entry.id);
         const _fin = (reason: string, note: string) => { // KV_MOD_CONFIRM: type DELIST before the cold key signs
