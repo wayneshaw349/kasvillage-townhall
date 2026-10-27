@@ -818,7 +818,47 @@ const KvChainGamePublish: React.FC = () => {
   const gadd = (l: string) => setGlog((p) => [...p.slice(-150), l]);
   const GAMES: Record<string, { bundle: any; head: string; nonceBase: number }> = require('./games_to_publish');
   // KV_GRANT_UI: dev grants a board to a buyer (buyer ID + board + payment txid as proof)
-  try { const _g: any = globalThis as any; if (!_g.__kvDevContactLoaded) { _g.__kvDevContactLoaded = 1; require('@react-native-async-storage/async-storage').default.getItem('kv_dev_contact').then((v: any) => { if (v) _g.__kvDevContact = v; }); require('@react-native-async-storage/async-storage').default.getItem('kv_dev_price').then((v: any) => { try { if (v) _g.__kvDevPrice = JSON.parse(v); } catch {} }); } } catch {}
+  try { const _g: any = globalThis as any; if (!_g.__kvDevContactLoaded) { _g.__kvDevContactLoaded = 1; require('@react-native-async-storage/async-storage').default.getItem('kv_dev_contact').then((v: any) => { if (v) _g.__kvDevContact = v; }); require('@react-native-async-storage/async-storage').default.getItem('kv_dev_price').then((v: any) => { try { if (v) _g.__kvDevPrice = JSON.parse(v); } catch {} }); require('@react-native-async-storage/async-storage').default.getItem('kv_dev_relay').then((v: any) => { if (v) _g.__kvDevRelay = v; }); } } catch {}
+  // KV_DEV_RELAY: one extra step for plug-and-play multiplayer. The dev pastes
+  // their server address (Cloudflare, Railway, Fly, a Flux app - any public
+  // HTTPS host running the KasVillage relay rooms API); the wallet self-tests it
+  // (health + create + read back a room) and writes it into the game's next
+  // ANNOUNCE. Players' wallets then let THAT game talk to THAT host, only.
+  const setMyRelay = () => {
+    const AS = require('@react-native-async-storage/async-storage').default;
+    const saveRelay = async (v: string) => { (globalThis as any).__kvDevRelay = v; try { if (v) await AS.setItem('kv_dev_relay', v); else await AS.removeItem('kv_dev_relay'); } catch {} };
+    require('./kv_prompt').kvPrompt('Multiplayer server (optional)', 'Your game relay\u0027s address, e.g. mygame.app.runonflux.io or relay.mygame.com (HTTPS). It runs the KasVillage relay rooms API. Leave empty for single-player. Goes into your next ANNOUNCE.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => { saveRelay(''); Alert.alert('Removed', 'No multiplayer server. Re-ANNOUNCE to update the listing.'); } },
+      { text: 'Test & Save', onPress: async (t: string) => {
+        const { kvDevRelayHost } = require('./kv_net_bridge');
+        const host = kvDevRelayHost(t);
+        if (!host) { Alert.alert('Bad address', 'Use a public HTTPS host name, like relay.mygame.com - no IPs, ports, or http://.'); return; }
+        const base = 'https://' + host;
+        const fin = (ok: boolean, why: string) => {
+          if (ok) { saveRelay(host); Alert.alert('Server works \u2713', host + '\n\nHealth + game room create/read all passed. Re-ANNOUNCE the game so players\u0027 wallets allow it.'); }
+          else Alert.alert('Server test failed', why + '\n\nFix the server and test again, or Save Anyway if you know it is right.', [
+            { text: 'OK' },
+            { text: 'Save Anyway', style: 'destructive', onPress: () => { saveRelay(host); } },
+          ]);
+        };
+        try {
+          const tmo = (ms: number) => { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
+          const h = await fetch(base + '/health', { signal: tmo(8000) });
+          if (!h.ok) { fin(false, '/health answered HTTP ' + h.status); return; }
+          const room = 'kvtest' + Math.floor(Math.random() * 1e9).toString(16);
+          const c = await fetch(base + '/api/game/room/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: tmo(8000),
+            body: JSON.stringify({ room, wallet: 'kvselftest', seed_commit: 'selftest' }) });
+          const cb: any = await c.json().catch(() => null);
+          if (!c.ok || !cb || String(cb.room || '') !== room) { fin(false, 'room create answered HTTP ' + c.status + (cb && cb.error ? ': ' + cb.error : '')); return; }
+          const g = await fetch(base + '/api/game/room/' + room, { signal: tmo(8000) });
+          const gb: any = await g.json().catch(() => null);
+          if (!g.ok || !gb || String(gb.room || '') !== room) { fin(false, 'room read-back answered HTTP ' + g.status); return; }
+          fin(true, '');
+        } catch (e: any) { fin(false, 'could not reach ' + host + ' (' + String((e && e.message) || e).slice(0, 80) + ')'); }
+      } },
+    ], 'plain-text', String((globalThis as any).__kvDevRelay || ''));
+  };
   const setMyContact = () => {
     const RN = require('react-native');
     
@@ -1171,7 +1211,7 @@ const KvChainGamePublish: React.FC = () => {
       const _u8 = (t: string) => { const s2 = unescape(encodeURIComponent(t)); const a = new Uint8Array(s2.length); for (let i = 0; i < s2.length; i++) a[i] = s2.charCodeAt(i); return a; };
       const manifestHash = bytesToHex(sha256(_u8(JSON.stringify({ ...m, addresses: slotAddresses }))));
       gadd('manifestHash ' + manifestHash.slice(0, 16) + '…');
-      const quad = { game: gameId, tags: kvTagsOf(gameId), manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
+      const quad = { game: gameId, tags: kvTagsOf(gameId), manifestAddress, manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...((globalThis as any).__kvDevRelay ? { relay: (globalThis as any).__kvDevRelay } : {}) /* KV_DEV_RELAY */, ...daaSpan };
       try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
       gadd('announcing to game registry…');
       // KV_SEND_GATE: SEND BOARD delivers privately; UNLISTED skips the public announce
@@ -1288,13 +1328,13 @@ const KvChainGamePublish: React.FC = () => {
         if (hi > 0) daaSpan = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(publishAnchor ? { anchor_hash: publishAnchor } : {}) } as any; // ±1 min margin
         gadd('walk span: daa ' + daaSpan.daa_from + ' .. ' + daaSpan.daa_to + ' | pledge ' + (daaSpan.pledge_kas || 0) + ' KAS');
       } catch (de: any) { gadd('daa span skipped: ' + String(de?.message || de)); }
-      const t = JSON.stringify({ game: gameId, tags: kvTagsOf(gameId), manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan });
+      const t = JSON.stringify({ game: gameId, tags: kvTagsOf(gameId), manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...((globalThis as any).__kvDevRelay ? { relay: (globalThis as any).__kvDevRelay } : {}) /* KV_DEV_RELAY */, ...daaSpan });
       setTriple(t);
       await Clipboard.setStringAsync(t);
       try {
         gadd('announcing to game registry…');
         const { announceToRegistry } = require('./payload_publish');
-        const quad = { game: gameId, tags: kvTagsOf(gameId), manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...daaSpan };
+        const quad = { game: gameId, tags: kvTagsOf(gameId), manifestAddress, manifestHash: res.manifestHash, head: m.head, ...(tipOn ? { tip_addr: myAddr } : {}), ...((globalThis as any).__kvDevContact ? { contact: (globalThis as any).__kvDevContact } : {}), ...((globalThis as any).__kvDevPrice && (globalThis as any).__kvDevPrice.price ? { price: (globalThis as any).__kvDevPrice.price, frostAbove: (globalThis as any).__kvDevPrice.frostAbove || 20 } : {}), ...((globalThis as any).__kvDevRelay ? { relay: (globalThis as any).__kvDevRelay } : {}) /* KV_DEV_RELAY */, ...daaSpan };
         try { console.log('[KV] PUBLISH QUAD ' + JSON.stringify(quad)); const _AS = require('@react-native-async-storage/async-storage').default; _AS.setItem('kv_last_publish_quad', JSON.stringify(quad)); } catch {}
         // KV_SEND_GATE: SEND BOARD delivers privately; UNLISTED skips the public announce
         if ((globalThis as any).__kvSendTo || (globalThis as any).__kvUnlisted) {
@@ -1461,6 +1501,7 @@ const KvChainGamePublish: React.FC = () => {
                 {_kvOwner ? (<TouchableOpacity onPress={modErrorNote} style={{ borderWidth: 1, borderColor: '#b91c1c', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#b91c1c', fontWeight: '700', fontSize: 11 }}>MOD: ERROR NOTE</Text></TouchableOpacity>) : null}
                 <TouchableOpacity onPress={exportSales} style={{ borderWidth: 1, borderColor: '#7c3aed', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#7c3aed', fontWeight: '700', fontSize: 11 }}>EXPORT SALES</Text></TouchableOpacity>
                 <TouchableOpacity onPress={setMyContact} style={{ borderWidth: 1, borderColor: '#64748b', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#64748b', fontWeight: '700', fontSize: 11 }}>MY CONTACT</Text></TouchableOpacity>
+                <TouchableOpacity onPress={setMyRelay} style={{ borderWidth: 1, borderColor: (globalThis as any).__kvDevRelay ? '#10b981' : '#64748b', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: (globalThis as any).__kvDevRelay ? '#10b981' : '#64748b', fontWeight: '700', fontSize: 11 }}>{(globalThis as any).__kvDevRelay ? 'MP SERVER \u2713' : 'MP SERVER'}</Text></TouchableOpacity>
                 <TouchableOpacity key={id + '-del'} disabled={!!gbusy} onPress={() => runDelist(id)}
           style={{ backgroundColor: '#2d1a1a', borderWidth: 1, borderColor: '#b14b4b', borderRadius: 8, padding: 10, marginBottom: 6 }}>
           <Text style={{ color: '#e08b8b', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>

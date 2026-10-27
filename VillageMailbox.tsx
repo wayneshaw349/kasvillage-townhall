@@ -1381,6 +1381,7 @@ export default function VillageMailbox() {
       const btns: any[] = [
         { text: 'Scam / fraud', onPress: () => send('fraud') },
         { text: 'Prohibited / illegal', onPress: () => send('prohibited') },
+        { text: 'Gambling', onPress: () => send('gambling') }, // KV_REASON_GAMBLING
         { text: 'Spam / fake', onPress: () => send('spam') },
         { text: 'Stolen / copied', onPress: () => send('stolen') },
       ];
@@ -1450,6 +1451,7 @@ export default function VillageMailbox() {
         }, 350);
         require('./kv_prompt').kvChoose('Moderator delist', 'Not your listing - acting as moderator. Pick a reason; it is recorded on chain with an evidence hash (~1 KAS).', [
           { text: 'Prohibited category', onPress: () => _note('prohibited') },
+          { text: 'Gambling', onPress: () => _note('gambling') }, // KV_REASON_GAMBLING
           { text: 'Scam / fraud', onPress: () => _note('fraud') },
           { text: 'Illegal content', onPress: () => _note('illegal') },
           { text: 'Legal request', onPress: () => _note('legal') }, // KV_MOD_LEGAL

@@ -160,13 +160,42 @@ import { hexToBytes as _kvH2B } from '@noble/hashes/utils';
 
 const KV_RELAY_HTTPS = KV_WNET_ALLOW.https.filter((h) => /^kasvillage[a-z0-9_-]*\.app\.runonflux\.io$/.test(h));
 
-export function kvIsRelayUrl(url: string): boolean {
+export function kvIsRelayUrl(url: string, devRelayHost?: string | null, allow = KV_WNET_ALLOW): boolean {
   let u: URL;
   try { u = new URL(url); } catch { return false; }
-  if (!kvNetAllowed(url, KV_WNET_ALLOW)) return false;
-  if (u.protocol === 'https:') return KV_RELAY_HTTPS.includes(u.hostname);
-  if (u.protocol === 'http:') return KV_WNET_ALLOW.ipv4Ports.includes(+u.port);
+  if (!kvNetAllowed(url, allow)) return false;
+  if (u.protocol === 'https:') return KV_RELAY_HTTPS.includes(u.hostname) || (!!devRelayHost && u.hostname.toLowerCase() === devRelayHost); // KV_DEV_RELAY
+  if (u.protocol === 'http:') return allow.ipv4Ports.includes(+u.port);
   return false;
+}
+
+// KV_DEV_RELAY: a game may declare its own multiplayer server (any public HTTPS
+// host - Cloudflare, Railway, Fly, a Flux app, ...). kvDevRelayHost() validates
+// the declared value; the viewer widens that one game's allowlist to this single
+// host and the bridge signs relay POSTs for it, so a dev relay running the same
+// room code gets the same seat binding. Never private hosts, never plain http,
+// never bare IPs (those stay on the ip:35816 path), never credentials in the URL.
+export function kvDevRelayHost(declared: any): string | null {
+  try {
+    const s = String(declared || '').trim();
+    if (!s || s.length > 200) return null;
+    const u = new URL(/^https?:\/\//i.test(s) ? s : 'https://' + s);
+    if (u.protocol !== 'https:') return null;
+    if (u.port && u.port !== '443') return null;
+    if (u.username || u.password) return null;
+    const h = u.hostname.toLowerCase().replace(/\.$/, '');
+    if (!/^[a-z0-9.-]+$/.test(h) || !h.includes('.') || h.length > 120) return null;
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) return null;
+    if (/(^|\.)(localhost|local|internal|lan|home|corp|test|invalid)$/.test(h)) return null;
+    return h;
+  } catch { return null; }
+}
+
+/** Allowlist for one game: the standard hosts plus its declared relay host. */
+export function kvDevRelayAllow(declared: any): typeof KV_WNET_ALLOW | null {
+  const h = kvDevRelayHost(declared);
+  if (!h || KV_WNET_ALLOW.https.includes(h)) return null;
+  return { ...KV_WNET_ALLOW, https: [...KV_WNET_ALLOW.https, h] };
 }
 
 export function kvRelaySigMessage(host: string, method: string, pathAndQuery: string, body: string, ts: number): Uint8Array {
@@ -197,8 +226,8 @@ async function _kvRelayKey(): Promise<string | null> {
   return hex;
 }
 
-async function _kvRelayHeaders(method: string, url: string, body: string | null): Promise<Record<string, string>> {
-  if (method !== 'POST' || !kvIsRelayUrl(url)) return {};   // reads need no auth; never sign for other hosts
+async function _kvRelayHeaders(method: string, url: string, body: string | null, devRelayHost?: string | null, allow = KV_WNET_ALLOW): Promise<Record<string, string>> {
+  if (method !== 'POST' || !kvIsRelayUrl(url, devRelayHost, allow)) return {};   // reads need no auth; never sign for other hosts
   try {
     const priv = await _kvRelayKey();
     if (!priv) return {};
@@ -211,6 +240,8 @@ export type KvNetOpts = {
   sign?: boolean;
   /** Host allowlist override (tests). */
   allow?: typeof KV_WNET_ALLOW;
+  /** KV_DEV_RELAY: this game's declared relay host (already validated). */
+  relayHost?: string | null;
 };
 
 /** Returns true if the message was a KV_WNET message (handled here). */
@@ -250,7 +281,7 @@ export function handleKvNetMessage(raw: string, inject: (js: string) => void, op
         const headers: Record<string, string> = {};
         const ct = m.headers && m.headers['Content-Type'];
         if (typeof ct === 'string' && ct.length < 100) headers['Content-Type'] = ct;
-        if (sign) Object.assign(headers, await _kvRelayHeaders(method, url, body0)); // KV_RELAY_SIG (opt-in; re-signed per host)
+        if (sign) Object.assign(headers, await _kvRelayHeaders(method, url, body0, opts?.relayHost, allow)); // KV_RELAY_SIG (opt-in; re-signed per host)
         const r = await fetch(url, { method, headers, body: method === 'POST' ? (body0 ?? undefined) : undefined, signal: c.signal });
         if (r.url && r.url !== url && !kvNetAllowed(String(r.url), allow)) return { ok: false, err: 'blocked redirect: ' + String(r.url).slice(0, 80) }; // KV_NET_REDIRECT
         const body = await r.text();
