@@ -32,6 +32,7 @@ import { ReceiveScreen } from './ReceiveScreen';
 import IOUBalanceSheetModal from './IOUBalanceSheetShare';
 import { PhoneProofScreen } from './PhoneProofScreen';
 import { SnailModeScreen } from './SnailModeScreen';
+import { computeTrust, snailGateRemaining, snailMarkPassed } from './snail_rule'; // KV_SNAIL_RULE
 import { TownHallScreen } from './TownHallScreen';
 import { TransactionHistory } from './TransactionHistory';
 import VillageMailbox from './VillageMailbox';
@@ -671,6 +672,7 @@ export const AppNavigator: React.FC = () => {
   const [snailReason, setSnailReason] = useState('');
   const [snailPComplete, setSnailPComplete] = useState(0);
   const [snailDeadlocks, setSnailDeadlocks] = useState(0);
+  const [, setSnailTick] = useState(0); // KV_SNAIL_GATE re-render when a gate opens
   const [vaultWires, setVaultWires] = useState<string[]>([]);
   const balanceSompiRef = useRef<bigint>(0n); // KV_STALE_BAL: loadUserStats has [] deps, read latest balance via ref
   useEffect(() => { balanceSompiRef.current = balanceSompi; }, [balanceSompi]);
@@ -680,22 +682,14 @@ export const AppNavigator: React.FC = () => {
   // ------------------------------------------------------------------
   const loadUserStats = useCallback(async (aptAlias: string, publicKey: string) => {
     try {
-      const [stats, snail] = await Promise.all([getUserStats(), isInSnailMode()]);
+      const stats = await getUserStats();
       setUser((prev) => ({ ...prev, xp: stats.xp }));
-      setSnailMode(snail);
-      
-      if (snail) {
-        const delayMs = await getCreationDelayMs();
-        setSnailDelayMs(delayMs);
-        const pComplete = (1 + stats.successes) / (2 + stats.successes + stats.deadlocks);
-        setSnailPComplete(pComplete);
-        setSnailDeadlocks(stats.deadlocks);
-        setSnailReason(
-          stats.xp < 150 
-            ? `Low XP (${stats.xp} < 150)` 
-            : `Low completion rate (${(pComplete * 100).toFixed(0)}% < 50%)`
-        );
-      }
+      const tr = await computeTrust(); // KV_SNAIL_RULE: one shared, forgiving rule
+      setSnailMode(tr.snail);
+      setSnailDelayMs(tr.waitMs);
+      setSnailPComplete(tr.pComplete);
+      setSnailDeadlocks(tr.deadlocks);
+      setSnailReason(tr.reason);
     } catch { /* non-fatal */ }
 
     try {
@@ -934,11 +928,7 @@ export const AppNavigator: React.FC = () => {
   const handleQuizSuccess = useCallback(() => {
     kvMarkQuizPassed(); // KV_QUIZ_SESSION
     if (onboardAfterQuizRef.current) { onboardAfterQuizRef.current = false; setScreen('onboarding'); return; }
-    if (snailMode && snailDelayMs > 0) {
-      setScreen('snail_mode');
-    } else {
-      setScreen('dashboard');
-    }
+    setScreen('dashboard'); // KV_SNAIL_RULE: unlocking never waits - snail only slows opening apps/screens
   }, [snailMode, snailDelayMs]);
 
   const handleQuizFail = useCallback(() => { relockRef.current = false; onboardAfterQuizRef.current = false; (globalThis as any).__kvQuizPassedAt = 0; setScreen('vault_recovery'); }, []);
@@ -1127,6 +1117,23 @@ export const AppNavigator: React.FC = () => {
   // ------------------------------------------------------------------
   // RENDER
   // ------------------------------------------------------------------
+  // KV_SNAIL_GATE: apps/screens wait in the slow lane; money screens never do (see snail_rule.ts)
+  const __snailWait = snailGateRemaining(screen);
+  if (__snailWait > 0) {
+    const __gs = screen;
+    return (
+      <SnailModeScreen
+        key={'snail-' + __gs}
+        reason={snailReason}
+        delayMs={__snailWait}
+        xp={user.xp}
+        pComplete={snailPComplete}
+        deadlocks={snailDeadlocks}
+        onDelayComplete={() => { snailMarkPassed(__gs); setSnailTick((t) => t + 1); }}
+        onBack={() => setScreen('dashboard')}
+      />
+    );
+  }
   switch (screen) {
     case 'booting':
       return <LoadingScreen />;

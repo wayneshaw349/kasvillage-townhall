@@ -140,7 +140,7 @@ const getNextTier = (xp: number) => {
 
 // KV_SNAIL_FAIR: same rule as the unlock/agreement gates - new users (<3 deals) and N/A stats never show snail
 const isSnailMode = (xp: number, pComplete: number, samples: number = 0) => 
-  samples >= 3 && pComplete >= 0 && (xp < SNAIL_THRESHOLD || pComplete < 0.5);
+  samples >= 3 && pComplete >= 0 && pComplete < 0.5; // KV_SNAIL_RULE: low XP alone never triggers it
 
 const isEliteMode = (xp: number) => xp >= ELITE_THRESHOLD;
 
@@ -317,9 +317,9 @@ const SnailModeBanner: React.FC<{ reason?: string | null }> = ({ reason }) => (
   <View style={styles.snailBanner}>
     <Text style={styles.snailIcon}>🐌</Text>
     <View>
-      <Text style={styles.snailTitle}>SNAIL POISON ACTIVE</Text>
+      <Text style={styles.snailTitle}>SLOW LANE</Text>
       <Text style={styles.snailText}>
-        {reason || 'XP below 150 or P(complete) below 50%'}
+        {reason || 'Under 50% of recent deals finished - apps open slower, money works normally. Finish deals cleanly to speed back up.'}
       </Text>
     </View>
   </View>
@@ -602,7 +602,7 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
               transactions_completed: realStats.successes + realStats.deadlocks,
               successful_completions: realStats.successes,
               deadlock_count: realStats.deadlocks,
-              in_snail_mode: (realStats.successes + realStats.deadlocks) >= 3 && (realStats.xp < 150 || pComplete < 0.5),
+              in_snail_mode: (realStats.successes + realStats.deadlocks) >= 3 && pComplete < 0.5,
               tier: (realStats as any).citadel_tier || prev.tier,
             }));
           }

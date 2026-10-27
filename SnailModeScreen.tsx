@@ -23,6 +23,7 @@ interface SnailModeScreenProps {
   pComplete: number;
   deadlocks: number;
   onDelayComplete?: () => void;
+  onBack?: () => void; // KV_SNAIL_RULE
   inAgreementsSompi?: bigint;
   iousOwedSompi?: bigint;
   iousOwedToYouSompi?: bigint;
@@ -36,6 +37,7 @@ export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({
   pComplete,
   deadlocks,
   onDelayComplete,
+  onBack,
 }) => {
   const [remainingMs, setRemainingMs] = useState(delayMs);
   
@@ -54,18 +56,18 @@ export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({
     return () => clearInterval(timer);
   }, [delayMs, onDelayComplete]);
 
-  const minutes = Math.ceil(remainingMs / 60_000);
-  const seconds = ((remainingMs % 60_000) / 1000).toFixed(0);
+  const minutes = Math.floor(remainingMs / 60_000);
+  const seconds = String(Math.floor((remainingMs % 60_000) / 1000));
   const percentComplete = ((delayMs - remainingMs) / delayMs) * 100;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       {/* Header: Reputation Cooldown */}
       <View style={styles.header}>
-        <Clock size={48} color={COLORS.amber600} />
-        <Text style={styles.title}>Reputation Cooldown</Text>
+        <Text style={{ fontSize: 56 }}>🐌</Text>
+        <Text style={styles.title}>Slow lane</Text>
         <Text style={styles.subtitle}>
-          Building trust takes time. Complete agreements reliably to regain full access.
+          Some of your recent deals didn't finish, so apps and games take a moment to open. Your wallet and money work normally.
         </Text>
       </View>
 
@@ -74,7 +76,7 @@ export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({
         <Text style={styles.countdownText}>
           {minutes}:{(parseInt(seconds) % 60).toString().padStart(2, '0')}
         </Text>
-        <Text style={styles.countdownLabel}>Until next agreement</Text>
+        <Text style={styles.countdownLabel}>Until this screen opens</Text>
         
         {/* Progress bar */}
         <View style={styles.progressContainer}>
@@ -104,19 +106,19 @@ export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({
         <StatCard
           label="XP"
           value={xp.toString()}
-          icon="â­"
+          icon="⭐"
           color={COLORS.amber400}
         />
         <StatCard
           label="Completion Rate"
           value={`${(pComplete * 100).toFixed(0)}%`}
-          icon="âœ“"
+          icon="✓"
           color={pComplete > 0.7 ? COLORS.green400 : COLORS.red400}
         />
         <StatCard
           label="Deadlocks"
           value={deadlocks.toString()}
-          icon="âš ï¸"
+          icon="⚠️"
           color={deadlocks > 2 ? COLORS.red500 : COLORS.amber400}
         />
       </View>
@@ -127,10 +129,10 @@ export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({
         <View style={{ flex: 1 }}>
           <Text style={styles.actionTitle}>How to rebuild trust</Text>
           <Text style={styles.actionText}>
-            • Complete agreements within posted timeframes{'\n'}
-            • Communicate clearly if delays occur{'\n'}
-            • Accept agreements with balanced pricing{'\n'}
-            • Follow through on your commitments
+            • Finish your open agreements - each clean deal speeds you up{'\n'}
+            • Talk to the other side early if something is late{'\n'}
+            • Old deadlocks count less as you finish new deals{'\n'}
+            • Send, receive and settling are never slowed
           </Text>
         </View>
       </View>
@@ -138,7 +140,12 @@ export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({
       {/* Waiting indicator */}
       <View style={styles.waitingBox}>
         <ActivityIndicator size="large" color={COLORS.stone500} />
-        <Text style={styles.waitingText}>Waiting for cooldown…</Text>
+        <Text style={styles.waitingText}>Opening soon…</Text>
+        {onBack ? (
+          <Pressable onPress={onBack} style={{ marginTop: 16, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 10, backgroundColor: COLORS.stone800 }}>
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>← Back to wallet (timer keeps running)</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.waitingSubtext}>
           This helps us maintain a healthy marketplace where neighbors trust each other.
         </Text>

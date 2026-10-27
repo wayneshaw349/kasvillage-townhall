@@ -1477,8 +1477,8 @@ function parseClipboard(raw: string): {
 
   const pComplete = (1 + userStats.successes) / (2 + userStats.successes + userStats.deadlocks);
   const isNewUser = (userStats.successes + userStats.deadlocks) < 3;
-  const snailModeActive = !isNewUser && (userStats.xp < SNAIL_THRESHOLD || pComplete < 0.5);
-  const creationDelayMs = snailModeActive 
+  const snailModeActive = !isNewUser && pComplete < 0.5; // KV_SNAIL_RULE: same rule as snail_rule.ts
+  const creationDelayMs = 0 && snailModeActive // agreements (money) are never delayed
     ? Math.min(60000 + (userStats.deadlocks * 60000), 600000) 
     : 0;
   
@@ -3752,10 +3752,9 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
               <View style={styles.snailWarning}>
                 <Text style={styles.snailEmoji}>🐌</Text>
                 <View style={styles.snailContent}>
-                  <Text style={styles.snailTitle}>Snail Poison Active</Text>
+                  <Text style={styles.snailTitle}>Slow lane</Text>
                   <Text style={styles.snailText}>
-                    App will be slow due to low trust score (XP: {userStats.xp}, Completion: {(pComplete * 100).toFixed(0)}%).
-                    Agreement creation delayed ~{Math.round(creationDelayMs / 1000)}s.
+                    {(pComplete * 100).toFixed(0)}% of your recent deals finished. Apps and games open slower for now - agreements and payments work normally.
                   </Text>
                   <Text style={styles.snailNote}>
                     Complete transactions successfully to improve your score.
