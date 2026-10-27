@@ -49,6 +49,14 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
   const [chainVerdict, setChainVerdict] = useState('');
   const [chainCopied, setChainCopied] = useState(false);
   const [anchorMsg, setAnchorMsg] = useState(''); // KV_PHONE_LOCAL3
+  // KV_BUNDLE_VERIFY: paste someone else's evidence bundle and check it against the chain
+  const [bundleIn, setBundleIn] = useState('');
+  const [bundleBusy, setBundleBusy] = useState(false);
+  const [bundleRes, setBundleRes] = useState<any>(null);
+  const [net, setNet] = useState<'mainnet' | 'testnet-10'>('testnet-10'); // KV_NET_FOLLOW: scans follow the wallet's network
+  React.useEffect(() => {
+    (async () => { try { const a = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || ''; if (a.startsWith('kaspa:')) setNet('mainnet'); } catch {} })();
+  }, []);
   React.useEffect(() => {
     if (!visible) return;
     (async () => { try { const { loadChain } = require('./stat_records'); setMyChain(await loadChain()); } catch (e) { console.log('[PhoneProof] chain load failed:', e); } })();
@@ -87,6 +95,44 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
     } catch (e) { console.log('[PhoneProof] anchor fetch failed:', e); }
   };
 
+  const _xo = (k: string) => { const p = String(k || '').toLowerCase(); return p.length === 66 ? p.slice(2) : p; };
+  const _race = <T,>(p: Promise<T>, ms: number): Promise<T | null> => Promise.race([p, new Promise<null>((res) => setTimeout(() => res(null), ms))]);
+  const handleBundleVerify = async () => {
+    const raw = bundleIn.trim();
+    if (!raw) { setBundleRes({ ok: false, errors: ['Paste a bundle first - the other person copies it from THEIR Phone Proof screen.'] }); return; }
+    setBundleBusy(true); setBundleRes(null);
+    try {
+      const { verifyBundle, fetchAnchor } = require('./stat_records');
+      let recs: any[] = [];
+      try { recs = JSON.parse(raw).records || []; } catch { setBundleRes({ ok: false, errors: ['Not valid bundle JSON.'] }); setBundleBusy(false); return; }
+      if (!recs.length) { setBundleRes({ ok: false, errors: ['Bundle holds no records.'] }); setBundleBusy(false); return; }
+      const owner = String(recs[0].myPubkey || '');
+      const v: any = verifyBundle(raw, owner);
+      const distinct = new Set(recs.map((r: any) => _xo(r.cpPubkey)).filter(Boolean)).size;
+      // anchor spot-check: confirm up to 3 anchored records exist on the chain
+      let anchorsTried = 0, anchorsOk = 0;
+      for (const r of recs) {
+        const a: any = r && r.anchor; if (!a || !a.releaseTxId) continue;
+        if (anchorsTried >= 3) break; anchorsTried++;
+        try { const got: any = await _race(fetchAnchor(a.releaseTxId, r.network === 'mainnet' ? 'mainnet' : 'testnet-10'), 6000); if (got && (got.releaseDaaScore || got.utxoCommitment)) anchorsOk++; } catch {}
+      }
+      // live cross-check: a fresh chain scan of the same pubkey catches dropped recent deals
+      const warns: string[] = []; let liveLine = '';
+      try {
+        const { scanCounterparty } = require('./counterparty_scan');
+        const live: any = await _race(scanCounterparty(owner, net, 40, false), 9000);
+        if (live) {
+          liveLine = 'Live chain window: ' + live.settled + ' settled, ' + live.deadlocked + ' deadlocked of ' + live.total + (live.truncated ? '+' : '');
+          if (live.deadlocked > v.deadlocks) warns.push('The live chain shows ' + live.deadlocked + ' deadlocked escrows but the bundle admits only ' + v.deadlocks + ' - recent bad deals may have been left out.');
+        } else liveLine = 'Live cross-check timed out - rely on the signature checks above.';
+      } catch { liveLine = 'Live cross-check unavailable.'; }
+      if (v.legacy) warns.push(v.legacy + ' legacy (v1) record(s): counterparty signature does not cover escrow/timeout/description.');
+      if (anchorsTried && anchorsOk < anchorsTried) warns.push('Only ' + anchorsOk + '/' + anchorsTried + ' spot-checked anchors were found on the chain.');
+      setBundleRes({ ...v, owner, distinct, anchorsTried, anchorsOk, warns, liveLine });
+    } catch (e: any) { setBundleRes({ ok: false, errors: [String(e?.message || e)] }); }
+    setBundleBusy(false);
+  };
+
   const handleGenerate = async () => {
     const input = target.trim();
     if (!input) { setError('Enter APT, address, or pubkey'); return; }
@@ -99,7 +145,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
       // KV_SCAN_PROOF: chain-first background check (Arweave prover dead in RN)
       if (!/^[0-9a-fA-F]{64,66}$/.test(pk)) throw new Error('Enter their pubkey (64/66 hex) - it is in any proposal they send you');
       const { scanCounterparty } = require('./counterparty_scan');
-      const _scan: any = await scanCounterparty(pk, 'testnet-10', 40, false);
+      const _scan: any = await scanCounterparty(pk, net, 40, false);
       const _p: any = {
         completed: _scan.settled,
         deadlocks: _scan.deadlocked,
@@ -124,7 +170,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
       if ((proof as any)._scan) {
         // KV_SCAN_PROOF: verify = independent re-scan of the chain, compare tallies
         const { scanCounterparty } = require('./counterparty_scan');
-        const _re: any = await scanCounterparty((proof as any)._pk, 'testnet-10', 40, false);
+        const _re: any = await scanCounterparty((proof as any)._pk, net, 40, false);
         const _match = _re.settled === proof.completed && _re.deadlocked === proof.deadlocks && _re.total === proof.total_agreements;
         r = { valid: _match, reason: _match ? undefined : 'fresh scan differs (window moved or new activity): settled ' + _re.settled + ' vs ' + proof.completed + ', deadlocked ' + _re.deadlocked + ' vs ' + proof.deadlocks };
       } else {
@@ -190,6 +236,39 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
                 <Text style={{ color: anchorMsg ? C.primary : C.muted, fontSize: rs.font(11), fontWeight: 'bold' }}>{anchorMsg || 'Fetch Anchors'}</Text>
               </TouchableOpacity>
             </View>
+          </View>
+
+          {/* KV_BUNDLE_VERIFY: check a bundle someone sent you */}
+          <View style={{ backgroundColor: C.card, borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(14), borderWidth: 1, borderColor: C.border }}>
+            <Text style={{ color: C.primary, fontWeight: 'bold', fontSize: rs.font(13) }}>Verify someone's bundle</Text>
+            <Text style={{ color: C.muted, fontSize: rs.font(10), marginTop: rs.s(4) }}>
+              They copy their Evidence Chain bundle and send it to you. Pasting it here checks every dual signature, the hash chain, their Kaspa anchors, and runs a fresh chain scan to catch left-out deals.
+            </Text>
+            <TextInput
+              style={[s.input, { marginTop: rs.s(8), minHeight: rs.s(70), textAlignVertical: 'top' }]}
+              value={bundleIn} onChangeText={setBundleIn} multiline
+              placeholder='Paste their bundle JSON ({"kind":"KVSTAT-BUNDLE"...})'
+              placeholderTextColor={C.muted} autoCapitalize="none" autoCorrect={false}
+            />
+            <TouchableOpacity onPress={handleBundleVerify} disabled={bundleBusy} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: C.primary, borderRadius: rs.s(8), paddingVertical: rs.s(10), alignItems: 'center' }}>
+              {bundleBusy ? <ActivityIndicator color={C.primary} /> : <Text style={{ color: C.primary, fontWeight: '600', fontSize: rs.font(13) }}>Verify bundle</Text>}
+            </TouchableOpacity>
+            {bundleRes && (
+              <View style={{ marginTop: rs.s(10) }}>
+                <Text style={{ color: bundleRes.ok ? C.green : C.red, fontWeight: 'bold', fontSize: rs.font(13) }}>
+                  {bundleRes.ok ? '\u2713 VALID - dual-signed and chain-intact' : '\u2717 INVALID'}
+                </Text>
+                {bundleRes.ok !== false || bundleRes.total ? (
+                  <Text style={{ color: C.text, fontSize: rs.font(11), marginTop: rs.s(4) }}>
+                    {String(bundleRes.complete || 0) + ' complete / ' + String(bundleRes.deadlocks || 0) + ' deadlocked of ' + String(bundleRes.total || 0) + ' records \u00b7 ' + String(bundleRes.distinct || 0) + ' distinct counterpart' + (bundleRes.distinct === 1 ? 'y' : 'ies') + (bundleRes.anchorsTried ? ' \u00b7 anchors ' + bundleRes.anchorsOk + '/' + bundleRes.anchorsTried + ' \u2713' : '')}
+                  </Text>
+                ) : null}
+                {bundleRes.owner ? <Text style={{ color: C.muted, fontSize: rs.font(9), fontFamily: 'monospace', marginTop: rs.s(2) }}>{'for ' + bundleRes.owner.slice(0, 20) + '\u2026 - make sure this matches the pubkey on THEIR proposal'}</Text> : null}
+                {bundleRes.liveLine ? <Text style={{ color: C.muted, fontSize: rs.font(10), marginTop: rs.s(4) }}>{bundleRes.liveLine}</Text> : null}
+                {(bundleRes.warns || []).map((w: string, i: number) => <Text key={i} style={{ color: C.gold, fontSize: rs.font(10), marginTop: rs.s(4) }}>{'\u26a0 ' + w}</Text>)}
+                {(bundleRes.errors || []).slice(0, 3).map((e: string, i: number) => <Text key={'e' + i} style={{ color: C.red, fontSize: rs.font(10), marginTop: rs.s(4) }}>{e}</Text>)}
+              </View>
+            )}
           </View>
 
           <View style={s.inputBox}>
