@@ -23,7 +23,7 @@ const KV_HEAD_SUPERSEDE: Record<string, string> = {
   '976b8c49712ee5fd1e00a33e1042f6fd5ac24f3c135b4e1fca3a80010e476805':
     'ef0c3a6ff34488044747589b3ee301c238879f496f60bf7bfb6c9fa7292ff63a',
 };
-import { KV_WNET_INJECT, handleKvNetMessage } from './kv_net_bridge';
+import { KV_WNET_INJECT, handleKvNetMessage, kvDevRelayAllow, kvDevRelayHost } from './kv_net_bridge';
 import { useRef } from 'react';
 
 export interface OnChainPageViewProps {
@@ -39,7 +39,7 @@ export interface OnChainPageViewProps {
   onPage?: (hash: string) => void;
   onClose?: () => void;
   /** Chain GAME mode: solve the hash-chained puzzle instead of a single page. */
-  game?: { manifestAddress: string; manifestHash: string; head: string };
+  game?: { manifestAddress: string; manifestHash: string; head: string; relay?: string };
   /** KV_PREVIEW: test-run local HTML in the locked game player (nothing is fetched). */
   previewHtml?: string;
 }
@@ -84,6 +84,13 @@ const KV_GAME_CSP = '<meta http-equiv="Content-Security-Policy" content="default
 // dimensions and rotated into the portrait viewport, so the game reflows as if
 // the phone turned - no expo-screen-orientation, no dev-client rebuild. Touch
 // coordinates map through a real CSS transform, so input keeps working.
+// KV_ROLL_PROBE (dev builds only): every 2 s while a game runs, one Metro line with
+// the real viewport, the landscape class, whether a Roll choice exists / is
+// visible, and where the big ROLL button sits. Diagnoses the Android-tablet
+// "ROLL hidden in landscape" report without guessing. Read-only; changes nothing.
+const KV_ROLL_PROBE = "(function(){try{var buf=[];var t0=Date.now();var last='';setInterval(function(){try{var d=document,b=d.getElementById('kvbigroll'),dl=d.getElementById('kvx_dlg');var ch=Array.prototype.slice.call(d.querySelectorAll('div[data-i]')).map(function(e){return (e.textContent||'').trim().slice(0,12)+(e.offsetParent?'@vis':'#hidden');});var f=(window.KV_FLAGS&&window.KV_FLAGS())||{};var t=((f.turn||0)%4)+1;var M=window.KV_MP2||{};var ow='?';try{ow=M.owns?(M.owns(t)?1:0):'?';}catch(e){}var sce='none';try{var os=Array.prototype.slice.call(d.querySelectorAll('div')).filter(function(e){return e.style&&/z-index:\\s*76/.test(e.getAttribute('style')||'');});if(os.length){var o=os[os.length-1];sce=getComputedStyle(o).display+' btns='+o.querySelectorAll('button,div[data-i]').length+' txt='+((o.textContent||'').trim().slice(0,36).replace(/\\s+/g,'_'));}}catch(e){sce='err';}var sg='';try{var els=Array.prototype.slice.call(d.querySelectorAll('div')).filter(function(e){return /^scn: /.test(e.textContent||'')&&e.children.length===0;});sg=els.length?els[els.length-1].textContent.slice(0,36):'';}catch(e){}if(window.KV_LOG&&!window.__kvNLW){window.__kvNLW=1;window.__kvNL=[];var t00=t0;var ol=window.KV_LOG;window.KV_LOG=function(m,c){try{if(/node|relay|append|discover|chain|poll|fail|drop|reach|seal|refus|fan|stor|diverg|pin|adopt|expect|block|silent|YOUR/i.test(String(m))){window.__kvNL.push('+'+Math.round((Date.now()-t00)/1000)+'s '+String(m).slice(0,90));if(window.__kvNL.length>40)window.__kvNL.shift();}}catch(e){}return ol.apply(this,arguments);};}var rxs='-';try{var rsec=(M.__lastLogAt?Math.round((Date.now()-M.__lastLogAt)/1000):-1);rxs=(rsec<0?'-':(rsec<=8?'ok':(Math.min(990,Math.round(rsec/10)*10)+'s')));}catch(e){}var nuls=0;try{var mvq=window.KV_MOVES||[];for(var q=1;q<mvq.length;q++)if(!mvq[q])nuls++;}catch(e){}var rb=d.getElementById('kv_rescue');if(rb&&!rb.__kvPW){rb.__kvPW=1;window.__kvPT=window.__kvPT||0;rb.addEventListener('pointerup',function(){window.__kvPT=(window.__kvPT||0)+1;},true);}var nd='-';try{if(window.KV_RELAY&&window.KV_RELAY.nodes){var ns=window.KV_RELAY.nodes();nd=ns.filter(function(n){return n.ok;}).length+'/'+ns.length+'f'+ns.reduce(function(a,n){return a+(n.fails||0);},0);}}catch(e){}var rsc=(rb?(rb.style.display||'?'):'-')+'/'+(window.__kvPT||0);var s='vp='+innerWidth+'x'+innerHeight+' turn=P'+t+' mine='+ow+' head='+(M.head!=null?M.head:'-')+' logN='+(M.logN||0)+' rx='+rxs+' nul='+nuls+' nd='+nd+' rsc='+rsc+' fl='+[f.seat,f.humans,f.asked,f.go,f.phase,f.moved].map(function(x){return x==null?'-':x;}).join(',')+' big='+(b?getComputedStyle(b).display:'none')+' dlg='+(dl?getComputedStyle(dl).display:'none')+' scn=['+sce+'] gate=['+sg+'] ch='+JSON.stringify(ch);if(s!==last){last=s;var line='+'+Math.round((Date.now()-t0)/1000)+'s '+s;buf.push(line);if(buf.length>60)buf.shift();console.log('[KV_ROLL] '+line);}if(window.KV_WNET&&window.KV_WNET.copy&&!window.KV_WNET.__kvRollWrap){window.KV_WNET.__kvRollWrap=1;var oc=window.KV_WNET.copy.bind(window.KV_WNET);window.KV_WNET.copy=function(x){try{if(typeof x==='string'&&x.indexOf('\"moves\"')>0){x=x+'\\n\\n[KV_ROLL_HISTORY]\\n'+buf.join('\\n')+'\\n\\n[KV_NET_LOG]\\n'+((window.__kvNL||[]).join('\\n')||'(empty)');}}catch(e){}return oc(x);};}}catch(e){console.log('[KV_ROLL] err '+e);}},2000);}catch(e){}})();";
+
+
 // KV_LAND_SHIM: self-landscape for games (see wire_game_landscape.cjs)
 const KV_LAND_SHIM = "(function(){try{\nif(window.__kvLandInit)return;window.__kvLandInit=1;\nvar RW=function(){return window.__kvRealW||window.screen.width;};\nvar RH=function(){return window.__kvRealH||window.screen.height;};\nif(!(RW()<RH()))return;\nwindow.__kvSelfLandscape=1;\ntry{Object.defineProperty(window,'innerWidth',{configurable:true,get:function(){return RH();}});}catch(e){}\ntry{Object.defineProperty(window,'innerHeight',{configurable:true,get:function(){return RW();}});}catch(e){}\ntry{if(window.visualViewport){Object.defineProperty(window.visualViewport,'width',{configurable:true,get:function(){return RH();}});Object.defineProperty(window.visualViewport,'height',{configurable:true,get:function(){return RW();}});}}catch(e){}\nvar st=document.createElement('style');st.textContent='html{background:#000;overflow:hidden;margin:0;padding:0;width:100%;height:100%;}';\nvar apply=function(){var b=document.body;if(!b)return false;var w=RW(),h=RH();\n if(!st.parentNode){var hd=document.head||document.documentElement;if(hd)hd.appendChild(st);}\n b.style.setProperty('position','fixed','important');b.style.setProperty('margin','0','important');\n b.style.top='0';b.style.left='0';b.style.width=h+'px';b.style.height=w+'px';b.style.overflow='hidden';\n b.style.transformOrigin='0 0';b.style.transform='translateX('+w+'px) rotate(90deg)';return true;};\nvar nat=Element.prototype.getBoundingClientRect;\nElement.prototype.getBoundingClientRect=function(){var r=nat.call(this);var w=RW();var L=r.top,T=w-r.right,W=r.height,H=r.width;\n return {left:L,top:T,right:L+W,bottom:T+H,width:W,height:H,x:L,y:T,toJSON:function(){return {left:L,top:T,width:W,height:H};}};};\nvar map=function(o){if(!o||o.__kvL)return;var sx=o.clientX,sy=o.clientY;if(typeof sx!=='number')return;var vx=sy,vy=RW()-sx;\n try{['clientX','pageX','x'].forEach(function(k){Object.defineProperty(o,k,{configurable:true,value:vx});});\n ['clientY','pageY','y'].forEach(function(k){Object.defineProperty(o,k,{configurable:true,value:vy});});\n Object.defineProperty(o,'__kvL',{value:1});}catch(e){}};\nvar tl=function(L){var a=[];if(L)for(var i=0;i<L.length;i++){var t=L[i],vx=t.clientY,vy=RW()-t.clientX;a.push({identifier:t.identifier,target:t.target,clientX:vx,clientY:vy,pageX:vx,pageY:vy,screenX:t.screenX,screenY:t.screenY,radiusX:t.radiusX,radiusY:t.radiusY,rotationAngle:t.rotationAngle,force:t.force});}a.item=function(i){return a[i]||null;};return a;};\nvar fix=function(e){if(e.__kvL)return;if(typeof TouchEvent!=='undefined'&&e instanceof TouchEvent){try{var T=tl(e.touches),C=tl(e.changedTouches),G=tl(e.targetTouches);Object.defineProperty(e,'touches',{configurable:true,value:T});Object.defineProperty(e,'changedTouches',{configurable:true,value:C});Object.defineProperty(e,'targetTouches',{configurable:true,value:G});Object.defineProperty(e,'__kvL',{value:1});}catch(x){}}else map(e);};\n['click','dblclick','contextmenu','mousedown','mouseup','mousemove','pointerdown','pointermove','pointerup','pointercancel','touchstart','touchmove','touchend','touchcancel','wheel'].forEach(function(t){window.addEventListener(t,fix,{capture:true,passive:true});});\nif(!apply()){var mo=new MutationObserver(function(){if(apply()){mo.disconnect();try{window.dispatchEvent(new Event('resize'));}catch(e){}}});mo.observe(document,{childList:true,subtree:true});}\ndocument.addEventListener('DOMContentLoaded',function(){apply();try{window.dispatchEvent(new Event('resize'));}catch(e){}});\n}catch(e){window.__kvLandErr=String(e);}})();";
 const KV_ROT_JS = "(function(){try{if(window.__kvSelfLandscape)return;var r=__R__,s=__S__;var b=document.body;if(!b)return;if(!window.__kvVInit){window.__kvVInit=1;var st=document.createElement('style');st.textContent='html{background:#000;}html,body{margin:0;padding:0;overflow:hidden;}';document.head.appendChild(st);window.addEventListener('resize',function(){try{window.__kvView(window.__kvR||0,window.__kvS||0);}catch(e){}});}window.__kvNat=function(){var t=b.style.transform;b.style.transform='none';var w=1,h=1,i,c=b.children;for(i=0;i<c.length;i++){var q=c[i].getBoundingClientRect();if(q.width>w)w=q.width;if(q.bottom>h)h=q.bottom;}w=Math.max(w,b.scrollWidth,1);h=Math.max(h,b.scrollHeight,1);b.style.transform=t;return{w:w,h:h};};window.__kvView=function(rr,ss){b.style.transformOrigin='0 0';var vw=window.innerWidth,vh=window.innerHeight;var n=window.__kvNat();if(!ss){var tw=rr?vh:vw,th=rr?vw:vh;ss=Math.min(tw/n.w,th/n.h)*0.88;if(!isFinite(ss)||ss<=0)ss=1;ss=Math.round(ss*100)/100;}var x,y;if(rr){x=(vw+ss*n.h)/2;y=(vh-ss*n.w)/2;b.style.transform='translate('+x+'px,'+y+'px) rotate(90deg) scale('+ss+')';}else{x=(vw-ss*n.w)/2;if(x<0)x=0;y=(vh-ss*n.h)/2;if(y<0)y=0;b.style.transform='translate('+x+'px,'+y+'px) scale('+ss+')';}window.__kvR=rr;window.__kvS=ss;try{window.ReactNativeWebView.postMessage(JSON.stringify({kvview:1,scale:ss,w:n.w,h:n.h}));}catch(e){}};window.__kvView(r,s);}catch(e){}})();true;";
@@ -99,6 +106,41 @@ const KV_ROT_JS = "(function(){try{if(window.__kvSelfLandscape)return;var r=__R_
 // The context is a closure local, so we wrap the constructor BEFORE the page
 // loads, keep every instance, and resume any that fall asleep. The game is on
 // chain and immutable; this fixes it from outside without a republish.
+// KV_END_GUARD: never let an automatic closer end a turn under a player who is choosing.
+// KasCity's three auto-closers (stall failsafe, half-open-turn healer after 8 s of
+// quiet, closer guarantee) all post `end` with value 0 and none checks for an open
+// Buy/Pass dialog or scenario card - so a player thinking for 8 s lost the turn.
+// While a choice is open on THIS device, an `end` with value 0 is dropped (never
+// queued, never replaced); the closers retry on their own once the choice closes.
+// The game's own Roll prompt and the roll-for-first screen are not choices here.
+// Human ends carry the turn number, rescue/bot ends carry the seat - untouched.
+// Prevention only: it never posts or changes anything.
+const KV_END_GUARD = "(function(){try{var vis=function(e){try{if(!e||!document.body.contains(e))return false;var cs=getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;return e.getClientRects().length>0;}catch(x){return false;}};var choiceOpen=function(){try{var ds=document.querySelectorAll('div[data-i]');for(var i=0;i<ds.length;i++)if(vis(ds[i])&&!/\\broll\\b/i.test(ds[i].textContent||''))return true;var ms=document.querySelectorAll('[data-kvmodal]');for(var k=0;k<ms.length;k++)if(vis(ms[k])&&!/roll for first/i.test(ms[k].textContent||''))return true;var os=document.querySelectorAll('div');for(var j=0;j<os.length;j++){var st=os[j].getAttribute&&os[j].getAttribute('style');if(st&&/z-index:\\s*76/.test(st)&&vis(os[j]))return true;}}catch(e){}return false;};var lastLog=0;var mk=function(fn){var w=function(seat,action,value,fx){try{if(String(action)==='end'&&(+value===0)&&choiceOpen()){var n=Date.now();if(n-lastLog>5000){lastLog=n;try{if(window.KV_LOG)window.KV_LOG('held an automatic end for P'+seat+' — a choice is open','#7fd87f');}catch(e){}}try{console.log('[KV_END_GUARD] held auto-end P'+seat);}catch(e){}return;}}catch(e){}return fn.apply(this,arguments);};try{for(var k in fn)if(Object.prototype.hasOwnProperty.call(fn,k))w[k]=fn[k];}catch(e){}w.__kvEG=1;w.__kvInner=fn;return w;};var cur=window.KV_MOVE;if(typeof cur==='function'&&!cur.__kvEG)cur=mk(cur);Object.defineProperty(window,'KV_MOVE',{configurable:true,enumerable:true,get:function(){return cur;},set:function(v){cur=(typeof v==='function'&&!v.__kvEG)?mk(v):v;}});}catch(e){}})();true;";
+
+// KV_DLG_WATCH: clear a ghost engine dialog that froze the turn logic.
+// Confirmed in-browser (room kcc40ea2ce): the engine pauses ALL turn logic while
+// one of its own dialogs is open, and a guest's boot-time prompt (the game boots
+// as single-player seat 1 before the multiplayer join re-seats it) can be hidden
+// by the MP machinery without the engine dialog state being cleared - dialogueOpen()
+// stayed true for 10 minutes with nothing on screen, so no Roll was ever offered.
+// Rule: in a started relay game, if the dialog state is set but its window is not
+// actually visible for 2 consecutive checks (~4s), clear it and reset the asked
+// flag; the revived turn logic then re-opens the correct prompt by itself (verified
+// in Chromium: ghost cleared -> fresh visible Roll prompt; legit open dialogs and
+// single-player untouched).
+const KV_DLG_WATCH = "(function(){try{var LOG=function(m){try{if(window.KV_LOG)window.KV_LOG(m,'#7fd87f');}catch(e){}try{console.log('[KV_DLG_WATCH] '+m);}catch(e){}};var strikes=0;setInterval(function(){try{var M=window.KV_MP2;if(!M||!M.room||!M.started){strikes=0;return;}var d=window.DLG;if(!d){strikes=0;return;}var el=null;try{el=(typeof dlgEl!=='undefined')?dlgEl:null;}catch(e){}var vis=!!(el&&el.offsetParent);if(vis){strikes=0;return;}strikes++;if(strikes<2)return;strikes=0;window.DLG=null;try{if(typeof hideDialogue==='function')hideDialogue();}catch(e){}try{if(el)el.style.display='none';}catch(e){}try{if(window.KV_SETSTATE)window.KV_SETSTATE('asked',0);}catch(e){}LOG('cleared a stale engine dialog \u2014 the turn logic was frozen behind it');}catch(e){}},2000);}catch(e){}})();true;";
+
+// KV_ROLL_RESCUE v3: the CONTINUE button posts what the CHAIN is owed.
+// The relay's turn gate (game_rooms v52+) only accepts a `roll` from the seat it
+// expects and an `end` from the seat that last rolled - rescue v2's blind `end`
+// was refused with not_the_roller on every node (fan-out 0/3) whenever the stuck
+// seat had not rolled yet. v3 reads the local chain: last acked roll mine -> post
+// the missing `end`; otherwise -> post a `roll` (same call the engine's own bot
+// driver uses; the chain stores the total, devices draw the dice). If the first
+// guess has not acked after ~3.5s the other is posted - the relay harmlessly
+// refuses the wrong one. Player-triggered only; no engine state is touched.
+const KV_ROLL_RESCUE = "(function(){try{var LOG=function(m){try{if(window.KV_LOG)window.KV_LOG(m,'#7fd87f');}catch(e){}try{console.log('[KV_RESCUE] '+m);}catch(e){}};var clickRoll=function(){try{var ds=document.querySelectorAll('div[data-i]');for(var i=0;i<ds.length;i++){var d=ds[i];if(/\\broll\\b/i.test(d.textContent||'')&&d.offsetParent){d.click();return true;}}}catch(e){}return false;};var choiceOpen=function(){try{var ds=document.querySelectorAll('div[data-i]');for(var i=0;i<ds.length;i++)if(ds[i].offsetParent)return true;var os=document.querySelectorAll('div');for(var j=0;j<os.length;j++){var st=os[j].getAttribute&&os[j].getAttribute('style');if(st&&/z-index:\\s*76/.test(st)&&getComputedStyle(os[j]).display!=='none')return true;}return false;}catch(e){return false;}};var ackedBy=function(seat,from){try{var mv=window.KV_MOVES||[];for(var i=mv.length-1;i>=0;i--){var e=mv[i];if(e&&+e.s===seat&&(e.__acked||e.acked)&&(from==null||e.i>=from))return e;if(from!=null&&e&&e.i<from)break;}}catch(e){}return null;};var lastAckedRoll=function(){try{var mv=window.KV_MOVES||[];for(var i=mv.length-1;i>=0;i--){var e=mv[i];if(e&&String(e.a)==='roll'&&(e.__acked||e.acked))return e;}}catch(e){}return null;};var fire=function(ev){if(ev){try{ev.preventDefault();ev.stopPropagation();}catch(x){}}if(btn)btn.style.display='none';try{if(clickRoll()){LOG('clicked the live roll');return;}var f=(window.KV_FLAGS&&window.KV_FLAGS())||{};var s=((f.turn||0)%4)+1;var lr=lastAckedRoll();var mineRolled=!!(lr&&+lr.s===s);var mv0=(window.KV_MOVES||[]);var headB=mv0.length;var post=function(kind){if(typeof window.KV_MOVE!=='function')return;if(kind==='end'){LOG('posting end for P'+s+' (chain says P'+s+' rolled)');window.KV_MOVE(s,'end',s);}else{var tot=2+Math.floor(Math.random()*11);LOG('posting roll '+tot+' for P'+s+' (chain owes a roll)');window.KV_MOVE(s,'roll',tot);}};post(mineRolled?'end':'roll');setTimeout(function(){try{if(clickRoll())return;var got=ackedBy(s,headB>0?(mv0[headB-1]&&mv0[headB-1].i!=null?mv0[headB-1].i+1:null):null);if(got){LOG('chain accepted '+got.a+' — continuing');return;}LOG('no ack — trying the other move');post(mineRolled?'roll':'end');}catch(x2){}},3500);}catch(e2){LOG('rescue error '+e2);}};var btn=null;var mk=function(){if(btn)return btn;btn=document.createElement('div');btn.id='kv_rescue';btn.textContent='▶ CONTINUE';btn.style.cssText='position:fixed;left:14px;bottom:46px;z-index:9950;display:none;min-width:130px;height:52px;line-height:52px;text-align:center;padding:0 16px;border-radius:12px;background:#5a2ca0;color:#fff;font:900 18px system-ui,sans-serif;letter-spacing:1px;box-shadow:0 4px 18px rgba(0,0,0,.6);cursor:pointer;user-select:none;';var armed=0;var g=function(ev){var n=Date.now();if(n-armed<1200)return;armed=n;fire(ev);};btn.addEventListener('touchend',g,{passive:false});btn.addEventListener('pointerup',g);btn.addEventListener('click',g);(document.body||document.documentElement).appendChild(btn);return btn;};var okAt=Date.now();setInterval(function(){try{var M=window.KV_MP2;var show=false;if(M&&M.room&&M.started){var f=(window.KV_FLAGS&&window.KV_FLAGS())||{};var s=((f.turn||0)%4)+1;var mine=false;try{mine=!!(M.owns&&M.owns(s));}catch(e){}if(mine&&!choiceOpen()){if(Date.now()-okAt>6000)show=true;}else okAt=Date.now();}else okAt=Date.now();var b=mk();if(b)b.style.display=show?'block':'none';}catch(e){}},2000);}catch(e){}})();true;";
+
 const KV_AUDIO_KEEP = "(function(){try{var C=window.AudioContext||window.webkitAudioContext;if(!C)return;var made=[];function W(){var c=new C();made.push(c);return c;}W.prototype=C.prototype;try{window.AudioContext=W;}catch(e){}try{window.webkitAudioContext=W;}catch(e){}function kick(){for(var i=0;i<made.length;i++){var c=made[i];if(c&&c.state==='suspended'){try{c.resume();}catch(e){}}}}setInterval(kick,1500);document.addEventListener('touchstart',kick,true);document.addEventListener('touchend',kick,true);document.addEventListener('visibilitychange',kick);window.__kvAudioKick=kick;}catch(e){}})();true;";
 
 function injectCsp(raw: string, meta: string = CSP_META): string {
@@ -330,7 +372,13 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       const RN = require('react-native');
       RN.Alert.alert('Contact player', 'Your message is copied - paste it in the chat.\n\nAgree on the deal there, then settle wallet-to-wallet in KasVillage (direct send or a FROST agreement). Never pay an address you did not verify. The owner presses TRANSFER in the game after being paid.' + (url ? '' : '\n\nContact: ' + to), url ? [{ text: 'Cancel', style: 'cancel' }, { text: 'Open chat', onPress: () => { RN.Linking.openURL(url).catch(() => RN.Alert.alert('Could not open', to)); } }] : [{ text: 'OK' }]);
       return; } } catch {}
-    if (handleKvNetMessage(event.nativeEvent.data, (js) => webRef.current?.injectJavaScript(js), { sign: !!props.game })) return; // KV_WNET_SIGN: only chain games get signed requests
+    if (handleKvNetMessage(event.nativeEvent.data, (js) => webRef.current?.injectJavaScript(js), {
+      sign: !!props.game,
+      // KV_DEV_RELAY: a game that declared its own multiplayer server gets that
+      // single extra HTTPS host allowed and signed for - nothing else changes.
+      allow: (props.game && kvDevRelayAllow((props.game as any).relay)) || undefined,
+      relayHost: props.game ? kvDevRelayHost((props.game as any).relay) : null,
+    })) return; // KV_WNET_SIGN: only chain games get signed requests
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.kv && /^kv:\/\//.test(String(msg.kv))) handleKvLink(msg.kv); // KV_MSG_FIX: status signals are not links
@@ -374,7 +422,14 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
     );
   }
 
+  // KV_TABLET_SAFE: Android tablets ignore the portrait lock and rotate the app.
+  // In landscape the game area ran under the system bars, cutting off the bottom
+  // strip (KasCity's ROLL button + the verified bar). Games now sit inside the
+  // native safe area on the bottom/left/right (top is handled by topPad), and the
+  // view re-measures on every rotation.
+  const _KvSafe: any = props.game ? require('react-native-safe-area-context').SafeAreaView : View;
   return (
+    <_KvSafe style={styles.fill} {...(props.game ? { edges: ['bottom', 'left', 'right'] } : {})}>
     <View ref={outerRef} style={[styles.fill, { paddingTop: topPad || 0 }]} onLayout={(e: any) => { const L = e.nativeEvent.layout;
       const done = (pad: number) => { boxRef.current = { w: L.width, h: L.height, pad }; setTopPad(pad); if (barH == null) return; const h = L.height - pad - barH; if (!wv || Math.abs(wv.w - L.width) > 1 || Math.abs(wv.h - h) > 1) setWv({ w: L.width, h }); };
       let ins = 0; try { const m = require('react-native-safe-area-context').initialWindowMetrics; ins = (m && m.insets && m.insets.top) || 0; } catch {}
@@ -382,11 +437,11 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       try { outerRef.current.measureInWindow((_x: number, y: number) => done(Math.max(0, Math.round(ins - (y || 0))))); } catch { done(0); } }}>
       {props.game && (land === null || !wv || topPad === null) ? null : (
       <WebView
-        key={'kvwv' + (land ? 1 : 0) + '_r' + kvReloadN}
+        key={'kvwv' + (land ? 1 : 0) + '_r' + kvReloadN + (props.game && wv ? (wv.w > wv.h ? '_L' : '_P') : '') /* KV_TABLET_SAFE */}
         source={{ html, baseUrl: 'https://kv-game.local/' }}
         originWhitelist={['https://kv-game.local']}
         ref={webRef}
-        injectedJavaScriptBeforeContentLoaded={(props.game && land && wv ? 'window.__kvRealW=' + Math.round(wv.w) + ';window.__kvRealH=' + Math.round(wv.h) + ';' + KV_LAND_SHIM : (props.game && land === false ? 'window.__kvLandOff=1;' : '')) /* KV_LAND_FIX */ + CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? ('try{window.KV_GRANTS=' + JSON.stringify((globalThis as any).__kvGrantsAll || {}) + ';window.KV_MY_CONTACT=' + JSON.stringify(String((globalThis as any).__kvDevContact || '').slice(0, 80)) + ';}catch(e){};') : '') /* KV_GRANTS */}
+        injectedJavaScriptBeforeContentLoaded={(props.game && land && wv ? 'window.__kvRealW=' + Math.round(wv.w) + ';window.__kvRealH=' + Math.round(wv.h) + ';' + KV_LAND_SHIM : (props.game && land === false ? 'window.__kvLandOff=1;' : '')) /* KV_LAND_FIX */ + CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? KV_END_GUARD : '') /* KV_END_GUARD */ + (props.game ? KV_DLG_WATCH : '') /* KV_DLG_WATCH */ + (props.game ? KV_ROLL_RESCUE : '') /* KV_ROLL_RESCUE */ + (props.game && typeof __DEV__ !== 'undefined' && __DEV__ ? KV_ROLL_PROBE : '') /* KV_ROLL_PROBE */ + (props.game ? ('try{window.KV_GRANTS=' + JSON.stringify((globalThis as any).__kvGrantsAll || {}) + ';window.KV_MY_CONTACT=' + JSON.stringify(String((globalThis as any).__kvDevContact || '').slice(0, 80)) + ';}catch(e){};') : '') /* KV_GRANTS */}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         onLoadEnd={() => { kvPageUpRef.current = true; }}
@@ -482,6 +537,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
         </TouchableOpacity>
       ) : null}
     </View>
+    </_KvSafe>
   );
 }
 

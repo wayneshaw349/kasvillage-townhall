@@ -528,7 +528,8 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
         pageHash={playingChain.manifestHash}
         network={'testnet-10'}
         game={{ manifestAddress: playingChain.manifestAddress, manifestHash: playingChain.manifestHash, head: playingChain.head,
-          anchor_hash: (playingChain as any).anchor_hash, daa_from: (playingChain as any).daa_from, daa_to: (playingChain as any).daa_to }}
+          anchor_hash: (playingChain as any).anchor_hash, daa_from: (playingChain as any).daa_from, daa_to: (playingChain as any).daa_to,
+          relay: (playingChain as any).relay /* KV_DEV_RELAY */ }}
         onClose={() => setPlayingChain(null)}
       />
     );
