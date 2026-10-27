@@ -59,98 +59,8 @@ const BOARD_COLORS: Record<string, { bg: string; text: string }> = {
   Incubator: { bg: '#059669', text: '#FFFFFF' },
 };
 
-// ============================================================================
-// MOCK DATA
-// ============================================================================
-
-const mockDApps: DApp[] = [
-  {
-    id: 'dapp-1',
-    name: 'KasSwap DEX',
-    category: 'DeFi',
-    board: 'Elite',
-    url: 'https://kasswap.example.com',
-    stakeKas: 5200,
-    lockStart: '2025-01-01',
-    lockEnd: '2026-01-01',
-    trustScore: 9800,
-    ownerApt: 'APT-101',
-    verified: true,
-    price: 0,
-  },
-  {
-    id: 'dapp-2',
-    name: 'Village Chess',
-    category: 'Game',
-    board: 'Main',
-    url: 'https://chess.example.com',
-    stakeKas: 800,
-    lockStart: '2025-03-01',
-    lockEnd: '2025-12-31',
-    trustScore: 3200,
-    ownerApt: 'APT-205',
-    verified: true,
-    price: 5,
-  },
-  {
-    id: 'dapp-3',
-    name: 'NFT Gallery',
-    category: 'Art',
-    board: 'Incubator',
-    url: 'https://gallery.example.com',
-    stakeKas: 150,
-    lockStart: '2025-06-01',
-    lockEnd: '2025-09-30',
-    trustScore: 650,
-    ownerApt: 'APT-412',
-    verified: false,
-    price: 0,
-  },
-  {
-    id: 'dapp-4',
-    name: 'Prediction Market',
-    category: 'DeFi',
-    board: 'Main',
-    url: 'https://predict.example.com',
-    stakeKas: 1200,
-    lockStart: '2025-02-15',
-    lockEnd: '2026-02-15',
-    trustScore: 4100,
-    ownerApt: 'APT-118',
-    verified: true,
-    price: 0,
-  },
-];
-
-const mockBookshelf: BookshelfItem[] = [
-  {
-    id: 'book-1',
-    type: 'abstract',
-    title: 'Zero-Knowledge Proofs in L2 Systems',
-    author: 'Dr. A. Nakamoto',
-    abstractSummary: 'Survey of ZK implementations in blockchain layer 2 solutions',
-    costKas: 25,
-    purchased: true,
-    purchasedAt: Date.now() - 86400000 * 5,
-  },
-  {
-    id: 'book-2',
-    type: 'tutoring',
-    title: 'Rust Smart Contract Development',
-    author: 'Prof. K. Buterin',
-    costKas: 100,
-    purchased: false,
-  },
-  {
-    id: 'book-3',
-    type: 'audit',
-    title: 'Security Audit: KasSwap V2',
-    author: 'ChainSec Labs',
-    abstractSummary: 'Comprehensive audit of token swap logic',
-    costKas: 500,
-    purchased: false,
-  },
-];
+// KV_NO_MOCKS: launch build ships no example content - lanes start empty and fill
+// from the chain (installed/published games) and real purchases only.
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -392,7 +302,7 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
   const [activeTab, setActiveTab] = useState<'dapps' | 'bookshelf'>('dapps');
   const [activeBoard, setActiveBoard] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [dapps, setDapps] = useState<DApp[]>(mockDApps);
+  const [dapps, setDapps] = useState<DApp[]>([]); // KV_NO_MOCKS
   const [playingChain, setPlayingChain] = useState<any>(null);
   useEffect(() => {
     (async () => {
@@ -419,7 +329,7 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
       } catch (e) { console.warn('[EC] installed games load failed:', e); }
     })();
   }, []);
-  const [bookshelf, setBookshelf] = useState<BookshelfItem[]>(mockBookshelf);
+  const [bookshelf, setBookshelf] = useState<BookshelfItem[]>([]); // KV_NO_MOCKS
   const [selectedDApp, setSelectedDApp] = useState<DApp | null>(null);
   // In-app engine player. null = not playing; otherwise the fetched
   // descriptor plus the record it came from.
