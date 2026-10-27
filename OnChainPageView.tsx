@@ -333,7 +333,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       }
       if (!ident || !ident.address || !ident.privkey) throw new Error('wallet identity unavailable');
       const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-      const r: any = await sendKaspaViaRest({
+      const r: any = await sendKaspaViaRest({ preview: 'DApp payment request', /* KV_TX_SIM */
         senderAddress: ident.address,
         recipientAddress: paySheet.addr,
         amountSompi: BigInt(Math.round(paySheet.kas * 1e8)),

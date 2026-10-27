@@ -707,11 +707,11 @@ export const SendKAS: React.FC<SendKASProps> = ({
           {step === 'sending' && (
             <View style={styles.statusContainer}>
               <ActivityIndicator size="large" color={COLORS.amber500} />
-              <Text style={styles.statusTitle}>Sending...</Text>
+              <Text style={styles.statusTitle}>🔍 Simulating transaction…</Text>
               <Text style={styles.statusSubtitle}>
                 {resolved?.type === 'stealth' 
                   ? 'Creating PO Box payment and broadcasting'
-                  : 'Authenticating and broadcasting transaction'}
+                  : 'Checking exactly what this transaction does before you sign (KV_TX_SIM). Then authenticating and broadcasting.'}
               </Text>
             </View>
           )}

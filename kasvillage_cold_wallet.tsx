@@ -677,7 +677,7 @@ async function lockToNeighborAgreement(
     );
     const lockAmount = myRole === 'buyer' ? config.buyerLockSompi : config.sellerLockSompi;
 
-    const restResult = await sendKaspaViaRest({
+    const restResult = await sendKaspaViaRest({ preview: 'You - agreement lock', /* KV_TX_SIM */
       senderAddress: wallet.address,
       recipientAddress: address,
       amountSompi: lockAmount,
@@ -788,7 +788,7 @@ async function sendKASWithHybridSig(
 
   try {
     console.log('[SendKAS] Sending from main wallet via REST...');
-    const restResult = await sendKaspaViaRest({
+    const restResult = await sendKaspaViaRest({ preview: 'You - Send KAS', /* KV_TX_SIM */
       senderAddress: wallet.address,
       recipientAddress,
       amountSompi,
@@ -906,7 +906,7 @@ async function sendKASFromVault(
     const privKeyHex = bytesToHex(hdPriv);
 
     console.log('[VaultSend] Sending from vault', preview.address.slice(0, 22), 'via REST...');
-    const restResult = await sendKaspaViaRest({
+    const restResult = await sendKaspaViaRest({ preview: 'You - send from vault', /* KV_TX_SIM */
       senderAddress: preview.address,
       recipientAddress,
       amountSompi,

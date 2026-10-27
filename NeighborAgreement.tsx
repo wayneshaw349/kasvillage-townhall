@@ -3346,7 +3346,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
       }
       console.log('[Neighbor] Seller preparing (freeze, no broadcast)', immediateSendAmount / 1e8, 'KASPA to FROST');
               // sendKaspaViaRest is already imported/available in this scope
-              const txResult = await sendKaspaViaRest({
+              const txResult = await sendKaspaViaRest({ preview: 'You - accept & fund agreement', /* KV_TX_SIM */
                 senderAddress: wallet.address,
                 recipientAddress: frostData.address,
                 amountSompi: BigInt(immediateSendAmount),
@@ -3566,7 +3566,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
       }
 
       console.log('[Neighbor] Sending', Number(myLockAmount) / 1e8, 'KASPA to FROST:', contract.multisigAddress);
-      const result = await sendKaspaViaRest({
+      const result = await sendKaspaViaRest({ preview: 'You - fund agreement', /* KV_TX_SIM */
         senderAddress: wallet.address,
         recipientAddress: contract.multisigAddress,
         amountSompi: myLockAmount,

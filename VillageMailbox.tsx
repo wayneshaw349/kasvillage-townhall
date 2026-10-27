@@ -688,7 +688,7 @@ function kvTipStore(item: any) {
             const priv = await ps._kvResolvePrivHex();
             if (!sender || !priv) throw new Error('wallet identity unavailable');
             const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-            const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: String(tipAddr), amountSompi: 100000000n, privateKeyHex: priv, network: 'testnet-10' as any });
+            const r: any = await sendKaspaViaRest({ preview: 'You - tip store', /* KV_TX_SIM */ senderAddress: sender, recipientAddress: String(tipAddr), amountSompi: 100000000n, privateKeyHex: priv, network: 'testnet-10' as any });
             if (r && r.success) Alert.alert('Tip sent \u2713'); else Alert.alert('Tip failed', String((r && r.error) || 'unknown'));
           } catch (e: any) { Alert.alert('Tip failed', String(e?.message || e)); }
         } },
@@ -715,7 +715,7 @@ function StorefrontCard({ item, onPress, onRepost, reposting, onFlag, onTipKeepe
               const priv = await ps._kvResolvePrivHex();
               if (!sender || !priv) throw new Error('wallet identity unavailable');
               const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-              const r: any = await sendKaspaViaRest({
+              const r: any = await sendKaspaViaRest({ preview: 'You - store payment', /* KV_TX_SIM */
                 senderAddress: sender, recipientAddress: String(tipAddr),
                 amountSompi: 100000000n, privateKeyHex: priv, network: 'testnet-10' as any,
               });
@@ -1323,7 +1323,7 @@ export default function VillageMailbox() {
         const _o = String(entry.ownerPubkey || '');
         const authorAddr = deriveAddress(_o.length === 66 ? _o.slice(2) : _o, 'testnet-10' as any);
         const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-        const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: authorAddr, amountSompi: BigInt(Math.round(price * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
+        const r: any = await sendKaspaViaRest({ preview: 'You - ask the author', /* KV_TX_SIM */ senderAddress: sender, recipientAddress: authorAddr, amountSompi: BigInt(Math.round(price * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
         if (r && r.success === false) throw new Error(String(r.error || 'payment failed'));
         payTx = String((r && (r.txid || r.transactionId || r.txId)) || '');
         console.log('[QA] paid', price, 'KAS ->', authorAddr.slice(0, 24), payTx.slice(0, 16));
@@ -1528,7 +1528,7 @@ export default function VillageMailbox() {
       const priv = await ps._kvResolvePrivHex();
       if (!sender || !priv) throw new Error('wallet identity unavailable');
       const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-      const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: String(keeperTip.addr), amountSompi: BigInt(Math.round(kas * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
+      const r: any = await sendKaspaViaRest({ preview: 'You - tip keeper', /* KV_TX_SIM */ senderAddress: sender, recipientAddress: String(keeperTip.addr), amountSompi: BigInt(Math.round(kas * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
       if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
       console.log('[KeeperTip]', kas, 'KAS ->', String(keeperTip.addr).slice(0, 24));
       setKeeperTip(null);
@@ -1554,7 +1554,7 @@ export default function VillageMailbox() {
       const priv = await ps._kvResolvePrivHex();
       if (!sender || !priv) throw new Error('wallet identity unavailable');
       const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-      const r: any = await sendKaspaViaRest({
+      const r: any = await sendKaspaViaRest({ preview: 'You - tip', /* KV_TX_SIM */
         senderAddress: sender, recipientAddress: String(addr),
         amountSompi: BigInt(Math.round(kas * 1e8)),
         privateKeyHex: priv, network: 'testnet-10' as any,

@@ -652,7 +652,7 @@ export async function settleIOUBySend(iou: SignedIOU): Promise<{ success: boolea
 
   if (!isValidProposalAmount(iou.amountSompi)) return { success: false, error: 'Invalid settle amount (must be at least 600 sompi) - nothing sent' }; // KV_IOU_AMOUNT_GUARD
   const network = await currentNetwork();
-  const result = await sendKaspaViaRest({
+  const result = await sendKaspaViaRest({ preview: 'You - settle IOU', /* KV_TX_SIM */
     senderAddress: creds.address,
     privateKeyHex: creds.privkey,
     recipientAddress,

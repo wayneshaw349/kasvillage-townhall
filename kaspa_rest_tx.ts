@@ -451,6 +451,7 @@ export async function sendKaspaViaRest(params: {
   prepareOnly?: boolean;    // freeze + predict txid, do NOT broadcast
   fundingAgrId?: string;    // OWN-AGR-SPEND: UTXOs committed to THIS agreement are spendable by its own funding tx
   sweepAll?: boolean;       // [KV_SWEEP_ALL] with amountSompi 0n: send EVERY coin (minus fee) to recipient
+  preview?: string;         // [KV_TX_SIM] who is asking; shows the simulated tx and waits for the user before signing
 }): Promise<RestTxResult> {
   const { senderAddress, recipientAddress, amountSompi, privateKeyHex, network, payload } = params;
   
@@ -615,6 +616,13 @@ export async function sendKaspaViaRest(params: {
       fee += change; // Absorb dust change into fee (v2: locked value is balance-level, never rides a specific coin)
     }
     
+    // [KV_TX_SIM] simulate before signing (opt-in user-facing sends only)
+    if (params.preview) {
+      let _wt = 0n; for (const u of utxos) _wt += BigInt(u.utxoEntry?.amount || (u as any).amount || '0');
+      const _ok = await require('./tx_preview').confirmSimulatedTx({ requester: String(params.preview), from: senderAddress, to: recipientAddress, amountSompi: sendAmount, changeSompi: (change > 0n && _finalPlan.keepChange) ? change : 0n, feeSompi: fee, walletSompi: _wt, payloadHex: payload || '', inputs: selectedUtxos.length, prepareOnly: !!params.prepareOnly });
+      if (!_ok) return { success: false, error: 'Cancelled after simulation - nothing was sent' };
+    }
+
     // 5. Sign inputs
     const inputsData = selectedUtxos.map(u => ({
       txId: hexToBytes(u.outpoint.transactionId),
