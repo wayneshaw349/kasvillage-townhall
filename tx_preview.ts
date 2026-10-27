@@ -27,6 +27,45 @@ function describePayload(hex: string): string {
   } catch { return 'unknown data (' + hex.length / 2 + ' bytes)'; }
 }
 
+// KV_SCAM_ADDR: addresses linked to flagged activity, from on-chain data only (no central list).
+//  1) Mailbox listings delisted by 3+ community flags or by the moderator (store address + owner wallet)
+//  2) the recipient's own escrow history (settled vs unresolved), same scan as the pre-deal check
+const FLAG_KEY = 'kv_sim_flagged';
+const FLAG_TTL = 48 * 3600_000; // flags expire with chain pruning (~30-40h)
+async function flaggedAddrs(): Promise<Record<string, { why: string; at: number }>> {
+  let m: Record<string, { why: string; at: number }> = {};
+  try { m = JSON.parse((await AsyncStorage.getItem(FLAG_KEY)) || '{}'); } catch {}
+  const now = Date.now();
+  for (const k of Object.keys(m)) if (now - m[k].at > FLAG_TTL) delete m[k];
+  try {
+    const fi: Map<string, any> | undefined = (globalThis as any).__kvFlagInfo;
+    if (fi && fi.size) {
+      const { deriveAddress } = require('./canonical_agreement_steps');
+      for (const [store, f] of fi) {
+        if (!f || !f.hidden || f.modNote) continue; // only real delists; a moderator-acknowledged error does not count
+        const why = '"' + (f.name || 'a listing') + '" was ' + (f.mod ? 'removed by the moderator' : 'delisted by ' + f.n + ' community flags');
+        if (/^kaspa/.test(String(store))) m[String(store)] = { why, at: now };
+        try {
+          const pk = String(f.owner || '').toLowerCase(); const x = pk.length === 66 ? pk.slice(2) : pk;
+          if (x.length === 64) for (const net of ['testnet-10', 'mainnet']) m[deriveAddress(x, net as any)] = { why, at: now };
+        } catch {}
+      }
+    }
+    await AsyncStorage.setItem(FLAG_KEY, JSON.stringify(m));
+  } catch {}
+  return m;
+}
+
+async function escrowHistory(addr: string): Promise<{ settled: number; bad: number; total: number } | null> {
+  try {
+    const net = addr.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet';
+    const scan = require('./counterparty_scan').scanCounterparty(addr, net, 15);
+    const r: any = await Promise.race([scan, new Promise((res) => setTimeout(() => res(null), 6000))]);
+    if (!r) return null;
+    return { settled: r.settled || 0, bad: (r.deadlocked || 0), total: r.total || 0 };
+  } catch { return null; }
+}
+
 async function known(): Promise<string[]> { try { return JSON.parse((await AsyncStorage.getItem(KNOWN_KEY)) || '[]'); } catch { return []; } }
 export async function rememberRecipient(addr: string): Promise<void> {
   try { const k = await known(); if (!k.includes(addr)) { k.unshift(addr); await AsyncStorage.setItem(KNOWN_KEY, JSON.stringify(k.slice(0, 300))); } } catch {}
@@ -41,6 +80,16 @@ export async function simulate(tx: SimTx): Promise<{ lines: string[]; red: strin
     const look = k.find((x) => { const xb = body(x); return xb !== b && xb.slice(0, 5) === b.slice(0, 5) && xb.slice(-4) === b.slice(-4); });
     if (look) red.push('LOOKALIKE ADDRESS: this looks like an address you used before (' + look.slice(0, 14) + '…' + look.slice(-4) + ') but it is NOT the same. This is a common scam (address poisoning).');
     else amber.push('First time sending to this address - double-check it.');
+  }
+  if (!toSelf) {
+    const fl = await flaggedAddrs();
+    if (fl[tx.to]) red.push('FLAGGED ADDRESS: this address is linked to flagged activity - ' + fl[tx.to].why + '.');
+    const eh = await escrowHistory(tx.to);
+    if (eh && eh.total > 0) {
+      const tr = require('./snail_rule').trustFromStats({ successes: eh.settled, deadlocks: eh.bad });
+      if (tr.snail) red.push('BAD DEAL HISTORY: only ' + Math.round(tr.pComplete * 100) + '% of this address\'s escrow deals finished (' + eh.settled + ' settled, ' + eh.bad + ' deadlocked).');
+      else if (eh.bad >= 2) amber.push('This address has ' + eh.bad + ' deadlocked escrow deals on record.');
+    }
   }
   const spend = tx.amountSompi + tx.feeSompi;
   if (!toSelf && tx.walletSompi > 0n && spend * 2n > tx.walletSompi) amber.push('This sends more than half of your balance.');

@@ -113,7 +113,8 @@ export async function scanCounterparty(
   useCache: boolean = true,
 ): Promise<ScanResult> {
   const base = apiBase(network);
-  const address = deriveAddress(xonly(pubkey), network as any);
+  // KV_SCAM_ADDR: also accepts a plain kaspa address (pre-send scam check in the transaction simulation)
+  const address = /^kaspa(test|dev|sim)?:/.test(String(pubkey)) ? String(pubkey) : deriveAddress(xonly(pubkey), network as any);
 
   if (useCache) {
     try {
