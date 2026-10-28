@@ -8,7 +8,7 @@ export const KV_DISCLAIMER_KEY = 'kv_disclaimer_v2';
 
 const P: React.FC<{ t: string; b: string }> = ({ t, b }) => (
   <View style={{ marginBottom: 14 }}>
-    <Text style={{ color: '#F59E0B', fontSize: 14, fontWeight: 'bold', marginBottom: 4 }}>{t}</Text>
+    <Text style={{ color: '#ec4899', fontSize: 14, fontWeight: 'bold', marginBottom: 4 }}>{t}</Text>
     <Text style={{ color: '#D6D3D1', fontSize: 13, lineHeight: 19 }}>{b}</Text>
   </View>
 );
@@ -30,7 +30,7 @@ export const DisclaimerGate: React.FC<{ onAccept: () => void }> = ({ onAccept })
         <P t="Privacy" b="Kaspa is a public ledger: your addresses, balances, transactions, listings, pledges, flags and game moves are visible to anyone, forever. Your seed and keys never leave this phone, and KasVillage runs no accounts and collects no personal data. A contact handle you attach to an offer is shared with the players in that room. Streamer Mode hides details on YOUR screen only - it changes nothing on-chain." />
         <P t="Moderation and the law" b="Listings flagged by 3 community members are automatically delisted in every wallet, and a moderator can delist content with the reason published on-chain; owners are notified in-app. Content that is illegal or that the law requires to be removed will be delisted when identified. You are responsible for what you publish and trade." />
         <View style={{ marginBottom: 14 }}>
-          <Text style={{ color: '#F59E0B', fontSize: 14, fontWeight: 'bold', marginBottom: 4 }}>See something illegal?</Text>
+          <Text style={{ color: '#ec4899', fontSize: 14, fontWeight: 'bold', marginBottom: 4 }}>See something illegal?</Text>
           <Text style={{ color: '#D6D3D1', fontSize: 13, lineHeight: 19 }}>
             Flag the listing in the app, and report it to the authorities - in the US, the FBI's Internet Crime Complaint Center:{' '}
             <Text style={{ color: '#60A5FA' }} onPress={() => { try { Linking.openURL('https://www.ic3.gov'); } catch {} }}>ic3.gov</Text>

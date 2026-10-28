@@ -70,8 +70,8 @@ interface Avatar {
 
 const XP_TIERS = [
   { name: 'Base', threshold: 0, color: '#9CA3AF' },
-  { name: 'Verified', threshold: 200, color: '#10B981' },
-  { name: 'Custodian', threshold: 500, color: '#3B82F6' },
+  { name: 'Verified', threshold: 200, color: '#ec4899' },   // KV_PINK
+  { name: 'Custodian', threshold: 500, color: '#4f46e5' },  // indigo - matches Mailbox dev XP
   { name: 'Sentinel', threshold: 1000, color: '#8B5CF6' },
   { name: 'Archon', threshold: 2000, color: '#F59E0B' },
 ];
