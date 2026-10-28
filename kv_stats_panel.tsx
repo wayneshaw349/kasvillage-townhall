@@ -170,6 +170,10 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
             Every number below is re-derived from Kaspa L1 or from dual-signed deal records - nothing is
             self-reported. Keeps cost the keeper KAS; sales are escrow deals co-signed by the buyer.
           </Text>
+          <Text style={{ color: '#a3b18a', fontSize: 11, fontStyle: 'italic', textAlign: 'center', marginBottom: 12 }}>
+            {'“…yin na yang — ọnụahịa na-arị elu na ọnụahịa na-ada — na ike nhọrọ nke ndị mmadụ…”'}{'\n'}
+            {'…yin and yang — inflation and deflation — and the people\u2019s power of choice… — Wayne Shaw (Igbo · full quote on the Dashboard)'}
+          </Text>
           {busy && <ActivityIndicator color={C.pink} style={{ marginVertical: 20 }} />}
           {err ? <Text style={{ color: '#e74c3c', fontSize: 12 }}>{err}</Text> : null}
 
@@ -292,7 +296,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                 {Math.round(circ.pct * 100) + '% of the KAS you spent stayed in the village'}{sm ? '' : ' (₭' + circ.inKas.toFixed(1) + ' circular · ₭' + circ.outKas.toFixed(1) + ' exited)'}
               </Text>
               <Text style={{ color: C.mut, fontSize: 10, marginTop: 4 }}>
-                ☯️ The heartbeat of a dual economy: KAS circulates inside, dollars pay the outside bills — a complement, not a competitor. An ode to the Swiss, whose WIR has flowed this way since 1934.{'\n\n'}“A free market isn't the goal — for that allows the freedom to control said market. A fair market is the goal: balance between two forces, a yin and a yang, inflation and deflation, reinforced by equality of power of the people, not money.” — Wayne Shaw{'\n'}“Zandu ya kimpwanza ke lengo ve — sambu kimpwanza ke pesaka nzila na kuyala zandu yina. Lengo kele zandu ya masonga: bukatikati ya ngolo zole, yin mpe yang, ntalu ke mata mpe ntalu ke kulumuka, yina me simbama na lulendo ya kiteso mosi ya bantu — kansi ve mbongo.” (Kikongo){'\n'}“Edwa a ɛde ne ho nyɛ botaeɛ no — edwa pɛpɛɛpɛ ne botaeɛ no.” (Twi){'\n'}“Ọjà òmìnira kọ́ ni àfojúsùn — ọjà òdodo ni.” (Yorùbá){'\n'}(Escrows, stores, registries and known counterparties count as village.) An ode to the Swiss: WIR has breathed this way since 1934. An ode to the Swiss: the WIR has breathed this way since 1934.
+                ☯️ The heartbeat of a dual economy: KAS circulates inside, dollars pay the outside bills — a complement, not a competitor. An ode to the Swiss, whose WIR has flowed this way since 1934.{'\n'}(Escrows, stores, registries and known counterparties count as village.) An ode to the Swiss: WIR has breathed this way since 1934. An ode to the Swiss: the WIR has breathed this way since 1934.
               </Text>
             </View>
           ) : null}

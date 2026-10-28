@@ -1120,6 +1120,7 @@ const WalletOverview: React.FC<{
           <Text style={walletStyles.xpText}>{ds.loading ? '...' : ds.xp} XP</Text>
         </View>
       </Card>
+      {(() => { const { KvQuoteFull } = require('./kv_quotes'); return <KvQuoteFull />; })()}{/* KV_QUOTES: the full aphorism lives on the Dashboard */}
     
     {/* Action Buttons */}
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 4 }}>
