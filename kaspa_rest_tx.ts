@@ -526,6 +526,10 @@ export async function sendKaspaViaRest(params: {
       const totalNeeded = effectiveAmount + fee;
       
       for (const u of utxos) {
+        // [KV_SWEEP_BATCH] a sweep of a chunk-funded address can hold hundreds of coins; cap each
+        // tx at ~90% of the mass limit and leave the rest for the caller's next sweep call.
+        if (_sweepAllCoins && selectedUtxos.length > 0
+            && computeMass(selectedUtxos.length + 1, [recipientScript], sigScriptLen, payloadBytes.length) > (MAXIMUM_STANDARD_TX_MASS * 9n) / 10n) break;
         selectedUtxos.push(u);
         selectedAmount += BigInt(u.utxoEntry.amount);
         if (!_sweepAllCoins && selectedAmount >= totalNeeded) break; // [KV_SWEEP_ALL] sweep takes every coin

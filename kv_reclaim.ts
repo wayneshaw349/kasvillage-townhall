@@ -60,15 +60,28 @@ export async function listMyPledges(): Promise<MyPledge[]> {
 }
 
 // Sweeps every coin at the pledge address(es) back to your wallet. Returns KAS reclaimed (before fees).
+// KV_SWEEP_BATCH: a game pledge sits in hundreds of chunk coins, so each sweep tx is capped by mass
+// and we loop until the address is empty, waiting between batches for the mempool to settle.
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function reclaimPledge(p: MyPledge): Promise<number> {
   const o = await owner();
   const { withdrawPledge } = require('./payload_publish');
   let moved = 0n;
   for (const n of p.nonces) {
-    const b = await balanceAt(o.privateKeyHex, n); if (b === 0n) continue;
-    const r: any = await withdrawPledge(o, n);
-    if (r && r.success === false) throw new Error(String(r.error || 'sweep failed') + ' (after ' + (Number(moved) / 1e8) + ' KAS)');
-    moved += b;
+    let retries = 0;
+    for (let batch = 0; batch < 25; batch++) {
+      const b = await balanceAt(o.privateKeyHex, n); if (b === 0n) break;
+      const r: any = await withdrawPledge(o, n);
+      if (r === null) break; // already 0
+      if (r && r.success === false) {
+        const e = String(r.error || 'sweep failed');
+        if (/already spent|mempool|orphan/i.test(e) && retries < 4) { retries++; await sleep(5000); continue; }
+        throw new Error(e + ' (after ' + (Number(moved) / 1e8) + ' KAS)');
+      }
+      const after = await (async () => { await sleep(4000); return balanceAt(o.privateKeyHex, n); })();
+      moved += b - after;
+      if (after === 0n) break;
+    }
   }
   return Number(moved) / 1e8;
 }
