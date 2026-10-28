@@ -44,9 +44,9 @@ export const DisclaimerGate: React.FC<{ onAccept: () => void }> = ({ onAccept })
         <TouchableOpacity
           disabled={busy}
           onPress={async () => { setBusy(true); try { await AsyncStorage.setItem(KV_DISCLAIMER_KEY, String(Date.now())); } catch {} onAccept(); }}
-          style={{ backgroundColor: '#F59E0B', borderRadius: 12, paddingVertical: 16, alignItems: 'center' }}
+          style={{ backgroundColor: '#ec4899', borderRadius: 12, paddingVertical: 16, alignItems: 'center' }} // KV_PINK: matches the Mailbox pledge bar
         >
-          <Text style={{ color: '#0a0a0a', fontSize: 16, fontWeight: 'bold' }}>I understand — enter the Village</Text>
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>I understand — enter the Village</Text>
         </TouchableOpacity>
       </View>
     </View>
