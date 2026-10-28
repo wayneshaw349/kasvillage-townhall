@@ -20,12 +20,19 @@ export function kvPnl(revUsd30: number, c: Costs) {
   const cogs = Math.min(Math.max(num(c.cogsPct), 0), 100) / 100;
   const monthly = num(c.ai) + num(c.team) + num(c.rent) + (num(c.publish) + num(c.audit)) / 12; // one-time costs spread over 12 months
   const expected = revUsd30 * (1 - cogs) - monthly;
-  const floor = revUsd30 * 0.5 * (1 - cogs) - monthly;
+  // KV_PNL_STRESS: floors anchored to history, not optimism.
+  //  - Recession: US retail fell ~12% peak-to-trough in 2008-09; we use -15% volume.
+  //  - Crypto winter: BTC bears fell 77-84% from ATH, mid-cap alts 85-90%; we use -85% price.
+  //  Standard case = BOTH at once: (1-0.85)*(1-0.15) ~= 13% of today's revenue.
+  const RECESSION_VOL = 0.15, BEAR_PRICE = 0.85;
+  const recessionFloor = revUsd30 * (1 - RECESSION_VOL) * (1 - cogs) - monthly;
+  const winterFloor = revUsd30 * (1 - BEAR_PRICE) * (1 - RECESSION_VOL) * (1 - cogs) - monthly;
+  const floor = winterFloor; // the number we judge by - never the generous one
   const breakEvenRev = cogs < 1 ? monthly / (1 - cogs) : Infinity;
   const band = Math.max(monthly * 0.05, 1);
   const state: 'green' | 'black' | 'red' = expected > band ? 'green' : expected < -band ? 'red' : 'black';
   const ratio = breakEvenRev > 0 && isFinite(breakEvenRev) ? Math.min(revUsd30 / breakEvenRev, 2) : (revUsd30 > 0 ? 2 : 0); // 1.0 = break-even
-  return { cogs, monthly, expected, floor, breakEvenRev, state, ratio };
+  return { cogs, monthly, expected, floor, recessionFloor, winterFloor, breakEvenRev, state, ratio };
 }
 
 export default function KvStatsPanel({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -172,7 +179,9 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                   {P.state === 'green' ? 'Profitable' : P.state === 'red' ? 'Running at a loss' : 'Break-even'}: {usd(P.expected)}/mo
                 </Text>
                 <Text style={{ color: C.text, fontSize: 12, marginTop: 4 }}>Verified revenue (30d): {usd(revUsd)} · costs {usd(P.monthly)}/mo{P.cogs ? ' + ' + Math.round(P.cogs * 100) + '% goods' : ''}</Text>
-                <Text style={{ color: P.floor >= 0 ? C.green : '#ef4444', fontSize: 12, marginTop: 2 }}>Floor (if sales drop 50%): {usd(P.floor)}/mo</Text>
+                <Text style={{ color: P.recessionFloor >= 0 ? C.green : '#ef4444', fontSize: 12, marginTop: 2 }}>Recession floor (sales −15%, USD-priced goods): {usd(P.recessionFloor)}/mo</Text>
+                <Text style={{ color: P.winterFloor >= 0 ? C.green : '#ef4444', fontSize: 12, marginTop: 2, fontWeight: 'bold' }}>Crypto-winter floor (KAS −85% + sales −15%): {usd(P.winterFloor)}/mo ← standard case</Text>
+                <Text style={{ color: C.mut, fontSize: 10, marginTop: 2 }}>Anchored to history: alt bears drop 85–90% from ATH; 2008–09 retail fell ~12%. If you hold your KAS, judge by the winter floor.</Text>
                 <Text style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>Break-even needs {isFinite(P.breakEvenRev) ? usd(P.breakEvenRev) : '—'}/mo in sales</Text>
                 <TouchableOpacity onPress={() => setEditCosts(!editCosts)} style={{ marginTop: 8 }}>
                   <Text style={{ color: C.indigo, fontSize: 12 }}>{editCosts ? '▼ Hide my costs' : '▶ Enter my costs (USD, stays on this phone)'}</Text>
