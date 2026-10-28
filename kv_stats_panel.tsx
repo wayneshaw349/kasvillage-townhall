@@ -45,6 +45,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
   const [sales, setSales] = useState<{ deals: number; kasIn: number; buyers: number; top: SaleRow[] } | null>(null);
   const [err, setErr] = useState('');
   const [kpp, setKpp] = useState<{ n: number; avg: number; store: number; svc: number } | null>(null); // KV_KPP
+  const [circ, setCirc] = useState<{ pct: number; inKas: number; outKas: number; n: number } | null>(null); // KV_CIRC
   const [costs, setCosts] = useState<Costs>(NO_COSTS); // KV_PNL
   const [rev30, setRev30] = useState(0);
   const [editCosts, setEditCosts] = useState(false);
@@ -116,6 +117,37 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
         const avg = (x: number[]) => (x.length ? x.reduce((p, q) => p + q, 0) / x.length : 0);
         setKpp({ n: ds.length, avg: avg(ds), store: avg(st), svc: avg(sv) });
       } catch { setKpp({ n: 0, avg: 0, store: 0, svc: 0 }); }
+      // KV_CIRC: circularity % - of the KAS this wallet SPENT recently, how much stayed in the
+      // village (escrows, stores, registries, pledges, known counterparties) vs exited elsewhere.
+      // Estimated from the chain; the yin-yang gauge of the dual economy.
+      try {
+        const addr = (await (require('expo-secure-store').getItemAsync('kv_kaspa_address'))) || (await (require('expo-secure-store').getItemAsync('kaspa_address'))) || '';
+        if (addr) {
+          const { apiBase } = require('./kaspa_payload');
+          const { registryAddress } = require('./payload_publish');
+          const { deriveAddress } = require('./canonical_agreement_steps');
+          const xo = (k: string) => { const p = String(k || '').toLowerCase(); return p.length === 66 ? p.slice(2) : p; };
+          const village = new Set<string>();
+          for (const k of ['store', 'dapp', 'game']) { try { village.add(registryAddress(k, NET)); } catch {} }
+          try { for (const r of (await require('./stat_records').loadChain()) || []) { if (r.frostAddr) village.add(String(r.frostAddr)); try { if (r.cpPubkey) village.add(deriveAddress(xo(r.cpPubkey), NET)); } catch {} } } catch {}
+          try { for (const a2 of (await require('./local_agreements').listAgreements()) || []) { if ((a2 as any).frostAddress) village.add(String((a2 as any).frostAddress)); } } catch {}
+          try { for (const p of (await require('./kv_reclaim').listMyPledges()) || []) { /* own pledge addrs count as village investment */ } } catch {}
+          const txs: any[] = await (await fetch(apiBase(NET) + '/addresses/' + encodeURIComponent(addr) + '/full-transactions?limit=50&resolve_previous_outpoints=light')).json();
+          let inside = 0, outside = 0, counted = 0;
+          for (const tx of (Array.isArray(txs) ? txs : [])) {
+            const mine = (tx.inputs || []).some((i: any) => i && i.previous_outpoint_address === addr);
+            if (!mine) continue;
+            counted++;
+            for (const o of (tx.outputs || [])) {
+              const to = o && o.script_public_key_address; const amt = Number(o && o.amount || 0);
+              if (!to || to === addr || !amt) continue;           // change back to self is neither
+              if (village.has(to)) inside += amt; else outside += amt;
+            }
+          }
+          const tot = inside + outside;
+          setCirc({ pct: tot > 0 ? inside / tot : 0, inKas: inside / 1e8, outKas: outside / 1e8, n: counted });
+        }
+      } catch { setCirc(null); }
     } catch (e: any) { setErr(String(e?.message || e)); }
     setBusy(false);
   };
@@ -249,6 +281,21 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
               </View>
             );
           })()}
+          {/* KV_CIRC: the yin-yang gauge */}
+          {circ && circ.n > 0 ? (
+            <View style={{ backgroundColor: C.card, borderRadius: 10, padding: 12, marginTop: 10 }}>
+              <Text style={{ color: C.pink, fontWeight: 'bold', fontSize: 14 }}>☯ CIRCULARITY (estimated)</Text>
+              <View style={{ height: 12, borderRadius: 6, backgroundColor: '#1c1917', marginTop: 8, overflow: 'hidden', flexDirection: 'row' }}>
+                <View style={{ width: Math.round(circ.pct * 100) + '%', backgroundColor: C.green } as any} />
+              </View>
+              <Text style={{ color: C.text, fontSize: 12, marginTop: 6 }}>
+                {Math.round(circ.pct * 100) + '% of the KAS you spent stayed in the village'}{sm ? '' : ' (₭' + circ.inKas.toFixed(1) + ' circular · ₭' + circ.outKas.toFixed(1) + ' exited)'}
+              </Text>
+              <Text style={{ color: C.mut, fontSize: 10, marginTop: 4 }}>
+                Escrows, stores, registries and known counterparties count as village. The dual economy breathes: KAS circulates inside, dollars pay the outside bills - a complement, not a competitor.
+              </Text>
+            </View>
+          ) : null}
           <TouchableOpacity onPress={load} disabled={busy} style={{ borderWidth: 1, borderColor: C.pink, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginVertical: 10 }}>
             <Text style={{ color: C.pink, fontWeight: 'bold' }}>↻ Re-derive from chain</Text>
           </TouchableOpacity>
