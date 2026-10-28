@@ -1347,6 +1347,7 @@ export const AppNavigator: React.FC = () => {
             </TouchableOpacity>
             <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 12 }}>Workspace</Text>
           </View>
+          {(() => { const Q = require('./kv_quotes').default; return <Q />; })()}
           <Workspace
             userPubkey={user.pubkey || ''}
             userXp={user.xp}

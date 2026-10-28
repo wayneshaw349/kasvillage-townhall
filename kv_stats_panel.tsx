@@ -269,8 +269,8 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                     ? 'Measured live: ' + n + ' active Kaspa discount' + (n === 1 ? '' : 's') + ' on the app · village average ' + pct(d) + (kpp && (kpp.store || kpp.svc) ? ' (stores ' + pct((kpp as any).store) + ' · services ' + pct((kpp as any).svc) + ')' : '')
                     : 'No live dual-priced listings yet — using the story baseline of ' + pct(STORY_D) + '.'}
                 </Text>
-                <View style={{ backgroundColor: '#111', borderRadius: 6, padding: 8, marginTop: 8 }}>
-                  <Text style={{ color: C.gold, fontSize: 11, fontFamily: 'monospace', lineHeight: 17 }}>
+                <View style={{ backgroundColor: '#dde7cf', borderRadius: 6, padding: 8, marginTop: 8 }}>{/* KV_EARTH: light earthy green */}
+                  <Text style={{ color: '#3f4d2e', fontSize: 11, fontFamily: 'monospace', lineHeight: 17 }}>
                     {'D  = dollar price of an item\nK  = kaspa price × $/KAS   (same item)\nd  = (D − K) ÷ D           (Kaspa discount)\nd̄  = average d across live listings = ' + pct(d) + '\n\nPP = D ÷ K = 1 ÷ (1 − d̄) = ×' + mult.toFixed(2)}
                   </Text>
                 </View>

@@ -118,6 +118,7 @@ import { uploadPerTxProof } from './wallet_merkle_archive';
 import { uploadToIrys } from './arweave_upload';
 import { encryptPartialSig, decryptPartialSig } from './frost_encrypted_relay';
 import { computeSighash, buildCanonicalFrostTx, canonicalSighash } from './kaspa_rest_tx';
+import KvQuote from './kv_quotes'; // KV_QUOTES
 import { hexToBytes as h2b, bytesToHex as b2h } from '@noble/hashes/utils';
 import * as _secpNA from '@noble/secp256k1';
 function secpPub(privHex: string): Uint8Array { return (_secpNA as any).getPublicKey(h2b(privHex), true); }
@@ -3749,6 +3750,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
             <TouchableOpacity onPress={() => { setShowBalanceSheet(!showBalanceSheet); }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text></TouchableOpacity>
           </View>
           <Text style={{ fontSize: 10, color: "#78716c", textAlign: "center", paddingVertical: 4 }}>(Two-Party Collateral / Good Faith Deposit)</Text>
+          <KvQuote size={9} />
           <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled" onScrollBeginDrag={Keyboard.dismiss}>
             {snailModeActive && (
               <View style={styles.snailWarning}>

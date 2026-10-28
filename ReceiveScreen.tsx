@@ -26,6 +26,7 @@ import {
 
 import { getBalance, formatKAS } from './kaspa_unified';
 import { useKaspaPrice } from './useKaspaPrice';
+import KvQuote from './kv_quotes'; // KV_QUOTES
 import { useStreamer, isStreamer, maskAddr, STREAMER_BAL, STREAMER_USD } from './streamer_mode'; // KV_STREAMER
 
 const SECURESTORE_KEYS = {
@@ -191,6 +192,7 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
               Your Kaspa address is public. Anyone can see your balance and transaction history.
             </Text>
           </View>
+          <KvQuote />
         </ScrollView>
       </View>
     </Modal>

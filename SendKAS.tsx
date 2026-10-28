@@ -20,6 +20,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
 import { useKaspaPrice } from './useKaspaPrice';
+import KvQuote from './kv_quotes'; // KV_QUOTES
 import {
   X,
   Send,
@@ -719,6 +720,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
           {/* Step: Success */}
           {step === 'success' && txId && (
             <View style={styles.statusContainer}>
+              <KvQuote />
               <View style={[styles.successIcon, resolved?.type === 'stealth' && styles.successIconStealth]}>
                 {resolved?.type === 'stealth' ? (
                   <Shield size={rs.s(48)} color={COLORS.purple500} />
