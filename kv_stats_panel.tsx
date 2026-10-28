@@ -292,7 +292,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                 {Math.round(circ.pct * 100) + '% of the KAS you spent stayed in the village'}{sm ? '' : ' (₭' + circ.inKas.toFixed(1) + ' circular · ₭' + circ.outKas.toFixed(1) + ' exited)'}
               </Text>
               <Text style={{ color: C.mut, fontSize: 10, marginTop: 4 }}>
-                Escrows, stores, registries and known counterparties count as village. The dual economy breathes: KAS circulates inside, dollars pay the outside bills - a complement, not a competitor. An ode to the Swiss: the WIR has breathed this way since 1934.
+                ☯️ The heartbeat of a dual economy: KAS circulates inside, dollars pay the outside bills — a complement, not a competitor. An ode to the Swiss, whose WIR has breathed this way since 1934. (Escrows, stores, registries and known counterparties count as village.) An ode to the Swiss: WIR has breathed this way since 1934. An ode to the Swiss: the WIR has breathed this way since 1934.
               </Text>
             </View>
           ) : null}
