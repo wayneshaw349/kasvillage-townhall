@@ -1,6 +1,0 @@
-name = "kasvillage-gateway"
-main = "worker.js"
-compatibility_date = "2026-01-01"
-
-# After `npx wrangler deploy`, attach the domain in the Cloudflare dashboard:
-# Workers & Pages -> kasvillage-gateway -> Settings -> Domains & Routes -> add kasvillage.com
