@@ -243,7 +243,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                   </Text>
                 </View>
                 <Text style={{ color: C.green, fontSize: 13, marginTop: 6, fontWeight: 'bold' }}>
-                  $100 in dollars buys $100 of goods. The same $100 spent as Kaspa at the stalls ≈ ${Math.round(100 * mult)} of goods.
+                  $100 worth of Kaspa buys ≈ ${Math.round(100 * mult)} worth of goods. ($100 in dollars buys $100.)
                 </Text>
 
               </View>
