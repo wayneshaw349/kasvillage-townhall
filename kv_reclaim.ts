@@ -75,7 +75,7 @@ export async function reclaimPledge(p: MyPledge): Promise<number> {
       if (r === null) break; // already 0
       if (r && r.success === false) {
         const e = String(r.error || 'sweep failed');
-        if (/already spent|mempool|orphan/i.test(e) && retries < 4) { retries++; await sleep(5000); continue; }
+        if (/already spent|mempool|orphan|no utxos/i.test(e) && retries < 8) { retries++; await sleep(6000); continue; } // KV_SWEEP_LAG: UTXO view trails mid-confirmation
         throw new Error(e + ' (after ' + (Number(moved) / 1e8) + ' KAS)');
       }
       const after = await (async () => { await sleep(4000); return balanceAt(o.privateKeyHex, n); })();
