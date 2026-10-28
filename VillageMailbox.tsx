@@ -731,7 +731,9 @@ function StorefrontCard({ item, onPress, onRepost, reposting, onFlag, onTipKeepe
   return (
     <KvBizEnvelope name={item.storeName} cat={item.category} stamp={'\u{1F3EA}'} colors={col}
       verified={!!(item.townhall && item.townhall.verified)} postedAt={item.createdAt}
-      lines={[item.description || item.storeName, item.productCount ? item.productCount + ' items' : 'escrow · wallet-to-wallet', item.rating ? '★ ' + item.rating : '']}
+      lines={[item.description || item.storeName,
+        (item as any).dealUsd > 0 ? 'from $' + Number((item as any).dealUsd).toFixed(2) + ((item as any).kvDiscount > 0 ? ' · ₭ pays ' + Math.round((item as any).kvDiscount * 100) + '% less' : '') : (item.productCount ? item.productCount + ' items' : 'escrow · wallet-to-wallet'),
+        item.rating ? '★ ' + item.rating : '']} /* KV_DUAL_PRICE on the envelope */
       info={[pl != null ? '\u{1F4B0} Pledge ' + pl + ' KAS' : '\u{1F4B0} pledge-anchored', '\u{1F552} ' + (kvAgo(item.createdAt) || 'new').toLowerCase()]}
       action={{ label: 'OPEN STORE', onPress }} onPress={onPress} />
   );

@@ -113,24 +113,41 @@ function visSort(a: { pledgeSompi: bigint; announcedAt: number }, b: { pledgeSom
   return score(b) - score(a);
 }
 
-// KV_DEAL_RANK: effective price = cheapest stash item after the best live coupon.
-async function kvEffMinKas(storeAddress: string, cfgHash: string, coords: any, ownerPub?: string): Promise<number> {
+// KV_DUAL_PRICE: every stash item already carries dollarPrice + kaspaPrice. Visibility is
+// earned on BOTH axes (Aesop's deal as a ranking rule): the lowest dollar price in your
+// category, and the biggest dollar-vs-Kaspa discount on the same item. Coupons are just
+// an extra cut on top - never the only signal.
+async function kvEffPrices(storeAddress: string, cfgHash: string, coords: any, ownerPub?: string): Promise<{ kas: number; usd: number; disc: number }> {
+  const none = { kas: 0, usd: 0, disc: 0 };
   try {
-    if (!cfgHash) return 0;
+    if (!cfgHash) return none;
     const { config } = await fetchStoreConfig(storeAddress, cfgHash, NET, coords || undefined, ownerPub || undefined); // KV_CHUNK_CANDIDATES
-    if (!config) return 0;
-    const prices = (config.stash || []).map((i: any) => Number(i.kaspaPrice || 0)).filter((p: number) => p > 0);
-    if (!prices.length) return 0;
-    let eff = Math.min(...prices);
+    if (!config) return none;
+    let usdPerKas = 0; try { const p: any = require('./kas_price_feed').getKasPrice(); usdPerKas = Number((p && p.usdPerKas) || 0); } catch {}
+    let kas = 0, usd = 0, disc = 0;
+    for (const i of (config.stash || [])) {
+      const pk = Number(i.kaspaPrice || 0), pd = Number(i.dollarPrice || 0);
+      if (pk > 0 && (kas === 0 || pk < kas)) kas = pk;
+      if (pd > 0 && (usd === 0 || pd < usd)) usd = pd;
+      // same-item discount in dollars: what the dollar buyer pays minus what the Kaspa buyer pays
+      if (pk > 0 && pd > 0 && usdPerKas > 0) {
+        const d = (pd - pk * usdPerKas) / pd;
+        if (d > disc) disc = Math.min(d, 0.9);
+      }
+    }
+    // coupons: an additional cut on the best Kaspa price (kept from the old deal logic)
     const now = Date.now();
     for (const c of (config.coupons || [])) {
       if ((c.createdAt || 0) + (c.expiryDays || 30) * 86400000 < now) continue;
       if ((c.usedCount || 0) >= (c.maxUses || 1)) continue;
-      const e2 = c.discountPercent > 0 ? eff * (1 - c.discountPercent / 100) : (c.discountKas > 0 ? eff - c.discountKas : eff);
-      if (e2 < eff && e2 > 0) eff = e2;
+      const e2 = c.discountPercent > 0 ? kas * (1 - c.discountPercent / 100) : (c.discountKas > 0 ? kas - c.discountKas : kas);
+      if (e2 < kas && e2 > 0) kas = e2;
     }
-    return eff;
-  } catch { return 0; }
+    return { kas, usd, disc };
+  } catch { return none; }
+}
+async function kvEffMinKas(storeAddress: string, cfgHash: string, coords: any, ownerPub?: string): Promise<number> {
+  return (await kvEffPrices(storeAddress, cfgHash, coords, ownerPub)).kas; // kept for callers/tools
 }
 // KV_DEAL_RANK: re-rank in place - pledge 0.25 + freshness 0.35 + deal 0.20 + XP 0.20 (KV_RANK_XP).
 // deal is a capped z-score against the CATEGORY's mean effective price, so a
@@ -139,27 +156,34 @@ async function kvDealRank(dir: any[], items: any[], maxCfg: number = 12): Promis
   try {
     const n = Math.min(items.length, maxCfg);
     const eff: number[] = new Array(items.length).fill(0);
+    const effUsd: number[] = new Array(items.length).fill(0);   // KV_DUAL_PRICE
+    const discA: number[] = new Array(items.length).fill(0);
     for (let i = 0; i < n; i++) {
       const e: any = dir[i];
-      eff[i] = await kvEffMinKas(e.storeAddress, e.configHash || (e.record && e.record.d && e.record.d.configHash) || '', e.record && e.record.d && e.record.d.coords, e.ownerPubkey);
-      (items[i] as any).dealKas = eff[i];
+      const _pp = await kvEffPrices(e.storeAddress, e.configHash || (e.record && e.record.d && e.record.d.configHash) || '', e.record && e.record.d && e.record.d.coords, e.ownerPubkey); eff[i] = _pp.kas; effUsd[i] = _pp.usd; discA[i] = _pp.disc;
+      (items[i] as any).dealKas = eff[i]; (items[i] as any).dealUsd = effUsd[i]; (items[i] as any).kvDiscount = discA[i]; // KV_DUAL_PRICE
     }
     const byCat: any = {};
-    for (let i = 0; i < items.length; i++) { if (eff[i] > 0) { const k = String((dir[i] as any).category || '').toLowerCase(); (byCat[k] = byCat[k] || []).push(eff[i]); } }
+    for (let i = 0; i < items.length; i++) { if ((effUsd[i] || eff[i]) > 0) { const k = String((dir[i] as any).category || '').toLowerCase(); (byCat[k] = byCat[k] || []).push(effUsd[i] || eff[i]); } } // KV_DUAL_PRICE: dollar axis when declared
     const stats: any = {};
     for (const k in byCat) { const a = byCat[k]; const m = a.reduce((x: number, y: number) => x + y, 0) / a.length; const sd = Math.sqrt(a.reduce((x: number, y: number) => x + (y - m) * (y - m), 0) / a.length); stats[k] = { m, sd: Math.max(sd, m * 0.1), n: a.length }; }
     const xps = await kvXpOf(dir);   // KV_RANK_XP
     for (let i = 0; i < items.length; i++) (items[i] as any).publisherXp = xps[i];
     const score = (i: number) => {
       const e: any = dir[i];
-      const pledge = kvPledgeScore(Number(e.pledgeSompi) / 1e8) * 0.25;
+      const pledge = kvPledgeScore(Number(e.pledgeSompi) / 1e8) * 0.20; // KV_DUAL_PRICE reweight
       const ageH = Math.max(0, (Date.now() / 1000 - e.announcedAt) / 3600);
-      const fresh = Math.pow(0.5, ageH / 168) * 0.35;
+      const fresh = Math.pow(0.5, ageH / 168) * 0.30; // KV_DUAL_PRICE reweight
       const xpPart = kvXpScore(xps[i]) * 0.20;
       const st = stats[String(e.category || '').toLowerCase()];
-      let deal = 0.10; // neutral
-      if (eff[i] > 0 && st && st.n >= 3) { const z = (st.m - eff[i]) / st.sd; deal = Math.max(0, Math.min(1, 0.5 + z / 4)) * 0.20; }
-      return pledge + fresh + deal + xpPart;
+      // KV_DUAL_PRICE: visibility is earned on BOTH axes.
+      //  cheap (0.15): capped z-score of your lowest DOLLAR price vs the category (fake rock-bottom scores no better than honestly cheap)
+      //  disc  (0.15): the biggest same-item dollar-vs-Kaspa discount - Aesop's dual pricing, rewarded directly
+      const myP = effUsd[i] || eff[i];
+      let cheap = 0.075; // neutral
+      if (myP > 0 && st && st.n >= 3) { const z = (st.m - myP) / st.sd; cheap = Math.max(0, Math.min(1, 0.5 + z / 4)) * 0.15; }
+      const disc = Math.max(0, Math.min(discA[i] / 0.5, 1)) * 0.15; // full marks at a 50% Kaspa discount
+      return pledge + fresh + cheap + disc + xpPart;
     };
     const idx = items.map((_: any, i: number) => i).sort((a: number, b: number) => score(b) - score(a));
     const si = idx.map((i: number) => items[i]); const sd2 = idx.map((i: number) => dir[i]);
