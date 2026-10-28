@@ -44,6 +44,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
   const [games, setGames] = useState<GameStat[] | null>(null);
   const [sales, setSales] = useState<{ deals: number; kasIn: number; buyers: number; top: SaleRow[] } | null>(null);
   const [err, setErr] = useState('');
+  const [kpp, setKpp] = useState<{ n: number; avg: number; store: number; svc: number } | null>(null); // KV_KPP
   const [costs, setCosts] = useState<Costs>(NO_COSTS); // KV_PNL
   const [rev30, setRev30] = useState(0);
   const [editCosts, setEditCosts] = useState(false);
@@ -100,6 +101,21 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
       }
       setSales({ deals, kasIn, buyers: buyers.size, top: Object.values(items).sort((a, b) => b.kas - a.kas).slice(0, 5) });
       setRev30(kas30);
+      // KV_KPP: measure the village's live Kaspa discounts (coupons = dual pricing in the wild)
+      try {
+        const { fetchCoupons } = require('./mailbox_kaspa_api');
+        const cs: any[] = ((await fetchCoupons()) || {}).items || [];
+        const now = Date.now(); const ds: number[] = []; const st: number[] = []; const sv: number[] = [];
+        for (const cpn of cs) {
+          if (Number(cpn.expiresAt || 0) && Number(cpn.expiresAt) < now) continue;
+          const m = String(cpn.discount || '').match(/(\d{1,2}(?:\.\d+)?)\s*%/);
+          if (!m) continue;
+          const d = Math.min(Number(m[1]), 90) / 100; ds.push(d);
+          (/(service|repair|tutor|labor|clean|build)/i.test(String(cpn.category || '')) ? sv : st).push(d);
+        }
+        const avg = (x: number[]) => (x.length ? x.reduce((p, q) => p + q, 0) / x.length : 0);
+        setKpp({ n: ds.length, avg: avg(ds), store: avg(st), svc: avg(sv) });
+      } catch { setKpp({ n: 0, avg: 0, store: 0, svc: 0 }); }
     } catch (e: any) { setErr(String(e?.message || e)); }
     setBusy(false);
   };
@@ -202,6 +218,34 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                     <Text style={{ color: C.mut, fontSize: 10, marginTop: 6 }}>One-time costs are spread over 12 months. Revenue is verified on-chain; costs are your own numbers - never shared.</Text>
                   </View>
                 ) : null}
+              </View>
+            );
+          })()}
+          {/* KV_KPP: purchasing power - the story's economic model, measured live */}
+          {(() => {
+            const STORY_D = 0.20; // Act 8 baseline: "priced significantly less in Kaspa"
+            const n = kpp ? kpp.n : 0;
+            const d = n > 0 ? (kpp as any).avg : STORY_D;
+            const mult = d < 1 ? 1 / (1 - d) : 1;
+            const pct = (x: number) => Math.round(x * 100) + '%';
+            return (
+              <View style={{ backgroundColor: C.card, borderRadius: 10, padding: 12, marginTop: 10, borderWidth: 1, borderColor: '#4f46e5' }}>
+                <Text style={{ color: C.indigo, fontWeight: 'bold', fontSize: 14 }}>🏛 KASPA PURCHASING POWER — hypothetical</Text>
+                <Text style={{ color: C.mut, fontSize: 10, marginTop: 4 }}>
+                  The KasVillage story's economic model (Aesop's deal, Act 8): every item carries two prices, and the Kaspa price is significantly lower — affordability is the reward for adoption. Not a promise, not financial advice.
+                </Text>
+                <Text style={{ color: C.text, fontSize: 12, marginTop: 8 }}>
+                  {n > 0
+                    ? 'Measured live: ' + n + ' active Kaspa discount' + (n === 1 ? '' : 's') + ' on the app · village average ' + pct(d) + (kpp && (kpp.store || kpp.svc) ? ' (stores ' + pct((kpp as any).store) + ' · services ' + pct((kpp as any).svc) + ')' : '')
+                    : 'No live dual-priced listings yet — using the story baseline of ' + pct(STORY_D) + '.'}
+                </Text>
+                <Text style={{ color: C.gold, fontSize: 12, marginTop: 6, fontFamily: 'monospace' }}>purchasing power = 1 ÷ (1 − discount) = ×{mult.toFixed(2)}</Text>
+                <Text style={{ color: C.green, fontSize: 13, marginTop: 6, fontWeight: 'bold' }}>
+                  $100 in dollars buys $100 of goods. The same $100 spent as Kaspa at the stalls ≈ ${Math.round(100 * mult)} of goods.
+                </Text>
+                <Text style={{ color: C.mut, fontSize: 10, marginTop: 8, lineHeight: 15 }}>
+                  The hypothesis, in the story's own chain of logic: the more purchasing power Kaspa carries at the stalls, the faster the circular economy closes. And if moving between monies ever gets expensive (the capital-controls arc), the money people actually HOLD becomes the money prices are set in — vendors drop Kaspa prices to meet their customers, and the village drifts onto a Kaspa standard not by decree but by liquidity. Controlling purchasing power, not price, is the whole game.
+                </Text>
               </View>
             );
           })()}
