@@ -11591,7 +11591,7 @@ async function __api_direct(path, opts){
     function openContact(o){
       var text="Hi! About "+nm(o.tile)+" in KasCity: you made an offer. Let's agree here, settle wallet-to-wallet in KasVillage (direct send or a FROST agreement), then I'll press TRANSFER in the game.";
       try{ if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage(JSON.stringify({ kvcontact:{ to:o.contact, text:text } })); return; } }catch(e){}
-      if(kvSM()){ var cp=o.contact+"  —  "+text; try{ navigator.clipboard.writeText(cp); log("🎥 P"+o.buyer+"'s contact ("+kvMask(o.contact)+") + message copied — paste it off-stream","#c4b5fd"); }catch(e){ log("🎥 streamer mode: turn it off to see P"+o.buyer+"'s contact","#c4b5fd"); } return; }
+      if(kvSM()){ log("🎥 streamer mode: P"+o.buyer+"'s contact stays hidden ("+kvMask(o.contact)+") — open the game in the KasVillage wallet to contact privately, or turn streamer off","#c4b5fd"); return; }
       try{ window.prompt("Contact P"+o.buyer+" and send this message:", o.contact+"  —  "+text); }catch(e){}
     }
     function render(force){
