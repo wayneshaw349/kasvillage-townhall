@@ -5,6 +5,8 @@ Built first, understood second - that's the order AI makes possible, and it's a 
 way to learn. Each chapter takes one real file from this repo and walks through what
 it does and *why*, in plain language. Read with the file open beside you.
 
+**Chapter 0 - The Grammar** - how to read and write a line of TypeScript, using lines from this repo
+
 ## Part I - Money (the core)
 1. **The Money Pipe** - `kaspa_rest_tx.ts` - what a transaction really is: coins in, coins out, nothing else
 2. The Vault - `kasvillage_cold_wallet.tsx` - hot vs cold keys, and why two signatures beat one
