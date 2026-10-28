@@ -28,11 +28,15 @@ export function kvPnl(revUsd30: number, c: Costs) {
   const recessionFloor = revUsd30 * (1 - RECESSION_VOL) * (1 - cogs) - monthly;
   const winterFloor = revUsd30 * (1 - BEAR_PRICE) * (1 - RECESSION_VOL) * (1 - cogs) - monthly;
   const floor = winterFloor; // the number we judge by - never the generous one
+  // KV_PNL_BULL: the upside swing, kept sober. BTC mid-cycle bulls ran ~3-4x (20x only from
+  // the exact bottom); activity grows with it. We use KAS x3 and sales +50% - a ceiling to
+  // size the opportunity, never a number to plan costs on.
+  const bullCeiling = revUsd30 * 3 * 1.5 * (1 - cogs) - monthly;
   const breakEvenRev = cogs < 1 ? monthly / (1 - cogs) : Infinity;
   const band = Math.max(monthly * 0.05, 1);
   const state: 'green' | 'black' | 'red' = expected > band ? 'green' : expected < -band ? 'red' : 'black';
   const ratio = breakEvenRev > 0 && isFinite(breakEvenRev) ? Math.min(revUsd30 / breakEvenRev, 2) : (revUsd30 > 0 ? 2 : 0); // 1.0 = break-even
-  return { cogs, monthly, expected, floor, recessionFloor, winterFloor, breakEvenRev, state, ratio };
+  return { cogs, monthly, expected, floor, recessionFloor, winterFloor, bullCeiling, breakEvenRev, state, ratio };
 }
 
 export default function KvStatsPanel({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -181,7 +185,8 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                 <Text style={{ color: C.text, fontSize: 12, marginTop: 4 }}>Verified revenue (30d): {usd(revUsd)} · costs {usd(P.monthly)}/mo{P.cogs ? ' + ' + Math.round(P.cogs * 100) + '% goods' : ''}</Text>
                 <Text style={{ color: P.recessionFloor >= 0 ? C.green : '#ef4444', fontSize: 12, marginTop: 2 }}>Recession floor (sales −15%, USD-priced goods): {usd(P.recessionFloor)}/mo</Text>
                 <Text style={{ color: P.winterFloor >= 0 ? C.green : '#ef4444', fontSize: 12, marginTop: 2, fontWeight: 'bold' }}>Crypto-winter floor (KAS −85% + sales −15%): {usd(P.winterFloor)}/mo ← standard case</Text>
-                <Text style={{ color: C.mut, fontSize: 10, marginTop: 2 }}>Anchored to history: alt bears drop 85–90% from ATH; 2008–09 retail fell ~12%. If you hold your KAS, judge by the winter floor.</Text>
+                <Text style={{ color: C.indigo, fontSize: 12, marginTop: 2 }}>Bull ceiling (KAS ×3, sales +50%): {usd(P.bullCeiling)}/mo — possibility, not a plan</Text>
+                <Text style={{ color: C.mut, fontSize: 10, marginTop: 2 }}>Anchored to history: alt bears drop 85–90% from ATH; 2008–09 retail fell ~12%; mid-cycle bulls ran ~3–4×. Plan costs on the winter floor; let the bull surprise you.</Text>
                 <Text style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>Break-even needs {isFinite(P.breakEvenRev) ? usd(P.breakEvenRev) : '—'}/mo in sales</Text>
                 <TouchableOpacity onPress={() => setEditCosts(!editCosts)} style={{ marginTop: 8 }}>
                   <Text style={{ color: C.indigo, fontSize: 12 }}>{editCosts ? '▼ Hide my costs' : '▶ Enter my costs (USD, stays on this phone)'}</Text>
