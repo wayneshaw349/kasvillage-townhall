@@ -277,12 +277,18 @@ const TradeFiSection: React.FC<TradeFiSectionProps> = ({ onClose }) => {
 
           {/* KV_ODE_MALCOLM_X */}
           <Text style={styles.bantuText}>
-            "Kura na hati fungani kati ya nchi na raia wake."
+            "Kuvota mpe luwawanu kati ya nsi mpe bantu na yo."
           </Text>
           <Text style={styles.bantuTranslation}>
-            "A ballot and a bond between a country and its citizens." (Kiswahili)
+            "A ballot and a bond between a country and its citizens." (Kikongo)
           </Text>
-          <Text style={styles.bantuAuthor}>— Wayne Shaw, heshima kwa Malcolm X</Text>
+          <Text style={styles.bantuTranslation}>
+            "Abatoɔ ne apam a ɛda ɔman ne ne manfoɔ ntam." (Twi)
+          </Text>
+          <Text style={styles.bantuTranslation}>
+            "Ìbò àti ìdéhùn láàrin orílẹ̀-èdè àti àwọn aráàlú rẹ̀." (Yorùbá)
+          </Text>
+          <Text style={styles.bantuAuthor}>— Wayne Shaw, luzitu kwa Malcolm X</Text>
         </View>
 
         {/* Multi-Bond DCA Calculator */}
