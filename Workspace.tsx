@@ -369,41 +369,37 @@ const COMMUNICATION_CHANNELS = [
 ];
 
 const DAPP_TEMPLATE_CODE = `// ---------------------------------------------------------------------------
-// KASVILLAGE L2 - DAPP/GAME INTEGRATION TEMPLATE
+// KASVILLAGE DAPP / GAME TEMPLATE (SDK v2)
+// Paste your finished code into Workspace -> DApp scan. The scan requires at
+// least one KasVillage SDK import and blocks raw fetch of images, camera,
+// iframes, innerHTML and eval. Use kvFetch() for any network call.
 // ---------------------------------------------------------------------------
-// IDE: https://idx.google.com | Docs: https://kasvillage.dev/docs
-// ---------------------------------------------------------------------------
+import { kvFetch } from './procedural_sdk';   // <- required SDK import (any module counts)
+// also available: './kasvillage_game_v1', './kasvillage_canvas_renderer',
+// './kasvillage_avatar_engine', './kasvillage_audio_ui', './kasvillage_particles',
+// './kasvillage_item_library', './kasvillage_wallet_bridge' (payments) ...
 
-const kasvillage = new KasVillageL2({ 
-  network: "mainnet", 
-  endpoint: "https://api.kasvillage.dev" 
-});
+// The wallet injects a read-only trust signal - rank-friendly DApps respect it:
+//   window.KV_TRUST = { snail: boolean, waitMs: number, newUser: boolean }
+const trust = (typeof window !== 'undefined' && window.KV_TRUST) || { snail: false, waitMs: 0, newUser: true };
 
-// 1. AUTHENTICATION
-async function auth() {
-  const session = await kasvillage.connect();
-  return { pubkey: session.pubkey, apt: session.apartment, xp: session.xp };
+// 1. SETUP - build your scene (procedural shapes only; no external images)
+function setup() {
+  // const c = document.getElementById('game'); // your canvas
 }
 
-// 2. SAVE STATE
-async function saveState(state) {
-  return kasvillage.commitState({ gameId: "YOUR_GAME_ID", stateHash: hash(state), ts: Date.now() });
+// 2. GAME LOOP
+function tick(dtMs) {
+  // update + draw
 }
 
-// 3. LOAD STATE
-async function loadState(userId) {
-  return kasvillage.getState({ gameId: "YOUR_GAME_ID", userId });
-}
+// 3. NETWORK (optional) - kvFetch enforces the same rules at runtime
+// const data = await kvFetch('https://api.kaspa.org/info/network');
 
-// 4. TRANSFER
-async function transfer(amount, recipient) {
-  return kasvillage.transfer({ amount, recipient, memo: "game_payment" });
-}
-
-// ---------------------------------------------------------------------------
-// BOARDS & XP REQUIREMENTS:
-// Incubator: 500+ XP | Main: 1000+ XP | Elite: 5000+ XP
-// ---------------------------------------------------------------------------`;
+setup();
+let last = Date.now();
+setInterval(() => { const now = Date.now(); tick(now - last); last = now; }, 33);
+`;
 
 // ============================================================================
 // UTILITY FUNCTIONS
