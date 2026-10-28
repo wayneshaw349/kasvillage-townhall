@@ -1,0 +1,8 @@
+{
+  "name": "kasvillage-gateway",
+  "private": true,
+  "type": "module",
+  "scripts": { "deploy": "wrangler deploy", "dev": "wrangler dev" },
+  "dependencies": { "@noble/curves": "^1.4.0", "@noble/hashes": "^1.4.0" },
+  "devDependencies": { "wrangler": "^3.80.0" }
+}
