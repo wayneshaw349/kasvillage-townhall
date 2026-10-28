@@ -3333,10 +3333,12 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     <TouchableOpacity style={{ backgroundColor: '#7f1d1d', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 8 }} onPress={handleWithdrawUntitled} disabled={isLoading}>
                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Clean Up Untitled Abstracts (withdraw pledges)</Text>
                     </TouchableOpacity>
-                    {/* KV_DUST_PROBE (dev) */}
+                    {/* KV_DUST_PROBE: dev builds only */}
+                    {__DEV__ ? (
                     <TouchableOpacity style={{ backgroundColor: '#44403c', borderRadius: 12, paddingVertical: 10, alignItems: 'center', marginTop: 8 }} onPress={handleDustProbe} disabled={isLoading}>
                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Probe Repost Amounts (dev, fees only)</Text>
                     </TouchableOpacity>
+                    ) : null}
                   </View>
                 )}
               </View>

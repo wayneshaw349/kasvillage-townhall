@@ -1151,6 +1151,7 @@ const WalletOverview: React.FC<{
         <Text style={walletStyles.actionIcon}>{' '}</Text>
         <Text style={[walletStyles.actionLabel, { color: '#000' }]}>{activeMode === 'real' ? 'Real Kaspa' : 'Tutorial'}</Text>
       </TouchableOpacity>
+      {__DEV__ ? ( /* KV_DEV_ONLY: hidden in release builds */
       <TouchableOpacity style={walletStyles.actionBtn} onPress={async () => {
         try {
           const { probePayloadLimit } = require('./payload_publish');
@@ -1167,6 +1168,8 @@ const WalletOverview: React.FC<{
         <Text style={walletStyles.actionIcon}>{'\u{1F9EA}'}</Text>
         <Text style={walletStyles.actionLabel}>DEV Probe</Text>
       </TouchableOpacity>
+      ) : null}
+      {__DEV__ ? ( /* KV_DEV_ONLY: hidden in release builds */
       <TouchableOpacity style={walletStyles.actionBtn} onPress={async () => {
         try {
           const { fetchRecords, verifyRecord } = require('./kaspa_payload');
@@ -1186,6 +1189,7 @@ const WalletOverview: React.FC<{
         <Text style={walletStyles.actionIcon}>{'\u{1F4D6}'}</Text>
         <Text style={walletStyles.actionLabel}>DEV Read</Text>
       </TouchableOpacity>
+      ) : null}
       <TouchableOpacity style={walletStyles.actionBtn} onPress={onDeposit}>
         <Text style={walletStyles.actionIcon}>⬇️</Text>
         <Text style={walletStyles.actionLabel}>Receive</Text>
