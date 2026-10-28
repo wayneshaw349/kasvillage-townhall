@@ -1087,9 +1087,12 @@ const WalletOverview: React.FC<{
   const kasBalance = Number(balanceSompi) / 100_000_000;
   const usdValue = kasBalance * usdPerKas;
   const __sm = useStreamer();
+  const [showKvStats, setShowKvStats] = useState(false); // KV_STATS
+  useEffect(() => { (globalThis as any).__kvStatsOpen = () => setShowKvStats(true); return () => { if ((globalThis as any).__kvStatsOpen) (globalThis as any).__kvStatsOpen = undefined; }; }, []);
 
   return (
     <View style={walletStyles.container}>
+      {showKvStats ? (() => { const P = require('./kv_stats_panel').default; return <P visible={showKvStats} onClose={() => setShowKvStats(false)} />; })() : null}
       {/* Sloth Poison Meter */}
       <SlothPoisonBar />
       {/* Price Card */}
@@ -1151,45 +1154,12 @@ const WalletOverview: React.FC<{
         <Text style={walletStyles.actionIcon}>{' '}</Text>
         <Text style={[walletStyles.actionLabel, { color: '#000' }]}>{activeMode === 'real' ? 'Real Kaspa' : 'Tutorial'}</Text>
       </TouchableOpacity>
-      {__DEV__ ? ( /* KV_DEV_ONLY: hidden in release builds */
-      <TouchableOpacity style={walletStyles.actionBtn} onPress={async () => {
-        try {
-          const { probePayloadLimit } = require('./payload_publish');
-          const { _kvResolvePrivHex } = require('./proposal_share');
-          const pub = (await SecureStore.getItemAsync('kv_l1_pubkey')) || (await SecureStore.getItemAsync('kaspa_pubkey')) || (await SecureStore.getItemAsync('kv_public_key')) || '';
-          const addr = (await SecureStore.getItemAsync('kaspa_address')) || '';
-          const priv = await _kvResolvePrivHex();
-          if (!priv || !pub || !addr) { Alert.alert('Probe', 'Missing keys: priv=' + !!priv + ' pub=' + !!pub + ' addr=' + !!addr); return; }
-          Alert.alert('Probe', 'Running 4 test self-sends (500/1000/2000/5000B). Watch Metro.');
-          const res = await probePayloadLimit({ privateKeyHex: priv, pubkeyHex: pub, address: addr, network: 'testnet-10' });
-          Alert.alert('Probe done', res.map((r: any) => r.size + 'B: ' + (r.ok ? 'OK' : 'FAIL')).join('\n'));
-        } catch (e: any) { Alert.alert('Probe error', String((e && e.message) || e)); }
-      }}>
-        <Text style={walletStyles.actionIcon}>{'\u{1F9EA}'}</Text>
-        <Text style={walletStyles.actionLabel}>DEV Probe</Text>
+      
+      
+      <TouchableOpacity style={walletStyles.actionBtn} onPress={() => { (globalThis as any).__kvStatsOpen && (globalThis as any).__kvStatsOpen(); }}>{/* KV_STATS */}
+        <Text style={walletStyles.actionIcon}>📊</Text>
+        <Text style={walletStyles.actionLabel}>Stats</Text>
       </TouchableOpacity>
-      ) : null}
-      {__DEV__ ? ( /* KV_DEV_ONLY: hidden in release builds */
-      <TouchableOpacity style={walletStyles.actionBtn} onPress={async () => {
-        try {
-          const { fetchRecords, verifyRecord } = require('./kaspa_payload');
-          const addr = (await SecureStore.getItemAsync('kaspa_address')) || '';
-          if (!addr) { Alert.alert('Read', 'No address'); return; }
-          const recs = await fetchRecords(addr, 'testnet-10', 50);
-          console.log('[KVRead] records found:', recs.length);
-          let okCount = 0;
-          for (const r of recs) {
-            const v = verifyRecord(r.record);
-            if (v) okCount++;
-            console.log('[KVRead]', r.txid.slice(0, 12), '| kind:', r.record.k, '| sig:', v ? 'VALID' : 'INVALID', '| t:', r.record.t, '| d:', JSON.stringify(r.record.d).slice(0, 80));
-          }
-          Alert.alert('Read done', recs.length + ' KVP1 records on-chain\n' + okCount + ' signatures VALID\n' + (recs.length - okCount) + ' invalid');
-        } catch (e: any) { console.warn('[KVRead] error:', e); Alert.alert('Read error', String((e && e.message) || e)); }
-      }}>
-        <Text style={walletStyles.actionIcon}>{'\u{1F4D6}'}</Text>
-        <Text style={walletStyles.actionLabel}>DEV Read</Text>
-      </TouchableOpacity>
-      ) : null}
       <TouchableOpacity style={walletStyles.actionBtn} onPress={onDeposit}>
         <Text style={walletStyles.actionIcon}>⬇️</Text>
         <Text style={walletStyles.actionLabel}>Receive</Text>
