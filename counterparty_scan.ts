@@ -108,7 +108,7 @@ const outAddrs = (tx: any): string[] =>
  */
 export async function scanCounterparty(
   pubkey: string,
-  network: string = 'testnet-10',
+  network: string = require('./kv_net').KV_NET,
   maxCandidates: number = 40,
   useCache: boolean = true,
 ): Promise<ScanResult> {

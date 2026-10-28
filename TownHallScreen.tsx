@@ -275,7 +275,7 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         setKvScan(null);
         setKvScanning(true);
         try {
-          _scanRes = await (await import('./counterparty_scan')).scanCounterparty(_pk, 'testnet-10', 40);
+          _scanRes = await (await import('./counterparty_scan')).scanCounterparty(_pk, require('./kv_net').KV_NET, 40);
           setKvScan(_scanRes);
         } catch (e) { console.warn('[StatsLookup] scan failed:', e); setKvScan({ error: true }); }
         finally { setKvScanning(false); }
@@ -1104,7 +1104,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
             const _addr = (await SecureStore.getItemAsync('kv_kaspa_address'))
               || (await SecureStore.getItemAsync('kaspa_address')) || '';
             if (_priv && myPubkey && _addr) {
-              const _owner = { privateKeyHex: _priv, pubkeyHex: myPubkey, address: _addr, network: 'testnet-10' as any };
+              const _owner = { privateKeyHex: _priv, pubkeyHex: myPubkey, address: _addr, network: require('./kv_net').KV_NET as any };
               const DAPP_PLEDGE_SOMPI = 500_000_000n; // 5 KAS anchor
               const _pub: any = await publishContent(_owner, 'dapp', {
                 name: sendName,

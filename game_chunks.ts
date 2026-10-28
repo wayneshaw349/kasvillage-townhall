@@ -255,7 +255,7 @@ async function fetchGameViaWalk(
 }
 
 export async function fetchGamePuzzle(
-  manifestAddress: string, manifestHash: string, pinnedHead: string, network = 'testnet-10',
+  manifestAddress: string, manifestHash: string, pinnedHead: string, network = require('./kv_net').KV_NET,
   onProgress?: (have: number, total: number) => void,
   coords?: { anchor_hash?: string; daa_from?: number; daa_to?: number },
 ): Promise<{ html: string | null; error?: string }> {
@@ -333,7 +333,7 @@ async function kvSaveManifest(head: string, json: string): Promise<void> {
 }
 async function kvLoadManifest(q: any): Promise<string | null> {
   try { const AS = require('@react-native-async-storage/async-storage').default; const j = await AS.getItem(KV_MAN_KEY + q.head); if (j && hex(j) === q.manifestHash) return j; } catch {}
-  try { const { config } = await fetchStoreConfig(q.manifestAddress, q.manifestHash, 'testnet-10'); if (config) { const j = JSON.stringify(config); if (hex(j) === q.manifestHash) { await kvSaveManifest(q.head, j); return j; } } } catch {}
+  try { const { config } = await fetchStoreConfig(q.manifestAddress, q.manifestHash, require('./kv_net').KV_NET); if (config) { const j = JSON.stringify(config); if (hex(j) === q.manifestHash) { await kvSaveManifest(q.head, j); return j; } } } catch {}
   return null;
 }
 function kvSplitFrags(html: string, m: GameManifest): string[] | null {

@@ -9,7 +9,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 export type PledgeKind = 'store' | 'dapp' | 'academic' | 'game';
 export interface MyPledge { key: string; kind: PledgeKind; label: string; nonces: number[]; sompi: bigint; note: string; }
 
-const NET = 'testnet-10';
+const NET = require('./kv_net').KV_NET;
 
 async function owner() {
   const { _kvResolvePrivHex } = require('./proposal_share');

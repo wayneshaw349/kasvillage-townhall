@@ -688,7 +688,7 @@ function kvTipStore(item: any) {
             const priv = await ps._kvResolvePrivHex();
             if (!sender || !priv) throw new Error('wallet identity unavailable');
             const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-            const r: any = await sendKaspaViaRest({ preview: 'You - tip store', /* KV_TX_SIM */ senderAddress: sender, recipientAddress: String(tipAddr), amountSompi: 100000000n, privateKeyHex: priv, network: 'testnet-10' as any });
+            const r: any = await sendKaspaViaRest({ preview: 'You - tip store', /* KV_TX_SIM */ senderAddress: sender, recipientAddress: String(tipAddr), amountSompi: 100000000n, privateKeyHex: priv, network: require('./kv_net').KV_NET as any });
             if (r && r.success) Alert.alert('Tip sent \u2713'); else Alert.alert('Tip failed', String((r && r.error) || 'unknown'));
           } catch (e: any) { Alert.alert('Tip failed', String(e?.message || e)); }
         } },
@@ -717,7 +717,7 @@ function StorefrontCard({ item, onPress, onRepost, reposting, onFlag, onTipKeepe
               const { sendKaspaViaRest } = require('./kaspa_rest_tx');
               const r: any = await sendKaspaViaRest({ preview: 'You - store payment', /* KV_TX_SIM */
                 senderAddress: sender, recipientAddress: String(tipAddr),
-                amountSompi: 100000000n, privateKeyHex: priv, network: 'testnet-10' as any,
+                amountSompi: 100000000n, privateKeyHex: priv, network: require('./kv_net').KV_NET as any,
               });
               if (r && r.success) Alert.alert('Tip sent \u2713');
               else Alert.alert('Tip failed', String((r && r.error) || 'unknown'));
@@ -987,7 +987,7 @@ export default function VillageMailbox() {
           const pp = require('./payload_publish');
           const kp = require('./kaspa_payload');
           const AS = require('@react-native-async-storage/async-storage').default;
-          const regAddr = pp.registryAddress('game', 'testnet-10');
+          const regAddr = pp.registryAddress('game', require('./kv_net').KV_NET);
           const RELAY = 'https://kasvillage.app.runonflux.io';
           const h2s = (hx: string) => { let o = ''; for (let i = 0; i < hx.length; i += 2) o += String.fromCharCode(parseInt(hx.substr(i, 2), 16)); try { return decodeURIComponent(escape(o)); } catch { return o; } };
           const parseAnn = (input: any): any | null => {
@@ -1019,7 +1019,7 @@ export default function VillageMailbox() {
           const modHeadsG = new Map<string, number>(); const modLiftG = new Map<string, number>();
           const take = (it: any) => {
             if (!it) return;
-            if (it.keep) { try { const ka = String((it.d && it.d.tip_addr) || ''); const own = require('./canonical_agreement_steps').deriveAddress(String(it.o).slice(2), 'testnet-10'); if (ka && ka === own) { let L = keepersByHead.get(it.head); if (!L) { L = []; keepersByHead.set(it.head, L); } if (L.indexOf(ka) < 0) L.push(ka); } } catch {} }
+            if (it.keep) { try { const ka = String((it.d && it.d.tip_addr) || ''); const own = require('./canonical_agreement_steps').deriveAddress(String(it.o).slice(2), require('./kv_net').KV_NET); if (ka && ka === own) { let L = keepersByHead.get(it.head); if (!L) { L = []; keepersByHead.set(it.head, L); } if (L.indexOf(ka) < 0) L.push(ka); } } catch {} }
             if (it.keep) { const pk = keepByHead.get(it.head); if (!pk || Number(it.d.daa_to || 0) > Number(pk.d.daa_to || 0)) keepByHead.set(it.head, it); return; }
             if (it.grant) { grantRecs.push(it.rec); return; }
             if (it.flag) { let m = flagsByHead.get(it.head); if (!m) { m = new Map(); flagsByHead.set(it.head, m); } if (!m.has(String(it.o)) && m.size >= 500) return; m.set(String(it.o), it.reason); return; } // KV_FLAG_CAP2: sanity cap; qualification checks are capped below
@@ -1042,7 +1042,7 @@ export default function VillageMailbox() {
           let rowsCount = 0;
           try {
             const fetchR = kp.fetchRecords || kp.fetchPayloadRecords || kp.fetchAddressRecords;
-            const rows: any[] = (await fetchR(regAddr, 'testnet-10')) || [];
+            const rows: any[] = (await fetchR(regAddr, require('./kv_net').KV_NET)) || [];
             rowsCount = rows.length;
             // KV_ANN_OWNER: fetchRecords is newest-first - feed CHAIN order (oldest first) so the
             // first signer really is the first publisher (block-scan below already walks forward)
@@ -1092,7 +1092,7 @@ export default function VillageMailbox() {
                       const xo = (k: string) => String(k || '').replace(/^0[23]/, '').toLowerCase();
                       const rec = (chain || []).find((c: any) => c.agrId === _ref);
                       if (rec && rec.outcome === 'complete' && xo(rec.cpPubkey) === xo(String(r.o))) v = { ok: true, amountKas: Number(rec.buyerAmountSompi || 0) / 1e8, agr: true, releaseTxId: (rec.anchor && rec.anchor.releaseTxId) || '' };
-                    } else v = await kp.kvVerifyPayment(_ref, payTo.get(game) || '', 'testnet-10');
+                    } else v = await kp.kvVerifyPayment(_ref, payTo.get(game) || '', require('./kv_net').KV_NET);
                   } catch {}
                   if (_old) { if (!v.ok) continue; proofs.splice(proofs.indexOf(_old), 1); }
                   proofs.push({ game, item, txid: String(d.txid || ''), dev: String(r.o), verified: !!v.ok, amountKas: v.amountKas || 0, agr: !!v.agr, releaseTxId: v.releaseTxId || '', grant: r, savedAt: Date.now() });
@@ -1111,7 +1111,7 @@ export default function VillageMailbox() {
             const recv: any[] = JSON.parse((await AS.getItem('kv_received_boards')) || '[]');
             if (me && myAddr) {
               const fetchR2 = kp.fetchRecords || kp.fetchPayloadRecords || kp.fetchAddressRecords;
-              const mine: any[] = (await fetchR2(myAddr, 'testnet-10', 50, 2)) || [];
+              const mine: any[] = (await fetchR2(myAddr, require('./kv_net').KV_NET, 50, 2)) || [];
               let ch = false;
               for (const row of mine) {
                 const pa: any = parseAnn(row); if (!pa || !pa.grant) continue;
@@ -1154,7 +1154,7 @@ export default function VillageMailbox() {
               const it = byHead.get(h); if (!it) continue;
               m.delete(String(it.o));
               const ok: string[] = [];
-              let _checks = 0; for (const [fk, why] of Array.from(m)) { if (ok.length >= 3) break; const _cached = !!(_g.__kvQualCache && _g.__kvQualCache.has(fk)); if (!_cached) { if (_checks >= 40 || Date.now() > _flagDeadline) continue; _checks++; } try { if (await kp.kvFlaggerQualifies(fk, 'testnet-10')) ok.push(why); } catch {} } // KV_FLAG_CAP2: cap network checks, stop at 3 qualified
+              let _checks = 0; for (const [fk, why] of Array.from(m)) { if (ok.length >= 3) break; const _cached = !!(_g.__kvQualCache && _g.__kvQualCache.has(fk)); if (!_cached) { if (_checks >= 40 || Date.now() > _flagDeadline) continue; _checks++; } try { if (await kp.kvFlaggerQualifies(fk, require('./kv_net').KV_NET)) ok.push(why); } catch {} } // KV_FLAG_CAP2: cap network checks, stop at 3 qualified
               const info = { n: ok.length, reasons: Array.from(new Set(ok)), owner: String(it.o), name: String(it.name || '') };
               if (ok.length >= 3) { _g.__kvFlagInfo.set(h, { ...info, hidden: true }); byHead.delete(h); console.warn('[GamesLane] hidden by', ok.length, 'flags:', h.slice(0, 8), info.reasons.join(',')); }
               else if (ok.length) { _g.__kvFlagInfo.set(h, info); console.log('[GamesLane] flags', ok.length + '/3', h.slice(0, 8)); }
@@ -1254,7 +1254,7 @@ export default function VillageMailbox() {
       const { secp256k1 } = require('@noble/curves/secp256k1');
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
       const { repostRecord, repostStrip } = require('./payload_publish');
-      const _keeper = { privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any };
+      const _keeper = { privateKeyHex: priv, pubkeyHex: pub, address: sender, network: require('./kv_net').KV_NET as any };
       // KV_REPOST_V3: replay the CONTENT first (store record + cfg chunks) so
       // the body survives pruning, not just the announce. fetchRecords falls
       // back to the device cache, so this also revives content the chain has
@@ -1263,7 +1263,7 @@ export default function VillageMailbox() {
       try {
         const { fetchRecords } = require('./kaspa_payload');
         const _addr = String(entry.arweaveTx || entry.id || '');
-        const _wrapped: any[] = _addr ? await fetchRecords(_addr, 'testnet-10', 100) : [];
+        const _wrapped: any[] = _addr ? await fetchRecords(_addr, require('./kv_net').KV_NET, 100) : [];
         const _seen: any = {};
         const _strip: any[] = [];
         for (const _w of _wrapped) {
@@ -1321,9 +1321,9 @@ export default function VillageMailbox() {
         if (!sender || !priv) throw new Error('wallet identity unavailable');
         const { deriveAddress } = require('./canonical_agreement_steps');
         const _o = String(entry.ownerPubkey || '');
-        const authorAddr = deriveAddress(_o.length === 66 ? _o.slice(2) : _o, 'testnet-10' as any);
+        const authorAddr = deriveAddress(_o.length === 66 ? _o.slice(2) : _o, require('./kv_net').KV_NET as any);
         const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-        const r: any = await sendKaspaViaRest({ preview: 'You - ask the author', /* KV_TX_SIM */ senderAddress: sender, recipientAddress: authorAddr, amountSompi: BigInt(Math.round(price * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
+        const r: any = await sendKaspaViaRest({ preview: 'You - ask the author', /* KV_TX_SIM */ senderAddress: sender, recipientAddress: authorAddr, amountSompi: BigInt(Math.round(price * 1e8)), privateKeyHex: priv, network: require('./kv_net').KV_NET as any });
         if (r && r.success === false) throw new Error(String(r.error || 'payment failed'));
         payTx = String((r && (r.txid || r.transactionId || r.txId)) || '');
         console.log('[QA] paid', price, 'KAS ->', authorAddr.slice(0, 24), payTx.slice(0, 16));
@@ -1369,7 +1369,7 @@ export default function VillageMailbox() {
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
       const head = String(entry.arweaveTx || entry.id);
       if (entry.ownerPubkey && String(entry.ownerPubkey) === pub) { Alert.alert('Your listing', 'You cannot flag your own listing.'); return; }
-      const keys = { privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any };
+      const keys = { privateKeyHex: priv, pubkeyHex: pub, address: sender, network: require('./kv_net').KV_NET as any };
       const send = async (reason: string) => {
         try {
           const { flagListing } = require('./payload_publish');
@@ -1427,7 +1427,7 @@ export default function VillageMailbox() {
             const pre = JSON.stringify({ head: _head, reason, note: note || '', title: String(entry.title || entry.name || ''), owner: String(entry.ownerPubkey || ''), t: Date.now() });
             const evidenceHash = bytesToHex(_sha(utf8ToBytes(pre)));
             const { delistFromRegistry } = require('./payload_publish');
-            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, _head, kind, { reason, evidenceHash, mod: 1, owner: String(entry.ownerPubkey || '') }, { privateKeyHex: _mPriv, pubkeyHex: _mPub });
+            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: require('./kv_net').KV_NET as any }, _head, kind, { reason, evidenceHash, mod: 1, owner: String(entry.ownerPubkey || '') }, { privateKeyHex: _mPriv, pubkeyHex: _mPub });
             if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
             try {
               const AS = require('@react-native-async-storage/async-storage').default;
@@ -1501,7 +1501,7 @@ export default function VillageMailbox() {
         { text: 'Delist', style: 'destructive', onPress: async () => {
           try {
             const { delistFromRegistry } = require('./payload_publish');
-            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, String(entry.arweaveTx || entry.id), kind);
+            const r: any = await delistFromRegistry({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: require('./kv_net').KV_NET as any }, String(entry.arweaveTx || entry.id), kind);
             if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
             console.log('[DelistOwner]', String(entry.arweaveTx || entry.id).slice(0, 24), kind);
             setStoreView(null);
@@ -1528,7 +1528,7 @@ export default function VillageMailbox() {
       const priv = await ps._kvResolvePrivHex();
       if (!sender || !priv) throw new Error('wallet identity unavailable');
       const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-      const r: any = await sendKaspaViaRest({ preview: 'You - tip keeper', /* KV_TX_SIM */ senderAddress: sender, recipientAddress: String(keeperTip.addr), amountSompi: BigInt(Math.round(kas * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
+      const r: any = await sendKaspaViaRest({ preview: 'You - tip keeper', /* KV_TX_SIM */ senderAddress: sender, recipientAddress: String(keeperTip.addr), amountSompi: BigInt(Math.round(kas * 1e8)), privateKeyHex: priv, network: require('./kv_net').KV_NET as any });
       if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
       console.log('[KeeperTip]', kas, 'KAS ->', String(keeperTip.addr).slice(0, 24));
       setKeeperTip(null);
@@ -1557,7 +1557,7 @@ export default function VillageMailbox() {
       const r: any = await sendKaspaViaRest({ preview: 'You - tip', /* KV_TX_SIM */
         senderAddress: sender, recipientAddress: String(addr),
         amountSompi: BigInt(Math.round(kas * 1e8)),
-        privateKeyHex: priv, network: 'testnet-10' as any,
+        privateKeyHex: priv, network: require('./kv_net').KV_NET as any,
       });
       if (r && r.success && (r.txId || r.transactionId)) {
         setTipT(null);
@@ -1588,7 +1588,7 @@ export default function VillageMailbox() {
             const priv = await ps._kvResolvePrivHex();
             if (!sender || !priv) throw new Error('wallet identity unavailable');
             const { bytesToHex, hexToBytes } = require('@noble/hashes/utils'); const { secp256k1 } = require('@noble/curves/secp256k1');
-            const keeper = { privateKeyHex: priv, pubkeyHex: bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true)), address: sender, network: 'testnet-10' as any };
+            const keeper = { privateKeyHex: priv, pubkeyHex: bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true)), address: sender, network: require('./kv_net').KV_NET as any };
             const r: any = await gc.repostGame(keeper, q, item.rec || null, (d: number, t: number) => setRepostGameProg(d + '/' + t));
             if (r && r.success) Alert.alert('Reposted ✓', (item.name || q.game) + ' is fresh on chain again (' + r.sent + ' records). New players can install it for ~30 more hours.');
             else Alert.alert('Repost stopped', String((r && r.error) || 'unknown') + '\n\nWhat was sent still counts - you can tap Repost again.');
@@ -1613,7 +1613,7 @@ export default function VillageMailbox() {
           if (!sender || !priv) throw new Error('wallet identity unavailable');
           if (sender === addr) { Alert.alert('That is you', 'You kept this game alive yourself.'); return; }
           const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-          const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: String(addr), amountSompi: BigInt(Math.round(kas * 1e8)), privateKeyHex: priv, network: 'testnet-10' as any });
+          const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: String(addr), amountSompi: BigInt(Math.round(kas * 1e8)), privateKeyHex: priv, network: require('./kv_net').KV_NET as any });
           if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
           console.log('[GameKeeperTip]', kas, 'KAS ->', String(addr).slice(0, 24));
           Alert.alert('Tip sent \u2713', kas + ' KAS to the keeper of "' + nm + '".');
@@ -1627,7 +1627,7 @@ export default function VillageMailbox() {
     setInstallingGame(q.head);
     try {
       const gc = require('./game_chunks');
-      const r = await gc.fetchGamePuzzle(q.manifestAddress, q.manifestHash, q.head, 'testnet-10', undefined,
+      const r = await gc.fetchGamePuzzle(q.manifestAddress, q.manifestHash, q.head, require('./kv_net').KV_NET, undefined,
         { anchor_hash: q.anchor_hash, daa_from: q.daa_from, daa_to: q.daa_to });
       if (!r || !r.html) throw new Error((r && r.error) || 'download failed');
       const AS = require('@react-native-async-storage/async-storage').default;
@@ -1658,9 +1658,9 @@ export default function VillageMailbox() {
             console.log('[Mailbox] modal open - cfgHash:', cfgHash ? cfgHash.slice(0, 16) : 'MISSING', 'addr:', item.arweaveTx.slice(0, 24));
             if (!cfgHash) { setStoreView(sv => sv ? { ...sv, loading: false } : sv); return; }
             const { fetchStoreConfig } = await import('./config_chunks');
-            let { config, error: _cfgErr } = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined, (item as any).ownerPubkey || undefined);
+            let { config, error: _cfgErr } = await fetchStoreConfig(item.arweaveTx, cfgHash, require('./kv_net').KV_NET, (item as any).coords || undefined, (item as any).ownerPubkey || undefined);
             // KV_CFG_RETRY: one retry - a transient API miss must not read as "not on-chain"
-            if (!config) { await new Promise((r) => setTimeout(r, 1500)); const _r2: any = await fetchStoreConfig(item.arweaveTx, cfgHash, 'testnet-10', (item as any).coords || undefined, (item as any).ownerPubkey || undefined); if (_r2 && _r2.config) { config = _r2.config; _cfgErr = _r2.error; } }
+            if (!config) { await new Promise((r) => setTimeout(r, 1500)); const _r2: any = await fetchStoreConfig(item.arweaveTx, cfgHash, require('./kv_net').KV_NET, (item as any).coords || undefined, (item as any).ownerPubkey || undefined); if (_r2 && _r2.config) { config = _r2.config; _cfgErr = _r2.error; } }
             // KV_CFG_SCAN: config chunks (products, coupons, description) never render unscanned
             try { if (config) { const _cfm = require('./content_filter'); const scanObject = _cfm.scanObjectStrict || _cfm.scanObject; const _sc = scanObject(config); if (!_sc.ok) { console.warn('[Mailbox] store config BLOCKED:', _sc.reason, 'at', _sc.path); setStoreView(sv => sv && sv.entry.id === item.id ? { ...sv, config: null, loading: false } : sv); return; } } } catch {}
             console.log('[Mailbox] cfg fetch result:', config ? 'OK brand=' + config.brandName : 'NULL err=' + _cfgErr);
@@ -1936,7 +1936,7 @@ export default function VillageMailbox() {
                       (async () => {
                         try {
                           const { fetchStoreConfig } = await import('./config_chunks');
-                          const { config, error } = await fetchStoreConfig(gameView.addr, gameView.hash, 'testnet-10');
+                          const { config, error } = await fetchStoreConfig(gameView.addr, gameView.hash, require('./kv_net').KV_NET);
                           if (!config) { setGameView(g => g ? { ...g, loading: false, error: error || 'fetch failed' } : g); return; }
                           // Display-side gate. This is the one that matters:
                           // anyone can write to the registry address without

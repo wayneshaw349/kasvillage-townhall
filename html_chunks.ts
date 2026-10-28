@@ -290,7 +290,7 @@ const chunkCharsFor = (maxBytes: number) => Math.ceil(maxBytes * 4 / 3) + 65536;
 export async function fetchHtmlPage(
   storeAddress: string,
   expectedHash: string,
-  network = 'testnet-10',
+  network = require('./kv_net').KV_NET,
   coords?: { anchor_hash?: string; daa_from?: number; daa_to?: number },
   ownerPub?: string, // KV_CHUNK_CANDIDATES: announce `o` when known - only its signed chunks count
   opts?: { maxBytes?: number }, // KV_INFLATE_CAP: decompressed ceiling (default 2 MB)

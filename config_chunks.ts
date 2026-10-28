@@ -152,7 +152,7 @@ const KV_CFG_MAX_CHUNK_CHARS = Math.ceil(KV_PAGE_MAX_DECOMPRESSED * 4 / 3) + 655
 
 // ownerPub (KV_CHUNK_CANDIDATES): the announce / store registry `o` when known -
 // only chunks signed by it count. Omit for content-addressed reposts (games).
-export async function fetchStoreConfig(storeAddress: string, expectedHash: string, network = 'testnet-10', coords?: { anchor_hash?: string; daa_to?: number }, ownerPub?: string): Promise<{ config: any | null; error?: string }> {
+export async function fetchStoreConfig(storeAddress: string, expectedHash: string, network = require('./kv_net').KV_NET, coords?: { anchor_hash?: string; daa_to?: number }, ownerPub?: string): Promise<{ config: any | null; error?: string }> {
   let r = await _fetchStoreConfigOnce(storeAddress, expectedHash, network, coords, ownerPub);
   for (let i = 0; i < 4 && !r.config && /incomplete|missing chunk/.test(String(r.error || '')); i++) {
     await new Promise((res) => setTimeout(res, 5000));
@@ -163,7 +163,7 @@ export async function fetchStoreConfig(storeAddress: string, expectedHash: strin
 async function _fetchStoreConfigOnce(
   storeAddress: string,
   expectedHash: string,
-  network = 'testnet-10',
+  network = require('./kv_net').KV_NET,
   coords?: { anchor_hash?: string; daa_to?: number },
   ownerPub?: string,
 ): Promise<{ config: any | null; error?: string }> {

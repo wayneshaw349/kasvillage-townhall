@@ -60,7 +60,7 @@ const API: Record<string, string> = {
   'testnet-10': 'https://api-tn10.kaspa.org',
   'mainnet': 'https://api.kaspa.org',
 };
-export const apiBase = (network: string) => API[network] || API['testnet-10'];
+export const apiBase = (network: string) => API[network] || API[require('./kv_net').KV_NET];
 
 // ---------------------------------------------------------------------------
 // CANONICALIZATION + SIGNING
@@ -310,7 +310,7 @@ async function getJson(url: string): Promise<any> {
 }
 
 /** Live pledge = sum of unspent sompi at an address. One call, trustless. */
-export async function getPledgeSompi(address: string, network = 'testnet-10'): Promise<bigint> {
+export async function getPledgeSompi(address: string, network = require('./kv_net').KV_NET): Promise<bigint> {
   const utxos = await getJson(`${apiBase(network)}/addresses/${encodeURIComponent(address)}/utxos`);
   let sum = 0n;
   for (const u of utxos || []) {
@@ -321,7 +321,7 @@ export async function getPledgeSompi(address: string, network = 'testnet-10'): P
 }
 
 /** All decoded KV records in an address's tx history, newest first. */
-export async function fetchRecords(address: string, network = 'testnet-10', limit = 50, maxPages = 1): Promise<Array<{ record: KvRecord; txid: string; blockTime: number }>> {
+export async function fetchRecords(address: string, network = require('./kv_net').KV_NET, limit = 50, maxPages = 1): Promise<Array<{ record: KvRecord; txid: string; blockTime: number }>> {
   let txs: any[] = [];
   try {
     txs = await getJson(
@@ -383,7 +383,7 @@ const RELAY_RECORD_BASES = [
 ];
 
 /** Current content for a store/dapp/game/identity address: newest sig-valid record per kind. */
-export async function resolveCurrent(address: string, network = 'testnet-10'): Promise<Partial<Record<KvKind, KvRecord>>> {
+export async function resolveCurrent(address: string, network = require('./kv_net').KV_NET): Promise<Partial<Record<KvKind, KvRecord>>> {
   const all = await fetchRecords(address, network);
   const current: Partial<Record<KvKind, KvRecord>> = {};
   for (const { record } of all) {           // newest first
@@ -416,7 +416,7 @@ export interface DirectoryEntry {
  * live pledge per store. Ranking = caller sorts by pledgeSompi (+ reputation
  * from counterparty_scan on the owner key).
  */
-export async function rebuildDirectory(category: string, registryAddress: string, network = 'testnet-10'): Promise<DirectoryEntry[]> {
+export async function rebuildDirectory(category: string, registryAddress: string, network = require('./kv_net').KV_NET): Promise<DirectoryEntry[]> {
   // KV_BATCH_READ: page by time, then expand signed batch announces (verified once)
   const _annsRaw = await fetchRecords(registryAddress, network, 100, 5);
   // KV_CHAIN_ORDER: fetchRecords is newest-first; every ownership / first-N
@@ -790,7 +790,7 @@ async function kvPledgeQualified(pubkey: string, storeAddrs: string[], network: 
 }
 
 // KV_FLAGGER_QUALIFIES: shared reputation gate for flags (games lane; stores tally inline)
-export async function kvFlaggerQualifies(pubkey: string, network: string = 'testnet-10'): Promise<boolean> {
+export async function kvFlaggerQualifies(pubkey: string, network: string = require('./kv_net').KV_NET): Promise<boolean> {
   const g: any = globalThis as any;
   const qc = g.__kvQualCache || (g.__kvQualCache = new Map());
   const hit = qc.get(pubkey);
@@ -823,7 +823,7 @@ export async function kvFlaggerQualifies(pubkey: string, network: string = 'test
 }
 
 // KV_GRANT_VERIFY: did this tx pay the dev's SIGNED address? (check soon after grant - pruning)
-export async function kvVerifyPayment(txid: string, payTo: string, network: string = 'testnet-10'): Promise<{ ok: boolean; amountKas: number; found: boolean }> {
+export async function kvVerifyPayment(txid: string, payTo: string, network: string = require('./kv_net').KV_NET): Promise<{ ok: boolean; amountKas: number; found: boolean }> {
   try {
     if (!/^[0-9a-f]{64}$/i.test(String(txid || ''))) return { ok: false, amountKas: 0, found: false };
     const api = String(network).indexOf('testnet') >= 0 ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
@@ -839,7 +839,7 @@ export async function kvVerifyPayment(txid: string, payTo: string, network: stri
 try { require('@react-native-async-storage/async-storage').default.getItem('kv_grants').then((v: any) => { try { if (v) (globalThis as any).__kvGrantsAll = JSON.parse(v); } catch {} }); } catch {}
 
 // KV_EVIDENCE: archive the node's own answer about a tx so it can be checked after pruning
-export async function kvFetchEvidence(txid: string, network: string = 'testnet-10'): Promise<any | null> {
+export async function kvFetchEvidence(txid: string, network: string = require('./kv_net').KV_NET): Promise<any | null> {
   try {
     if (!/^[0-9a-f]{64}$/i.test(String(txid || ''))) return null;
     const api = String(network).indexOf('testnet') >= 0 ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
@@ -865,7 +865,7 @@ export async function kvFetchEvidence(txid: string, network: string = 'testnet-1
   } catch { return null; }
 }
 
-export async function kvSealEvidence(network: string = 'testnet-10'): Promise<{ sealed: number; pending: number }> {
+export async function kvSealEvidence(network: string = require('./kv_net').KV_NET): Promise<{ sealed: number; pending: number }> {
   let sealed = 0, pending = 0;
   try {
     const AS = require('@react-native-async-storage/async-storage').default;

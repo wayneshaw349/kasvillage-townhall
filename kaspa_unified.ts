@@ -4,7 +4,7 @@
 import { KaspaClient, KaspaNetwork, FeeEstimate, FeeCalculation, UtxoEntry, TransactionResult, ServerInfo } from './KaspaClient';
 
 let _client: KaspaClient | null = null;
-let _network: KaspaNetwork = 'testnet-10';
+let _network: KaspaNetwork = require('./kv_net').KV_NET;
 let _connectionPromise: Promise<ServerInfo> | null = null;
 
 export async function getClient(): Promise<KaspaClient> {

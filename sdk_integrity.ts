@@ -284,7 +284,7 @@ export async function verifySDKOnArweave(sdkHash: string, constraintsHash: strin
 export async function verifyDAppOnChain(
   dappAddress: string,
   currentCodeHash: string,
-  network = 'testnet-10',
+  network = require('./kv_net').KV_NET,
 ): Promise<{ verified: boolean; reason: string; attestedHash?: string; proofType?: string }> {
   try {
     const { fetchRecords } = await import('./kaspa_payload');

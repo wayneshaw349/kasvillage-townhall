@@ -900,7 +900,7 @@ const KvChainGamePublish: React.FC = () => {
                 const { bytesToHex, hexToBytes } = require('@noble/hashes/utils'); const { secp256k1 } = require('@noble/curves/secp256k1');
                 const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
                 const { grantAccess } = require('./payload_publish');
-                const r: any = await grantAccess({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: 'testnet-10' as any }, to, gameId, item, txid);
+                const r: any = await grantAccess({ privateKeyHex: priv, pubkeyHex: pub, address: sender, network: require('./kv_net').KV_NET as any }, to, gameId, item, txid);
                 if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
                 gadd('GRANTED ' + item + ' of ' + gameId + ' -> ' + to.slice(0, 12) + '\u2026');
                 Alert.alert('Granted', 'The buyer\'s wallet unlocks ' + item + ' on its next Games refresh and saves the payment proof.');
@@ -948,7 +948,7 @@ const KvChainGamePublish: React.FC = () => {
             const priv = await _kvResolvePrivHex(); if (!priv || !myAddr) throw new Error('wallet keys unavailable');
             const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
             const { postModRecord } = require('./payload_publish');
-            const r: any = await postModRecord({ privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: 'testnet-10' as any }, 'modnote', head, kind, { privateKeyHex: k, pubkeyHex: mp }, { note: 'removed in error' });
+            const r: any = await postModRecord({ privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: require('./kv_net').KV_NET as any }, 'modnote', head, kind, { privateKeyHex: k, pubkeyHex: mp }, { note: 'removed in error' });
             if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
             Alert.alert('Error note posted', 'The removal stays final. The owner is told it was a moderator error.');
           } catch (e: any) { Alert.alert('Note failed', String((e && e.message) || e)); }
@@ -961,7 +961,7 @@ const KvChainGamePublish: React.FC = () => {
     try {
       const kp = require('./kaspa_payload');
       gadd('sealing proofs\u2026');
-      const sr: any = await kp.kvSealEvidence('testnet-10');
+      const sr: any = await kp.kvSealEvidence(require('./kv_net').KV_NET);
       const _AS4 = require('@react-native-async-storage/async-storage').default;
       const log: any[] = JSON.parse((await _AS4.getItem('kv_sales_log')) || '[]');
       const sales: any[] = [];
@@ -970,7 +970,7 @@ const KvChainGamePublish: React.FC = () => {
       const priv = await _kvResolvePrivHex();
       if (!priv) throw new Error('wallet key unavailable');
       const { schnorr } = require('@noble/curves/secp256k1');
-      const body = { v: 1, kind: 'kasvillage-sales', network: 'testnet-10', devPub: bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true)), generatedAt: Date.now(), count: sales.length, buyers: Array.from(new Set(sales.map((x: any) => x.buyer))).length, sales };
+      const body = { v: 1, kind: 'kasvillage-sales', network: require('./kv_net').KV_NET, devPub: bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true)), generatedAt: Date.now(), count: sales.length, buyers: Array.from(new Set(sales.map((x: any) => x.buyer))).length, sales };
       const msg = sha256(new TextEncoder().encode(JSON.stringify(body)));
       const report = { ...body, sig: bytesToHex(schnorr.sign(msg, hexToBytes(priv))) };
       gadd('sales export: ' + sales.length + ' deliveries, ' + body.buyers + ' unique buyers, ' + sales.filter((x: any) => x.evidence).length + ' with sealed evidence (' + sr.pending + ' pending)');
@@ -1143,7 +1143,7 @@ const KvChainGamePublish: React.FC = () => {
           const priv = await _kvResolvePrivHex();
           if (!priv || !myAddr) { gadd('ERROR: wallet keys unavailable'); setGbusy(''); return; }
           const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
-          const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: 'testnet-10' as any };
+          const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: require('./kv_net').KV_NET as any };
           let res: any = null;
           for (const _h of _heads) {
             res = await delistFromRegistry(owner, _h, 'game');
@@ -1173,7 +1173,7 @@ const KvChainGamePublish: React.FC = () => {
       const priv = await _kvResolvePrivHex();
       if (!priv || !myAddr) { gadd('ERROR: wallet keys unavailable'); setGbusy(''); return; }
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
-      const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: 'testnet-10' as any };
+      const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: require('./kv_net').KV_NET as any };
       const slots = Math.max(...m.frags.map((f: any) => f.slot)) + 1;
       const slotAddresses = Array.from({ length: slots }, (_, i) => deriveStoreKeys(priv, entry.nonceBase + i, owner.network).address);
       const manifestAddress = deriveStoreKeys(priv, entry.nonceBase + 86, owner.network).address;
@@ -1272,7 +1272,7 @@ const KvChainGamePublish: React.FC = () => {
       const priv = await _kvResolvePrivHex();
       if (!priv || !myAddr) { gadd('ERROR: wallet keys unavailable'); setGbusy(''); return; }
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
-      const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: 'testnet-10' as any };
+      const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: require('./kv_net').KV_NET as any };
       try {
         const led = require('./utxo_ledger');
         const lt = await led.getLockedTotals();
@@ -2724,7 +2724,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
       if (!_priv || !_addr) throw new Error('wallet keys unavailable');
       const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
-      const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: 'testnet-10' as any };
+      const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: require('./kv_net').KV_NET as any };
       const _nonce = 7000 + (Math.floor(Date.now() / 1000) % 1000000); // unique per abstract; saved below for pledge withdrawal
       const _pubRes: any = await publishContent(_owner, 'store', { name: newAbstract.title, category: 'Academic', abstractId: newAbstract.id }, _nonce, 100_000_000n);
       if (!_pubRes || _pubRes.success === false) throw new Error('abstract publish failed: ' + (_pubRes && _pubRes.error));
@@ -2773,7 +2773,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const myPub = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
       const mine = new Set<string>();
       try {
-        const recs: any[] = await fetchRecords(registryAddress('store', 'testnet-10'), 'testnet-10', 100, 5);
+        const recs: any[] = await fetchRecords(registryAddress('store', require('./kv_net').KV_NET), require('./kv_net').KV_NET, 100, 5);
         for (const w of recs) {
           const r: any = w && w.record;
           if (!r || r.k !== 'registry' || String(r.o) !== myPub || !r.d) continue;
@@ -2788,11 +2788,11 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
         let found = -1;
         for (let d = 0; d <= 90 && found < 0; d++) {
           const n = 7000 + ((base + d) % 1000000);
-          if (mine.has(deriveStoreKeys(_priv, n, 'testnet-10').address)) found = n;
+          if (mine.has(deriveStoreKeys(_priv, n, require('./kv_net').KV_NET).address)) found = n;
         }
         for (let d = 0; d <= 20 && found < 0; d++) {
           const n = 7000 + ((base + d) % 1000000);
-          try { if ((await getPledgeSompi(deriveStoreKeys(_priv, n, 'testnet-10').address, 'testnet-10')) > 0n) found = n; } catch {}
+          try { if ((await getPledgeSompi(deriveStoreKeys(_priv, n, require('./kv_net').KV_NET).address, require('./kv_net').KV_NET)) > 0n) found = n; } catch {}
         }
         if (found >= 0) { await AS.setItem('kv_abs_nonce_' + _a.id, String(found)); console.log('[Academic] nonce RECOVERED', _a.id, '->', found); }
         else console.log('[Academic] nonce not recoverable', _a.id, '(announce pruned and no live pledge)');
@@ -2811,7 +2811,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
       if (!_priv || !_addr) throw new Error('wallet keys unavailable');
       const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
-      const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: 'testnet-10' as any };
+      const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: require('./kv_net').KV_NET as any };
       const _list: any[] = JSON.parse((await SecureStore.getItemAsync('kv_abstracts')) || '[]');
       await kvRecoverAbsNonces(_priv, _list);
       const _dk = await SecureStore.getItemAsync('kv_dkim_domain');
@@ -2861,7 +2861,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
       if (!_priv || !_addr) throw new Error('wallet keys unavailable');
       const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
-      const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: 'testnet-10' as any };
+      const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: require('./kv_net').KV_NET as any };
       const _list: any[] = JSON.parse((await SecureStore.getItemAsync('kv_abstracts')) || '[]');
       await kvRecoverAbsNonces(_priv, _list);
       let _ok = 0, _skip = 0;
@@ -2895,7 +2895,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const _rows: string[] = [];
       for (const _kas of [0.5, 0.3, 0.2, 0.1, 0.05]) {
         try {
-          const _r: any = await sendKaspaViaRest({ senderAddress: _addr, recipientAddress: _addr, amountSompi: BigInt(Math.round(_kas * 1e8)), privateKeyHex: _priv, network: 'testnet-10' as any, payload: _hex });
+          const _r: any = await sendKaspaViaRest({ senderAddress: _addr, recipientAddress: _addr, amountSompi: BigInt(Math.round(_kas * 1e8)), privateKeyHex: _priv, network: require('./kv_net').KV_NET as any, payload: _hex });
           const _tx = String((_r && (_r.txid || _r.transactionId || _r.txId)) || '');
           _rows.push(_kas + ' KAS: ' + (_r && _r.success === false ? 'REJECTED ' + String(_r.error || '').slice(0, 60) : (_tx ? 'OK ' + _tx.slice(0, 10) : 'no txid')));
         } catch (_e: any) { _rows.push(_kas + ' KAS: ERROR ' + String((_e && _e.message) || _e).slice(0, 70)); }
@@ -4232,7 +4232,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       const { _kvResolvePrivHex } = require('./proposal_share');
       const _priv = await _kvResolvePrivHex();
       const _addr2 = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
-      const _owner2 = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr2, network: 'testnet-10' as any };
+      const _owner2 = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr2, network: require('./kv_net').KV_NET as any };
       let coords: any = undefined;
       try {
         let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
@@ -4325,7 +4325,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       const _priv = await _kvResolvePrivHex();
       const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
       if (!_priv || !userPubkey || !_addr) throw new Error('wallet keys unavailable');
-      const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: 'testnet-10' as any };
+      const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: require('./kv_net').KV_NET as any };
       const STORE_PLEDGE_SOMPI = 500_000_000n; // 5 KAS default stake
       {
         const { scanObjectStrict: scanObject, scanTextStrict: scanText, reasonMessage } = require('./content_filter');
@@ -5262,7 +5262,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     const _priv = await _kvResolvePrivHex();
                     const _addr = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
                     if (!_priv || !userPubkey || !_addr) throw new Error('wallet keys unavailable');
-                    const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: 'testnet-10' as any };
+                    const _owner = { privateKeyHex: _priv, pubkeyHex: userPubkey, address: _addr, network: require('./kv_net').KV_NET as any };
                     setGameStage('Anchoring pledge...');
                     const _Crypto = require('expo-crypto');
                     const _cHash = await _Crypto.digestStringAsync(_Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify(v.game));

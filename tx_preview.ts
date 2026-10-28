@@ -47,7 +47,7 @@ async function flaggedAddrs(): Promise<Record<string, { why: string; at: number 
         if (/^kaspa/.test(String(store))) m[String(store)] = { why, at: now };
         try {
           const pk = String(f.owner || '').toLowerCase(); const x = pk.length === 66 ? pk.slice(2) : pk;
-          if (x.length === 64) for (const net of ['testnet-10', 'mainnet']) m[deriveAddress(x, net as any)] = { why, at: now };
+          if (x.length === 64) for (const net of [require('./kv_net').KV_NET, 'mainnet']) m[deriveAddress(x, net as any)] = { why, at: now };
         } catch {}
       }
     }

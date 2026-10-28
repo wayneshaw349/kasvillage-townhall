@@ -1355,7 +1355,7 @@ function parseClipboard(raw: string): {
         if (!myPubkey) return;
 
         // Query Arweave for my active agreements
-        const arAll = await queryAgreementsFromArweave({ network: 'testnet-10' });
+        const arAll = await queryAgreementsFromArweave({ network: require('./kv_net').KV_NET });
         const myActive = arAll.filter((a: any) => {
           const pk = a.pubkey || a.partyA?.pubkey || '';
           const cp = a.counterpartyPubkey || a.KVCounterparty || '';
@@ -1421,7 +1421,7 @@ function parseClipboard(raw: string): {
             sellerCommitmentKas: (bestMatch.sellerAmountSompi || 0) / 1e8,
             itemDescription: bestMatch.description || agrId.slice(0, 12),
             multisigAddress: bestMatch.frostAddress || '',
-            frostData: bestMatch.frostAddress ? { address: bestMatch.frostAddress, network: 'testnet-10' } : undefined,
+            frostData: bestMatch.frostAddress ? { address: bestMatch.frostAddress, network: require('./kv_net').KV_NET } : undefined,
           }));
           setBuyerLocked(true);
           setSellerLocked(true);
@@ -1525,7 +1525,7 @@ function parseClipboard(raw: string): {
             if (wallet) {
               const myPk = (await SecureStore.getItemAsync('kv_public_key')) || b2h(secpPub(wallet.privKeyHex)); // [PUBKEY-PREFIX-FIX] real compressed prefix
               // Query Arweave for my agreements
-              const arAll = await queryAgreementsFromArweave({ network: 'testnet-10' });
+              const arAll = await queryAgreementsFromArweave({ network: require('./kv_net').KV_NET });
               const mine = arAll.filter((a: any) => (a.pubkey || '').startsWith(myPk.slice(0,16)) || (a.counterpartyPubkey || '').startsWith(myPk.slice(0,16)));
               for (const a of mine.slice(0, 5)) {
                 const agrId = a.agreementId || a.agreement_id || ''; if (agrId && allActive.some(e => e.agrId === agrId)) continue; // [RECOVERY-MERGE] local entry wins
@@ -2010,7 +2010,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
           const networkStr = await SecureStore.getItemAsync('kaspa_network');
           const network: KaspaNetwork = (networkStr === 'testnet-10' || networkStr === 'testnet-11') 
             ? networkStr 
-            : 'testnet-10';
+            : require('./kv_net').KV_NET;
           
           // Deterministic agreement ID from proposal variables
           const { sha256: sha256Agr } = require('@noble/hashes/sha256');
@@ -2298,7 +2298,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
       let arweaveProposals: any[] = [];
       // Always query Arweave · TownHall is stateless and may have stale data
       try {
-        arweaveProposals = await queryAgreementsFromArweave({ status: 'Proposed', network: 'testnet-10' });
+        arweaveProposals = await queryAgreementsFromArweave({ status: 'Proposed', network: require('./kv_net').KV_NET });
         console.log('[Neighbor] Arweave found', arweaveProposals.length, 'proposals');
       } catch (e) { console.warn('[Neighbor] Arweave query failed:', e); }
       // Show proposed agreements where I'm NOT party A (i.e., I can accept)
@@ -2759,7 +2759,7 @@ const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_twe
               pubkey: _bPk,
               amount_sompi: Math.floor((contract.itemPriceKas + contract.sellerCommitmentKas) * 1e8),
               description: 'Buyer confirmed: ' + sellerTrackingNum.trim(),
-              network: 'testnet-10',
+              network: require('./kv_net').KV_NET,
               status: 'Confirmed',
               frostAddress: contract.multisigAddress || '',
               signature: 'buyer_confirmed_' + Date.now(),
@@ -4021,7 +4021,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                       setInboxLoading(true);
                       try {
                         // queryAgreementsFromArweave imported statically
-                        const all = await queryAgreementsFromArweave({ status: 'Proposed', network: 'testnet-10' });
+                        const all = await queryAgreementsFromArweave({ status: 'Proposed', network: require('./kv_net').KV_NET });
                         const match = all.find((a: any) => (a.agreementId || a.agreement_id) === manualAgrId);
                         if (match) {
                           console.log('[Neighbor] Manual lookup found:', manualAgrId);

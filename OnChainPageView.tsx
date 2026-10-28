@@ -165,7 +165,7 @@ function injectCsp(raw: string, meta: string = CSP_META): string {
 }
 
 export default function OnChainPageView(props: OnChainPageViewProps) {
-  const { storeAddress, pageHash, network = 'testnet-10', ownerPubkey } = props;
+  const { storeAddress, pageHash, network = require('./kv_net').KV_NET, ownerPubkey } = props;
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

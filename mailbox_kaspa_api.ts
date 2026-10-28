@@ -46,7 +46,7 @@ export class MailboxError extends Error {
   constructor(message: string, public code?: string) { super(message); this.name = 'MailboxError'; }
 }
 
-const NET = 'testnet-10';
+const NET = require('./kv_net').KV_NET;
 
 // ---- Network stubs: Kaspa REST is the only dependency; assume reachable ----
 export function isOnline(): boolean { return true; }

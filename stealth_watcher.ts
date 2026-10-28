@@ -37,7 +37,7 @@ const RESOLVER_URLS: Record<KaspaNetwork, string[]> = {
 };
 
 let _ws: WebSocket | null = null;
-let _network: KaspaNetwork = 'testnet-10';
+let _network: KaspaNetwork = require('./kv_net').KV_NET;
 let _requestId = 0;
 let _pendingRequests: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }> = new Map();
 let _subscriptions: Map<string, (data: unknown) => void> = new Map();
@@ -48,7 +48,7 @@ async function ensureConnected(): Promise<void> {
   const networkStr = await SecureStore.getItemAsync('kaspa_network');
   _network = (networkStr === 'mainnet' || networkStr === 'testnet-10' || networkStr === 'testnet-11')
     ? networkStr as KaspaNetwork
-    : 'testnet-10';
+    : require('./kv_net').KV_NET;
   
   const urls = RESOLVER_URLS[_network];
   

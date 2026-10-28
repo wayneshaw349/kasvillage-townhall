@@ -55,7 +55,7 @@ async function fetchAgreements(pubkey: string, tagName: string): Promise<any[]> 
 export async function generateCounterpartyProof(
   targetPubkey: string,
   proverPubkey: string,
-  network = 'testnet-10',
+  network = require('./kv_net').KV_NET,
 ): Promise<CounterpartyProof> {
   // Pull agreements where target is either party
   const [asPubkey, asCounter] = await Promise.all([

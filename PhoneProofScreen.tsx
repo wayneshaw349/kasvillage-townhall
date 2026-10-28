@@ -84,7 +84,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
       for (const _r of _chain) {
         const _a: any = _r && _r.anchor;
         if (_a && _a.releaseTxId && !_a.utxoCommitment) {
-          const _full = await fetchAnchor(_a.releaseTxId, _r.network === 'mainnet' ? 'mainnet' : 'testnet-10');
+          const _full = await fetchAnchor(_a.releaseTxId, _r.network === 'mainnet' ? 'mainnet' : require('./kv_net').KV_NET);
           if (_full && (_full.utxoCommitment || _full.releaseDaaScore)) { await setAnchor(_r.agrId, _full); _f++; }
         }
       }
@@ -114,7 +114,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
       for (const r of recs) {
         const a: any = r && r.anchor; if (!a || !a.releaseTxId) continue;
         if (anchorsTried >= 3) break; anchorsTried++;
-        try { const got: any = await _race(fetchAnchor(a.releaseTxId, r.network === 'mainnet' ? 'mainnet' : 'testnet-10'), 6000); if (got && (got.releaseDaaScore || got.utxoCommitment)) anchorsOk++; } catch {}
+        try { const got: any = await _race(fetchAnchor(a.releaseTxId, r.network === 'mainnet' ? 'mainnet' : require('./kv_net').KV_NET), 6000); if (got && (got.releaseDaaScore || got.utxoCommitment)) anchorsOk++; } catch {}
       }
       // live cross-check: a fresh chain scan of the same pubkey catches dropped recent deals
       const warns: string[] = []; let liveLine = '';

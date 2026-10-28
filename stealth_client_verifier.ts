@@ -29,7 +29,7 @@ export interface StealthRepResult {
 // FETCH CURRENT ROOT (independent of TownHall)
 // ============================================================================
 
-export async function fetchMerkleRoot(network = 'testnet-10'): Promise<string | null> {
+export async function fetchMerkleRoot(network = require('./kv_net').KV_NET): Promise<string | null> {
   const q = `{ transactions(tags: [{ name: "KV-Type", values: ["stealth-merkle-root"] }, { name: "KV-Network", values: ["${network}"] }], sort: HEIGHT_DESC, first: 1) { edges { node { id } } } }`;
   try {
     const r = await fetch(ARWEAVE_GQL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) });
@@ -45,7 +45,7 @@ export async function fetchMerkleRoot(network = 'testnet-10'): Promise<string | 
 // FETCH ALL NULLIFIER INSCRIPTIONS FOR A NETWORK
 // ============================================================================
 
-export async function fetchNullifiers(network = 'testnet-10'): Promise<Array<{ nullifier: string; amount: bigint; trade_tx: string; timestamp: number; proof_tx: string; txid: string }>> {
+export async function fetchNullifiers(network = require('./kv_net').KV_NET): Promise<Array<{ nullifier: string; amount: bigint; trade_tx: string; timestamp: number; proof_tx: string; txid: string }>> {
   const q = `{ transactions(tags: [{ name: "KV-Type", values: ["stealth-nullifier"] }, { name: "KV-Network", values: ["${network}"] }], first: 100, sort: HEIGHT_DESC) { edges { node { id tags { name value } } } } }`;
   try {
     const r = await fetch(ARWEAVE_GQL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) });
@@ -75,7 +75,7 @@ export async function fetchNullifiers(network = 'testnet-10'): Promise<Array<{ n
 // ============================================================================
 
 export async function verifyStealthRep(
-  network = 'testnet-10',
+  network = require('./kv_net').KV_NET,
   verifyMerkleProof?: (proofHex: string, root: string) => Promise<boolean>,
 ): Promise<StealthRepResult> {
   const root = await fetchMerkleRoot(network);

@@ -19,7 +19,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
   const load = async () => {
     setBusy(true); setErr('');
     try {
-      const NET = 'testnet-10';
+      const NET = require('./kv_net').KV_NET;
       // ---- projects: keeps per head from the on-chain game registry ----
       const myGames: Record<string, any> = {};
       try { Object.assign(myGames, require('./games_to_publish')); } catch {}

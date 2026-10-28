@@ -9472,7 +9472,7 @@ function PhaseAnchor({ recipe, onComplete, onLocked }: { recipe: AvatarRecipe; o
             backgroundColor: '#1A2A1A', borderWidth: 2, borderColor: '#4CAF50',
             borderRadius: 16, padding: 20, marginBottom: 16,
           }}
-          onPress={() => handleNetworkSelect('testnet-10')}
+          onPress={() => handleNetworkSelect(require('./kv_net').KV_NET)}
         >
           <Text style={{ color: '#4CAF50', fontSize: 20, fontWeight: 'bold', textAlign: 'center' }}>
             🧪 Testnet (Tutorial)

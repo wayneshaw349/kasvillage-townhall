@@ -128,7 +128,7 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
       if (resolvedPubkey) {
         setKvScanning(true);
         try {
-          kvScanResult = await require('./counterparty_scan').scanCounterparty(String(resolvedPubkey), 'testnet-10', 40);
+          kvScanResult = await require('./counterparty_scan').scanCounterparty(String(resolvedPubkey), require('./kv_net').KV_NET, 40);
           setKvScan(kvScanResult);
         } catch (e) { console.warn('[DashStats] self-scan failed:', e); setKvScan({ error: true }); }
         finally { setKvScanning(false); }
@@ -1626,7 +1626,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           apartment={user.apartment}
           isSnailMode={isSnailMode}
           isEliteMode={isEliteMode}
-          network={activeMode === 'real' ? 'mainnet' : 'testnet-10'}
+          network={activeMode === 'real' ? 'mainnet' : require('./kv_net').KV_NET}
           activeMode={activeMode}
           onSwitchMode={onSwitchMode}
         />

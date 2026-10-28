@@ -255,7 +255,7 @@ export async function backfillAnchors(maxRecords: number = 20): Promise<number> 
   let stamped = 0;
   for (const rec of pending) {
     try {
-      const net = rec.network === 'mainnet' ? 'mainnet' : 'testnet-10';
+      const net = rec.network === 'mainnet' ? 'mainnet' : require('./kv_net').KV_NET;
       const base = net === 'mainnet' ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org';
       const url = base + '/addresses/' + rec.frostAddr + '/full-transactions?limit=50&resolve_previous_outpoints=light';
       const txs = await (await fetch(url)).json();
