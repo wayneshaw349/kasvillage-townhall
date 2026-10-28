@@ -77,7 +77,7 @@ const XP_TIERS = [
 ];
 
 const SNAIL_THRESHOLD = 150;
-const ELITE_THRESHOLD = 300;
+const ELITE_THRESHOLD = 500; // KV_XP_ONE_LADDER: Elite = Custodian = full ranking weight
 const CITADEL_BUYER_THRESHOLD = 5;
 const CITADEL_SELLER_THRESHOLD = 6;
 

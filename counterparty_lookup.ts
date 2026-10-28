@@ -115,7 +115,7 @@ const SNAIL_MODE_DELAY_PER_DEADLOCK = 30_000;
 const SNAIL_MODE_MAX_DELAY_MS = 240_000;
 
 const XP_INCUBATOR = 500;
-const XP_ELITE = 5000;
+const XP_ELITE = 2000; // KV_XP_ONE_LADDER: passport = Archon
 
 // BAYESIAN COMPUTATION
 export function computePComplete(successes: number, deadlocks: number): number {

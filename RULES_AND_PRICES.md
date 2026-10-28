@@ -59,3 +59,13 @@ everything at once: `kasvillage_sdk_complete.zip` · manual: `kasvillage_engine_
 1. Build (AI welcome) → 2. `node scan_check.cjs …` until it passes → 3. Workspace →
 scan/publish → 4. Face ID → 5. pledge staked → 6. live in the Mailbox, hash-verified, sandboxed.
 Testnet-10 KAS comes from the Kaspa community faucet.
+
+## XP - one ladder everywhere (KV_XP_ONE_LADDER)
+Earn: +10 per settled escrow deal. Lose: -50 per deadlock (everywhere: wallet, relay, ranking).
+No XP for posting, chatting or playing - only completed commerce a counterparty co-signed.
+Anyone can re-derive your XP from the chain; the number on your profile is the number the world computes.
+
+Tiers (status): Base 0 -> Verified 200 -> Custodian 500 -> Sentinel 1000 -> Archon 2000.
+At 500 (Custodian) you are also Elite (priority processing) and at FULL RANKING WEIGHT:
+XP's share of Mailbox rank maxes out at 500 by design, so reputation whales cannot bury
+fresh builders - Sentinel and Archon are prestige and trust signals, not extra rank.

@@ -1246,7 +1246,7 @@ export async function recordDeadlock(): Promise<UserStats> {
   return updateUserStats({
     deadlocks: newDeadlocks,
     totalTransactions: stats.totalTransactions + 1,
-    xp: Math.max(0, stats.xp - 20),
+    xp: Math.max(0, stats.xp - 50), // KV_XP_ONE_LADDER: matches the relay and the chain-derived ranking (-50/deadlock)
     snailModeUntil,
   });
 }
