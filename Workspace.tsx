@@ -5372,9 +5372,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 const sdkModules = [
                   { cat: '⚙️ Core Engine', mods: ['procedural_sdk', 'game_v1', 'game_loop', 'game_input'] },
                   { cat: '🧑 Avatar & Identity', mods: ['avatar_engine', 'player_sprite', 'enemy_avatars'] },
-                  { cat: '🖼️ Rendering', mods: ['canvas_renderer', 'ps1_engine', 'ps1_presets', 'board_renderer', 'camera_system'] },
+                  { cat: '🖼️ Rendering', mods: ['canvas_renderer', 'ps1_engine', 'ps1_presets', 'board_renderer', 'camera_system', 'shaders', 'skia_adapter', 'detail_engine'] },
                   { cat: '🥊 Combat & Input', mods: ['touch_input', 'parry_system', 'enemy_combos', 'paint_v2'] },
-                  { cat: '🌍 World', mods: ['environments', 'particles', 'wave_spawner', 'difficulty', 'vagrant_preset'] },
+                  { cat: '🌍 World', mods: ['environments', 'particles', 'wave_spawner', 'difficulty', 'vagrant_preset', 'world_physics', 'shape_dictionary'] },
+                  { cat: '📦 Docs & Bundle', mods: ['engine_manual', 'sdk_complete_zip'] },
                   { cat: '🎵 Audio & Music', mods: ['audio_ui', 'spotify_auth', 'spotify_sync', 'juice'] },
                   { cat: '💎 Items & Economy', mods: ['item_library', 'wallet_bridge'] },
                   { cat: '👥 Multiplayer', mods: ['multiplayer', 'tuned_config'] },
@@ -5385,11 +5386,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(4) }}>
                       {group.mods.map(m => (
                         <TouchableOpacity key={m} onPress={() => {
-                          const nameMap = { 'procedural_sdk': 'procedural_sdk', 'game_input': 'kasvillage_game_input_paint' };
-                          const fileName = nameMap[m] || ('kasvillage_' + m);
-                          const rawUrl = 'https://raw.githubusercontent.com/wayneshaw349/kasvillage-townhall/main/' + fileName + '.ts';
+                          const nameMap: Record<string, string> = { 'procedural_sdk': 'procedural_sdk.ts', 'game_input': 'kasvillage_game_input_paint.ts', 'engine_manual': 'kasvillage_engine_manual_rev2.md', 'sdk_complete_zip': 'kasvillage_sdk_complete.zip' };
+                          const fileName = nameMap[m] || ('kasvillage_' + m + '.ts');
+                          const rawUrl = 'https://raw.githubusercontent.com/wayneshaw349/kasvillage-townhall/main/' + fileName;
                           Clipboard.setStringAsync('Fetch this file and use it to build: ' + rawUrl);
-                          Alert.alert('Copied!', fileName + '.ts\nGitHub URL on clipboard.\nPaste into Claude Code.');
+                          Alert.alert('Copied!', fileName + '\nGitHub URL on clipboard.\nPaste into Claude Code.');
                         }} style={{ backgroundColor: '#fff', paddingHorizontal: rs.s(6), paddingVertical: rs.s(3), borderRadius: rs.s(5), borderWidth: 1, borderColor: '#fca5a5' }} activeOpacity={0.6}>
                           <Text style={{ fontSize: rs.font(8), fontFamily: 'monospace', color: '#991b1b' }}>• {m}</Text>
                         </TouchableOpacity>
