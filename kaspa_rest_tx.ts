@@ -454,7 +454,12 @@ export async function sendKaspaViaRest(params: {
   preview?: string;         // [KV_TX_SIM] who is asking; shows the simulated tx and waits for the user before signing
 }): Promise<RestTxResult> {
   const { senderAddress, recipientAddress, amountSompi, privateKeyHex, network, payload } = params;
-  
+  // KV_TUTORIAL_GUARD: practice mode never broadcasts. prepareOnly gets a fake frozen tx too.
+  if (require('./kv_tutorial').kvIsTutorial()) {
+    const r = await require('./kv_tutorial').kvTutorialTx();
+    if (params.prepareOnly) return { success: true, predictedTxId: r.txId, preparedTx: { tutorial: true } };
+    return r;
+  }
   try {
     // [KV_SWEEP_ALL] 0n = "send all" is only legal to self or with an explicit sweepAll flag.
     // A kv://pay of 1e-9 KAS rounds to 0n and must not send a whole coin to a third party.
@@ -863,6 +868,7 @@ async function _wrpcSubmitOnce(restTx: any, network: KaspaNetwork, idHint: strin
 }
 
 export async function broadcastPreparedTx(tx: any, network: KaspaNetwork): Promise<RestTxResult> {
+  if (require('./kv_tutorial').kvIsTutorial()) return require('./kv_tutorial').kvTutorialTx(); // KV_TUTORIAL_GUARD
   try {
     let result: any;
     if (tx && tx.payload && tx.payload.length > 0) {
@@ -916,6 +922,7 @@ export async function broadcastPreparedTx(tx: any, network: KaspaNetwork): Promi
 export async function inscribeIdentityViaRest(params: {
   identityHash: string; address: string; privateKeyHex: string; network: KaspaNetwork;
 }): Promise<RestTxResult> {
+  if (require('./kv_tutorial').kvIsTutorial()) return require('./kv_tutorial').kvTutorialTx(); // KV_TUTORIAL_GUARD
   const marker = new TextEncoder().encode('KV2U');
   const version = new Uint8Array([0x02]);
   const hashBytes = hexToBytes(params.identityHash.slice(0, 64));
@@ -1089,6 +1096,7 @@ export async function submitCanonicalFrostTx(params: {
   buyerSighashes?: string[];
 }): Promise<{ success: boolean; txId?: string; error?: string }> {
   const { tx, perInputSigner, network } = params;
+  if (require('./kv_tutorial').kvIsTutorial()) return require('./kv_tutorial').kvTutorialTx(); // KV_TUTORIAL_GUARD
   const apiBase = network === 'mainnet' ? 'https://api.kaspa.org' : (network === 'testnet-10' ? 'https://api-tn10.kaspa.org' : 'https://api-tn.kaspa.org');
 
   const signedInputs = tx.utxos.map((u: any, idx: number) => {
@@ -1139,6 +1147,7 @@ export async function sendKaspaWithSignature(params: {
   perInputSigner?: (sighashHex: string, inputIndex: number) => string;
 }): Promise<{ success: boolean; txId?: string; error?: string }> {
   const { senderAddress, recipientAddress, amountSompi, aggregateSignature, aggregatePubkey, network } = params;
+  if (require('./kv_tutorial').kvIsTutorial()) return require('./kv_tutorial').kvTutorialTx(); // KV_TUTORIAL_GUARD
 
   try {
     // 1. Fetch UTXOs for the FROST address

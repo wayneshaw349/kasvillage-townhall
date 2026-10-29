@@ -125,6 +125,11 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
         </View>
 
         <ScrollView style={styles.content}>
+          {require('./kv_tutorial').kvIsTutorial() ? (
+            <View style={{ backgroundColor: '#2b2410', borderWidth: 1, borderColor: '#D4AF37', borderRadius: 8, padding: 8, marginBottom: 10 }}>
+              <Text style={{ color: '#D4AF37', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>🎓 TUTORIAL — practice only. Go Real on the Dashboard before sharing this address to get paid.</Text>
+            </View>
+          ) : null}
           {vaultAddr ? (
         <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12, justifyContent: 'center' }}>
           {([['hot', 'Hot Wallet'], ['vault', 'Vault']] as const).map(([src, label]) => (

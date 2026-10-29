@@ -660,7 +660,7 @@ const ChessboardHeader: React.FC<{
           const next = activeMode === "tutorial" ? "real" : "tutorial";
           Alert.alert(
             next === "real" ? "Switch to Real KAS?" : "Switch to Tutorial?",
-            next === "real" ? "You will use REAL Kaspa (mainnet). Transactions cost real money." : "Switch to Tutorial mode (testnet). Free tKAS for testing.",
+            next === "real" ? "You will use REAL Kaspa (mainnet). Transactions cost real money." : "Practice mode: simulated coins, nothing touches the chain.",
             [{ text: "Cancel", style: "cancel" }, { text: next === "real" ? "Go Real" : "Go Tutorial", onPress: () => onSwitchMode(next) }]
           );
         }}
@@ -1084,7 +1084,8 @@ const WalletOverview: React.FC<{
   }, []);
   const { formattedPrice, usdPerKas, loading: priceLoading, isStale } = useKaspaPrice({ autoStart: true });
   console.log('[WalletUI] render balanceSompi:', balanceSompi.toString());
-  const kasBalance = Number(balanceSompi) / 100_000_000;
+  const __kvTut = require('./kv_tutorial').kvIsTutorial(); // KV_TUTORIAL: practice coins on the dashboard
+  const kasBalance = __kvTut ? require('./kv_tutorial').TUTORIAL_KAS : Number(balanceSompi) / 100_000_000;
   const usdValue = kasBalance * usdPerKas;
   const __sm = useStreamer();
   const [showKvStats, setShowKvStats] = useState(false); // KV_STATS
@@ -1095,6 +1096,11 @@ const WalletOverview: React.FC<{
       {showKvStats ? (() => { const P = require('./kv_stats_panel').default; return <P visible={showKvStats} onClose={() => setShowKvStats(false)} />; })() : null}
       {/* Sloth Poison Meter */}
       <SlothPoisonBar />
+      {__kvTut ? (
+        <View style={{ backgroundColor: '#2b2410', borderWidth: 1, borderColor: '#D4AF37', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+          <Text style={{ color: '#D4AF37', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>🎓 TUTORIAL — practice coins. Send, receive and agreements are simulated; nothing touches the chain. Tap the toggle to Go Real.</Text>
+        </View>
+      ) : null}
       {/* Price Card */}
       <Card style={walletStyles.priceCard}>
         <View style={walletStyles.priceRow}>
@@ -1149,7 +1155,7 @@ const WalletOverview: React.FC<{
         const next = activeMode === 'tutorial' ? 'real' : 'tutorial';
         Alert.alert(
           next === 'real' ? 'Switch to Real Kaspa?' : 'Switch to Tutorial?',
-          next === 'real' ? 'Transactions will use REAL Kaspa (mainnet).' : 'Switch to Tutorial mode (testnet). Free tKAS.',
+          next === 'real' ? 'Transactions will use REAL Kaspa (mainnet).' : 'Practice mode: simulated coins, nothing touches the chain.',
           [{ text: 'Cancel', style: 'cancel' }, { text: next === 'real' ? 'Go Real' : 'Go Tutorial', onPress: () => onSwitchMode(next) }]
         );
       }}>

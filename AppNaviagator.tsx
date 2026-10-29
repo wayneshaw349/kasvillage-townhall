@@ -700,6 +700,7 @@ export const AppNavigator: React.FC = () => {
         const savedMode = await SecureStore.getItemAsync('kaspa_active_mode');
         const mode = (savedMode === 'real') ? 'real' : 'tutorial';
         setActiveMode(mode);
+        require('./kv_tutorial').kvSetMode(mode); // KV_TUTORIAL: tx layer reads this flag
         
         // Load address for current mode
         const tutorialAddr = await SecureStore.getItemAsync('kaspa_address_tutorial') || await SecureStore.getItemAsync('kaspa_address') || '';
@@ -1051,6 +1052,7 @@ export const AppNavigator: React.FC = () => {
         setKaspaAddress(addr);
       }
       setActiveMode('real');
+      require('./kv_tutorial').kvSetMode('real'); // KV_TUTORIAL
       await SecureStore.setItemAsync('kaspa_active_mode', 'real');
       try {
         const a = await SecureStore.getItemAsync('kaspa_address_real') || '';
@@ -1098,6 +1100,7 @@ export const AppNavigator: React.FC = () => {
       const addr = await SecureStore.getItemAsync('kaspa_address_tutorial') || await SecureStore.getItemAsync('kaspa_address') || '';
       setKaspaAddress(addr);
       setActiveMode('tutorial');
+      require('./kv_tutorial').kvSetMode('tutorial'); // KV_TUTORIAL
       await SecureStore.setItemAsync('kaspa_active_mode', 'tutorial');
       try {
         const r = await fetch('https://api-tn10.kaspa.org/addresses/' + addr + '/balance');

@@ -144,7 +144,7 @@ function kaspaConv8to5(payload: number[]): number[] {
   return result;
 }
 
-function kaspaAddressFromXOnly(xOnlyPubkey: Uint8Array, hrp = 'kaspa'): string {
+export function kaspaAddressFromXOnly(xOnlyPubkey: Uint8Array, hrp = 'kaspa'): string { // exported: the Dashboard Go-Real toggle derives the mainnet address with it
   // Version byte 0 (Schnorr P2PK) + 32-byte x-only pubkey
   const fullPayload = [0, ...Array.from(xOnlyPubkey)];
   const fivebitPayload = kaspaConv8to5(fullPayload);

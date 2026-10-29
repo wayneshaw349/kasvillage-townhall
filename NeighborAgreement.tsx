@@ -3751,6 +3751,11 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
           </View>
           <Text style={{ fontSize: 10, color: "#78716c", textAlign: "center", paddingVertical: 4 }}>(Two-Party Collateral / Good Faith Deposit)</Text>
           <KvQuote size={9} />
+          {require('./kv_tutorial').kvIsTutorial() ? (
+            <View style={{ backgroundColor: '#fef9e7', borderWidth: 1, borderColor: '#D4AF37', borderRadius: 8, padding: 8, marginHorizontal: 10, marginBottom: 6 }}>
+              <Text style={{ color: '#92400e', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>🎓 TUTORIAL — practice agreement. Funding, settle and refund are simulated; no coins move and this cannot bind a real neighbor. Go Real on the Dashboard to trade.</Text>
+            </View>
+          ) : null}
           <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled" onScrollBeginDrag={Keyboard.dismiss}>
             {snailModeActive && (
               <View style={styles.snailWarning}>
