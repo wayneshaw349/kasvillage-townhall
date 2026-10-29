@@ -1,6 +1,6 @@
 // wire_no_contact_leak.cjs - stop the wallet putting your developer email into games.
 //
-// Room kcbad1dffa: a trade offer (i29) carried wayneshaw349@hotmail.com to every
+// Room kcbad1dffa: a trade offer (i29) carried the developer's email to every
 // player's game record. Source: the wallet injected the Workspace developer
 // contact (meant for published game listings) into every game as KV_MY_CONTACT,
 // and KasCity uses that as the default trade-offer contact. Now nothing is

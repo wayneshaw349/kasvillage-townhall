@@ -406,7 +406,7 @@ export async function getStealthMetaAddress(): Promise<string | null> {
 export async function createStealthPayment(
   recipientScanPubkey: string,
   recipientSpendPubkey: string,
-  network: 'mainnet' | 'testnet-10' | 'testnet-11' = 'testnet-10'
+  network: 'mainnet' | 'testnet-10' | 'testnet-11' = require('./kv_net').KV_NET
 ): Promise<StealthPaymentData> {
   // Generate ephemeral keypair using expo-crypto
   const ephemeralPriv = await getRandomBytes(32);

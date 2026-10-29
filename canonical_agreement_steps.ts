@@ -301,7 +301,7 @@ export const MIN_FEE_SOMPI = 300000n;         // KIP-9 safe minimum (above Tocca
 // Toccata-compatible: fetch fee estimate from REST API
 // Falls back to hardcoded formula if API unavailable
 export async function fetchFeeEstimate(
-  network: 'mainnet' | 'testnet-10' = 'testnet-10'
+  network: 'mainnet' | 'testnet-10' = require('./kv_net').KV_NET
 ): Promise<bigint> {
   const api = network === 'mainnet' ? 'api.kaspa.org' : 'api-tn10.kaspa.org';
   try {

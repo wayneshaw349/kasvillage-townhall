@@ -84,7 +84,7 @@ export function xOnlyToKaspaAddress(
 // ---- derive the full wallet from a mnemonic (matches createWallet's path) ---
 export async function deriveWallet(
   mnemonic: string,
-  network: 'mainnet' | 'testnet-10' | 'testnet-11' = 'testnet-10',
+  network: 'mainnet' | 'testnet-10' | 'testnet-11' = require('./kv_net').KV_NET,
 ): Promise<{ privateKeyHex: string; publicKeyHex: string; kaspaAddress: string }> {
   const seed = await mnemonicToSeed(mnemonic, '');   // EMPTY passphrase (matches createWallet)
   const hd = deriveKaspaHDKey(seed);
