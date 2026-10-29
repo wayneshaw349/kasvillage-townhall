@@ -354,9 +354,12 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
           {(() => {
             const cap = { backgroundColor: '#241f18', borderWidth: 1, borderColor: '#3a3128', borderRadius: 4, margin: 2, flex: 1, alignItems: 'center' as const, paddingVertical: 7 };
             const leg = { color: '#b8ab92', fontSize: 9, fontFamily: 'monospace' as const };
+            // KV_KEY_GLOW: action keys read like a backlit gaming keyboard - bright pink underglow + bold legend
+            const glow = { backgroundColor: '#3a0f2b', borderColor: '#ff5ec8', borderWidth: 1.5, shadowColor: '#ff3db8', shadowOpacity: 0.95, shadowRadius: 7, shadowOffset: { width: 0, height: 0 }, elevation: 10 };
+            const glowLeg = { color: '#ffa8de', fontWeight: 'bold' as const, fontSize: 10, textShadowColor: '#ff2fae', textShadowRadius: 8, textShadowOffset: { width: 0, height: 0 } };
             const Key = ({ k, onPress, pink, flex }: any) => (
-              <TouchableOpacity disabled={!onPress} onPress={onPress} style={[cap, flex ? { flex } : null, pink ? { borderColor: C.pink } : null]}>
-                <Text style={[leg, pink ? { color: C.pink } : null]}>{k}</Text>
+              <TouchableOpacity disabled={!onPress} onPress={onPress} style={[cap, flex ? { flex } : null, pink ? glow : null]}>
+                <Text style={[leg, pink ? glowLeg : null]}>{k}</Text>
               </TouchableOpacity>
             );
             const row = (keys: string[]) => (
