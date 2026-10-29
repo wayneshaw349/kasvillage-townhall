@@ -166,7 +166,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
           <TouchableOpacity onPress={onClose}><Text style={{ color: C.mut, fontSize: 18 }}>✕</Text></TouchableOpacity>
         </View>
         {/* KV_MONITOR: the screen - bezel wraps everything that scrolls */}
-        <View style={{ flex: 1, marginHorizontal: 10, marginTop: 8, borderWidth: 10, borderColor: '#dcd9d2', borderRadius: 18, backgroundColor: '#0c110b', overflow: 'hidden' }}>
+        <View style={{ flex: 1, marginHorizontal: 10, marginTop: 8, borderWidth: 10, borderColor: '#c3c6cc', borderRadius: 18, backgroundColor: '#0c110b', overflow: 'hidden' }}>
         <ScrollView style={{ flex: 1, padding: 14 }}>
           <Text style={{ color: C.mut, fontSize: 12, lineHeight: 17, marginBottom: 12 }}>
             Every number below is re-derived from Kaspa L1 or from dual-signed deal records - nothing is
