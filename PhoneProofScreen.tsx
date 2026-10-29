@@ -193,7 +193,11 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={s.container}>
+      <View style={[s.container, { padding: 8 }]}>
+        {/* KV_PHONE: clip-art phone frame - the proof lives in a phone */}
+        <View style={{ flex: 1, backgroundColor: '#2e6fe0', borderRadius: 30, borderWidth: 2, borderColor: '#1d4ed8', padding: 10 }}>
+          <View style={{ alignSelf: 'center', width: 54, height: 6, borderRadius: 3, backgroundColor: '#1d4ed8', marginBottom: 8 }} />
+          <View style={{ flex: 1, borderRadius: 14, overflow: 'hidden', backgroundColor: C.bg }}>
         <View style={s.header}>
           <Text style={s.title}>Phone Proof</Text>
           <TouchableOpacity onPress={onClose}><X size={rs.s(24)} color={C.muted} /></TouchableOpacity>
@@ -346,6 +350,9 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
             </>
           )}
         </ScrollView>
+          </View>
+          <TouchableOpacity onPress={onClose} style={{ alignSelf: 'center', marginTop: 8, width: 34, height: 34, borderRadius: 17, borderWidth: 2.5, borderColor: 'rgba(255,255,255,0.85)' }} />
+        </View>
       </View>
     </Modal>
   );

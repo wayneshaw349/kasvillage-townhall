@@ -1660,7 +1660,28 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
             <TouchableOpacity onPress={onClose}><Text style={styles.x}>✕</Text></TouchableOpacity>
           </View>
         </View>
-        
+        {/* KV_IOU_CARD: the ledger as a card - an IOU is a promise-to-pay instrument, so draw it as one */}
+        {(() => {
+          let sm = false; try { sm = require('./streamer_mode').isStreamer(); } catch {}
+          const net = netPos.theyOwe - netPos.iOwe;
+          const kas = (Number(net < 0n ? -net : net) / 1e8).toFixed(2);
+          return (
+            <View style={{ backgroundColor: '#e8837d', borderRadius: 14, marginHorizontal: 16, marginTop: 10, padding: 14 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Text style={{ color: '#232a4d', fontWeight: 'bold', fontSize: 14 }}>IOU CARD</Text>
+                <Text style={{ color: '#232a4d', fontWeight: 'bold', fontSize: 12 }}>KasVillage</Text>
+              </View>
+              <View style={{ width: 34, height: 26, borderRadius: 5, backgroundColor: '#f4c84a', marginTop: 10, borderWidth: 1, borderColor: '#caa32e' }} />
+              <Text style={{ color: '#232a4d', fontSize: 20, fontWeight: 'bold', letterSpacing: 2, marginTop: 8, fontVariant: ['tabular-nums'] }}>
+                {sm ? '₭ ••••' : (net === 0n ? '₭ 0.00 · even' : (net > 0n ? '₭ ' + kas + ' owed to you' : '₭ ' + kas + ' you owe'))}
+              </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 6 }}>
+                <Text style={{ color: '#232a4d', fontSize: 12 }}>{(counterpartyAlias || 'open ledger').toString().slice(0, 24)}</Text>
+                <Text style={{ color: '#f4c84a', fontSize: 18, fontWeight: 'bold' }}>₭</Text>
+              </View>
+            </View>
+          );
+        })()}
         <ScrollView style={styles.content}>
           {/* FROST Collateral */}
           <FrostCollateralBox frost={frost} myAlias="You" counterpartyAlias={counterpartyAlias} />
