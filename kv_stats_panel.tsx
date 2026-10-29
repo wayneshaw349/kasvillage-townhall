@@ -2,7 +2,7 @@
 // dual-signed records; nothing self-reported, so a dev can show real engagement
 // (keeps cost KAS; sales are co-signed escrow deals; bots must fund real wallets).
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, TextInput, Share } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, TextInput, Share, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const C = { bg: '#0a0a0a', card: '#1a1a2e', gold: '#D4AF37', pink: '#ec4899', indigo: '#818cf8', text: '#fff', mut: '#888', line: '#333', green: '#10B981' };
@@ -44,6 +44,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
   const [games, setGames] = useState<GameStat[] | null>(null);
   const [sales, setSales] = useState<{ deals: number; kasIn: number; buyers: number; top: SaleRow[] } | null>(null);
   const [err, setErr] = useState('');
+  const [lastDerive, setLastDerive] = useState(''); // KV_KEY_FEEDBACK
   const [kpp, setKpp] = useState<{ n: number; avg: number; store: number; svc: number } | null>(null); // KV_KPP
   const [circ, setCirc] = useState<{ pct: number; inKas: number; outKas: number; n: number } | null>(null); // KV_CIRC
   const [costs, setCosts] = useState<Costs>(NO_COSTS); // KV_PNL
@@ -150,6 +151,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
       } catch { setCirc(null); }
     } catch (e: any) { setErr(String(e?.message || e)); }
     setBusy(false);
+    try { setLastDerive(new Date().toLocaleTimeString()); } catch {} // KV_KEY_FEEDBACK
   };
   useEffect(() => { if (visible && games === null && !busy) load(); }, [visible]);
 
@@ -185,8 +187,13 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
       L.push('Expected profit: ' + usd(P.expected) + '/mo · crypto-winter floor (KAS -85%, sales -15%): ' + usd(P.winterFloor) + '/mo · break-even: ' + usd(P.breakEvenRev) + '/mo in sales');
       L.push('');
       L.push('HOW TO VERIFY: in any KasVillage wallet, Phone Proof -> enter the owner pubkey above; every deal is a co-signed, re-fetchable Kaspa transaction. Dual-signed evidence bundle available from the owner on request.');
-      await Share.share({ message: L.join('\n') });
-    } catch (e: any) { setErr(String(e?.message || e)); }
+      const msg = L.join('\n');
+      try { await require('expo-clipboard').setStringAsync(msg); } catch {}
+      Alert.alert('⎙ Report ready', 'The Verified Business Report is on your clipboard — paste it into any email or message.', [
+        { text: 'OK' },
+        { text: 'Share…', onPress: () => { Share.share({ message: msg }).catch(() => {}); } },
+      ]);
+    } catch (e: any) { Alert.alert('Export failed', String(e?.message || e)); }
   };
 
   if (!visible) return null;
@@ -198,7 +205,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
           <TouchableOpacity onPress={onClose}><Text style={{ color: C.mut, fontSize: 18 }}>✕</Text></TouchableOpacity>
         </View>
         {/* KV_MONITOR: the screen - bezel wraps everything that scrolls */}
-        <View style={{ flex: 1, marginHorizontal: 10, marginTop: 8, borderWidth: 10, borderColor: '#c3c6cc', borderRadius: 18, backgroundColor: '#0c110b', overflow: 'hidden' }}>
+        <View style={{ flex: 1, marginHorizontal: 10, marginTop: 8, borderWidth: 10, borderColor: '#e8e9eb', borderRadius: 18, backgroundColor: '#0c110b', overflow: 'hidden' }}>
         <ScrollView style={{ flex: 1, padding: 14 }}>
           <Text style={{ color: C.mut, fontSize: 12, lineHeight: 17, marginBottom: 12 }}>
             Every number below is re-derived from Kaspa L1 or from dual-signed deal records - nothing is
@@ -341,8 +348,8 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
         </ScrollView>
         </View>
         {/* KV_MONITOR: neck + base, then the keyboard on the desk */}
-        <View style={{ alignSelf: 'center', width: 76, height: 20, backgroundColor: '#8b8e97' }} />
-        <View style={{ alignSelf: 'center', width: 190, height: 12, backgroundColor: '#aab0ba', borderRadius: 7, marginBottom: 8 }} />
+        <View style={{ alignSelf: 'center', width: 76, height: 20, backgroundColor: '#d6d7da' }} />
+        <View style={{ alignSelf: 'center', width: 190, height: 12, backgroundColor: '#c9cbcf', borderRadius: 7, marginBottom: 8 }} />
           {/* KV_KEYBOARD: the terminal's keyboard. Spacebar re-derives; ESC closes. */}
           {(() => {
             const cap = { backgroundColor: '#241f18', borderWidth: 1, borderColor: '#3a3128', borderRadius: 4, margin: 2, flex: 1, alignItems: 'center' as const, paddingVertical: 7 };
@@ -368,6 +375,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                   <Key k={busy ? '· · · DERIVING · · ·' : '↻  RE-DERIVE FROM CHAIN'} onPress={load} pink flex={5} />
                   <Key k="ALT" /><Key k="⎙PRT" onPress={exportReport} pink />
                 </View>
+                {lastDerive ? <Text style={{ color: '#6b6354', fontSize: 8, fontFamily: 'monospace', textAlign: 'center', marginTop: 3 }}>{'⏱ last derive ' + lastDerive}</Text> : null}
               </View>
             );
           })()}
