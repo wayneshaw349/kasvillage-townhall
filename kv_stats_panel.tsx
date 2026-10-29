@@ -165,7 +165,9 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
           <Text style={{ color: C.text, fontSize: 20, fontWeight: 'bold' }}>📊 Project & Store Stats</Text>
           <TouchableOpacity onPress={onClose}><Text style={{ color: C.mut, fontSize: 18 }}>✕</Text></TouchableOpacity>
         </View>
-        <ScrollView style={{ flex: 1, padding: 16 }}>
+        {/* KV_MONITOR: the screen - bezel wraps everything that scrolls */}
+        <View style={{ flex: 1, marginHorizontal: 10, marginTop: 8, borderWidth: 10, borderColor: '#2b2620', borderRadius: 18, backgroundColor: '#0c110b', overflow: 'hidden' }}>
+        <ScrollView style={{ flex: 1, padding: 14 }}>
           <Text style={{ color: C.mut, fontSize: 12, lineHeight: 17, marginBottom: 12 }}>
             Every number below is re-derived from Kaspa L1 or from dual-signed deal records - nothing is
             self-reported. Keeps cost the keeper KAS; sales are escrow deals co-signed by the buyer.
@@ -302,6 +304,13 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
               </Text>
             </View>
           ) : null}
+
+          <View style={{ height: 24 }} />
+        </ScrollView>
+        </View>
+        {/* KV_MONITOR: neck + base, then the keyboard on the desk */}
+        <View style={{ alignSelf: 'center', width: 76, height: 20, backgroundColor: '#2b2620' }} />
+        <View style={{ alignSelf: 'center', width: 190, height: 12, backgroundColor: '#3a3128', borderRadius: 7, marginBottom: 8 }} />
           {/* KV_KEYBOARD: the terminal's keyboard. Spacebar re-derives; ESC closes. */}
           {(() => {
             const cap = { backgroundColor: '#241f18', borderWidth: 1, borderColor: '#3a3128', borderRadius: 4, margin: 2, flex: 1, alignItems: 'center' as const, paddingVertical: 7 };
@@ -317,7 +326,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
               </View>
             );
             return (
-              <View style={{ backgroundColor: '#12100c', borderWidth: 1, borderColor: '#4a3f2e', borderRadius: 10, padding: 6, marginVertical: 10 }}>
+              <View style={{ backgroundColor: '#12100c', borderWidth: 1, borderColor: '#4a3f2e', borderRadius: 10, padding: 6, marginHorizontal: 10, marginBottom: 8 }}>
                 {row(['ESC', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'])}
                 {row(['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'])}
                 {row(['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', '↻'])}
@@ -330,8 +339,6 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
               </View>
             );
           })()}
-          <View style={{ height: 40 }} />
-        </ScrollView>
       </View>
     </Modal>
   );
