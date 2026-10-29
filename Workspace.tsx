@@ -4938,7 +4938,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           <View>
             {/* KV_QUOTES: the price-cut corollary, beside the items being priced */}
             <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, fontStyle: 'italic', textAlign: 'center', paddingHorizontal: 18, paddingBottom: 8 }}>
-              {'“If a rise in prices lowers the value of a currency, the opposite must hold true as well: every price cut raises it.” — Wayne Shaw'}
+              {'“If it is true that a rise in prices lowers the value of a currency, then the opposite must hold true as well — value your hard-earned money.” — Wayne Shaw'}
             </Text>
             <SectionCard title="The Stash Management">
               <Text style={wsStyles.sectionSubtitle}>Add, edit, or delete items for your feed.</Text>
@@ -5034,7 +5034,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           <View>
             {/* KV_QUOTES: the price-cut corollary lives beside the coupons that enact it */}
             <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, fontStyle: 'italic', textAlign: 'center', paddingHorizontal: 18, paddingBottom: 8 }}>
-              {'“If a rise in prices lowers the value of a currency, the opposite must hold true as well: every price cut raises it.” — Wayne Shaw'}
+              {'“If it is true that a rise in prices lowers the value of a currency, then the opposite must hold true as well — value your hard-earned money.” — Wayne Shaw'}
             </Text>
             <SectionCard title="🎟️ Coupon Management">
               <Text style={{ fontSize: rs.font(11), color: COLORS.stone500, marginBottom: rs.s(12) }}>
