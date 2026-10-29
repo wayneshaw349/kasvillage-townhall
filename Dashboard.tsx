@@ -1116,7 +1116,8 @@ const WalletOverview: React.FC<{
           <Text style={walletStyles.usdValue}>{__sm ? STREAMER_USD : '≈ $' + usdValue.toFixed(2) + ' USD'}</Text>
         )}
         <View style={walletStyles.xpRow}>
-          <Zap size={rs.s(14)} color={'#a78bfa'} /> {/* KV_PINK sweep: violet XP */}
+          {/* KV_PINK sweep: violet XP */}
+          <Zap size={rs.s(14)} color={'#a78bfa'} />
           <Text style={walletStyles.xpText}>{ds.loading ? '...' : ds.xp} XP</Text>
         </View>
       </Card>
