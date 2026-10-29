@@ -193,18 +193,18 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
 
           <Text style={{ color: C.pink, fontWeight: 'bold', fontSize: 14, marginVertical: 8 }}>MY STORE SALES (dual-signed)</Text>
           {sales && (
-            <View style={{ backgroundColor: C.card, borderRadius: 10, padding: 12, marginBottom: 8 }}>
-              <Text style={{ color: C.text, fontSize: 13 }}>
-                {sales.deals} completed deal{sales.deals === 1 ? '' : 's'} · {sales.buyers} distinct buyer{sales.buyers === 1 ? '' : 's'} · <Text style={{ color: C.green }}>{kasTxt(sales.kasIn)}</Text> received
+            <View style={{ backgroundColor: '#dde7cf', borderRadius: 10, padding: 12, marginBottom: 8 }}>{/* KV_EARTH */}
+              <Text style={{ color: '#1c1917', fontSize: 13 }}>
+                {sales.deals} completed deal{sales.deals === 1 ? '' : 's'} · {sales.buyers} distinct buyer{sales.buyers === 1 ? '' : 's'} · <Text style={{ color: '#2e7d4f' }}>{kasTxt(sales.kasIn)}</Text> received
               </Text>
-              {sales.top.length > 0 && <Text style={{ color: C.gold, fontSize: 12, marginTop: 8, fontWeight: 'bold' }}>TOP SELLING ITEMS</Text>}
+              {sales.top.length > 0 && <Text style={{ color: '#8a6d1a', fontSize: 12, marginTop: 8, fontWeight: 'bold' }}>TOP SELLING ITEMS</Text>}
               {sales.top.map((it, i) => (
                 <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
-                  <Text style={{ color: C.text, fontSize: 12, flex: 1 }} numberOfLines={1}>{(i + 1) + '. ' + it.label}</Text>
-                  <Text style={{ color: C.mut, fontSize: 12 }}>{it.n}× · <Text style={{ color: C.green }}>{kasTxt(it.kas)}</Text></Text>
+                  <Text style={{ color: '#1c1917', fontSize: 12, flex: 1 }} numberOfLines={1}>{(i + 1) + '. ' + it.label}</Text>
+                  <Text style={{ color: '#5a6650', fontSize: 12 }}>{it.n}× · <Text style={{ color: '#2e7d4f' }}>{kasTxt(it.kas)}</Text></Text>
                 </View>
               ))}
-              {sales.deals === 0 && <Text style={{ color: C.mut, fontSize: 12, marginTop: 4 }}>No completed sales on this device yet.</Text>}
+              {sales.deals === 0 && <Text style={{ color: '#5a6650', fontSize: 12, marginTop: 4 }}>No completed sales on this device yet.</Text>}
             </View>
           )}
           {/* KV_PNL: profit health bar */}
@@ -212,36 +212,36 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
             let usdPer = 0; try { const p: any = require('./kas_price_feed').getKasPrice(); usdPer = Number((p && (p.usd || p.price || p.usdPerKas)) || 0); } catch {}
             const revUsd = usdPer > 0 ? rev30 * usdPer : 0;
             const P = kvPnl(revUsd, costs);
-            const col = P.state === 'green' ? C.green : P.state === 'red' ? '#ef4444' : '#e7e5e4';
+            const col = P.state === 'green' ? '#2e7d4f' : P.state === 'red' ? '#b3261e' : '#1c1917'; // dark-on-sage
             const fill = P.state === 'green' ? C.green : P.state === 'red' ? '#ef4444' : '#1c1917';
             const usd = (n: number) => (sm ? '$•••' : (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(0));
             const field = (k: keyof Costs, label: string, hint: string) => (
               <View key={k} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-                <Text style={{ color: C.mut, fontSize: 12, flex: 1 }}>{label}<Text style={{ fontSize: 10 }}>{'  ' + hint}</Text></Text>
-                <TextInput value={costs[k]} onChangeText={(t) => saveCosts({ ...costs, [k]: t })} keyboardType="decimal-pad" placeholder="0" placeholderTextColor="#555"
-                  style={{ color: C.text, borderWidth: 1, borderColor: C.line, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, width: 90, textAlign: 'right' }} />
+                <Text style={{ color: '#3f4d2e', fontSize: 12, flex: 1 }}>{label}<Text style={{ fontSize: 10 }}>{'  ' + hint}</Text></Text>
+                <TextInput value={costs[k]} onChangeText={(t) => saveCosts({ ...costs, [k]: t })} keyboardType="decimal-pad" placeholder="0" placeholderTextColor="#7a8470"
+                  style={{ color: '#1c1917', borderWidth: 1, borderColor: '#9aa88a', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, width: 90, textAlign: 'right' }} />
               </View>
             );
             return (
-              <View style={{ backgroundColor: C.card, borderRadius: 10, padding: 12, marginTop: 4 }}>
+              <View style={{ backgroundColor: '#dde7cf', borderRadius: 10, padding: 12, marginTop: 4 }}>{/* KV_EARTH */}
                 <Text style={{ color: C.pink, fontWeight: 'bold', fontSize: 14 }}>💹 PROFIT HEALTH (30-day)</Text>
-                <View style={{ height: 14, borderRadius: 7, backgroundColor: '#2a2a2a', marginTop: 10, overflow: 'hidden' }}>
-                  <View style={{ width: Math.max(4, Math.min(100, P.ratio * 50)) + '%', height: '100%', backgroundColor: fill, borderRightWidth: P.state === 'black' ? 2 : 0, borderRightColor: '#e7e5e4' } as any} />
-                  <View style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 2, backgroundColor: '#e7e5e4' }} />
+                <View style={{ height: 14, borderRadius: 7, backgroundColor: '#b9c4a6', marginTop: 10, overflow: 'hidden' }}>
+                  <View style={{ width: Math.max(4, Math.min(100, P.ratio * 50)) + '%', height: '100%', backgroundColor: fill, borderRightWidth: P.state === 'black' ? 2 : 0, borderRightColor: '#1c1917' } as any} />
+                  <View style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 2, backgroundColor: '#1c1917' }} />
                 </View>
-                <Text style={{ color: C.mut, fontSize: 10, marginTop: 3, textAlign: 'center' }}>red = loss · black = break-even (center line) · green = profit</Text>
-                {usdPer <= 0 ? <Text style={{ color: C.gold, fontSize: 11, marginTop: 6 }}>KAS price not loaded yet - open the Dashboard once, then re-derive.</Text> : null}
+                <Text style={{ color: '#5a6650', fontSize: 10, marginTop: 3, textAlign: 'center' }}>red = loss · black = break-even (center line) · green = profit</Text>
+                {usdPer <= 0 ? <Text style={{ color: '#8a6d1a', fontSize: 11, marginTop: 6 }}>KAS price not loaded yet - open the Dashboard once, then re-derive.</Text> : null}
                 <Text style={{ color: col, fontWeight: 'bold', fontSize: 15, marginTop: 8 }}>
                   {P.state === 'green' ? 'Profitable' : P.state === 'red' ? 'Running at a loss' : 'Break-even'}: {usd(P.expected)}/mo
                 </Text>
-                <Text style={{ color: C.text, fontSize: 12, marginTop: 4 }}>Verified revenue (30d): {usd(revUsd)} · costs {usd(P.monthly)}/mo{P.cogs ? ' + ' + Math.round(P.cogs * 100) + '% goods' : ''}</Text>
-                <Text style={{ color: P.recessionFloor >= 0 ? C.green : '#ef4444', fontSize: 12, marginTop: 2 }}>Recession floor (sales −15%, USD-priced goods): {usd(P.recessionFloor)}/mo</Text>
-                <Text style={{ color: P.winterFloor >= 0 ? C.green : '#ef4444', fontSize: 12, marginTop: 2, fontWeight: 'bold' }}>Crypto-winter floor (KAS −85% + sales −15%): {usd(P.winterFloor)}/mo ← standard case</Text>
-                <Text style={{ color: C.indigo, fontSize: 12, marginTop: 2 }}>Bull ceiling (KAS ×3, sales +50%): {usd(P.bullCeiling)}/mo — possibility, not a plan</Text>
+                <Text style={{ color: '#1c1917', fontSize: 12, marginTop: 4 }}>Verified revenue (30d): {usd(revUsd)} · costs {usd(P.monthly)}/mo{P.cogs ? ' + ' + Math.round(P.cogs * 100) + '% goods' : ''}</Text>
+                <Text style={{ color: P.recessionFloor >= 0 ? '#2e7d4f' : '#b3261e', fontSize: 12, marginTop: 2 }}>Recession floor (sales −15%, USD-priced goods): {usd(P.recessionFloor)}/mo</Text>
+                <Text style={{ color: P.winterFloor >= 0 ? '#2e7d4f' : '#b3261e', fontSize: 12, marginTop: 2, fontWeight: 'bold' }}>Crypto-winter floor (KAS −85% + sales −15%): {usd(P.winterFloor)}/mo ← standard case</Text>
+                <Text style={{ color: '#3d4a8a', fontSize: 12, marginTop: 2 }}>Bull ceiling (KAS ×3, sales +50%): {usd(P.bullCeiling)}/mo — possibility, not a plan</Text>
                 <Text style={{ color: C.mut, fontSize: 10, marginTop: 2 }}>Anchored to history: alt bears drop 85–90% from ATH; 2008–09 retail fell ~12%; mid-cycle bulls ran ~3–4×. Plan costs on the winter floor; let the bull surprise you.</Text>
-                <Text style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>Break-even needs {isFinite(P.breakEvenRev) ? usd(P.breakEvenRev) : '—'}/mo in sales</Text>
+                <Text style={{ color: '#5a6650', fontSize: 12, marginTop: 2 }}>Break-even needs {isFinite(P.breakEvenRev) ? usd(P.breakEvenRev) : '—'}/mo in sales</Text>
                 <TouchableOpacity onPress={() => setEditCosts(!editCosts)} style={{ marginTop: 8 }}>
-                  <Text style={{ color: C.indigo, fontSize: 12 }}>{editCosts ? '▼ Hide my costs' : '▶ Enter my costs (USD, stays on this phone)'}</Text>
+                  <Text style={{ color: '#3d4a8a', fontSize: 12 }}>{editCosts ? '▼ Hide my costs' : '▶ Enter my costs (USD, stays on this phone)'}</Text>
                 </TouchableOpacity>
                 {editCosts ? (
                   <View>
@@ -251,7 +251,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                     {field('rent', 'Rent / mortgage', '$/month')}
                     {field('publish', 'Publish & launch', 'one-time $')}
                     {field('audit', 'Audit', 'one-time $')}
-                    <Text style={{ color: C.mut, fontSize: 10, marginTop: 6 }}>One-time costs are spread over 12 months. Revenue is verified on-chain; costs are your own numbers - never shared.</Text>
+                    <Text style={{ color: '#5a6650', fontSize: 10, marginTop: 6 }}>One-time costs are spread over 12 months. Revenue is verified on-chain; costs are your own numbers - never shared.</Text>
                   </View>
                 ) : null}
               </View>
