@@ -365,7 +365,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
               </View>
             );
             return (
-              <View style={{ backgroundColor: '#12100c', borderWidth: 1, borderColor: '#4a3f2e', borderRadius: 10, padding: 6, marginHorizontal: 10, marginBottom: 8 }}>
+              <View style={{ backgroundColor: '#d6d7da', borderWidth: 1, borderColor: '#b3b6bb', borderRadius: 10, padding: 6, marginHorizontal: 10, marginBottom: 8 }}>
                 {row(['ESC', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'])}
                 {row(['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'])}
                 {row(['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', '↻'])}

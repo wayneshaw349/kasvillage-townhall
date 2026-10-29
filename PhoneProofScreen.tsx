@@ -195,8 +195,8 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
       <View style={[s.container, { padding: 8 }]}>
         {/* KV_PHONE: clip-art phone frame - the proof lives in a phone */}
-        <View style={{ flex: 1, backgroundColor: '#2e6fe0', borderRadius: 30, borderWidth: 2, borderColor: '#1d4ed8', padding: 10 }}>
-          <View style={{ alignSelf: 'center', width: 54, height: 6, borderRadius: 3, backgroundColor: '#1d4ed8', marginBottom: 8 }} />
+        <View style={{ flex: 1, backgroundColor: '#5b7c99', borderRadius: 30, borderWidth: 2, borderColor: '#43617c', padding: 10 }}>
+          <View style={{ alignSelf: 'center', width: 54, height: 6, borderRadius: 3, backgroundColor: '#43617c', marginBottom: 8 }} />
           <View style={{ flex: 1, borderRadius: 14, overflow: 'hidden', backgroundColor: C.bg }}>
         <View style={s.header}>
           <Text style={s.title}>Phone Proof</Text>
