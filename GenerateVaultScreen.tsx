@@ -31,7 +31,7 @@ interface Props {
 }
 
 export const GenerateVaultScreen: React.FC<Props> = ({
-  onDone, onCancel, network = 'testnet-10', total = 4, threshold = 2,
+  onDone, onCancel, network = require('./kv_net').KV_NET, total = 4, threshold = 2,
 }) => {
   const [busy, setBusy] = useState(false);
   const [wires, setWires] = useState<string[] | null>(null);

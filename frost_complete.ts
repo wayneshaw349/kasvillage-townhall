@@ -798,7 +798,7 @@ export function cleanup(): void {
 
 /** Validate escrow destination is standard P2PK, not a covenant. */
 export async function validateEscrowDestination(
-  address: string, network: KaspaNetwork = 'testnet-10'
+  address: string, network: KaspaNetwork = require('./kv_net').KV_NET
 ): Promise<{ safe: boolean; reason?: string }> {
   const prefix = network === 'mainnet' ? 'kaspa:' : 'kaspatest:';
   if (!address.startsWith(prefix)) return { safe: false, reason: "Invalid address prefix" };

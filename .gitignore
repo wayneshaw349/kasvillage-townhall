@@ -38,3 +38,4 @@ make_evil_test.cjs
 proof.txt
 headers.txt
 *.eml
+kv_cold_key_SECRET_qr.png

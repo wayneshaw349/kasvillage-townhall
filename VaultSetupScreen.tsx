@@ -57,7 +57,7 @@ export interface VaultSetupScreenProps {
 }
 
 export const VaultSetupScreen: React.FC<VaultSetupScreenProps> = ({
-  visible, onClose, getMyPubkey, network = 'testnet-10', onCreated,
+  visible, onClose, getMyPubkey, network = require('./kv_net').KV_NET, onCreated,
 }) => {
   const [step, setStep] = useState<Step>('start');
   const [error, setError] = useState<string | null>(null);
