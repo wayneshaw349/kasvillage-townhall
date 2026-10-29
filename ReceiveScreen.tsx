@@ -136,7 +136,7 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
             <TouchableOpacity
               key={src}
               onPress={() => setRecvSource(src)}
-              style={{ paddingVertical: 8, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1,
+              style={{ paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1,
                 borderColor: recvSource === src ? '#49d6aa' : '#333',
                 backgroundColor: recvSource === src ? '#12241d' : 'transparent' }}
             >

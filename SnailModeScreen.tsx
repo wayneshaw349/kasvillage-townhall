@@ -142,7 +142,7 @@ export const SnailModeScreen: React.FC<SnailModeScreenProps> = ({
         <ActivityIndicator size="large" color={COLORS.stone500} />
         <Text style={styles.waitingText}>Opening soon…</Text>
         {onBack ? (
-          <Pressable onPress={onBack} style={{ marginTop: 16, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 10, backgroundColor: COLORS.stone800 }}>
+          <Pressable onPress={onBack} style={{ marginTop: 16, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, backgroundColor: COLORS.stone800 }}>
             <Text style={{ color: '#fff', fontWeight: 'bold' }}>← Back to wallet (timer keeps running)</Text>
           </Pressable>
         ) : null}
@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
   },
   whyBox: {
     backgroundColor: COLORS.amber50,
-    borderRadius: 10,
+    borderRadius: 12,
     borderLeftWidth: 4,
     borderLeftColor: COLORS.amber600,
     padding: 16,
@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     backgroundColor: COLORS.cardBg,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.stone200,
     padding: 12,
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   },
   actionBox: {
     backgroundColor: COLORS.green50,
-    borderRadius: 10,
+    borderRadius: 12,
     borderLeftWidth: 4,
     borderLeftColor: COLORS.green600,
     padding: 16,
@@ -303,7 +303,7 @@ const styles = StyleSheet.create({
   },
   waitingBox: {
     backgroundColor: COLORS.stone100,
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 20,
     alignItems: 'center',
     marginBottom: 12,

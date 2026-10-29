@@ -664,7 +664,7 @@ const ChessboardHeader: React.FC<{
             [{ text: "Cancel", style: "cancel" }, { text: next === "real" ? "Go Real" : "Go Tutorial", onPress: () => onSwitchMode(next) }]
           );
         }}
-        style={{ backgroundColor: activeMode === "real" ? "#10B981" : "#F59E0B", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, position: "absolute", top: 8, right: 12 }}
+        style={{ backgroundColor: activeMode === "real" ? "#10B981" : "#F59E0B", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, position: "absolute", top: 8, right: 12 }}
       >
         <Text style={{ color: "#000", fontSize: 10, fontWeight: "bold" }}>{activeMode === "real" ? "REAL KAS ($)" : "TUTORIAL (free)"}</Text>
       </TouchableOpacity>

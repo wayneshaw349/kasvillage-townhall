@@ -626,7 +626,7 @@ const exchangeStyles = StyleSheet.create({
   securityBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: 8,
   },
   securityText: {
     fontSize: 10,
@@ -1207,7 +1207,7 @@ const TurnBanner: React.FC<{ phase: string; role: 'buyer' | 'seller' | null; onP
   const st = ceremonyStatus(phase, role);
   if (phase === 'complete' || phase === 'aborted' || !role) return null;
   return (
-    <View style={{ backgroundColor: st.mine ? '#dcfce7' : '#f1f5f9', borderRadius: 10, borderWidth: 2, borderColor: st.mine ? '#16a34a' : '#cbd5e1', padding: 10, marginBottom: 12 }}>
+    <View style={{ backgroundColor: st.mine ? '#dcfce7' : '#f1f5f9', borderRadius: 12, borderWidth: 2, borderColor: st.mine ? '#16a34a' : '#cbd5e1', padding: 10, marginBottom: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <Text style={{ fontSize: rs.font(12), fontWeight: '900', color: st.mine ? '#166534' : '#64748b' }}>{st.mine ? 'YOUR TURN' : 'WAITING ON THEM'}</Text>
         <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: st.mine ? '#15803d' : '#94a3b8' }}>Step {st.stepNum} of {st.total}</Text>
@@ -4086,7 +4086,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                 {false && inboxAgreements.length > 0 && (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
                     {[{k:'recent',l:'Recent'},{k:'buyerHigh',l:'Buyer ↑'},{k:'sellerLow',l:'Seller ↓'},{k:'name',l:'Name'}].map(s => (
-                      <TouchableOpacity key={s.k} onPress={() => setInboxSort(s.k as any)} style={{ backgroundColor: inboxSort === s.k ? '#4f46e5' : '#e5e7eb', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
+                      <TouchableOpacity key={s.k} onPress={() => setInboxSort(s.k as any)} style={{ backgroundColor: inboxSort === s.k ? '#4f46e5' : '#e5e7eb', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
                         <Text style={{ fontSize: 10, color: inboxSort === s.k ? '#fff' : '#374151', fontWeight: inboxSort === s.k ? 'bold' : 'normal' }}>{s.l}</Text>
                       </TouchableOpacity>
                     ))}
@@ -4095,14 +4095,14 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
 
                 {/* INBOX-NOTICE: honest discovery-only framing */}
                 <View style={{ backgroundColor: '#f8fafc', borderColor: '#e2e8f0', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 10 }}>
-                  <Text style={{ fontSize: rs.font(10), color: '#64748b', lineHeight: rs.font(15) }}>
+                  <Text style={{ fontSize: rs.font(10), color: '#64748b', lineHeight: rs.font(14) }}>
                     Discovery view. The list below is this device's own record of your agreements. To act on one, tap it to resume, or paste its original proposal. The pasted proposal is the source of truth - the list is for finding and reopening, not for driving the deal.
                   </Text>
                 </View>
                 {/* LOCAL-TABS: source of truth is local_agreements. Arweave inbox still runs in background. */}
                 <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8, alignItems: 'center' }}>
                   {[{k:'active',l:'Active'},{k:'buyer',l:'Buyer'},{k:'seller',l:'Seller'}].map(t => (
-                    <TouchableOpacity key={t.k} onPress={() => setActiveTab(t.k as any)} style={{ backgroundColor: activeTab === t.k ? '#4f46e5' : '#e5e7eb', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 6 }}>
+                    <TouchableOpacity key={t.k} onPress={() => setActiveTab(t.k as any)} style={{ backgroundColor: activeTab === t.k ? '#4f46e5' : '#e5e7eb', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 }}>
                       <Text style={{ fontSize: 11, color: activeTab === t.k ? '#fff' : '#374151', fontWeight: activeTab === t.k ? 'bold' : 'normal' }}>{t.l}</Text>
                     </TouchableOpacity>
                   ))}
@@ -4118,7 +4118,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                     <TouchableOpacity onPress={() => resumeLocal(r)} style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#c7d2fe', borderRadius: 12, padding: 12 }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: '#3730a3', flex: 1 }} numberOfLines={1}>{r.description}</Text>
-                        <View style={{ backgroundColor: r.role === 'buyer' ? '#dcfce7' : '#dbeafe', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 6 }}>
+                        <View style={{ backgroundColor: r.role === 'buyer' ? '#dcfce7' : '#dbeafe', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 6 }}>
                           <Text style={{ fontSize: rs.font(9), fontWeight: 'bold', color: r.role === 'buyer' ? '#166534' : '#1e40af' }}>{r.role.toUpperCase()}</Text>
                         </View>
                       </View>
@@ -4574,7 +4574,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
                           <Text style={{ fontSize: rs.font(10), color: '#78716c', marginBottom: 2 }}>Agreement ID:</Text>
                           <Text selectable style={{ fontSize: rs.font(14), fontFamily: 'monospace', fontWeight: 'bold', color: '#1c1917' }}>{contract.agreementId}</Text>
                           {contract.arweaveTxId ? (
-                            <View style={{ marginTop: 6, backgroundColor: '#f0fdf4', borderRadius: 6, padding: 8 }}>
+                            <View style={{ marginTop: 6, backgroundColor: '#f0fdf4', borderRadius: 8, padding: 8 }}>
                               <Text style={{ fontSize: rs.font(9), color: '#166534', fontWeight: '600' }}>Arweave TX (fastest lookup):</Text>
                               <Text selectable style={{ fontSize: rs.font(10), fontFamily: 'monospace', color: '#15803d', marginTop: 2 }}>{contract.arweaveTxId}</Text>
                             </View>
@@ -5340,7 +5340,7 @@ nonces: _killNonces,
                         />
                       </View>
                       <TouchableOpacity onPress={buildReleaseTemplate} disabled={templateBuilt} style={{ backgroundColor: templateBuilt ? '#9ca3af' : '#059669', borderRadius: 8, padding: 14, alignItems: 'center' }}>
-                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{templateBuilt ? 'Template Built ✓ (paste response below)' : 'Build TX Template (generates k + R)'}</Text>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{templateBuilt ? 'Template Built ✓ (paste response below)' : 'Build TX Template (generates k + R)'}</Text>
                       </TouchableOpacity>
                       <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#4f46e5', marginTop: 4, marginBottom: 4 }}>Paste Seller Response</Text>
 
@@ -5364,7 +5364,7 @@ nonces: _killNonces,
 
                       <TouchableOpacity onPress={async () => { if (sellerResponseB64 && sellerResponseB64.length > 20) { try { await Clipboard.setStringAsync(sellerResponseB64); } catch {} } processSellerResponse(); }} style={{ backgroundColor: '#4f46e5', borderRadius: 8, padding: 14, alignItems: 'center' }}>
 
-                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{'Process Seller Response'}</Text>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{'Process Seller Response'}</Text>
 
                       </TouchableOpacity>
                       <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center' }}>{'k lives only during this signing ceremony (~seconds)'}</Text>
@@ -5495,7 +5495,7 @@ nonces: _killNonces,
                           onPress={async () => { try { let _ss = ''; try { const _cj = (await AsyncStorage.getItem('kv_stat_chain_v1')) || '[]'; const _cr = JSON.parse(_cj).find((c: any) => c.agrId === (contract.agreementId || '')); _ss = (_cr && _cr.mySignature) || ''; } catch {} await Clipboard.setStringAsync('KV-STEP-6-RESPONSE|' + (contract.agreementId || '') + (_ss ? '|STATSIG:' + _ss : '') + '\n' + sellerResponseB64); Alert.alert('Copied!', 'Send this to the buyer.'); } catch {} }}
                           style={{ backgroundColor: '#059669', borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 8 }}
                         >
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Copy Response & Send to Buyer</Text>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Copy Response & Send to Buyer</Text>
                         </TouchableOpacity>
                       ) : null}
             <View style={{ backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#86efac' }}>
@@ -5503,7 +5503,7 @@ nonces: _killNonces,
               <Text style={{ fontSize: 11, color: '#15803d' }}>AGR ID: {contract.agreementId}</Text>
               <Text style={{ fontSize: 11, color: '#15803d', marginTop: 2 }}>Arweave TX: {contract.partialReleaseTx || contract.arweaveTxId || 'pending...'}</Text>
               <TouchableOpacity 
-                style={{ backgroundColor: '#22c55e', paddingVertical: 8, borderRadius: 6, marginTop: 8, alignItems: 'center' }}
+                style={{ backgroundColor: '#22c55e', paddingVertical: 8, borderRadius: 8, marginTop: 8, alignItems: 'center' }}
                 onPress={async () => {
                   try {
                     // Clipboard imported statically
@@ -5817,7 +5817,7 @@ nonces: _killNonces,
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
         <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, maxHeight: '82%' }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Text style={{ fontSize: rs.font(15), fontWeight: '900', color: '#1e293b', flex: 1 }} numberOfLines={1}>Payloads — {dossierData?.description || ''}</Text>
+            <Text style={{ fontSize: rs.font(14), fontWeight: '900', color: '#1e293b', flex: 1 }} numberOfLines={1}>Payloads — {dossierData?.description || ''}</Text>
             <TouchableOpacity onPress={() => setDossierAgrId(null)} style={{ paddingHorizontal: 10, paddingVertical: 4 }}><Text style={{ fontSize: rs.font(16), color: '#64748b', fontWeight: 'bold' }}>✕</Text></TouchableOpacity>
           </View>
           <Text style={{ fontSize: rs.font(10), color: '#94a3b8', marginBottom: 10 }}>Everything pasted or created for this agreement, kept on this device. Copy any item and paste it where needed. Tap Explain for a plain-language description.</Text>
@@ -5829,10 +5829,10 @@ nonces: _killNonces,
               const label = LABELS[slot.kind] || slot.kind;
               const isExplained = dossierExplain === slot.kind;
               return (
-                <View key={slot.kind + idx} style={{ borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                <View key={slot.kind + idx} style={{ borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 10, marginBottom: 8 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: rs.font(12), fontWeight: 'bold', color: '#334155', flex: 1 }}>{label}</Text>
-                    <View style={{ backgroundColor: slot.dir === 'in' ? '#dbeafe' : '#dcfce7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1, marginLeft: 6 }}>
+                    <View style={{ backgroundColor: slot.dir === 'in' ? '#dbeafe' : '#dcfce7', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 1, marginLeft: 6 }}>
                       <Text style={{ fontSize: rs.font(8), fontWeight: 'bold', color: slot.dir === 'in' ? '#1e40af' : '#166534' }}>{slot.dir === 'in' ? 'RECEIVED' : 'CREATED'}</Text>
                     </View>
                   </View>
@@ -5845,7 +5845,7 @@ nonces: _killNonces,
                       <Text style={{ color: '#4f46e5', fontSize: rs.font(11), fontWeight: 'bold' }}>{isExplained ? 'Hide' : 'Explain'}</Text>
                     </TouchableOpacity>
                   </View>
-                  {isExplained ? (<Text style={{ fontSize: rs.font(10), color: '#475569', marginTop: 8, lineHeight: rs.font(15) }}>{DOSSIER_EXPLAIN[slot.kind] || 'No description available.'}</Text>) : null}
+                  {isExplained ? (<Text style={{ fontSize: rs.font(10), color: '#475569', marginTop: 8, lineHeight: rs.font(14) }}>{DOSSIER_EXPLAIN[slot.kind] || 'No description available.'}</Text>) : null}
                 </View>
               );
             })}
@@ -5858,7 +5858,7 @@ nonces: _killNonces,
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
         <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, maxHeight: '88%' }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <Text style={{ fontSize: rs.font(15), fontWeight: '900', color: '#1e293b' }}>Shipping Helper</Text>
+            <Text style={{ fontSize: rs.font(14), fontWeight: '900', color: '#1e293b' }}>Shipping Helper</Text>
             <TouchableOpacity onPress={() => setShipAgrId(null)} style={{ paddingHorizontal: 10, paddingVertical: 4 }}><Text style={{ fontSize: rs.font(16), color: '#64748b', fontWeight: 'bold' }}>✕</Text></TouchableOpacity>
           </View>
           <Text style={{ fontSize: rs.font(10), color: '#b45309', backgroundColor: '#fffbeb', borderColor: '#fde68a', borderWidth: 1, borderRadius: 8, padding: 8, marginBottom: 10, lineHeight: rs.font(14) }}>Recommended practice, not verified by the app. Ship to a carrier PICKUP POINT (not a home address) to protect privacy and reduce fraud. Your enforced protection is the collateral + reputation system.</Text>
@@ -6211,7 +6211,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   roleTitle: {
-    fontSize: rs.font(15),
+    fontSize: rs.font(14),
     fontWeight: 'bold',
     marginTop: rs.s(8),
   },

@@ -379,7 +379,7 @@ const MyPledgesCard: React.FC<{ hidden: boolean }> = ({ hidden }) => {
               <Text style={{ color: '#fff', fontSize: 13 }} numberOfLines={1}>{p.label}</Text>
               <Text style={{ color: '#10B981', fontSize: 12 }}>{hidden ? '••• KAS' : (Number(p.sompi) / 1e8).toFixed(2) + ' KAS'}</Text>
             </View>
-            <TouchableOpacity disabled={!!busy} onPress={() => go(p)} style={{ backgroundColor: busy === p.key ? '#444' : '#7f1d1d', borderRadius: 6, paddingVertical: 6, paddingHorizontal: 10 }}>
+            <TouchableOpacity disabled={!!busy} onPress={() => go(p)} style={{ backgroundColor: busy === p.key ? '#444' : '#7f1d1d', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10 }}>
               <Text style={{ color: '#fff', fontSize: 12 }}>{busy === p.key ? 'Sending…' : 'Reclaim'}</Text>
             </TouchableOpacity>
           </View>

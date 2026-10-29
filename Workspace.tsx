@@ -1436,7 +1436,7 @@ const KvChainGamePublish: React.FC = () => {
         const mine = Object.entries(GAMES).filter(([gid, ge]: any) => _kvOwner || !!ge.url || !!ge.local);
         return (
           <View style={{ marginBottom: 10, marginTop: 4 }}>
-            <View style={{ backgroundColor: '#2a1a0e', borderRadius: 6, paddingTop: 12, borderWidth: 1, borderColor: '#4a2f17' }}>
+            <View style={{ backgroundColor: '#2a1a0e', borderRadius: 8, paddingTop: 12, borderWidth: 1, borderColor: '#4a2f17' }}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'flex-end', paddingHorizontal: 8 }}>
                 {book('kv-new', { title: '＋ NEW GAME', sub: 'file · paste · link', color: '', h: 150, dashed: true, onPress: runPublishStart })}
                 {mine.map(([gid]: any) => {
@@ -1466,10 +1466,10 @@ const KvChainGamePublish: React.FC = () => {
                   game={{ manifestAddress: 'preview', manifestHash: 'preview', head: 'preview-' + p.id }}
                   onClose={_close} />
                 <TouchableOpacity onPress={_close} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  style={{ position: 'absolute', top: 48, left: 12, zIndex: 50, elevation: 50, backgroundColor: 'rgba(20,18,16,0.85)', borderWidth: 1, borderColor: '#f0c860', borderRadius: 18, paddingVertical: 7, paddingHorizontal: 14 }}>
+                  style={{ position: 'absolute', top: 48, left: 12, zIndex: 50, elevation: 50, backgroundColor: 'rgba(20,18,16,0.85)', borderWidth: 1, borderColor: '#f0c860', borderRadius: 16, paddingVertical: 7, paddingHorizontal: 14 }}>
                   <Text style={{ color: '#f0c860', fontWeight: '800', fontSize: 14 }}>{'\u2039 Back'}</Text>
                 </TouchableOpacity>
-                <View pointerEvents="none" style={{ position: 'absolute', top: 52, right: 12, zIndex: 50, backgroundColor: 'rgba(20,18,16,0.85)', borderRadius: 10, paddingVertical: 4, paddingHorizontal: 10 }}>
+                <View pointerEvents="none" style={{ position: 'absolute', top: 52, right: 12, zIndex: 50, backgroundColor: 'rgba(20,18,16,0.85)', borderRadius: 12, paddingVertical: 4, paddingHorizontal: 10 }}>
                   <Text style={{ color: '#4ade80', fontWeight: '800', fontSize: 11 }}>TEST RUN</Text>
                 </View>
               </View>
@@ -1479,8 +1479,8 @@ const KvChainGamePublish: React.FC = () => {
       ) : null}
       {Object.entries(GAMES).filter(([gid, ge]: any) => (_kvOwner || !!ge.url || !!ge.local) && gid === openBook).map(([id, e]: any) => (
         <React.Fragment key={id}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f6ecd6', borderRadius: 6, paddingVertical: 8, paddingHorizontal: 12, marginTop: 2 }}>
-          <Text style={{ color: '#2a1a0e', fontWeight: '900', fontSize: 15 }}>{'\uD83D\uDCD6 ' + id}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f6ecd6', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, marginTop: 2 }}>
+          <Text style={{ color: '#2a1a0e', fontWeight: '900', fontSize: 14 }}>{'\uD83D\uDCD6 ' + id}</Text>
           <TouchableOpacity onPress={() => setOpenBook(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}><Text style={{ color: '#7a4e2a', fontWeight: '800', fontSize: 14 }}>{'close \u2715'}</Text></TouchableOpacity>
         </View>
         {(() => { const ex = require('./kv_dev_publish').expiryInfo(((myMeta || {})[id] || {}).publishedAt); return <Text style={{ color: ex.color, fontFamily: 'monospace', fontSize: 11, marginTop: 6, marginBottom: 4 }}>{'\u23F1 ' + id + ' - ' + ex.label}</Text>; })()}
@@ -1522,7 +1522,7 @@ const KvChainGamePublish: React.FC = () => {
         </View>
       ) : null}
       <TouchableOpacity onPress={() => Clipboard.setStringAsync(glog.join(String.fromCharCode(10)))}
-        style={{ alignSelf: 'flex-start', backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 6, paddingVertical: 4, paddingHorizontal: 10, marginTop: 6 }}>
+        style={{ alignSelf: 'flex-start', backgroundColor: '#2a2118', borderWidth: 1, borderColor: '#6a5a34', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10, marginTop: 6 }}>
         <Text style={{ color: '#f0c860', fontFamily: 'monospace', fontSize: 10 }}>📋 COPY LOG</Text>
       </TouchableOpacity>
       <View style={{ height: 300, marginTop: 4 }}>
@@ -1676,7 +1676,7 @@ const QualityGateModal: React.FC<QualityGateModalProps> = ({ visible, onClose, o
                       <View style={{ marginTop: rs.s(4) }}>
                         <Text style={{ fontSize: rs.font(11), fontWeight: 'bold', color: COLORS.red800, marginBottom: 4 }}>Violations ({scanResult.violations.length}):</Text>
                         {scanResult.violations.slice(0, 10).map((v: any, i: number) => (
-                          <View key={i} style={{ backgroundColor: '#fff', borderRadius: 6, padding: 8, marginBottom: 4 }}>
+                          <View key={i} style={{ backgroundColor: '#fff', borderRadius: 8, padding: 8, marginBottom: 4 }}>
                             <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: COLORS.red700 }}>Line {v.line}: {v.pattern}</Text>
                             <Text style={{ fontSize: rs.font(9), fontFamily: 'monospace', color: COLORS.stone500 }} numberOfLines={1}>{v.code}</Text>
                             <Text style={{ fontSize: rs.font(8), color: v.severity === 'critical' ? COLORS.red600 : COLORS.amber600 }}>Severity: {v.severity}</Text>
@@ -2999,7 +2999,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     {selectedAbstract ? (
                       <View>
                         <TouchableOpacity onPress={() => { setSelectedAbstract(null); setQaList([]); }} style={{ padding: 8 }}>
-                          <Text style={{ color: COLORS.amber600, fontSize: 15, fontWeight: 'bold' }}>‹ Back to list</Text>
+                          <Text style={{ color: COLORS.amber600, fontSize: 14, fontWeight: 'bold' }}>‹ Back to list</Text>
                         </TouchableOpacity>
                         
                         {/* Abstract Card */}
@@ -3013,7 +3013,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                           {selectedAbstract.keywords.length > 0 && (
                             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
                               {selectedAbstract.keywords.map((kw, i) => (
-                                <View key={i} style={{ backgroundColor: COLORS.amber100, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }}>
+                                <View key={i} style={{ backgroundColor: COLORS.amber100, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
                                   <Text style={{ color: COLORS.amber800, fontSize: 11 }}>{kw}</Text>
                                 </View>
                               ))}
@@ -3037,7 +3037,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                           </Text>
                           
                           {qaList.filter(q => !q.declined).map(qa => (
-                            <View key={qa.id} style={{ backgroundColor: COLORS.cardBg, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: qa.answerText ? COLORS.green200 : COLORS.stone200 }}>
+                            <View key={qa.id} style={{ backgroundColor: COLORS.cardBg, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: qa.answerText ? COLORS.green200 : COLORS.stone200 }}>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                                 <Text style={{ fontSize: 12, color: COLORS.stone500 }}>
                                   {qa.isPaid ? '💰 Paid' : '🆓 Free'} · {new Date(qa.timestamp).toLocaleDateString()}
@@ -3131,7 +3131,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                               onPress={() => { setSelectedAbstract(abstract_); loadQA(abstract_.id); }}
                               activeOpacity={0.7}
                             >
-                              <Text style={{ color: COLORS.stone800, fontSize: 15, fontWeight: 'bold' }}>{abstract_.title}</Text>
+                              <Text style={{ color: COLORS.stone800, fontSize: 14, fontWeight: 'bold' }}>{abstract_.title}</Text>
                               <Text style={{ color: COLORS.stone500, fontSize: 12, marginTop: 2 }}>
                                 {abstract_.researcherId} · {abstract_.institutionDomain}
                               </Text>
@@ -3185,11 +3185,11 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     <View style={{ backgroundColor: COLORS.blue50, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: COLORS.blue200, alignItems: 'center' }}>
                       <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.blue800, marginBottom: 8 }}>Your verification code:</Text>
                       <Text selectable style={{ fontSize: 36, fontWeight: '900', fontFamily: 'monospace', color: COLORS.amber900, letterSpacing: 6 }}>{magicLink || '------'}</Text>
-                      <TouchableOpacity onPress={() => { const code = Math.floor(100000 + Math.random() * 900000).toString(); setMagicLink(code); Clipboard.setStringAsync(code); Alert.alert('Code Ready!', code + ' copied. Paste it in your email subject line.'); }} style={{ backgroundColor: COLORS.amber600, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 24, marginTop: 10 }}>
+                      <TouchableOpacity onPress={() => { const code = Math.floor(100000 + Math.random() * 900000).toString(); setMagicLink(code); Clipboard.setStringAsync(code); Alert.alert('Code Ready!', code + ' copied. Paste it in your email subject line.'); }} style={{ backgroundColor: COLORS.amber600, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 24, marginTop: 10 }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{magicLink ? 'Copy Code Again' : 'Generate Code'}</Text>
                       </TouchableOpacity>
                     </View>
-                    <View style={{ backgroundColor: COLORS.stone50, borderRadius: 10, padding: 12, marginBottom: 16, gap: 6 }}>
+                    <View style={{ backgroundColor: COLORS.stone50, borderRadius: 12, padding: 12, marginBottom: 16, gap: 6 }}>
                       <Text style={{ fontSize: 13, fontWeight: 'bold', color: COLORS.stone800 }}>Then do this:</Text>
                       <Text style={{ fontSize: 12, color: COLORS.stone600 }}>1. Open your school email (Gmail, Outlook, etc.)</Text>
                       <Text style={{ fontSize: 12, color: COLORS.stone600 }}>2. Send a new email TO YOURSELF from your .edu</Text>
@@ -3197,9 +3197,9 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       <Text style={{ fontSize: 12, color: COLORS.stone600 }}>4. Hit send, come back here, tap Next</Text>
                     </View>
                     <TouchableOpacity style={{ backgroundColor: magicLink ? COLORS.amber600 : COLORS.stone300, borderRadius: 12, paddingVertical: 16, alignItems: 'center' }} onPress={() => { if (!magicLink) { Alert.alert('Generate Code First'); return; } setVerificationStep(1); }} disabled={!magicLink}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>I Sent the Email → Next</Text>
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>I Sent the Email → Next</Text>
                     </TouchableOpacity>
-                    <View style={{ backgroundColor: COLORS.green50, borderRadius: 10, padding: 12, marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={{ backgroundColor: COLORS.green50, borderRadius: 12, padding: 12, marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <ShieldCheck size={18} color={COLORS.green600} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 11, fontWeight: 'bold', color: COLORS.green800 }}>Zero Knowledge</Text>
@@ -3235,7 +3235,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     {rawEmailHeaders.length > 0 && <Text style={{ fontSize: 10, color: rawEmailHeaders.length > 200 ? COLORS.green600 : COLORS.amber600, marginTop: 4 }}>{rawEmailHeaders.length > 200 ? '? ' + rawEmailHeaders.length + ' chars pasted' : '✓ Keep pasting · need the full source'}</Text>}
                     {verificationError ? <Text style={{ fontSize: 11, color: COLORS.red600, marginTop: 8 }}>{verificationError}</Text> : null}
                     {dkimSteps && dkimSteps.length > 0 && (
-                      <View style={{ backgroundColor: '#f0f9ff', borderRadius: 10, padding: 10, marginTop: 8, borderWidth: 1, borderColor: '#93c5fd' }}>
+                      <View style={{ backgroundColor: '#f0f9ff', borderRadius: 12, padding: 10, marginTop: 8, borderWidth: 1, borderColor: '#93c5fd' }}>
                         <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#1e40af', marginBottom: 4 }}>Verification Steps:</Text>
                         {dkimSteps.map((st, i) => (
                           <Text key={i} style={{ fontSize: 9, color: st.includes('VALID') ? '#16a34a' : st.includes('failed') ? '#dc2626' : '#3b82f6', fontFamily: 'monospace', marginBottom: 2 }}>{st}</Text>
@@ -3263,10 +3263,10 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       } catch (e) { setVerificationError(String(e)); }
                       setIsLoading(false);
                     }} disabled={isLoading || rawEmailHeaders.length < 200}>
-                      {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>🔐 Verify DKIM Signature</Text>}
+                      {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>🔐 Verify DKIM Signature</Text>}
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => setVerificationStep(0)} style={{ alignItems: 'center', paddingVertical: 8, marginTop: 4 }}><Text style={{ color: COLORS.stone400, fontSize: 12 }}>✓ Start over</Text></TouchableOpacity>
-                    <View style={{ backgroundColor: COLORS.green50, borderRadius: 10, padding: 12, marginTop: 12 }}>
+                    <View style={{ backgroundColor: COLORS.green50, borderRadius: 12, padding: 12, marginTop: 12 }}>
                       <Text style={{ fontSize: 10, color: COLORS.green700, textAlign: 'center', lineHeight: 15 }}>🔐 DNS lookup for school's public key → RSA verify on YOUR phone → only school name saved. Zero PII transmitted.</Text>
                     </View>
                   </View>
@@ -3319,7 +3319,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       ))}
                     </View>
                     <TouchableOpacity style={{ backgroundColor: (attestation1 && attestation2 && attestation3) ? COLORS.amber700 : COLORS.stone300, borderRadius: 12, paddingVertical: 16, alignItems: 'center' }} onPress={handleSubmitAbstract} disabled={!attestation1 || !attestation2 || !attestation3 || isLoading}>
-                      {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Submit Abstract</Text>}
+                      {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Submit Abstract</Text>}
                     </TouchableOpacity>
                     {/* KV_ABS_REANNOUNCE */}
                     <TouchableOpacity style={{ backgroundColor: COLORS.stone600, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 8 }} onPress={handleReannounceAbstracts} disabled={isLoading}>
@@ -4575,7 +4575,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: rs.s(6), marginBottom: rs.s(10) }}>
                 {['General', 'Fashion', 'Food', 'Tech', 'Art', 'Services', 'Academic'].map((cat) => (
                   <TouchableOpacity key={cat} onPress={() => setStoreCategory(cat)}
-                    style={{ paddingHorizontal: rs.s(10), paddingVertical: rs.s(6), borderRadius: 14, borderWidth: 1,
+                    style={{ paddingHorizontal: rs.s(10), paddingVertical: rs.s(6), borderRadius: 12, borderWidth: 1,
                       borderColor: storeCategory === cat ? '#7c5cff' : '#44403c',
                       backgroundColor: storeCategory === cat ? '#241f36' : 'transparent' }}>
                     <Text style={{ fontSize: rs.font(10), fontWeight: '700', color: storeCategory === cat ? '#b9a6ff' : '#a8a29e' }}>{cat}</Text>
@@ -5327,7 +5327,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             {/* Video Demo · the listing IS the marketing */}
             <View style={{ backgroundColor: '#fef3c7', borderRadius: rs.s(12), padding: rs.s(14), marginBottom: rs.s(12), borderWidth: 1, borderColor: '#f59e0b' }}>
               <Text style={{ fontSize: rs.font(14), fontWeight: '900', color: '#92400e', marginBottom: rs.s(6) }}>🎬 Video Demo = Your Listing</Text>
-              <Text style={{ fontSize: rs.font(11), color: '#b45309', lineHeight: rs.font(17), marginBottom: rs.s(10) }}>
+              <Text style={{ fontSize: rs.font(11), color: '#b45309', lineHeight: rs.font(16), marginBottom: rs.s(10) }}>
                 Post a short video demo of your DApp, game, or website on Instagram or TikTok. That video IS your storefront listing · buyers see the demo, tap through, and the SDK compliance badge proves it's safe.
               </Text>
               <View style={{ gap: rs.s(6) }}>

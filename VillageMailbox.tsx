@@ -290,18 +290,18 @@ function KvBizEnvelope({ name, cat, stamp, colors, verified, verifiedLabel, post
             <Text style={{ color: colors.text, fontWeight: '900', fontSize: 18 }}>{String(name || '?').trim().charAt(0).toUpperCase()}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.bg, fontWeight: '900', fontSize: rs.font(15) }} numberOfLines={1}>{name}</Text>
+            <Text style={{ color: colors.bg, fontWeight: '900', fontSize: rs.font(14) }} numberOfLines={1}>{name}</Text>
             <Text style={{ color: acc, fontSize: 9, fontWeight: '800', letterSpacing: 2 }} numberOfLines={1}>{String(cat || '').toUpperCase()}</Text>
           </View>
         </View>
         {verified !== undefined ? (
-          <View style={{ position: 'absolute', left: 12, top: 52, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 9, backgroundColor: verified ? '#dcfce7' : '#fef3c7' }}>
+          <View style={{ position: 'absolute', left: 12, top: 52, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, backgroundColor: verified ? '#dcfce7' : '#fef3c7' }}>
             <Text style={{ fontSize: 9, fontWeight: '900', color: verified ? '#15803d' : '#b45309' }}>{verified ? '✓ ' + (verifiedLabel || 'VERIFIED') : '⚠ UNVERIFIED'}</Text>
           </View>
         ) : null}
         {/* stamp + postmark */}
         <View pointerEvents="none" style={{ position: 'absolute', right: 10, top: 8, width: 30, height: 36, backgroundColor: '#fffaf0', borderWidth: 2, borderStyle: 'dashed', borderColor: '#7a5c34', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '4deg' }] }}>
-          <Text style={{ fontSize: 15 }}>{stamp}</Text>
+          <Text style={{ fontSize: 14 }}>{stamp}</Text>
         </View>
         <View pointerEvents="none" style={{ position: 'absolute', right: 46, top: 10, width: 46, height: 46, borderRadius: 23, borderWidth: 1.5, borderColor: 'rgba(60,50,40,0.35)', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-12deg' }] }}>
           <Text style={{ color: 'rgba(60,50,40,0.5)', fontSize: 6, fontWeight: '800', textAlign: 'center' }}>{'KASVILLAGE\nPOST' + (postedAt ? '\n' + kvAgo(postedAt) : '')}</Text>
@@ -318,7 +318,7 @@ function KvBizEnvelope({ name, cat, stamp, colors, verified, verifiedLabel, post
             <Text key={i} style={{ color: colors.text, fontSize: 10.5, lineHeight: 17 }} numberOfLines={1}>{l}</Text>
           ))}
           {action ? (
-            <TouchableOpacity onPress={action.onPress} disabled={!!action.disabled} style={{ marginTop: 4, borderRadius: 6, paddingVertical: 5, alignItems: 'center', backgroundColor: action.bg || colors.text, opacity: action.disabled ? 0.6 : 1 }}>
+            <TouchableOpacity onPress={action.onPress} disabled={!!action.disabled} style={{ marginTop: 4, borderRadius: 8, paddingVertical: 5, alignItems: 'center', backgroundColor: action.bg || colors.text, opacity: action.disabled ? 0.6 : 1 }}>
               <Text style={{ color: action.fg || colors.bg, fontWeight: '900', fontSize: 11 }}>{action.label}</Text>
             </TouchableOpacity>
           ) : null}
@@ -365,13 +365,13 @@ function KvParcelEnvelope({ title, lines, stampText, verified, postedAt, seed, a
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 20, marginTop: 10, marginBottom: 12 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 9, backgroundColor: verified ? '#dcfce7' : '#fef3c7', marginRight: 8 }}>
+          <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, backgroundColor: verified ? '#dcfce7' : '#fef3c7', marginRight: 8 }}>
             <Text style={{ fontSize: 9, fontWeight: '900', color: verified ? '#15803d' : '#b45309' }}>{verified ? '✓ DKIM VERIFIED' : '⚠ UNVERIFIED'}</Text>
           </View>
           {postedAt ? <Text style={{ fontSize: 9, color: 'rgba(60,40,20,0.6)', fontWeight: '800' }}>{'KASVILLAGE POST · ' + kvAgo(postedAt)}</Text> : null}
         </View>
         {action ? (
-          <TouchableOpacity onPress={action.onPress} style={{ backgroundColor: '#5a3d1c', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 5 }}>
+          <TouchableOpacity onPress={action.onPress} style={{ backgroundColor: '#5a3d1c', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 5 }}>
             <Text style={{ color: '#f6e7c8', fontWeight: '900', fontSize: 11 }}>{action.label}</Text>
           </TouchableOpacity>
         ) : null}
@@ -550,7 +550,7 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
       })() : null}
       {/* KV_GAME_CARD_FLAG */}
       {(() => { const _fi = item.quad ? ((globalThis as any).__kvFlagInfo || new Map()).get(String(item.quad.head)) : null; return _fi && _fi.n ? (
-        <Text style={{ marginTop: 6, color: '#92400e', backgroundColor: '#fef3c7', fontSize: 10, fontWeight: '700', borderRadius: 6, padding: 4, textAlign: 'center' }}>{'\u2691 Flagged ' + _fi.n + '/3 \u2014 ' + _fi.reasons.join(', ')}</Text>
+        <Text style={{ marginTop: 6, color: '#92400e', backgroundColor: '#fef3c7', fontSize: 10, fontWeight: '700', borderRadius: 8, padding: 4, textAlign: 'center' }}>{'\u2691 Flagged ' + _fi.n + '/3 \u2014 ' + _fi.reasons.join(', ')}</Text>
       ) : null; })()}
       {item.quad ? (
         <TouchableOpacity onPress={() => { const f = (globalThis as any).__kvRunFlag; if (f) f({ arweaveTx: String(item.quad.head), id: String(item.quad.head), ownerPubkey: item.o || '', name: item.name || '' }, 'game'); }}
@@ -1807,7 +1807,7 @@ export default function VillageMailbox() {
           {((require('./kv_search').SEARCH_CHIPS as any)[section] || ['all']).map((c: string) => {
             const on = query.trim().toLowerCase() === c;
             return (
-              <TouchableOpacity key={c} onPress={() => setQuery(on ? '' : c)} style={{ marginRight: rs.s(6), borderWidth: 1, borderColor: on ? '#d97706' : '#d6d3d1', backgroundColor: on ? '#fef3c7' : 'transparent', borderRadius: 14, paddingVertical: 4, paddingHorizontal: 10 }}>
+              <TouchableOpacity key={c} onPress={() => setQuery(on ? '' : c)} style={{ marginRight: rs.s(6), borderWidth: 1, borderColor: on ? '#d97706' : '#d6d3d1', backgroundColor: on ? '#fef3c7' : 'transparent', borderRadius: 12, paddingVertical: 4, paddingHorizontal: 10 }}>
                 <Text style={{ fontSize: rs.font(11), color: '#44403c', fontWeight: '700' }}>{c}</Text>
               </TouchableOpacity>
             );
@@ -1861,27 +1861,27 @@ export default function VillageMailbox() {
       {/* Game generator - descriptor fetched from L1, hash verified, rendered on-device */}
       <Modal visible={!!tipT} animationType="fade" transparent onRequestClose={() => setTipT(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', padding: 22 }}>
-          <View style={{ backgroundColor: '#15151f', borderRadius: 14, padding: 18, borderColor: '#7c3aed', borderWidth: 1 }}>
+          <View style={{ backgroundColor: '#15151f', borderRadius: 12, padding: 18, borderColor: '#7c3aed', borderWidth: 1 }}>
             <Text style={{ color: '#b9a6ff', fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>{'\u{1F49C} TIP THE DEV'}</Text>
-            <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', marginTop: 6 }}>{(tipT && tipT.name) || 'dev'}</Text>
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', marginTop: 6 }}>{(tipT && tipT.name) || 'dev'}</Text>
             <Text style={{ color: '#8a8aa0', fontSize: 10, marginTop: 8 }}>TO (declared by dev in their announce)</Text>
             <Text style={{ color: '#ddd', fontSize: 10, fontFamily: 'monospace', marginTop: 2 }} selectable>
               {(tipT && tipT.quad && tipT.quad.tip_addr) || ''}
             </Text>
             <TextInput value={tipAmt} onChangeText={setTipAmt} keyboardType="decimal-pad" placeholder="0.0"
               placeholderTextColor="#555" editable={!tipBusy}
-              style={{ marginTop: 14, backgroundColor: '#0b0b12', color: '#fff', borderRadius: 9, paddingHorizontal: 12,
+              style={{ marginTop: 14, backgroundColor: '#0b0b12', color: '#fff', borderRadius: 8, paddingHorizontal: 12,
                 paddingVertical: 10, fontSize: 22, fontWeight: '700', borderColor: '#333', borderWidth: 1 }} />
             <Text style={{ color: '#6f6f85', fontSize: 9, marginTop: 8, lineHeight: 13 }}>
               {'Sent straight from your wallet to the dev. KasVillage never holds or fees it. Never send KAS to an address typed inside a game or page \u2014 only through sheets like this one.'}
             </Text>
             <View style={{ flexDirection: 'row', marginTop: 14, gap: 8 }}>
               <TouchableOpacity onPress={() => setTipT(null)} disabled={tipBusy}
-                style={{ flex: 1, paddingVertical: 11, borderRadius: 9, borderColor: '#444', borderWidth: 1, alignItems: 'center' }}>
+                style={{ flex: 1, paddingVertical: 11, borderRadius: 8, borderColor: '#444', borderWidth: 1, alignItems: 'center' }}>
                 <Text style={{ color: '#aaa', fontWeight: '700', fontSize: 12 }}>CANCEL</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={doTip} disabled={tipBusy}
-                style={{ flex: 2, paddingVertical: 11, borderRadius: 9, backgroundColor: tipBusy ? '#555' : '#7c3aed', alignItems: 'center' }}>
+                style={{ flex: 2, paddingVertical: 11, borderRadius: 8, backgroundColor: tipBusy ? '#555' : '#7c3aed', alignItems: 'center' }}>
                 <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>{tipBusy ? 'SENDING\u2026' : 'SEND TIP'}</Text>
               </TouchableOpacity>
             </View>
@@ -1904,7 +1904,7 @@ export default function VillageMailbox() {
           ); })() : null}
           <Text style={{ position: 'absolute', top: 70, alignSelf: 'center', color: '#fff', fontWeight: '700', fontSize: 16 }}>Point at the cold-key QR</Text>
           <TouchableOpacity onPress={() => setColdScan(null)} style={{ position: 'absolute', bottom: 50, alignSelf: 'center', backgroundColor: '#fff', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 32 }}>
-            <Text style={{ fontWeight: '700', fontSize: 15 }}>Cancel</Text>
+            <Text style={{ fontWeight: '700', fontSize: 14 }}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -1913,7 +1913,7 @@ export default function VillageMailbox() {
           <View style={{ backgroundColor: COLORS.cardBg, borderRadius: rs.s(20), padding: rs.s(18), maxHeight: '88%' }}>
             {gameView && (
               <View>
-                <Text style={{ fontSize: rs.font(19), fontWeight: '900', color: COLORS.stone900, textAlign: 'center' }}>{gameView.name}</Text>
+                <Text style={{ fontSize: rs.font(18), fontWeight: '900', color: COLORS.stone900, textAlign: 'center' }}>{gameView.name}</Text>
                 <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, textAlign: 'center', marginTop: 2, marginBottom: rs.s(12) }}>
                   descriptor {gameView.hash.slice(0, 16)}... on Kaspa L1
                 </Text>
@@ -1957,7 +1957,7 @@ export default function VillageMailbox() {
                         } catch (e: any) { setGameView(g => g ? { ...g, loading: false, error: String(e?.message || e) } : g); }
                       })();
                     }} style={{ backgroundColor: COLORS.indigo600, borderRadius: rs.s(12), paddingVertical: rs.s(14), paddingHorizontal: rs.s(36) }}>
-                      <Text style={{ color: '#fff', fontWeight: '900', fontSize: rs.font(15) }}>Generate Game</Text>
+                      <Text style={{ color: '#fff', fontWeight: '900', fontSize: rs.font(14) }}>Generate Game</Text>
                     </TouchableOpacity>
                     <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, marginTop: rs.s(8), textAlign: 'center' }}>
                       Fetches the descriptor from Kaspa L1, verifies its hash, and renders it locally.
@@ -2226,7 +2226,7 @@ export default function VillageMailbox() {
                         <View style={{ width: rs.s(38), height: rs.s(38), borderRadius: logoRound ? rs.s(19) : rs.s(9), backgroundColor: swatch(cfg?.brandName || storeView.entry.storeName), justifyContent: 'center', alignItems: 'center' }}>
                           <Text style={{ fontSize: rs.font(16), fontWeight: '900', color: '#fff' }}>{brandInitial}</Text>
                         </View>
-                        <Text style={{ fontSize: rs.font(21), fontWeight: fstyle.weight as any, letterSpacing: fstyle.spacing, textTransform: fstyle.transform as any, color: fg }}>{cfg?.brandName || storeView.entry.storeName}</Text>
+                        <Text style={{ fontSize: rs.font(20), fontWeight: fstyle.weight as any, letterSpacing: fstyle.spacing, textTransform: fstyle.transform as any, color: fg }}>{cfg?.brandName || storeView.entry.storeName}</Text>
                       </View>
                       {cfg?.storeDescription ? <Text style={{ fontSize: rs.font(11), color: fg, opacity: 0.85, marginTop: rs.s(6), textAlign: 'center' }} numberOfLines={2}>{cfg.storeDescription}</Text> : null}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: rs.s(6), marginTop: rs.s(8) }}>

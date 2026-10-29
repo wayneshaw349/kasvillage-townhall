@@ -1666,13 +1666,13 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
           const net = netPos.theyOwe - netPos.iOwe;
           const kas = (Number(net < 0n ? -net : net) / 1e8).toFixed(2);
           return (
-            <View style={{ backgroundColor: '#e8837d', borderRadius: 14, marginHorizontal: 16, marginTop: 10, padding: 14 }}>
+            <View style={{ backgroundColor: '#e8837d', borderRadius: 12, marginHorizontal: 16, marginTop: 10, padding: 14 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ color: '#232a4d', fontWeight: 'bold', fontSize: 14 }}>IOU CARD</Text>
                 <Text style={{ color: '#232a4d', fontWeight: 'bold', fontSize: 12 }}>KasVillage</Text>
               </View>
-              <View style={{ width: 34, height: 26, borderRadius: 5, backgroundColor: '#f4c84a', marginTop: 10, borderWidth: 1, borderColor: '#caa32e' }} />
-              <Text style={{ color: '#232a4d', fontSize: 20, fontWeight: 'bold', letterSpacing: 2, marginTop: 8, fontVariant: ['tabular-nums'] }}>
+              <View style={{ width: 34, height: 26, borderRadius: 4, backgroundColor: '#f4c84a', marginTop: 10, borderWidth: 1, borderColor: '#caa32e' }} />
+              <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: '#232a4d', fontSize: 20, fontWeight: 'bold', letterSpacing: 2, marginTop: 8, fontVariant: ['tabular-nums'] }}>
                 {sm ? '₭ ••••' : (net === 0n ? '₭ 0.00 · even' : (net > 0n ? '₭ ' + kas + ' owed to you' : '₭ ' + kas + ' you owe'))}
               </Text>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 6 }}>
@@ -1744,7 +1744,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
             <><Text style={styles.empty}>No IOUs yet</Text>
             <Text style={{ color: '#888', fontSize: 12, marginTop: 8, textAlign: 'center' }}>Create a FROST 2-of-2 collateral wallet with your counterparty, then issue IOUs backed by locked KAS.</Text>
             {/* FROST Address Input */}
-            <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 10, padding: 14 }}>
+            <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 12, padding: 14 }}>
               <Text style={{ color: '#D4AF37', fontWeight: 'bold', fontSize: 13, marginBottom: 8 }}>FROST 2-of-2 Collateral</Text>
               <Text style={{ color: '#888', fontSize: 11, marginBottom: 8 }}>Enter your shared FROST escrow address to track collateral and issue IOUs.</Text>
               <TextInput value={frostAddr} onChangeText={setFrostAddr} placeholder="kaspa:... or kaspatest:..." placeholderTextColor="#555" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 13, borderWidth: 1, borderColor: '#333', fontFamily: 'monospace' }} />
@@ -1761,7 +1761,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
             </View>
 
             {pendingIOU && (
-              <View style={{ marginTop: 12, backgroundColor: '#3a2a1a', borderRadius: 10, padding: 14, borderWidth: 1, borderColor: '#D4AF37' }}>
+              <View style={{ marginTop: 12, backgroundColor: '#3a2a1a', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#D4AF37' }}>
                 <Text style={{ color: '#D4AF37', fontWeight: 'bold', fontSize: 13 }}>Pending IOU — awaiting signed acceptance</Text>
                 <Text style={{ color: '#fff', fontSize: 14, marginTop: 4 }}>{pendingIOU.amount} KAS held</Text>
                 <Text style={{ color: '#888', fontSize: 11, marginTop: 2 }}>Auto-releases {new Date(pendingIOU.created + pendingIOU.expiresMs).toLocaleString()}</Text>
@@ -1771,7 +1771,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
               </View>
             )}
             {/* Active IOUs */}
-            <TouchableOpacity onPress={() => setShowActive(!showActive)} style={{ marginTop: 12, backgroundColor: '#1a1a2e', padding: 12, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <TouchableOpacity onPress={() => setShowActive(!showActive)} style={{ marginTop: 12, backgroundColor: '#1a1a2e', padding: 12, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={{ color: '#D4AF37', fontWeight: 'bold', fontSize: 13 }}>Active IOUs</Text>
               <Text style={{ color: '#888', fontSize: 12 }}>{showActive ? 'Hide' : 'Show'}</Text>
             </TouchableOpacity>
@@ -1785,16 +1785,16 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
                     <Text style={{ color: '#888', fontSize: 11 }}>{pi.status === 'awaiting_acceptance' ? 'Awaiting acceptance' : pi.role === 'recipient' ? ('Accepted — awaiting payment from ' + (pi.fromName || 'issuer')) : ('Accepted by ' + (pi.counterName || 'recipient'))}</Text>
                     {pi.desc ? <Text style={{ color: '#666', fontSize: 11 }}>{pi.desc}</Text> : null}
                     {pi.role === 'issuer' && pi.status === 'accepted' && pi.counterAddr ? (
-                      <TouchableOpacity onPress={async () => { try { if (!isValidProposalAmount(pi.amountSompi)) throw new Error('Invalid settle amount (must be at least 600 sompi) - nothing sent'); /* KV_IOU_AMOUNT_GUARD */ const amt = BigInt(pi.amountSompi); const network = await currentNetwork(); const creds = await getWalletCredentials(); if (!creds) throw new Error('Wallet not initialized'); const r = await sendKaspaViaRest({ senderAddress: creds.address, privateKeyHex: creds.privkey, recipientAddress: pi.counterAddr, amountSompi: amt, network, payload: _p2hex('KV-IOU-SETTLE:prop_' + pi.nonce) } as any); if (!r || !r.success) throw new Error(r?.error || 'Send failed'); try { await releaseIOU('prop_' + pi.nonce); } catch {} await removePropIOU(pi.nonce); Alert.alert('Settled', 'Paid ' + (Number(amt) / 1e8).toFixed(4) + ' KAS. TX: ' + (r.txId || '').slice(0, 16)); } catch (e: any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 6, backgroundColor: '#27AE60', padding: 8, borderRadius: 6, alignItems: 'center' }}>
+                      <TouchableOpacity onPress={async () => { try { if (!isValidProposalAmount(pi.amountSompi)) throw new Error('Invalid settle amount (must be at least 600 sompi) - nothing sent'); /* KV_IOU_AMOUNT_GUARD */ const amt = BigInt(pi.amountSompi); const network = await currentNetwork(); const creds = await getWalletCredentials(); if (!creds) throw new Error('Wallet not initialized'); const r = await sendKaspaViaRest({ senderAddress: creds.address, privateKeyHex: creds.privkey, recipientAddress: pi.counterAddr, amountSompi: amt, network, payload: _p2hex('KV-IOU-SETTLE:prop_' + pi.nonce) } as any); if (!r || !r.success) throw new Error(r?.error || 'Send failed'); try { await releaseIOU('prop_' + pi.nonce); } catch {} await removePropIOU(pi.nonce); Alert.alert('Settled', 'Paid ' + (Number(amt) / 1e8).toFixed(4) + ' KAS. TX: ' + (r.txId || '').slice(0, 16)); } catch (e: any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 6, backgroundColor: '#27AE60', padding: 8, borderRadius: 8, alignItems: 'center' }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>{'\u{1F4B8}'} Pay & Settle</Text>
                       </TouchableOpacity>
                     ) : null}
                     {pi.role === 'issuer' ? (
-                      <TouchableOpacity onPress={async () => { try { try { await releaseIOU('prop_' + pi.nonce); } catch {} await removePropIOU(pi.nonce); Alert.alert('Cancelled', 'IOU cancelled — lock freed.'); } catch (e: any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 6, backgroundColor: '#333', padding: 8, borderRadius: 6, alignItems: 'center' }}>
+                      <TouchableOpacity onPress={async () => { try { try { await releaseIOU('prop_' + pi.nonce); } catch {} await removePropIOU(pi.nonce); Alert.alert('Cancelled', 'IOU cancelled — lock freed.'); } catch (e: any) { Alert.alert('Error', e.message); } }} style={{ marginTop: 6, backgroundColor: '#333', padding: 8, borderRadius: 8, alignItems: 'center' }}>
                         <Text style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: 12 }}>{'\u2715'} Cancel</Text>
                       </TouchableOpacity>
                     ) : (
-                      <TouchableOpacity onPress={() => removePropIOU(pi.nonce)} style={{ marginTop: 6, backgroundColor: '#333', padding: 8, borderRadius: 6, alignItems: 'center' }}>
+                      <TouchableOpacity onPress={() => removePropIOU(pi.nonce)} style={{ marginTop: 6, backgroundColor: '#333', padding: 8, borderRadius: 8, alignItems: 'center' }}>
                         <Text style={{ color: '#888', fontSize: 12 }}>Dismiss (paid / void)</Text>
                       </TouchableOpacity>
                     )}
@@ -1804,15 +1804,15 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
             )}
 
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
-              <TouchableOpacity onPress={() => setNewIOUMode('send')} style={{ flex: 1, backgroundColor: '#D4AF37', padding: 14, borderRadius: 10, alignItems: 'center' }}>
-                <Text style={{ color: '#000', fontWeight: 'bold', fontSize: 15 }}>New IOU</Text>
+              <TouchableOpacity onPress={() => setNewIOUMode('send')} style={{ flex: 1, backgroundColor: '#D4AF37', padding: 14, borderRadius: 12, alignItems: 'center' }}>
+                <Text style={{ color: '#000', fontWeight: 'bold', fontSize: 14 }}>New IOU</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setNewIOUMode('receive')} style={{ flex: 1, backgroundColor: '#49d6aa20', padding: 14, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#49d6aa' }}>
-                <Text style={{ color: '#49d6aa', fontWeight: 'bold', fontSize: 15 }}>Receive IOU</Text>
+              <TouchableOpacity onPress={() => setNewIOUMode('receive')} style={{ flex: 1, backgroundColor: '#49d6aa20', padding: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#49d6aa' }}>
+                <Text style={{ color: '#49d6aa', fontWeight: 'bold', fontSize: 14 }}>Receive IOU</Text>
               </TouchableOpacity>
             </View>
             {newIOUMode === 'send' && (
-              <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 10, padding: 14 }}>
+              <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 12, padding: 14 }}>
                 <Text style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>Amount (KAS)</Text>
                 <TextInput value={proposalAmount} onChangeText={setProposalAmount} placeholder="0.00" placeholderTextColor="#555" keyboardType="decimal-pad" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 16, borderWidth: 1, borderColor: '#333' }} />
                 <Text style={{ color: '#888', fontSize: 12, marginTop: 10, marginBottom: 8 }}>Description</Text>
@@ -1834,7 +1834,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
               </View>
             )}
             {newIOUMode === 'receive' && (
-              <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 10, padding: 14 }}>
+              <View style={{ marginTop: 16, backgroundColor: '#1a1a2e', borderRadius: 12, padding: 14 }}>
                 <Text style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>Paste proposal from sender</Text>
                 <TextInput value={pasteInput} onChangeText={setPasteInput} placeholder="Paste proposal here..." placeholderTextColor="#555" multiline style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: 10, borderRadius: 8, fontSize: 12, borderWidth: 1, borderColor: '#333', minHeight: 80 }} />
                 <TouchableOpacity onPress={async () => { try { if (/kv1a:/.test(pasteInput)) { const acc = decodeAcceptance(pasteInput.trim()); if (!acc) throw new Error('Invalid acceptance'); if (await require('./proposal_share').kvIsClosedIOU(acc.proposal.nonce)) throw new Error('This IOU was already settled or cancelled'); /* KV_IOU_CLOSED */ const va = verifyAcceptance(acc); if (!va.valid) throw new Error(va.error || 'Acceptance failed verification'); const myPk = (await SecureStore.getItemAsync('kv_public_key')) || ''; if (!myPk.startsWith(acc.proposal.from)) throw new Error('This acceptance is not for your proposal'); setIncomingAcceptance(acc); setIncomingProposal(null); await upsertPropIOU({ nonce: acc.proposal.nonce, role: 'issuer', status: 'accepted', amountSompi: String(acc.proposal.amount || '0'), desc: acc.proposal.desc || '', counterName: acc.counterName || '', counterAddr: acc.counterAddr || '', counterPubkey: acc.counterPubkey || '', accepted: Date.now() }); Alert.alert('Acceptance Verified', 'Signed by ' + (acc.counterName || acc.counterPubkey.slice(0,12)) + ' - Pay & Settle or Cancel below.'); return; } const d = decodeProposal(pasteInput.trim()); if(!d) throw new Error('Invalid proposal'); const v = await verifyProposal(d); setIncomingProposal(d); setProposalVerified(v.valid); } catch(e:any) { Alert.alert('Invalid', e.message); } }} disabled={!pasteInput.trim()} style={{ marginTop: 12, backgroundColor: '#49d6aa', padding: 12, borderRadius: 8, alignItems: 'center', opacity: !pasteInput.trim() ? 0.5 : 1 }}>
@@ -1922,7 +1922,7 @@ const styles = StyleSheet.create({
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   title: { fontSize: rs(20), fontWeight: 'bold', color: '#fff' },
   x: { fontSize: rs(24), color: '#888' },
-  badge: { backgroundColor: '#e74c3c', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginRight: 8 },
+  badge: { backgroundColor: '#e74c3c', borderRadius: 12, paddingHorizontal: 6, paddingVertical: 2, marginRight: 8 },
   badgeText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
   content: { flex: 1, padding: rs(16) },
   
