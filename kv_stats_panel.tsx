@@ -302,9 +302,34 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
               </Text>
             </View>
           ) : null}
-          <TouchableOpacity onPress={load} disabled={busy} style={{ borderWidth: 1, borderColor: C.pink, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginVertical: 10 }}>
-            <Text style={{ color: C.pink, fontWeight: 'bold' }}>↻ Re-derive from chain</Text>
-          </TouchableOpacity>
+          {/* KV_KEYBOARD: the terminal's keyboard. Spacebar re-derives; ESC closes. */}
+          {(() => {
+            const cap = { backgroundColor: '#241f18', borderWidth: 1, borderColor: '#3a3128', borderRadius: 4, margin: 2, flex: 1, alignItems: 'center' as const, paddingVertical: 7 };
+            const leg = { color: '#b8ab92', fontSize: 9, fontFamily: 'monospace' as const };
+            const Key = ({ k, onPress, pink, flex }: any) => (
+              <TouchableOpacity disabled={!onPress} onPress={onPress} style={[cap, flex ? { flex } : null, pink ? { borderColor: C.pink } : null]}>
+                <Text style={[leg, pink ? { color: C.pink } : null]}>{k}</Text>
+              </TouchableOpacity>
+            );
+            const row = (keys: string[]) => (
+              <View style={{ flexDirection: 'row' }}>
+                {keys.map((k) => k === 'ESC' ? <Key key={k} k="ESC" onPress={onClose} pink /> : k === '↻' ? <Key key={k} k="↻" onPress={load} pink /> : <Key key={k} k={k} />)}
+              </View>
+            );
+            return (
+              <View style={{ backgroundColor: '#12100c', borderWidth: 1, borderColor: '#4a3f2e', borderRadius: 10, padding: 6, marginVertical: 10 }}>
+                {row(['ESC', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'])}
+                {row(['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'])}
+                {row(['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', '↻'])}
+                {row(['☯', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '₭'])}
+                <View style={{ flexDirection: 'row' }}>
+                  <Key k="FN" /><Key k="ALT" />
+                  <Key k={busy ? '· · · DERIVING · · ·' : '↻  RE-DERIVE FROM CHAIN'} onPress={load} pink flex={5} />
+                  <Key k="ALT" /><Key k="FN" />
+                </View>
+              </View>
+            );
+          })()}
           <View style={{ height: 40 }} />
         </ScrollView>
       </View>
