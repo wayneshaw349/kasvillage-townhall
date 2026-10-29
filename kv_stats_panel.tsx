@@ -2,7 +2,7 @@
 // dual-signed records; nothing self-reported, so a dev can show real engagement
 // (keeps cost KAS; sales are co-signed escrow deals; bots must fund real wallets).
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, TextInput, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const C = { bg: '#0a0a0a', card: '#1a1a2e', gold: '#D4AF37', pink: '#ec4899', indigo: '#818cf8', text: '#fff', mut: '#888', line: '#333', green: '#10B981' };
@@ -156,6 +156,38 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
   let sm = false; try { sm = require('./streamer_mode').isStreamer(); } catch {}
   const kasTxt = (n: number) => (sm ? '••• KAS' : n.toFixed(2) + ' KAS');
   const age = (t: number) => (!t ? 'never' : Math.max(1, Math.round((Date.now() - t) / 3600000)) + 'h ago');
+
+  // KV_EXPORT: the numbers that count, exportable - for presenting to a buyer, partner or lender.
+  // Real figures (ignores streamer masking - exporting IS disclosure), split verified vs self-reported.
+  const exportReport = async () => {
+    try {
+      let pub = ''; try { const SS = require('expo-secure-store'); pub = (await SS.getItemAsync('kv_public_key')) || (await SS.getItemAsync('kaspa_pubkey')) || ''; } catch {}
+      let usdPer = 0; try { const p: any = require('./kas_price_feed').getKasPrice(); usdPer = Number((p && p.usdPerKas) || 0); } catch {}
+      const P = kvPnl(usdPer > 0 ? rev30 * usdPer : 0, costs);
+      const usd = (n: number) => (usdPer > 0 ? '$' + n.toFixed(0) : 'n/a');
+      const L: string[] = [];
+      L.push('KASVILLAGE — VERIFIED BUSINESS REPORT');
+      L.push(new Date().toISOString().slice(0, 10) + ' · network: ' + require('./kv_net').KV_NET);
+      if (pub) L.push('owner pubkey: ' + pub);
+      L.push('');
+      L.push('== VERIFIED ON-CHAIN (anyone can re-derive these from Kaspa L1) ==');
+      if (sales) {
+        L.push('Sales (dual-signed escrow deals): ' + sales.deals + ' completed · ' + sales.buyers + ' distinct buyers · ' + sales.kasIn.toFixed(2) + ' KAS received' + (usdPer > 0 ? ' (~' + usd(sales.kasIn * usdPer) + ')' : ''));
+        sales.top.forEach((it, i) => L.push('  ' + (i + 1) + '. ' + it.label + ' — ' + it.n + '× · ' + it.kas.toFixed(2) + ' KAS'));
+      }
+      L.push('30-day revenue run-rate: ' + rev30.toFixed(2) + ' KAS' + (usdPer > 0 ? ' (~' + usd(rev30 * usdPer) + '/mo)' : ''));
+      for (const g of (games || [])) L.push('Project ' + g.id + ': ' + g.keeps + ' keeps · ' + g.keepers + ' distinct keepers · pledge ' + (g.pledgeKas > 0 ? g.pledgeKas.toFixed(1) + ' KAS in place' : 'none'));
+      if (circ && circ.n > 0) L.push('Circularity: ' + Math.round(circ.pct * 100) + '% of spent KAS stayed in the village economy');
+      if (kpp && kpp.n > 0) L.push('Village avg Kaspa discount: ' + Math.round(kpp.avg * 100) + '% across ' + kpp.n + ' live listings');
+      L.push('');
+      L.push('== SELF-REPORTED (owner\u2019s own books - not chain-verified) ==');
+      L.push('Monthly costs: ' + usd(P.monthly) + (P.cogs > 0 ? ' + ' + Math.round(P.cogs * 100) + '% cost of goods' : ''));
+      L.push('Expected profit: ' + usd(P.expected) + '/mo · crypto-winter floor (KAS -85%, sales -15%): ' + usd(P.winterFloor) + '/mo · break-even: ' + usd(P.breakEvenRev) + '/mo in sales');
+      L.push('');
+      L.push('HOW TO VERIFY: in any KasVillage wallet, Phone Proof -> enter the owner pubkey above; every deal is a co-signed, re-fetchable Kaspa transaction. Dual-signed evidence bundle available from the owner on request.');
+      await Share.share({ message: L.join('\n') });
+    } catch (e: any) { setErr(String(e?.message || e)); }
+  };
 
   if (!visible) return null;
   return (
@@ -334,7 +366,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                 <View style={{ flexDirection: 'row' }}>
                   <Key k="FN" /><Key k="ALT" />
                   <Key k={busy ? '· · · DERIVING · · ·' : '↻  RE-DERIVE FROM CHAIN'} onPress={load} pink flex={5} />
-                  <Key k="ALT" /><Key k="FN" />
+                  <Key k="ALT" /><Key k="⎙PRT" onPress={exportReport} pink />
                 </View>
               </View>
             );
