@@ -318,14 +318,15 @@ export const SendKAS: React.FC<SendKASProps> = ({
   useEffect(() => {
     (async () => {
       try {
-        const [v, h, fr] = await Promise.all([
-          SecureStore.getItemAsync('kv_vault_address'),
+        const _va = require('./kv_vault_active'); // KV_VAULT_ACTIVE: vault addresses follow the toggle
+        const [v, h, frv] = await Promise.all([
+          _va.kvVaultAddrActive(),
           SecureStore.getItemAsync('kv_kaspa_address'),
-          SecureStore.getItemAsync('kv_frost_vault_address'),
+          _va.kvFrostVaultActive(),
         ]);
-        setVaultAddr(v);
+        setVaultAddr(v || null);
         setHotAddr(h);
-        setFrostAddr(fr);
+        setFrostAddr(frv ? frv.address : null);
       } catch {}
     })();
   }, [visible]);

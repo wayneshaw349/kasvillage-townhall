@@ -39,8 +39,7 @@ export const KV_FROST_VAULT_ADDR_KEY = 'kv_frost_vault_address';
 /** Load the stored FROST vault (null if none). */
 export async function loadFrostVault(): Promise<VaultInfo | null> {
   try {
-    const raw = await SecureStore.getItemAsync(KV_FROST_VAULT_KEY);
-    return raw ? (JSON.parse(raw) as VaultInfo) : null;
+    return (await require('./kv_vault_active').kvFrostVaultActive()) as VaultInfo | null; // KV_VAULT_ACTIVE
   } catch { return null; }
 }
 

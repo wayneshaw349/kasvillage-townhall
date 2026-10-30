@@ -895,13 +895,18 @@ async function sendKASFromVault(
     const { mnemonicToSeedV2: mnemonicToSeed, deriveKaspaHDKeyV2: deriveKaspaHDKey } = await import('./bip39_v2');
     const { previewAddressFromMnemonic } = await import('./wallet_registration_v2');
 
+    // KV_VAULT_ACTIVE: spend on the network the toggle is on; the vault key is the same on both
+    const network: KaspaNetwork = require('./kv_vault_active').kvActiveNet();
     const storedVaultAddr = (await SecureStore.getItemAsync('kv_vault_address')) || '';
-    const network: KaspaNetwork = storedVaultAddr.startsWith('kaspa:') ? 'mainnet' : 'testnet-10';
+    const storedVaultPub = (await SecureStore.getItemAsync('kv_vault_pubkey')) || '';
 
     const preview = await previewAddressFromMnemonic(mnemonic, network);
     if (!preview) return { success: false, error: 'Vault key derivation failed' };
-    if (storedVaultAddr && preview.address !== storedVaultAddr) {
-      return { success: false, error: 'Vault key does not match stored vault address. Re-scan cards.' };
+    const _sameKey = storedVaultPub
+      ? preview.publicKeyHex.toLowerCase() === storedVaultPub.toLowerCase()
+      : (!storedVaultAddr || preview.address === storedVaultAddr);
+    if (!_sameKey) {
+      return { success: false, error: 'Vault key does not match stored vault. Re-scan cards.' };
     }
 
     const seed = await mnemonicToSeed(mnemonic, '');

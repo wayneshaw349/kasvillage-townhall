@@ -70,7 +70,7 @@ export function ReceiveScreen({ visible, onClose, myAddress }: ReceiveScreenProp
     if (!visible) return;
     (async () => {
       const addr = myAddress || await SecureStore.getItemAsync(SECURESTORE_KEYS.KASPA_ADDRESS);
-      try { setVaultAddr(await SecureStore.getItemAsync('kv_vault_address')); } catch {}
+      try { setVaultAddr((await require('./kv_vault_active').kvVaultAddrActive()) || null); } catch {} // KV_VAULT_ACTIVE
       if (addr) {
         setAddress(addr);
       // balance now loaded by toggle-aware effect below

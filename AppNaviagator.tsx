@@ -1460,9 +1460,13 @@ export const AppNavigator: React.FC = () => {
               const { previewAddressFromMnemonic } = await import('./wallet_registration_v2');
               const preview = await previewAddressFromMnemonic(mnemonic, net);
               const vaultAddr = (await SecureStore.getItemAsync('kv_vault_address')) || '';
+              const vaultPub = (await SecureStore.getItemAsync('kv_vault_pubkey')) || '';
               console.log('[Restore] VAULT-ROUTE preview:', preview?.address?.slice(0, 22) || 'none',
                 'vault:', vaultAddr.slice(0, 22) || 'none');
-              if (preview && vaultAddr && preview.address === vaultAddr) {
+              // KV_VAULT_ACTIVE: match by key, not address - a testnet-era vault has a kaspatest: address
+              const _isVault = !!preview && ((vaultPub && preview.publicKeyHex.toLowerCase() === vaultPub.toLowerCase())
+                || (vaultAddr && preview.address.split(':')[1] === vaultAddr.split(':')[1]));
+              if (preview && _isVault) {
                 await SecureStore.setItemAsync('kv_vault_mnemonic', mnemonic, {
                   keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
                 });
