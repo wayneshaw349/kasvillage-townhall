@@ -36,6 +36,19 @@
   .fx.on { border-color:var(--k); color:var(--k); box-shadow:0 0 10px #ff5ec866; }
   #go { padding:14px; border-radius:12px; border:none; background:var(--k); color:#16110c;
         font-size:17px; font-weight:800; letter-spacing:1px; }
+  #nowLayer { position:fixed; inset:0; pointer-events:none; z-index:4; }
+  .now { position:absolute; width:96px; height:96px; margin:-48px 0 0 -48px; border-radius:50%;
+         display:flex; flex-direction:column; align-items:center; justify-content:center;
+         color:#16110c; font-weight:900; pointer-events:auto; border:3px solid #fff;
+         box-shadow:0 0 22px currentColor; animation:pop .14s ease-out; touch-action:manipulation; }
+  .now b { font-size:22px; letter-spacing:1px; } .now i { font-style:normal; font-size:10px; letter-spacing:1px; }
+  .now.gone { animation:fade .2s forwards; pointer-events:none; }
+  .fb { position:absolute; transform:translate(-50%,-50%); font-weight:900; font-size:18px; color:#fff;
+        text-shadow:0 0 10px var(--k); animation:rise .7s forwards; pointer-events:none; }
+  #score { text-align:center; font-weight:800; letter-spacing:2px; color:var(--h); min-height:20px; }
+  @keyframes pop { from { transform:scale(.3); } to { transform:scale(1); } }
+  @keyframes fade { to { transform:scale(1.4); opacity:0; } }
+  @keyframes rise { to { transform:translate(-50%,-160%); opacity:0; } }
   #win { position:fixed; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column;
          background:#16110cdd; z-index:5; pointer-events:none; }
   #win.show { display:flex; }
@@ -49,6 +62,7 @@
 <div id="app">
   <h1>TAP BEAT</h1>
   <div id="sub">Tap START, then tap the pads. Your taps join the loop.</div>
+  <div id="score"></div>
   <div id="bar"><div id="fill"></div></div>
   <div id="grid"></div>
   <div class="lbl">DRUMS</div>
@@ -70,7 +84,8 @@
   </div>
   <button id="go">START</button>
 </div>
-<div id="win"><b>VICTORY</b><span>Your beat is looping. Tap START to make a new one.</span></div>
+<div id="nowLayer"></div>
+<div id="win"><b>VICTORY</b><span id="winTxt">Your beat is looping. Tap START to make a new one.</span></div>
 <script>
 (function () {
   'use strict';
@@ -89,6 +104,11 @@
   var ac = null, master, dry, echoSend, echoDelay, echoFb, filt;
   var pattern = {}, step = 0, nextT = 0, timer = null, state = 'idle', t0 = 0, uiTimer = null;
   var echoOn = false, sweepOn = false;
+  var score = 0, perfects = 0, combo = 0;
+  var NAMES = { k: 'KICK', s: 'SNARE', h: 'HAT', c: 'CLAP', b: 'BASS', g: 'GUITAR', v: 'VOICE' };
+  var COLORS = { k: '#ff5ec8', s: '#4ade80', h: '#f4c84a', c: '#60a5fa', b: '#c084fc', g: '#fb923c', v: '#2dd4bf' };
+  var NOW_EVERY = 8;            // a NOW bubble every half bar (8 sixteenths)
+  var NOW_LIFE = 0.75;          // seconds it stays tappable
 
   // ---- grid (built with DOM nodes; 2 rows of 16 = 2 bars) ----
   var grid = document.getElementById('grid'), cells = [];
@@ -117,80 +137,58 @@
     echoFb = ac.createGain(); echoFb.gain.value = 0.42;
     filt.connect(echoSend); echoSend.connect(echoDelay); echoDelay.connect(echoFb); echoFb.connect(echoDelay); echoDelay.connect(master);
   }
-  function noiseBuf(sec) {
-    var b = ac.createBuffer(1, Math.floor(ac.sampleRate * sec), ac.sampleRate), d = b.getChannelData(0);
-    for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    return b;
+  // ---- CHIPTUNE voices: pulse waves, triangle, stepped noise (like old console sound chips) ----
+  var PULSE = {};
+  function pulse(duty) {                         // band-limited pulse wave at a given duty cycle
+    if (PULSE[duty]) return PULSE[duty];
+    var n = 64, re = new Float32Array(n), im = new Float32Array(n);
+    for (var k = 1; k < n; k++) im[k] = (2 / (k * Math.PI)) * Math.sin(k * Math.PI * duty);
+    return (PULSE[duty] = ac.createPeriodicWave(re, im));
   }
-  var NB = null;
-  var DIST = null;
-  function distCurve() {
-    var n = 2048, c = new Float32Array(n);
-    for (var i = 0; i < n; i++) { var x = i * 2 / n - 1; c[i] = (3 + 40) * x * 20 * Math.PI / 180 / (Math.PI + 40 * Math.abs(x)); }
-    return c;
+  var NOISE = {};
+  function chipNoise(hold) {                     // stepped noise: each random value held for `hold` samples
+    if (NOISE[hold]) return NOISE[hold];
+    var b = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.5), ac.sampleRate), d = b.getChannelData(0), v = 0;
+    for (var i = 0; i < d.length; i++) { if (i % hold === 0) v = Math.random() < 0.5 ? -1 : 1; d[i] = v; }
+    return (NOISE[hold] = b);
+  }
+  function tone(type, hz, t, dur, vol, out) {    // one chip oscillator with a stepped volume envelope
+    var o = ac.createOscillator();
+    if (type === 'tri') o.type = 'triangle'; else o.setPeriodicWave(pulse(type));
+    o.frequency.setValueAtTime(hz, t);
+    var e = ac.createGain(); e.gain.setValueAtTime(vol, t);
+    e.gain.setValueAtTime(vol * 0.6, t + dur * 0.5); e.gain.setValueAtTime(0, t + dur);
+    o.connect(e); e.connect(out); o.start(t); o.stop(t + dur + 0.01);
+    return o;
+  }
+  function noise(hold, t, dur, vol, out) {
+    var n = ac.createBufferSource(); n.buffer = chipNoise(hold);
+    var e = ac.createGain(); e.gain.setValueAtTime(vol, t);
+    e.gain.setValueAtTime(vol * 0.5, t + dur * 0.4); e.gain.setValueAtTime(0, t + dur);
+    n.connect(e); e.connect(out); n.start(t); n.stop(t + dur + 0.01);
   }
   function play(v, t, hz) {
-    if (!NB) NB = noiseBuf(0.5);
-    var g = ac.createGain(); g.connect(filt);
-    if (v === 'b') {                               // BASS: saw + sub sine, low-pass, short glide
-      var lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(900, t); lp.frequency.exponentialRampToValueAtTime(180, t + 0.3); lp.Q.value = 8;
-      lp.connect(g);
-      [['sawtooth', 1, 0.35], ['sine', 0.5, 0.6]].forEach(function (w) {
-        var o = ac.createOscillator(); o.type = w[0];
-        o.frequency.setValueAtTime(hz * w[1] * 1.06, t); o.frequency.exponentialRampToValueAtTime(hz * w[1], t + 0.05);
-        var e = ac.createGain(); e.gain.value = w[2]; o.connect(e); e.connect(lp); o.start(t); o.stop(t + 0.42);
-      });
-      g.gain.setValueAtTime(0.9, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
-      return;
-    }
-    if (v === 'g') {                               // GUITAR: power chord (root+5th+octave) through distortion
-      if (!DIST) DIST = distCurve();
-      var ws = ac.createWaveShaper(); ws.curve = DIST; ws.oversample = '4x';
-      var cab = ac.createBiquadFilter(); cab.type = 'lowpass'; cab.frequency.value = 3200;
-      var pre = ac.createGain(); pre.gain.value = 0.5;
-      pre.connect(ws); ws.connect(cab); cab.connect(g);
-      [1, 1.4983, 2].forEach(function (m, i) {
-        var o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz * m; o.detune.value = i ? 6 : -6;
-        o.connect(pre); o.start(t); o.stop(t + 0.6);
-      });
-      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.7, t + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
-      return;
-    }
-    if (v === 'v') {                               // VOICE: chiptune square, vibrato, "ah"/"oh" formant
-      var o = ac.createOscillator(); o.type = 'square'; o.frequency.setValueAtTime(hz, t);
-      var lfo = ac.createOscillator(), dep = ac.createGain(); lfo.frequency.value = 6; dep.gain.value = hz * 0.025;
-      lfo.connect(dep); dep.connect(o.frequency);
-      var vow = (Math.round(hz) % 2) ? [800, 1150] : [500, 900];   // alternate ah / oh
-      var mix = ac.createGain(); mix.gain.value = 0.5;
-      vow.forEach(function (fq) { var bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = fq; bp.Q.value = 5; o.connect(bp); bp.connect(mix); });
-      var body = ac.createGain(); body.gain.value = 0.18; o.connect(body); body.connect(mix);
-      mix.connect(g);
-      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.85, t + 0.03); g.gain.setValueAtTime(0.85, t + 0.22); g.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
-      o.start(t); lfo.start(t); o.stop(t + 0.4); lfo.stop(t + 0.4);
-      return;
-    }
-    if (v === 'k') {
-      var o = ac.createOscillator(); o.type = 'sine';
-      o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.18);
-      g.gain.setValueAtTime(1, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
-      o.connect(g); o.start(t); o.stop(t + 0.4);
-    } else if (v === 's') {
-      var n = ac.createBufferSource(); n.buffer = NB; var hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1200;
-      n.connect(hp); hp.connect(g); g.gain.setValueAtTime(0.42, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
-      var o2 = ac.createOscillator(); o2.type = 'triangle'; o2.frequency.setValueAtTime(190, t);
-      var g2 = ac.createGain(); g2.gain.setValueAtTime(0.3, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-      o2.connect(g2); g2.connect(filt); o2.start(t); o2.stop(t + 0.12); n.start(t); n.stop(t + 0.2);
-    } else if (v === 'h') {
-      var n2 = ac.createBufferSource(); n2.buffer = NB; var hp2 = ac.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 7000;
-      n2.connect(hp2); hp2.connect(g); g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-      n2.start(t); n2.stop(t + 0.06);
-    } else {
-      var bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1500; bp.Q.value = 0.8; bp.connect(g);
-      [0, 0.012, 0.024].forEach(function (off) {
-        var n3 = ac.createBufferSource(); n3.buffer = NB; var e = ac.createGain();
-        e.gain.setValueAtTime(0.8, t + off); e.gain.exponentialRampToValueAtTime(0.001, t + off + 0.09);
-        n3.connect(e); e.connect(bp); n3.start(t + off); n3.stop(t + off + 0.1);
-      });
+    var out = filt;
+    if (v === 'k') {                               // KICK: triangle that drops in pitch
+      var o = tone('tri', 180, t, 0.16, 0.95, out); o.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+    } else if (v === 's') {                        // SNARE: square blip + coarse noise
+      tone(0.5, 220, t, 0.04, 0.35, out); noise(6, t, 0.14, 0.4, out);
+    } else if (v === 'h') {                        // HAT: very short fine noise tick
+      noise(1, t, 0.035, 0.22, out);
+    } else if (v === 'c') {                        // CLAP: three quick noise bursts
+      [0, 0.018, 0.036].forEach(function (o2) { noise(3, t + o2, 0.05, 0.24, out); });
+    } else if (v === 'b') {                        // BASS: triangle, the classic chip bassline
+      var ob = tone('tri', hz * 1.12, t, 0.3, 0.9, out); ob.frequency.setValueAtTime(hz, t + 0.025);
+    } else if (v === 'g') {                        // GUITAR: 12.5% pulse, fast root-5th-octave arpeggio
+      var ratios = [1, 1.4983, 2, 1.4983, 1, 1.4983, 2];
+      ratios.forEach(function (r, i) { tone(0.125, hz * r, t + i * 0.035, 0.035, 0.62, out); });
+    } else if (v === 'v') {                        // VOICE: 25% pulse that slides up into the note, with vibrato
+      var ov = ac.createOscillator(); ov.setPeriodicWave(pulse(0.25));
+      ov.frequency.setValueAtTime(hz * 0.94, t); ov.frequency.linearRampToValueAtTime(hz, t + 0.04);
+      var lfo = ac.createOscillator(), dep = ac.createGain(); lfo.frequency.value = 6.5; dep.gain.value = hz * 0.02;
+      lfo.connect(dep); dep.connect(ov.frequency);
+      var ev = ac.createGain(); ev.gain.setValueAtTime(0.62, t); ev.gain.setValueAtTime(0.5, t + 0.2); ev.gain.setValueAtTime(0, t + 0.36);
+      ov.connect(ev); ev.connect(out); ov.start(t); lfo.start(t); ov.stop(t + 0.37); lfo.stop(t + 0.37);
     }
   }
 
@@ -199,6 +197,7 @@
     while (nextT < ac.currentTime + 0.12) {
       VOICES.forEach(function (v) { var x = pattern[v][step]; if (x) play(v, nextT, x); });
       if (state === 'record' && step % 4 === 0) click(nextT, step % 16 === 0);
+      if (state === 'record' && step % NOW_EVERY === 0) scheduleNow(nextT);
       if (sweepOn) {
         var ph = (step % 16) / 16, f = 400 + 9000 * (0.5 + 0.5 * Math.sin(ph * Math.PI * 2));
         filt.frequency.setTargetAtTime(f, nextT, 0.05);
@@ -226,12 +225,53 @@
     pattern[v][s] = hz; paint();
   }
 
+  // ---- NOW bubbles: pop up somewhere new on the beat; tap to play + record + score ----
+  var layer = document.getElementById('nowLayer');
+  function scheduleNow(beatT) {
+    var delay = Math.max(0, (beatT - ac.currentTime) * 1000);
+    setTimeout(function () { if (state === 'record') spawnNow(beatT); }, delay);
+  }
+  function spawnNow(beatT) {
+    var v = VOICES[Math.floor(Math.random() * VOICES.length)];
+    var W = window.innerWidth, H = window.innerHeight, pad = 60;
+    var x = pad + Math.random() * (W - pad * 2), y = 90 + Math.random() * (H - 180);
+    var el = document.createElement('div'); el.className = 'now';
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.background = COLORS[v]; el.style.color = COLORS[v];
+    var b = document.createElement('b'); b.textContent = 'NOW'; b.style.color = '#16110c';
+    var i = document.createElement('i'); i.textContent = NAMES[v]; i.style.color = '#16110c';
+    el.appendChild(b); el.appendChild(i); layer.appendChild(el);
+    var done = false;
+    function tap(e) {
+      if (e) e.preventDefault(); if (done) return; done = true;
+      var off = Math.abs(ac.currentTime - beatT);
+      var perfect = off < 0.12;
+      combo++; score += perfect ? 3 : 1; if (perfect) perfects++;
+      hit(v);
+      feedback(x, y, perfect ? 'PERFECT' + (combo > 2 ? ' x' + combo : '') : 'GOOD');
+      el.classList.add('gone'); setTimeout(function () { el.remove(); }, 220);
+      showScore();
+    }
+    el.addEventListener('touchstart', tap, { passive: false });
+    el.addEventListener('mousedown', tap);
+    setTimeout(function () {
+      if (!done) { done = true; combo = 0; el.classList.add('gone'); setTimeout(function () { el.remove(); }, 220); }
+    }, NOW_LIFE * 1000);
+  }
+  function feedback(x, y, txt) {
+    var f = document.createElement('div'); f.className = 'fb'; f.textContent = txt;
+    f.style.left = x + 'px'; f.style.top = y + 'px'; layer.appendChild(f);
+    setTimeout(function () { f.remove(); }, 720);
+  }
+  function showScore() { document.getElementById('score').textContent = 'SCORE ' + score + '   PERFECT ' + perfects; }
+
   function start() {
     initAudio(); if (ac.state === 'suspended') ac.resume();
-    clearPattern(); riffAt = { b: 0, g: 0, v: 0 }; step = 0; nextT = ac.currentTime + 0.1; state = 'record'; t0 = Date.now();
+    clearPattern(); riffAt = { b: 0, g: 0, v: 0 }; score = 0; perfects = 0; combo = 0; showScore();
+    while (layer.firstChild) layer.removeChild(layer.firstChild);
+    step = 0; nextT = ac.currentTime + 0.1; state = 'record'; t0 = Date.now();
     document.getElementById('win').classList.remove('show');
     document.getElementById('go').textContent = 'RECORDING...';
-    document.getElementById('sub').textContent = '30 seconds - tap along with the click.';
+    document.getElementById('sub').textContent = '30 seconds - tap the NOW bubbles on the beat, or play the pads.';
     if (timer) clearInterval(timer); timer = setInterval(tick, 25);
     if (uiTimer) clearInterval(uiTimer);
     uiTimer = setInterval(function () {
@@ -243,6 +283,8 @@
   function victory() {
     state = 'loop';
     var taps = 0; VOICES.forEach(function (v) { pattern[v].forEach(function (x) { if (x) taps++; }); });
+    while (layer.firstChild) layer.removeChild(layer.firstChild);
+    document.getElementById('winTxt').textContent = 'Score ' + score + ' · ' + perfects + ' perfect. Your beat is looping - tap START for a new one.';
     document.getElementById('win').classList.add('show');
     document.getElementById('go').textContent = 'START';
     document.getElementById('sub').textContent = taps ? ('Your beat: ' + taps + ' hits, looping.') : 'Silent beat! Tap START and try again.';
