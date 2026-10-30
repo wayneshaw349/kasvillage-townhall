@@ -1190,6 +1190,17 @@ export async function getRegistrationData(): Promise<RegistrationData | null> {
 // USER STATS MANAGEMENT
 // ============================================================================
 
+// KV_NET_SCOPE: reputation is per-network. The relay's tallies are testnet-era and carry no
+// network field, so they only count while the wallet is on testnet (Tutorial). Mainnet stats
+// live under their own cache key and start from zero - trust is earned on the chain it's shown on.
+function __kvStatsNet(): string {
+  return require('./kv_tutorial').kvIsTutorial() ? 'testnet-10' : require('./kv_net').KV_NET;
+}
+function __kvStatsKey(): string {
+  const n = __kvStatsNet();
+  return n === 'testnet-10' ? STORE_KEYS.USER_STATS : STORE_KEYS.USER_STATS + '_' + n;
+}
+
 export async function getUserStats(): Promise<UserStats> {
   // Try TownHall first (cross-references Arweave + L1)
   try {
@@ -1203,8 +1214,9 @@ export async function getUserStats(): Promise<UserStats> {
       });
       if (resp.ok) {
         const stats = await resp.json();
+        if (((stats && stats.network) || 'testnet-10') !== __kvStatsNet()) throw new Error('relay stats are ' + ((stats && stats.network) || 'testnet-10') + ' - skipped for ' + __kvStatsNet()); // KV_NET_SCOPE
         // Cache locally for offline access
-        await AsyncStorage.setItem(STORE_KEYS.USER_STATS, JSON.stringify(stats));
+        await AsyncStorage.setItem(__kvStatsKey(), JSON.stringify(stats));
         console.log('[getUserStats] TownHall returned xp:', stats.xp);
         return stats as UserStats;
       }
@@ -1213,7 +1225,7 @@ export async function getUserStats(): Promise<UserStats> {
     console.warn('[Stats] TownHall unreachable, using local cache');
   }
   // Fallback to local SecureStore cache
-  const statsJson = await AsyncStorage.getItem(STORE_KEYS.USER_STATS);
+  const statsJson = await AsyncStorage.getItem(__kvStatsKey());
   return statsJson ? JSON.parse(statsJson) : createDefaultUserStats();
 }
 
@@ -1224,7 +1236,7 @@ export async function updateUserStats(updates: Partial<UserStats>): Promise<User
     ...updates,
     lastActiveAt: Date.now(),
   };
-  await AsyncStorage.setItem(STORE_KEYS.USER_STATS, JSON.stringify(updated));
+  await AsyncStorage.setItem(__kvStatsKey(), JSON.stringify(updated));
   return updated;
 }
 
