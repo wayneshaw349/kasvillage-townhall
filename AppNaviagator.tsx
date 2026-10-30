@@ -711,6 +711,13 @@ export const AppNavigator: React.FC = () => {
         if (tutorialAddr && !(await SecureStore.getItemAsync('kaspa_address_tutorial'))) {
           await SecureStore.setItemAsync('kaspa_address_tutorial', tutorialAddr);
         }
+        // KV_ACTIVE_ADDR: shared keys follow the active mode from boot onward
+        if (kaspaAddr) {
+          try {
+            await SecureStore.setItemAsync('kaspa_address', kaspaAddr);
+            await SecureStore.setItemAsync('kv_kaspa_address', kaspaAddr);
+          } catch {}
+        }
       if (kaspaAddr) {
         // Auto-detect network from address prefix
         const net = kaspaAddr.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet';
@@ -1034,6 +1041,21 @@ export const AppNavigator: React.FC = () => {
   }, [kaspaAddress, refreshBalance]);
   const [activeMode, setActiveMode] = useState<'tutorial' | 'real'>('tutorial');
 
+  // KV_ACTIVE_ADDR: dozens of screens (Mailbox, Stats, History, sends) read the shared
+  // 'kaspa_address' / 'kv_kaspa_address' keys. Point them at the ACTIVE mode's address so the
+  // whole app follows the toggle. The tutorial address is preserved under its own key first.
+  const __kvSyncActiveAddr = async (addr: string) => {
+    if (!addr) return;
+    try {
+      const cur = (await SecureStore.getItemAsync('kaspa_address')) || '';
+      if (cur.startsWith('kaspatest:') && !(await SecureStore.getItemAsync('kaspa_address_tutorial'))) {
+        await SecureStore.setItemAsync('kaspa_address_tutorial', cur);
+      }
+      await SecureStore.setItemAsync('kaspa_address', addr);
+      await SecureStore.setItemAsync('kv_kaspa_address', addr);
+    } catch (e) { console.warn('[AppNav] active-address sync failed:', e); }
+  };
+
   const switchMode = useCallback(async (newMode: 'tutorial' | 'real') => {
     if (newMode === 'real') {
       const addr = await SecureStore.getItemAsync('kaspa_address_real') || '';
@@ -1048,8 +1070,10 @@ export const AppNavigator: React.FC = () => {
         const mainAddr = kaspaAddressFromXOnly(xOnly, 'kaspa');
         await SecureStore.setItemAsync('kaspa_address_real', mainAddr);
         setKaspaAddress(mainAddr);
+        await __kvSyncActiveAddr(mainAddr);
       } else {
         setKaspaAddress(addr);
+        await __kvSyncActiveAddr(addr);
       }
       setActiveMode('real');
       require('./kv_tutorial').kvSetMode('real'); // KV_TUTORIAL
@@ -1099,6 +1123,7 @@ export const AppNavigator: React.FC = () => {
     } else {
       const addr = await SecureStore.getItemAsync('kaspa_address_tutorial') || await SecureStore.getItemAsync('kaspa_address') || '';
       setKaspaAddress(addr);
+      await __kvSyncActiveAddr(addr);
       setActiveMode('tutorial');
       require('./kv_tutorial').kvSetMode('tutorial'); // KV_TUTORIAL
       await SecureStore.setItemAsync('kaspa_active_mode', 'tutorial');

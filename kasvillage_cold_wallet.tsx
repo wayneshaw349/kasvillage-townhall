@@ -184,7 +184,11 @@ async function loadMainWallet(): Promise<{ privKeyHex: string; address: string; 
   const privKeyHex = await SecureStore.getItemAsync('kv_private_key')
     || await SecureStore.getItemAsync('kasvillage_private_key')
     || '';
-  const address = await SecureStore.getItemAsync('kaspa_address_tutorial')
+  // KV_MODE_SENDER: the sender follows the Dashboard toggle. Real mode spends from the mainnet
+  // address derived on Go Real; tutorial mode keeps the practice wallet (its sends are simulated).
+  const _real = !require('./kv_tutorial').kvIsTutorial();
+  const address = (_real ? await SecureStore.getItemAsync('kaspa_address_real') : null)
+    || await SecureStore.getItemAsync('kaspa_address_tutorial')
     || await SecureStore.getItemAsync('kaspa_address')
     || '';
   if (!privKeyHex || !address) return null;
