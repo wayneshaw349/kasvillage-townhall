@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Tap Beat</title>
+<style>
+  :root { --bg:#16110c; --panel:#221a12; --line:#3a2e20; --ink:#f3e9d8; --mut:#a8987e;
+          --k:#ff5ec8; --s:#4ade80; --h:#f4c84a; --c:#60a5fa; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+              font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
+  #app { max-width:480px; margin:0 auto; padding:14px 14px 20px; display:flex; flex-direction:column; gap:12px; min-height:100%; }
+  h1 { margin:4px 0 0; font-size:22px; letter-spacing:2px; text-align:center; }
+  #sub { text-align:center; color:var(--mut); font-size:13px; min-height:18px; }
+  #bar { height:10px; background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  #fill { height:100%; width:0; background:linear-gradient(90deg,var(--k),var(--h)); transition:width .1s linear; }
+  #grid { display:grid; grid-template-columns:repeat(16,1fr); gap:3px; background:var(--panel);
+          border:1px solid var(--line); border-radius:12px; padding:8px; }
+  .cell { aspect-ratio:1; border-radius:3px; background:#2e2418; }
+  .cell.on-k { background:var(--k); } .cell.on-s { background:var(--s); }
+  .cell.on-h { background:var(--h); } .cell.on-c { background:var(--c); }
+  .cell.now { outline:2px solid #fff; outline-offset:-1px; }
+  #pads { display:grid; grid-template-columns:1fr 1fr; gap:10px; flex:1; min-height:220px; }
+  .pad { border:none; border-radius:16px; font-size:20px; font-weight:800; color:#16110c;
+         letter-spacing:1px; transition:transform .06s, filter .06s; touch-action:manipulation; }
+  .pad:active, .pad.hit { transform:scale(.95); filter:brightness(1.35); }
+  #k { background:var(--k); } #s { background:var(--s); } #h { background:var(--h); } #c { background:var(--c); }
+  #fx { display:flex; gap:8px; }
+  .fx { flex:1; padding:12px 6px; border-radius:10px; border:1px solid var(--line); background:var(--panel);
+        color:var(--ink); font-size:14px; font-weight:700; }
+  .fx.on { border-color:var(--k); color:var(--k); box-shadow:0 0 10px #ff5ec866; }
+  #go { padding:14px; border-radius:12px; border:none; background:var(--k); color:#16110c;
+        font-size:17px; font-weight:800; letter-spacing:1px; }
+  #win { position:fixed; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column;
+         background:#16110cdd; z-index:5; pointer-events:none; }
+  #win.show { display:flex; }
+  #win b { font-size:56px; letter-spacing:6px; color:var(--h);
+           text-shadow:0 0 18px var(--k), 0 0 36px var(--k); animation:pulse .9s ease-in-out infinite alternate; }
+  #win span { margin-top:10px; color:var(--ink); font-size:15px; }
+  @keyframes pulse { from { transform:scale(1); } to { transform:scale(1.08); } }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>TAP BEAT</h1>
+  <div id="sub">Tap START, then tap the pads. Your taps join the loop.</div>
+  <div id="bar"><div id="fill"></div></div>
+  <div id="grid"></div>
+  <div id="pads">
+    <button class="pad" id="k">KICK</button>
+    <button class="pad" id="s">SNARE</button>
+    <button class="pad" id="h">HAT</button>
+    <button class="pad" id="c">CLAP</button>
+  </div>
+  <div id="fx">
+    <button class="fx" id="fxEcho">ECHO</button>
+    <button class="fx" id="fxSweep">SWEEP</button>
+  </div>
+  <button id="go">START</button>
+</div>
+<div id="win"><b>VICTORY</b><span>Your beat is looping. Tap START to make a new one.</span></div>
+<script>
+(function () {
+  'use strict';
+  var BPM = 100, STEPS = 32, ROUND_MS = 30000;
+  var STEP_S = 60 / BPM / 4;                 // sixteenth notes
+  var VOICES = ['k', 's', 'h', 'c'];
+  var ac = null, master, dry, echoSend, echoDelay, echoFb, filt;
+  var pattern = {}, step = 0, nextT = 0, timer = null, state = 'idle', t0 = 0, uiTimer = null;
+  var echoOn = false, sweepOn = false;
+
+  // ---- grid (built with DOM nodes; 2 rows of 16 = 2 bars) ----
+  var grid = document.getElementById('grid'), cells = [];
+  for (var i = 0; i < STEPS; i++) { var d = document.createElement('div'); d.className = 'cell'; grid.appendChild(d); cells.push(d); }
+  function clearPattern() { pattern = {}; VOICES.forEach(function (v) { pattern[v] = new Array(STEPS).fill(false); }); paint(); }
+  function paint() {
+    for (var i = 0; i < STEPS; i++) {
+      var cls = 'cell';
+      for (var j = VOICES.length - 1; j >= 0; j--) if (pattern[VOICES[j]][i]) { cls += ' on-' + VOICES[j]; break; }
+      if (state !== 'idle' && i === (step + STEPS - 1) % STEPS) cls += ' now';
+      cells[i].className = cls;
+    }
+  }
+
+  // ---- audio graph: voices -> filter -> (dry + echo) -> master ----
+  function initAudio() {
+    if (ac) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    ac = new AC();
+    master = ac.createGain(); master.gain.value = 0.9; master.connect(ac.destination);
+    filt = ac.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 18000; filt.Q.value = 6;
+    dry = ac.createGain(); filt.connect(dry); dry.connect(master);
+    echoSend = ac.createGain(); echoSend.gain.value = 0;
+    echoDelay = ac.createDelay(1.0); echoDelay.delayTime.value = STEP_S * 3;
+    echoFb = ac.createGain(); echoFb.gain.value = 0.42;
+    filt.connect(echoSend); echoSend.connect(echoDelay); echoDelay.connect(echoFb); echoFb.connect(echoDelay); echoDelay.connect(master);
+  }
+  function noiseBuf(sec) {
+    var b = ac.createBuffer(1, Math.floor(ac.sampleRate * sec), ac.sampleRate), d = b.getChannelData(0);
+    for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return b;
+  }
+  var NB = null;
+  function play(v, t) {
+    if (!NB) NB = noiseBuf(0.5);
+    var g = ac.createGain(); g.connect(filt);
+    if (v === 'k') {
+      var o = ac.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.18);
+      g.gain.setValueAtTime(1, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      o.connect(g); o.start(t); o.stop(t + 0.4);
+    } else if (v === 's') {
+      var n = ac.createBufferSource(); n.buffer = NB; var hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1200;
+      n.connect(hp); hp.connect(g); g.gain.setValueAtTime(0.7, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      var o2 = ac.createOscillator(); o2.type = 'triangle'; o2.frequency.setValueAtTime(190, t);
+      var g2 = ac.createGain(); g2.gain.setValueAtTime(0.5, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      o2.connect(g2); g2.connect(filt); o2.start(t); o2.stop(t + 0.12); n.start(t); n.stop(t + 0.2);
+    } else if (v === 'h') {
+      var n2 = ac.createBufferSource(); n2.buffer = NB; var hp2 = ac.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 7000;
+      n2.connect(hp2); hp2.connect(g); g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      n2.start(t); n2.stop(t + 0.06);
+    } else {
+      var bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1500; bp.Q.value = 0.8; bp.connect(g);
+      [0, 0.012, 0.024].forEach(function (off) {
+        var n3 = ac.createBufferSource(); n3.buffer = NB; var e = ac.createGain();
+        e.gain.setValueAtTime(0.8, t + off); e.gain.exponentialRampToValueAtTime(0.001, t + off + 0.09);
+        n3.connect(e); e.connect(bp); n3.start(t + off); n3.stop(t + off + 0.1);
+      });
+    }
+  }
+
+  // ---- sequencer (look-ahead scheduling keeps the loop tight) ----
+  function tick() {
+    while (nextT < ac.currentTime + 0.12) {
+      VOICES.forEach(function (v) { if (pattern[v][step]) play(v, nextT); });
+      if (state === 'record' && step % 4 === 0) click(nextT, step % 16 === 0);
+      if (sweepOn) {
+        var ph = (step % 16) / 16, f = 400 + 9000 * (0.5 + 0.5 * Math.sin(ph * Math.PI * 2));
+        filt.frequency.setTargetAtTime(f, nextT, 0.05);
+      }
+      step = (step + 1) % STEPS; nextT += STEP_S;
+    }
+    paint();
+  }
+  function click(t, accent) {
+    var o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = accent ? 1600 : 1100;
+    g.gain.setValueAtTime(0.06, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.04);
+  }
+  // a tap lands on the nearest step of the loop
+  function hit(v) {
+    initAudio(); if (ac.state === 'suspended') ac.resume();
+    play(v, ac.currentTime);
+    var pad = document.getElementById(v); pad.classList.add('hit'); setTimeout(function () { pad.classList.remove('hit'); }, 90);
+    if (state !== 'record') return;
+    var since = ac.currentTime - (nextT - STEP_S);       // time past the step just scheduled
+    var s = (step - 1 + STEPS) % STEPS;
+    if (since > STEP_S / 2) s = step;                      // closer to the next step
+    pattern[v][s] = true; paint();
+  }
+
+  function start() {
+    initAudio(); if (ac.state === 'suspended') ac.resume();
+    clearPattern(); step = 0; nextT = ac.currentTime + 0.1; state = 'record'; t0 = Date.now();
+    document.getElementById('win').classList.remove('show');
+    document.getElementById('go').textContent = 'RECORDING...';
+    document.getElementById('sub').textContent = '30 seconds - tap along with the click.';
+    if (timer) clearInterval(timer); timer = setInterval(tick, 25);
+    if (uiTimer) clearInterval(uiTimer);
+    uiTimer = setInterval(function () {
+      var p = Math.min(1, (Date.now() - t0) / ROUND_MS);
+      document.getElementById('fill').style.width = (p * 100) + '%';
+      if (p >= 1) { clearInterval(uiTimer); victory(); }
+    }, 100);
+  }
+  function victory() {
+    state = 'loop';
+    var taps = 0; VOICES.forEach(function (v) { pattern[v].forEach(function (x) { if (x) taps++; }); });
+    document.getElementById('win').classList.add('show');
+    document.getElementById('go').textContent = 'START';
+    document.getElementById('sub').textContent = taps ? ('Your beat: ' + taps + ' hits, looping.') : 'Silent beat! Tap START and try again.';
+    setTimeout(function () { document.getElementById('win').classList.remove('show'); }, 3500);
+  }
+
+  // ---- input: pads respond on touchstart for low latency ----
+  VOICES.forEach(function (v) {
+    var el = document.getElementById(v);
+    el.addEventListener('touchstart', function (e) { e.preventDefault(); hit(v); }, { passive: false });
+    el.addEventListener('mousedown', function () { hit(v); });
+  });
+  document.getElementById('go').addEventListener('click', function () { if (state !== 'record') start(); });
+  document.getElementById('fxEcho').addEventListener('click', function () {
+    initAudio(); echoOn = !echoOn; this.classList.toggle('on', echoOn);
+    echoSend.gain.setTargetAtTime(echoOn ? 0.45 : 0, ac.currentTime, 0.05);
+  });
+  document.getElementById('fxSweep').addEventListener('click', function () {
+    initAudio(); sweepOn = !sweepOn; this.classList.toggle('on', sweepOn);
+    if (!sweepOn) filt.frequency.setTargetAtTime(18000, ac.currentTime, 0.1);
+  });
+  // keyboard for desktop testing: A S D F
+  document.addEventListener('keydown', function (e) { var m = { a: 'k', s: 's', d: 'h', f: 'c' }[e.key]; if (m) hit(m); });
+  clearPattern();
+})();
+</script>
+</body>
+</html>
