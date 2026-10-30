@@ -188,6 +188,10 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
         console.log('[DashStats] Using balanceSompi fallback:', Number(balanceSompiFallback)/1e8);
       }
 
+      // KV_NET_SCOPE: reputation is per-network. Records carry KV-Network / network fields;
+      // legacy records without one are testnet-era. Mainnet trust must be earned on mainnet -
+      // otherwise testnet XP (free coins, free trust) would display as real reputation.
+      const __expectNet: string = require('./kv_tutorial').kvIsTutorial() ? 'testnet-10' : require('./kv_net').KV_NET;
       // 2) Arweave: frost-agreement stats (direct GraphQL, 8s timeout)
       let agreementsCompleted = 0, deadlocks = 0, pComplete = 0, xp = 0, totalVolumeSompi = 0;
       let totalAgreements = 0;
@@ -220,6 +224,7 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
           for (const e of allEdges) {
             const tags: Record<string, string> = {};
             for (const t of e.node.tags) tags[t.name] = t.value;
+            if ((tags['KV-Network'] || 'testnet-10') !== __expectNet) continue; // KV_NET_SCOPE
             const agrId = tags['KV-AgreementId'] || '';
             const status = tags['KV-Status'] || '';
             const amount = parseInt(tags['KV-Amount'] || '0', 10);
@@ -246,9 +251,11 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
         }
       } catch (e) { console.warn('[DashStats] Arweave error:', e); }
 
-      // Use local XP if Arweave didn't provide it
-      if (xp === 0 && localXp > 0) xp = localXp;
-      if (xp === 0 && xpFallback > 0) xp = xpFallback;
+      // Use local XP if Arweave didn't provide it (legacy local tallies are testnet-era)
+      if (__expectNet === 'testnet-10') { // KV_NET_SCOPE
+        if (xp === 0 && localXp > 0) xp = localXp;
+        if (xp === 0 && xpFallback > 0) xp = xpFallback;
+      }
 
       // ── TownHall Bayesian stats via /user-stats POST (direct Flux endpoint) ──
       const TOWNHALL_STATS_URL = 'https://kasvillage.app.runonflux.io/user-stats';
@@ -275,6 +282,10 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
           if (resp.ok) {
             const ts = await resp.json();
             townhallOnline = true;
+            // KV_NET_SCOPE: the relay's tallies are network-blind today (testnet-era data).
+            // Only merge them when they match this wallet's network; once the relay reports
+            // a 'network' field for mainnet, its stats flow in automatically.
+            if (((ts && ts.network) || 'testnet-10') !== __expectNet) throw new Error('TownHall stats are ' + ((ts && ts.network) || 'testnet-10') + ', wallet is ' + __expectNet + ' - skipped');
             const s = ts.successes || 0;
             const d = ts.deadlocks || 0;
             const n = s + d;
@@ -364,6 +375,7 @@ function useDashboardStats(pubkey?: string, balanceSompiFallback: bigint = 0n, x
           const txs: Array<{ type: string; amountSompi: string; status: string }> = JSON.parse(txJson);
           for (const tx of txs) {
             if (tx.status === 'failed') continue;
+            if (((tx as any).network || 'testnet-10') !== __expectNet) continue; // KV_NET_SCOPE
             const amt = BigInt(tx.amountSompi);
             if (tx.type === 'send') { totalSentSompi += amt; sendCount++; }
             if (tx.type === 'receive') { totalReceivedSompi += amt; receiveCount++; }

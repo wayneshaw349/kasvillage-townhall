@@ -758,7 +758,7 @@ async function getActiveAgreements(): Promise<NeighborAgreement[]> {
 async function storeTransaction(entry: Omit<TransactionHistoryEntry, 'fee'>): Promise<void> {
   const historyJson = await SecureStore.getItemAsync(STORE.TX_HISTORY);
   let history: any[] = historyJson ? JSON.parse(historyJson) : [];
-  history.unshift({ ...entry, amountSompi: entry.amountSompi.toString() });
+  history.unshift({ ...entry, amountSompi: entry.amountSompi.toString(), network: require('./kv_net').KV_NET }); // KV_NET_SCOPE: stats are per-network
   if (history.length > 100) history = history.slice(0, 100);
   await SecureStore.setItemAsync(STORE.TX_HISTORY, JSON.stringify(history));
 }
