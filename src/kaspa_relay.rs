@@ -226,10 +226,59 @@ fn mainnet_urls() -> Vec<String> {
         .unwrap_or_default()
 }
 
+// v73: ONE mainnet connection, kept open and reused. v72 connected per request, so a
+// 67-chunk publish meant 67 resolver lookups, and a node whose resolver pick was flaky
+// failed most of them (502). Testnet keeps its per-request behaviour unchanged.
+static MAINNET_CLIENT: Lazy<tokio::sync::Mutex<Option<KaspaRpcClient>>> =
+    Lazy::new(|| tokio::sync::Mutex::new(None));
+
 async fn connect_client_net(mainnet: bool) -> Result<KaspaRpcClient, String> {
     if !mainnet {
         return connect_client().await;
     }
+    let mut slot = MAINNET_CLIENT.lock().await;
+    if let Some(c) = slot.as_ref() {
+        if c.is_connected() {
+            return Ok(c.clone());
+        }
+        let _ = c.disconnect().await;
+        *slot = None;
+    }
+    let mut last_err = String::new();
+    // each resolver call can pick a different public node: try a few
+    for attempt in 1..=4 {
+        match connect_mainnet_once().await {
+            Ok(c) => { *slot = Some(c.clone()); return Ok(c); }
+            Err(e) => { println!("[KaspaRelay] mainnet connect attempt {} failed: {}", attempt, e); last_err = e; }
+        }
+    }
+    Err(last_err)
+}
+
+/// Return a client after use: testnet clients are per-request (disconnect);
+/// the shared mainnet client stays open.
+async fn release_client(client: KaspaRpcClient, mainnet: bool) {
+    if !mainnet {
+        let _ = client.disconnect().await;
+    }
+}
+
+/// Transport-level failure (not a consensus/mempool verdict on the tx).
+fn is_conn_error(e: &str) -> bool {
+    let l = e.to_ascii_lowercase();
+    !l.contains("rejected") && (l.contains("websocket") || l.contains("not connected")
+        || l.contains("disconnect") || l.contains("timeout") || l.contains("timed out")
+        || l.contains("connection") || l.contains("channel closed") || l.contains("broken pipe"))
+}
+
+async fn reset_mainnet_client() {
+    let mut slot = MAINNET_CLIENT.lock().await;
+    if let Some(c) = slot.take() {
+        let _ = c.disconnect().await;
+    }
+}
+
+async fn connect_mainnet_once() -> Result<KaspaRpcClient, String> {
     let network_id = NetworkId::new(NetworkType::Mainnet);
     let opts = || ConnectOptions {
         block_async_connect: true,
@@ -351,10 +400,11 @@ fn build_rpc_tx(js: &JsTx) -> Result<RpcTransaction, String> {
 }
 
 pub async fn relay_health(nq: web::Query<NetQ>) -> impl Responder {
-    match connect_client_net(is_mainnet(&nq.network)).await {
+    let __kv_m = is_mainnet(&nq.network);
+    match connect_client_net(__kv_m).await {
         Ok(client) => {
             let dag = client.get_block_dag_info().await;
-            let _ = client.disconnect().await;
+            release_client(client, __kv_m).await;
             match dag {
                 Ok(info) => HttpResponse::Ok().json(json!({
                     "ok": true,
@@ -370,6 +420,7 @@ pub async fn relay_health(nq: web::Query<NetQ>) -> impl Responder {
 }
 
 pub async fn submit_tx(body: web::Json<SubmitReq>) -> impl Responder {
+    let __kv_m = is_mainnet(&body.network);
     let rpc_tx = match build_rpc_tx(&body.transaction) {
         Ok(t) => t,
         Err(e) => {
@@ -378,7 +429,7 @@ pub async fn submit_tx(body: web::Json<SubmitReq>) -> impl Responder {
     };
     let allow_orphan = body.allow_orphan.unwrap_or(false);
 
-    let client = match connect_client_net(is_mainnet(&body.network)).await {
+    let client = match connect_client_net(__kv_m).await {
         Ok(c) => c,
         Err(e) => {
             return HttpResponse::BadGateway()
@@ -386,8 +437,33 @@ pub async fn submit_tx(body: web::Json<SubmitReq>) -> impl Responder {
         }
     };
 
-    let res = client.submit_transaction(rpc_tx, allow_orphan).await;
-    let _ = client.disconnect().await;
+    let mut res = client.submit_transaction(rpc_tx.clone(), allow_orphan).await;
+    release_client(client, __kv_m).await;
+
+    // v73: a dropped/stale mainnet connection is not a node verdict. Reconnect once;
+    // if it still can't talk to a node, answer 502 so the app retries elsewhere.
+    if let Err(e) = &res {
+        if __kv_m && is_conn_error(&e.to_string()) {
+            reset_mainnet_client().await;
+            match connect_client_net(true).await {
+                Ok(c2) => {
+                    res = c2.submit_transaction(rpc_tx, allow_orphan).await;
+                    release_client(c2, true).await;
+                }
+                Err(e2) => {
+                    return HttpResponse::BadGateway()
+                        .json(json!({ "error": format!("upstream reconnect failed: {}", e2) }));
+                }
+            }
+            if let Err(e3) = &res {
+                if is_conn_error(&e3.to_string()) {
+                    reset_mainnet_client().await;
+                    return HttpResponse::BadGateway()
+                        .json(json!({ "error": format!("upstream connection lost: {}", e3) }));
+                }
+            }
+        }
+    }
 
     match res {
         Ok(txid) => {
@@ -413,7 +489,8 @@ pub async fn submit_tx(body: web::Json<SubmitReq>) -> impl Responder {
 // blockwalk passthrough — stateless node proxies for client-side indexing.
 // ---------------------------------------------------------------------------
 pub async fn sink_info(nq: web::Query<NetQ>) -> impl Responder {
-    let client = match connect_client_net(is_mainnet(&nq.network)).await {
+    let __kv_m = is_mainnet(&nq.network);
+    let client = match connect_client_net(__kv_m).await {
         Ok(c) => c,
         Err(e) => return HttpResponse::ServiceUnavailable().json(json!({ "error": e })),
     };
@@ -425,7 +502,8 @@ pub async fn sink_info(nq: web::Query<NetQ>) -> impl Responder {
         })),
         Err(e) => HttpResponse::BadGateway().json(json!({ "error": format!("{}", e) })),
     };
-    let _ = client.disconnect().await;
+    release_client(client, __kv_m).await;
+    if __kv_m && out.status().is_server_error() { reset_mainnet_client().await; } // v73: stale conn -> reconnect next call
     out
 }
 
@@ -433,6 +511,7 @@ pub async fn sink_info(nq: web::Query<NetQ>) -> impl Responder {
 pub struct BlocksQ { low_hash: String, daa_max: Option<u64>, txs: Option<u8>, #[serde(default)] network: Option<String> }
 
 pub async fn blocks_page(q: web::Query<BlocksQ>) -> impl Responder {
+    let __kv_m = is_mainnet(&q.network);
     let low = match RpcHash::from_str(&q.low_hash) {
         Ok(h) => h,
         Err(_) => return HttpResponse::BadRequest().json(json!({ "error": "bad low_hash" })),
@@ -441,7 +520,7 @@ pub async fn blocks_page(q: web::Query<BlocksQ>) -> impl Responder {
     // pruning_point -> daa_from with txs=0, then re-requests with txs=1 inside
     // the advertised span. daa_max stops the walk past the span.
     let want_txs = q.txs.unwrap_or(1) != 0;
-    let client = match connect_client_net(is_mainnet(&q.network)).await {
+    let client = match connect_client_net(__kv_m).await {
         Ok(c) => c,
         Err(e) => return HttpResponse::ServiceUnavailable().json(json!({ "error": e })),
     };
@@ -480,7 +559,8 @@ pub async fn blocks_page(q: web::Query<BlocksQ>) -> impl Responder {
         }
         Err(e) => HttpResponse::BadGateway().json(json!({ "error": format!("{}", e) })),
     };
-    let _ = client.disconnect().await;
+    release_client(client, __kv_m).await;
+    if __kv_m && out.status().is_server_error() { reset_mainnet_client().await; } // v73: stale conn -> reconnect next call
     out
 }
 
