@@ -1281,6 +1281,22 @@ const KvChainGamePublish: React.FC = () => {
         const uj = await ur.json();
         const tot = (Array.isArray(uj) ? uj : []).reduce((a: bigint, u: any) => a + BigInt(u.utxoEntry?.amount || u.amount || '0'), 0n);
         gadd('visible UTXOs ' + (Number(tot) / 1e8).toFixed(4) + ' KAS in ' + (Array.isArray(uj) ? uj.length : 0) + ' coins');
+        // KV_PUBLISH_COST: every chunk locks 0.2 KAS at your own slot address (reclaimable via
+        // My Pledges). Count it up front and refuse to start a publish the wallet can't finish -
+        // a half-finished publish strands coins in slots until you reclaim them.
+        {
+          const { estimateHtmlPublishCost } = require('./html_chunks');
+          let _chunks = 0;
+          for (const _f of (entry.bundle.frags || [])) _chunks += estimateHtmlPublishCost(String(_f.text || '')).chunks;
+          _chunks += estimateHtmlPublishCost(JSON.stringify(entry.bundle.manifest || {})).chunks + 2;  // manifest (+ address list)
+          const _lockKas = _chunks * 0.2;
+          const _needKas = _lockKas + _chunks * 0.003 + 1;                                            // fees + 1 KAS headroom
+          gadd('cost: ' + _chunks + ' chunks x 0.2 = ' + _lockKas.toFixed(1) + ' KAS locked (yours, reclaimable in My Pledges) + ~' + (_needKas - _lockKas).toFixed(1) + ' KAS fees/headroom');
+          if (Number(tot) / 1e8 < _needKas) {
+            gadd('NOT ENOUGH KAS: need about ' + _needKas.toFixed(1) + ', wallet has ' + (Number(tot) / 1e8).toFixed(2) + '. Nothing was sent - top up and try again.');
+            setGbusy(''); return;
+          }
+        }
         gadd('ledger locks: collateral ' + (Number(lt.collateral) / 1e8) + ' + IOU ' + (Number(lt.iou) / 1e8) + ' = ' + (Number(lt.total) / 1e8) + ' KAS');
         if (lt.total > 0n) gadd('⚠️ locks > 0 while summary shows 0 -> press RELEASE STALE LOCKS first');
       } catch (pf: any) { gadd('preflight warn: ' + String(pf?.message || pf)); }
