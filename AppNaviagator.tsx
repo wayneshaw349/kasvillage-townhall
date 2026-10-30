@@ -716,6 +716,7 @@ export const AppNavigator: React.FC = () => {
           try {
             await SecureStore.setItemAsync('kaspa_address', kaspaAddr);
             await SecureStore.setItemAsync('kv_kaspa_address', kaspaAddr);
+            await SecureStore.setItemAsync('kaspa_network', kaspaAddr.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet'); // KV_ACTIVE_NET
           } catch {}
         }
       if (kaspaAddr) {
@@ -1053,6 +1054,8 @@ export const AppNavigator: React.FC = () => {
       }
       await SecureStore.setItemAsync('kaspa_address', addr);
       await SecureStore.setItemAsync('kv_kaspa_address', addr);
+      // KV_ACTIVE_NET: escrow derivation, DAA reads and balance checks read this setting
+      await SecureStore.setItemAsync('kaspa_network', addr.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet');
     } catch (e) { console.warn('[AppNav] active-address sync failed:', e); }
   };
 

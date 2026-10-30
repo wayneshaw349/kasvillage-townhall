@@ -2008,10 +2008,9 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
       if (step === 3 && !contract.multisigAddress && contract.buyerPubkey && contract.sellerPubkey) {
         let currentDaa = 0;
         try {
-          const networkStr = await SecureStore.getItemAsync('kaspa_network');
-          const network: KaspaNetwork = (networkStr === 'testnet-10' || networkStr === 'testnet-11') 
-            ? networkStr 
-            : require('./kv_net').KV_NET;
+          // KV_ACTIVE_NET: the escrow lives on the network the wallet is in (Real = mainnet,
+          // Tutorial = testnet). A stale saved 'testnet-10' must never put a mainnet trade in a testnet escrow.
+          const network: KaspaNetwork = require('./kv_vault_active').kvActiveNet();
           
           // Deterministic agreement ID from proposal variables
           const { sha256: sha256Agr } = require('@noble/hashes/sha256');

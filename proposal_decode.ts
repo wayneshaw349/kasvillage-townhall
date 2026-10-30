@@ -12,7 +12,7 @@
 // ============================================================================
 
 /** DAA blocks per minute on Kaspa (1 block/sec * 60). timeoutN = minutes * this. */
-export const DAA_PER_MIN = 3600;
+export const DAA_PER_MIN = 600; // 10 blocks/s (mainnet + testnet-10). Must match NeighborAgreement, which encodes timeoutN = minutes * 600
 
 export type DecodeRole = 'buyer' | 'seller';
 
