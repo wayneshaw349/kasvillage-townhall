@@ -468,7 +468,9 @@ export async function sendKaspaViaRest(params: {
     const _sweepAllCoins = amountSompi === 0n && params.sweepAll === true;
     if (amountSompi < 0n || (amountSompi === 0n && !_sweep)) return { success: false, error: 'Amount too small: ' + amountSompi + ' sompi' };
     if (!_toSelf && amountSompi > 0n && amountSompi < CHANGE_DUST_THRESHOLD) return { success: false, error: 'Amount too small: ' + amountSompi + ' sompi is below the ~600 sompi dust limit' };
-    if (String(recipientAddress).split(':')[0] !== String(senderAddress).split(':')[0]) throw new Error('Wrong network: ' + String(recipientAddress).split(':')[0] + ' address from a ' + String(senderAddress).split(':')[0] + ' wallet'); // KV_ADDR_SAMENET
+    if (String(recipientAddress).split(':')[0] !== String(senderAddress).split(':')[0]) throw new Error(String(recipientAddress).split(':')[0] === 'kaspatest'
+      ? 'That is a TESTNET (practice) address. Real KAS cannot go there - nothing was sent. Use a kaspa: address.'
+      : 'That is a MAINNET address but this wallet is in Tutorial (testnet). Nothing was sent. Go Real on the Dashboard to pay it.'); // KV_ADDR_SAMENET
     // 1. Fetch raw UTXOs from L1 + filter through UTXO ledger
     const resp = await fetch(`${API_BASES[network]}/addresses/${senderAddress}/utxos`);
     if (!resp.ok) throw new Error(`UTXO fetch failed: ${resp.status}`);

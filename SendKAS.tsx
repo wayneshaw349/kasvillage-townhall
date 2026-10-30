@@ -325,7 +325,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
           _va.kvFrostVaultActive(),
         ]);
         setVaultAddr(v || null);
-        setHotAddr(h);
+        setHotAddr(_va.kvActiveNet() === 'mainnet' ? ((await SecureStore.getItemAsync('kaspa_address_real')) || h) : h);
         setFrostAddr(frv ? frv.address : null);
       } catch {}
     })();
@@ -483,6 +483,8 @@ export const SendKAS: React.FC<SendKASProps> = ({
                     { label: 'FROST Vault', addr: frostAddr },
                   ].map(({ label, addr }) => {
                     if (!addr) return null;
+                    // KV_CHIP_SAMENET: never offer a destination on the other network
+                    if (addr.split(':')[0] !== (require('./kv_vault_active').kvActiveNet() === 'mainnet' ? 'kaspa' : 'kaspatest')) return null;
                     const effectiveSender = sendSource === 'vault' ? vaultAddr : myAddress;
                     const isSelf = addr === effectiveSender;
                     return (
