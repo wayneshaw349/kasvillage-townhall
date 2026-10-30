@@ -245,7 +245,7 @@ async function fetchHtmlPageViaWalk(
 ): Promise<{ html: string | null; error?: string }> {
   try {
     if (!coords || !coords.anchor_hash || !coords.daa_to) return { html: null, error: 'no coordinates' };
-    const sink = await (await fetch(KV_PAGE_WALK_RELAY + '/api/kaspa/sink')).json();
+    const sink = await (await fetch(KV_PAGE_WALK_RELAY + '/api/kaspa/sink?' + require('./kv_relay_net').kvRelayNetQ())).json();
     const vdaa = Number(sink.virtual_daa_score || 0);
     const daaTo = Number(coords.daa_to);
     if (vdaa && vdaa - daaTo > 1100000) return { html: null, error: 'publish window (~30h) closed - needs a republish' };
@@ -254,7 +254,7 @@ async function fetchHtmlPageViaWalk(
     let pages = 0, retries = 0;
     while (pages < 450) {
       let page: any;
-      try { page = await (await fetch(KV_PAGE_WALK_RELAY + '/api/kaspa/blocks?low_hash=' + low + '&daa_max=' + (daaTo + 600) + '&txs=1')).json(); }
+      try { page = await (await fetch(KV_PAGE_WALK_RELAY + '/api/kaspa/blocks?' + require('./kv_relay_net').kvRelayNetQ() + '&low_hash=' + low + '&daa_max=' + (daaTo + 600) + '&txs=1')).json(); }
       catch { if (++retries > 20) return { html: null, error: 'walk: node unreachable' }; await new Promise((r) => setTimeout(r, 1500)); continue; }
       pages++;
       for (const b of page.blocks || []) for (const tx of b.txs || []) {

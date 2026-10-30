@@ -179,7 +179,7 @@ async function fetchGameViaWalk(
   manifestAddress?: string, // KV_WALK_PAYTO: manifest txs must pay it (when outputs are exposed)
 ): Promise<{ html: string | null; error?: string }> {
   try {
-    const sink = await (await fetch(KV_WALK_RELAY + '/api/kaspa/sink')).json();
+    const sink = await (await fetch(KV_WALK_RELAY + '/api/kaspa/sink?' + require('./kv_relay_net').kvRelayNetQ())).json();
     const vdaa = Number(sink.virtual_daa_score || 0);
     const daaTo = Number(coords.daa_to);
     if (vdaa && vdaa - daaTo > 1100000) return { html: null, error: 'publish window (~30h) closed - needs a republish' };
@@ -193,7 +193,7 @@ async function fetchGameViaWalk(
     let pages = 0, retries = 0;
     while (pages < 450) {
       let page: any;
-      try { page = await (await fetch(KV_WALK_RELAY + '/api/kaspa/blocks?low_hash=' + low + '&daa_max=' + (daaTo + 600) + '&txs=1')).json(); }
+      try { page = await (await fetch(KV_WALK_RELAY + '/api/kaspa/blocks?' + require('./kv_relay_net').kvRelayNetQ() + '&low_hash=' + low + '&daa_max=' + (daaTo + 600) + '&txs=1')).json(); }
       catch { if (++retries > 20) return { html: null, error: 'walk: node unreachable' }; await new Promise((r) => setTimeout(r, 1500)); continue; }
       pages++;
       for (const b of page.blocks || []) for (const tx of b.txs || []) {
@@ -379,7 +379,7 @@ export async function repostGame(
   };
   try {
     let anchor = '';
-    try { anchor = String((await (await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink')).json()).sink || ''); } catch {}
+    try { anchor = String((await (await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink?' + require('./kv_relay_net').kvRelayNetQ())).json()).sink || ''); } catch {}
     const mc = configToChunkData(JSON.parse(plan.mjson!));
     if (mc.hash !== q.manifestHash) return { success: false, error: 'manifest hash drifted - not reposting' };
     for (let i = 0; i < mc.chunks.length; i++) await send(q.manifestAddress, { seq: i, tot: mc.chunks.length, h: mc.hash, c: mc.chunks[i] });

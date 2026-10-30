@@ -1054,11 +1054,11 @@ export default function VillageMailbox() {
           try {
             const ckRaw = await AS.getItem('kv_reg_checkpoint');
             const ck = ckRaw ? JSON.parse(ckRaw) : null;
-            const sink = await (await fetch(RELAY + '/api/kaspa/sink')).json();
+            const sink = await (await fetch(RELAY + '/api/kaspa/sink?' + require('./kv_relay_net').kvRelayNetQ())).json();
             if (rowsCount === 0 && ck && ck.sink) {
               let low = ck.sink;
               for (let p = 0; p < 240; p++) {
-                const page = await (await fetch(RELAY + '/api/kaspa/blocks?low_hash=' + low + '&txs=1')).json();
+                const page = await (await fetch(RELAY + '/api/kaspa/blocks?' + require('./kv_relay_net').kvRelayNetQ() + '&low_hash=' + low + '&txs=1')).json();
                 for (const b of page.blocks || []) for (const tx of b.txs || []) {
                   try { const raw = h2s(tx.payload_hex); const rec = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw); take(parseAnn(rec)); } catch {}
                 }

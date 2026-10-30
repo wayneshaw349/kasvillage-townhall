@@ -825,7 +825,7 @@ async function _wrpcSubmitOnce(restTx: any, network: KaspaNetwork, idHint: strin
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaction: restTx, allowOrphan: false, idHint, payloadAddress: (restTx && restTx.__payloadAddress) || '', payload_address: (restTx && restTx.__payloadAddress) || '' }),
+        body: JSON.stringify({ transaction: restTx, allowOrphan: false, network: String(network).startsWith('testnet') ? 'testnet-10' : 'mainnet', idHint, payloadAddress: (restTx && restTx.__payloadAddress) || '', payload_address: (restTx && restTx.__payloadAddress) || '' }),
       });
       const bodyText = await resp.text();
       let j: any = {};
@@ -856,7 +856,7 @@ async function _wrpcSubmitOnce(restTx: any, network: KaspaNetwork, idHint: strin
           _mp + ['65','108','72','85'].join('.') + _ms,
           _mp + ['82','65','58','211'].join('.') + _ms,
         ];
-        const mBody = JSON.stringify({ transaction: restTx, allowOrphan: false, idHint, payloadAddress: (restTx && restTx.__payloadAddress) || '', payload_address: (restTx && restTx.__payloadAddress) || '' });
+        const mBody = JSON.stringify({ transaction: restTx, allowOrphan: false, network: String(network).startsWith('testnet') ? 'testnet-10' : 'mainnet', idHint, payloadAddress: (restTx && restTx.__payloadAddress) || '', payload_address: (restTx && restTx.__payloadAddress) || '' });
         for (const mu of MIRRORS) {
           fetch(mu, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: mBody }).catch(() => {});
         }

@@ -1292,7 +1292,7 @@ const KvChainGamePublish: React.FC = () => {
       gadd('manifest ' + manifestAddress);
       let publishAnchor = '';
       try {
-        const sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink');
+        const sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink?' + require('./kv_relay_net').kvRelayNetQ());
         publishAnchor = String((await sr.json()).sink || '');
         if (publishAnchor) {
           gadd('walk anchor: ' + publishAnchor.slice(0, 16) + '…');
@@ -4347,7 +4347,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
       // content instead of crawling from the pruning point.
       let _stAnchor = '';
       try {
-        const _sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink');
+        const _sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink?' + require('./kv_relay_net').kvRelayNetQ());
         _stAnchor = String((await _sr.json()).sink || '');
       } catch {}
       const _pub: any = await publishContent(_owner, 'store', {
@@ -5290,7 +5290,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                     }
                     let _dpAnchor = '';
                     try {
-                      const _sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink');
+                      const _sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink?' + require('./kv_relay_net').kvRelayNetQ());
                       _dpAnchor = String((await _sr.json()).sink || '');
                     } catch {}
                     const _pub: any = await publishContent(_owner, 'dapp', { name: _gname, category: 'GameGrid', contentHash: _cHash }, 1, 500_000_000n);
