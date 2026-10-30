@@ -141,6 +141,8 @@ export async function buildRecord(p: Omit<StatRecord, 'v' | 'prevHash' | 'ts'>):
 
 /** Append once counterparty sig is in hand and verified. Idempotent per agrId+outcome. */
 export async function appendRecord(r: StatRecord, mySigHex: string, cpSigHex: string, myPrivKeyHex?: string): Promise<{ ok: boolean; error?: string }> {
+  // KV_TUTORIAL_CHAIN: practice deals (simulated coins) never become reputation
+  try { if (require('./kv_tutorial').kvIsTutorial()) { console.log('[StatChain] tutorial deal - not recorded'); return { ok: true }; } } catch {}
   if (!verifyRecordSig(r, cpSigHex, r.cpPubkey)) {
     // KV_STAT_V2: a counterparty on an older build signs v1 bytes. Accept it, but store the
     // record as v1 (legacy / weaker binding) so the bundle verifies honestly as v1.

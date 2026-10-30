@@ -105,7 +105,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
       const { verifyBundle, fetchAnchor } = require('./stat_records');
       let recs: any[] = [];
       try { recs = JSON.parse(raw).records || []; } catch { setBundleRes({ ok: false, errors: ['Not valid bundle JSON.'] }); setBundleBusy(false); return; }
-      if (!recs.length) { setBundleRes({ ok: false, errors: ['Bundle holds no records.'] }); setBundleBusy(false); return; }
+      if (!recs.length) { setBundleRes({ ok: false, empty: true, errors: ['No completed agreements yet - there is nothing to verify. A bundle fills in after their first settled trade.'] }); setBundleBusy(false); return; }
       const owner = String(recs[0].myPubkey || '');
       const v: any = verifyBundle(raw, owner);
       const distinct = new Set(recs.map((r: any) => _xo(r.cpPubkey)).filter(Boolean)).size;
@@ -126,6 +126,13 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
           if (live.deadlocked > v.deadlocks) warns.push('The live chain shows ' + live.deadlocked + ' deadlocked escrows but the bundle admits only ' + v.deadlocks + ' - recent bad deals may have been left out.');
         } else liveLine = 'Live cross-check timed out - rely on the signature checks above.';
       } catch { liveLine = 'Live cross-check unavailable.'; }
+      // KV_BUNDLE_NET: testnet deals are free to make, so they never count as mainnet reputation
+      const _expNet = require('./kv_vault_active').kvActiveNet();
+      const _wrongNet = recs.filter((r: any) => String(r.network || 'testnet-10') !== _expNet);
+      if (_wrongNet.length) {
+        v.ok = false;
+        v.errors = [...(v.errors || []), _wrongNet.length + ' of ' + recs.length + ' record(s) are from ' + (_expNet === 'mainnet' ? 'TESTNET (practice coins)' : 'MAINNET') + ' - they do not count here. Only ' + _expNet + ' deals are real reputation on this network.'];
+      }
       if (v.legacy) warns.push(v.legacy + ' legacy (v1) record(s): counterparty signature does not cover escrow/timeout/description.');
       if (anchorsTried && anchorsOk < anchorsTried) warns.push('Only ' + anchorsOk + '/' + anchorsTried + ' spot-checked anchors were found on the chain.');
       setBundleRes({ ...v, owner, distinct, anchorsTried, anchorsOk, warns, liveLine });
@@ -259,8 +266,8 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
             </TouchableOpacity>
             {bundleRes && (
               <View style={{ marginTop: rs.s(10) }}>
-                <Text style={{ color: bundleRes.ok ? C.green : C.red, fontWeight: 'bold', fontSize: rs.font(13) }}>
-                  {bundleRes.ok ? '\u2713 VALID - dual-signed and chain-intact' : '\u2717 INVALID'}
+                <Text style={{ color: bundleRes.ok ? C.green : bundleRes.empty ? C.muted : C.red, fontWeight: 'bold', fontSize: rs.font(13) }}>
+                  {bundleRes.ok ? '\u2713 VALID - dual-signed and chain-intact' : bundleRes.empty ? '\u2014 EMPTY' : '\u2717 INVALID'}
                 </Text>
                 {bundleRes.ok !== false || bundleRes.total ? (
                   <Text style={{ color: C.text, fontSize: rs.font(11), marginTop: rs.s(4) }}>
