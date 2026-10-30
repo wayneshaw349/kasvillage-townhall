@@ -32,7 +32,7 @@ use kaspa_rpc_core::{
 };
 use kaspa_wrpc_client::client::{ConnectOptions, ConnectStrategy};
 use kaspa_wrpc_client::prelude::{NetworkId, NetworkType, RpcApi};
-use kaspa_wrpc_client::{KaspaRpcClient, WrpcEncoding};
+use kaspa_wrpc_client::{KaspaRpcClient, Resolver, WrpcEncoding};
 
 // ---------------------------------------------------------------------------
 // Upstream nodes (borsh over TLS). First that connects wins.
@@ -105,6 +105,9 @@ struct JsTx {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubmitReq {
+    /// KV_RELAY_NET: "mainnet" routes to mainnet nodes; absent/other = testnet-10 (old clients).
+    #[serde(default)]
+    network: Option<String>,
     /// Optional client hint: the address this KVP1 record is published to.
     /// Used only to file the record in the relay's local records store.
     #[serde(default)]
@@ -209,6 +212,52 @@ fn upstream_urls() -> Vec<String> {
     DEFAULT_UPSTREAMS.iter().map(|s| s.to_string()).collect()
 }
 
+// KV_RELAY_NET: one relay serves both networks; each request says which.
+#[derive(Deserialize, Default)]
+pub struct NetQ { #[serde(default)] network: Option<String> }
+
+fn is_mainnet(n: &Option<String>) -> bool {
+    n.as_deref().map(|s| s.eq_ignore_ascii_case("mainnet")).unwrap_or(false)
+}
+
+fn mainnet_urls() -> Vec<String> {
+    std::env::var("KASPA_WRPC_URLS_MAINNET")
+        .map(|e| e.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+async fn connect_client_net(mainnet: bool) -> Result<KaspaRpcClient, String> {
+    if !mainnet {
+        return connect_client().await;
+    }
+    let network_id = NetworkId::new(NetworkType::Mainnet);
+    let opts = || ConnectOptions {
+        block_async_connect: true,
+        strategy: ConnectStrategy::Fallback,
+        url: None,
+        connect_timeout: Some(Duration::from_secs(10)),
+        retry_interval: None,
+    };
+    let mut last_err = String::from("no mainnet upstream");
+    // explicit mainnet nodes first (env), then the official public-node resolver
+    for url in mainnet_urls() {
+        match KaspaRpcClient::new(WrpcEncoding::Borsh, Some(url.as_str()), None, Some(network_id), None) {
+            Ok(client) => match client.connect(Some(opts())).await {
+                Ok(_) => { println!("[KaspaRelay] mainnet connected: {}", url); return Ok(client); }
+                Err(e) => last_err = format!("{}: {}", url, e),
+            },
+            Err(e) => last_err = format!("{}: {}", url, e),
+        }
+    }
+    match KaspaRpcClient::new(WrpcEncoding::Borsh, None, Some(Resolver::default()), Some(network_id), None) {
+        Ok(client) => match client.connect(Some(opts())).await {
+            Ok(_) => { println!("[KaspaRelay] mainnet connected via resolver"); Ok(client) }
+            Err(e) => Err(format!("resolver: {} (last: {})", e, last_err)),
+        },
+        Err(e) => Err(format!("resolver: {} (last: {})", e, last_err)),
+    }
+}
+
 async fn connect_client() -> Result<KaspaRpcClient, String> {
     let network_id = NetworkId::with_suffix(NetworkType::Testnet, 10);
     let mut last_err = String::from("no upstream configured");
@@ -301,8 +350,8 @@ fn build_rpc_tx(js: &JsTx) -> Result<RpcTransaction, String> {
     })
 }
 
-pub async fn relay_health() -> impl Responder {
-    match connect_client().await {
+pub async fn relay_health(nq: web::Query<NetQ>) -> impl Responder {
+    match connect_client_net(is_mainnet(&nq.network)).await {
         Ok(client) => {
             let dag = client.get_block_dag_info().await;
             let _ = client.disconnect().await;
@@ -329,7 +378,7 @@ pub async fn submit_tx(body: web::Json<SubmitReq>) -> impl Responder {
     };
     let allow_orphan = body.allow_orphan.unwrap_or(false);
 
-    let client = match connect_client().await {
+    let client = match connect_client_net(is_mainnet(&body.network)).await {
         Ok(c) => c,
         Err(e) => {
             return HttpResponse::BadGateway()
@@ -363,8 +412,8 @@ pub async fn submit_tx(body: web::Json<SubmitReq>) -> impl Responder {
 // ---------------------------------------------------------------------------
 // blockwalk passthrough — stateless node proxies for client-side indexing.
 // ---------------------------------------------------------------------------
-pub async fn sink_info() -> impl Responder {
-    let client = match connect_client().await {
+pub async fn sink_info(nq: web::Query<NetQ>) -> impl Responder {
+    let client = match connect_client_net(is_mainnet(&nq.network)).await {
         Ok(c) => c,
         Err(e) => return HttpResponse::ServiceUnavailable().json(json!({ "error": e })),
     };
@@ -381,7 +430,7 @@ pub async fn sink_info() -> impl Responder {
 }
 
 #[derive(Deserialize)]
-pub struct BlocksQ { low_hash: String, daa_max: Option<u64>, txs: Option<u8> }
+pub struct BlocksQ { low_hash: String, daa_max: Option<u64>, txs: Option<u8>, #[serde(default)] network: Option<String> }
 
 pub async fn blocks_page(q: web::Query<BlocksQ>) -> impl Responder {
     let low = match RpcHash::from_str(&q.low_hash) {
@@ -392,7 +441,7 @@ pub async fn blocks_page(q: web::Query<BlocksQ>) -> impl Responder {
     // pruning_point -> daa_from with txs=0, then re-requests with txs=1 inside
     // the advertised span. daa_max stops the walk past the span.
     let want_txs = q.txs.unwrap_or(1) != 0;
-    let client = match connect_client().await {
+    let client = match connect_client_net(is_mainnet(&q.network)).await {
         Ok(c) => c,
         Err(e) => return HttpResponse::ServiceUnavailable().json(json!({ "error": e })),
     };

@@ -21,7 +21,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: wayneshaw349/kasvillage-townhall:latest,wayneshaw349/kasvillage-townhall:v71
+          tags: wayneshaw349/kasvillage-townhall:latest,wayneshaw349/kasvillage-townhall:v72
           
           no-cache: true
 
@@ -44,5 +44,5 @@ jobs:
           context: .
           file: Dockerfile.kv-relay
           push: true
-          tags: wayneshaw349/kv-relay:latest,wayneshaw349/kv-relay:v3
+          tags: wayneshaw349/kv-relay:latest,wayneshaw349/kv-relay:v4
           no-cache: true
