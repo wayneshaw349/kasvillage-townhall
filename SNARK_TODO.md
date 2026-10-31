@@ -1,33 +1,33 @@
-# TownHall stats SNARK — findings + plan (paused 2026-10-30)
+# TownHall proofs — status (2026-10-30: DONE, shipped as relay v74)
 
-## What's wrong today
-1. **Proof not bound to the numbers.** The circuit declares an instance column but never
-   calls `constrain_instance`, and `create_proof` is given empty instances (`&[&[&[]]]`).
-   The proof says "a valid witness exists", not "pubkey X has these stats".
-2. **Gates don't match integer math.** `p_complete_basic` checks `p*(2+S+F) == (1+S)*SCALE`
-   and `confidence_blend` / `enhanced_factors` check exact products, but the witness
-   values come from floor division. Most real proofs fail and silently fall back to a
-   SHA-256 hash with proof_type `Hash-V2-ERR:...`.
-3. **App never verifies the proof.** `counterparty_lookup.ts verifyStatsProofLocally` only
-   re-checks the XP formula, yet the UI shows "✓ ZK Verified".
-4. **Not network-aware.** `KASPA_API` is hardcoded to api-tn10; Arweave records are not
-   filtered by `KV-Network`.
-5. **No Arweave on mainnet.** Stats must come from the Kaspa chain itself.
+Two sessions independently reached the same findings; this file documented the plan while
+work was paused. The implementation now lives in:
 
-## Plan
-- [x] `src/kaspa_chain_stats.rs`: Rust port of `counterparty_scan.ts` v2 (same rules:
-      exact-2 funders, busy-address filter, kill = self-pay, settled/deadlocked/open),
-      pubkey -> address derivation, network-aware. NOT yet in `main.rs` (`mod` line pending).
-- [ ] Witness from the chain scan (successes=settled, deadlocks=deadlocked, pending=open;
-      refund vs release and roles/reasons are not on chain: reason_other=deadlocks,
-      roles neutral, documented in the API response).
-- [ ] Gates: add remainder witnesses (`p*(2+n) + r == (1+S)*SCALE`, `0 <= r < 2+n`) so
-      floor division is provable; same for the blend/factor gates.
-- [ ] Public inputs via `constrain_instance`: pubkey-hash limbs, events-root limbs,
-      successes, deadlocks, xp, p_basic, p_enhanced, total; pass them to `create_proof`.
-- [ ] Real `verify_proof` (VerifierIPA + SingleStrategy) + `POST /api/verify/stats-proof`.
-- [ ] App: recompute successes/deadlocks with `counterparty_scan` and require they match
-      the proof's public inputs; label "ZK Verified" only when both checks pass.
-- [ ] Bump relay to v74, new VK fingerprint at `/api/verify/stats-vk`.
+- `src/townhall_verification_complete.rs` — chain-sourced stats (`scan_chain_escrows`,
+  the Rust port of `counterparty_scan.ts` v2, address derivation tested against the dev
+  wallet's real address), instance-bound stats / DApp / academic circuits, real
+  `verify_proof`, `stats_instances` / `dapp_instances` / `academic_instances`.
+- `src/dkim_verify.rs` — real RFC 6376 DKIM (RSA-SHA256 vs DNS key, DoH), academic policy
+  (aligned From, academic d=, pubkey challenge in the signed Subject), dkimpy-conformant
+  (15 fixtures in `tests/fixtures/dkim_cases.json`, regenerate with
+  `tools/mk_dkim_fixtures.py`).
+- Endpoints: `POST /api/verify/stats-check`, `/api/verify/dapp-check`,
+  `/api/verify/academic-check` — anyone verifies a relayed proof against the published VK.
 
-Until then: **Phone Proof (dual-signed bundles + live chain scan) is the trust layer.**
+## One deliberate deviation from the original plan
+The plan proposed in-circuit remainder witnesses for the floor divisions
+(`p*(2+n) + r == (1+S)*SCALE`, `0 <= r < 2+n`). Without range-check lookups, `r < 2+n` is
+not enforceable in-circuit, and an unconstrained remainder lets a prover shift `p` —
+a soundness hole dressed as a gate. Instead: the division/saturation formulas are enforced
+by every verifier in exact u64 arithmetic over the SAME bound public inputs, and the
+circuits keep only the exact counting identities. Same guarantee, no fake rigor.
+
+## What the proofs do NOT yet do (future, research-tier)
+- In-circuit DKIM (zkEmail-style RSA inside the SNARK) and in-circuit scan execution:
+  today those run outside the circuit on re-checkable public inputs, so a lying relay is
+  CATCHABLE (re-derive the events root / re-run DKIM or the scan on the pinned data),
+  not mathematically impossible.
+- Enhanced p_complete is bound but its derivation uses non-public recency data; the basic
+  p_complete is the verifiable one.
+
+Phone Proof (dual-signed bundles + live chain scan) remains the peer-to-peer trust layer.
