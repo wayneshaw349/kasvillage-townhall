@@ -73,8 +73,16 @@ export async function archiveRecordsAt(address: string, net: string, haveTxids: 
   const ids = Array.from(new Set(utxos
     .sort((a: any, b: any) => n(b?.utxoEntry?.blockDaaScore) - n(a?.utxoEntry?.blockDaaScore))
     .map((u: any) => String(u?.outpoint?.transactionId || ''))
-    .filter((id: string) => /^[0-9a-f]{64}$/.test(id) && !haveTxids.has(id)))).slice(0, max);
+    .filter((id: string) => /^[0-9a-f]{64}$/.test(id) && !haveTxids.has(id)))).slice(0, 600);
+  // Cached records are free and always included (delists/flags must never age out of
+  // view); only `max` uncached ids per call go to the network.
   const out: Array<{ txid: string; payload: string; block_time: number }> = [];
-  for (const id of ids) { const t = await archiveTx(id, net); if (t && t.payload) out.push({ txid: id, payload: t.payload, block_time: t.block_time }); }
+  let netTries = 0;
+  for (const id of ids) {
+    let t: any = null;
+    try { const c = await AsyncStorage.getItem('kv_arch_tx_' + id); if (c) t = JSON.parse(c); } catch {}
+    if (!t && netTries < max && Date.now() - (_miss.get(id) || 0) >= 3600000) { netTries++; t = await archiveTx(id, net); }
+    if (t && t.payload) out.push({ txid: id, payload: t.payload, block_time: t.block_time });
+  }
   return out;
 }
