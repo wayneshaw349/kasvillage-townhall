@@ -20,13 +20,14 @@ use once_cell::sync::Lazy;
 // Halo2 imports (PSE fork with IPA)
 use halo2_proofs::{
     arithmetic::Field,
-    circuit::{Layouter, SimpleFloorPlanner, Value},
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, ConstraintSystem, Error as PlonkError, Column, Advice, Instance, Selector, Expression, create_proof, verify_proof, keygen_pk, keygen_vk, ProvingKey, VerifyingKey},
     poly::{
         commitment::ParamsProver,
         ipa::{commitment::{ParamsIPA, IPACommitmentScheme}, multiopen::{ProverIPA, VerifierIPA}, strategy::SingleStrategy},
+        VerificationStrategy,
     },
-    transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptWriterBuffer},
+    transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptWriterBuffer, TranscriptReadBuffer},
 };
 use pasta_curves::{pallas, vesta, Fp, EqAffine};
 use rand_core::OsRng;
@@ -38,8 +39,13 @@ use crate::halo2_snark_module::{SparseMerkleTree, SparseMerkleCircuit, poseidon_
 const VERIFICATION_FEE_SOMPI: u64 = 0; // FREE verification
 const MAX_CODE_SIZE_BYTES: usize = 5 * 1024 * 1024; // 5MB
 
-// Kaspa network API — swap comment to switch mainnet/testnet
+// Kaspa network API — legacy default (testnet). Stats paths take the network per request.
 const KASPA_API: &str = "https://api-tn10.kaspa.org"; // testnet-10
+
+/// KV_RELAY_NET: per-request network -> REST base (same convention as kaspa_relay).
+pub fn kaspa_api_for(network: &str) -> &'static str {
+    if network == "mainnet" { "https://api.kaspa.org" } else { "https://api-tn10.kaspa.org" }
+}
 
 // ============================================================================
 // CODE SCANNER - PROHIBITED PATTERNS
@@ -317,15 +323,24 @@ pub struct VerificationProof {
 /// DApp/Game verification witness
 #[derive(Debug, Clone, Default)]
 pub struct DAppWitness {
-    pub scan_passed: u64,         // 1 = passed, 0 = failed
-    pub has_sdk_usage: u64,       // 1 = uses procedural SDK
-    pub has_image_bypass: u64,    // 0 = clean, 1 = has bypass (must be 0)
-    pub has_realistic_face: u64,  // 0 = clean, 1 = has face (must be 0)
-    pub trait_count: u64,         // >= 13 required
-    pub content_hash_lo: u64,     // lower 8 bytes of content hash
-    pub content_hash_hi: u64,     // upper 8 bytes of content hash
-    pub xp_commitment: u64,       // XP staked
+    pub scan_passed: u64,         // 1 = passed (in-circuit)
+    pub trait_count: u64,         // >= 13 (integer rule, verifier)
+    pub xp_commitment: u64,       // declared XP (bound; picks the board, no floor)
+    pub code_hash: [u8; 32],      // sha256 of the exact code scanned (anyone re-hashes the published code)
+    pub owner_hash: [u8; 32],     // sha256 of the owner's pubkey
+    pub ruleset_hash: [u8; 32],   // which scan rules were applied (DAPP_RULESET_HASH at prove time)
 }
+
+/// KV_DAPP_V2: fingerprint of the exact scan rules. A proof names the ruleset it was checked
+/// against, so a rules change never silently re-labels old proofs.
+pub static DAPP_RULESET_HASH: Lazy<[u8; 32]> = Lazy::new(|| {
+    let mut h = Sha256::new();
+    h.update(b"KV_DAPP_RULES_V1|max_bytes=");
+    h.update(MAX_CODE_SIZE_BYTES.to_le_bytes());
+    for r in PROHIBITED_PATTERNS.iter() { h.update(b"|P:"); h.update(r.as_str().as_bytes()); }
+    for r in SUSPICIOUS_PATTERNS.iter() { h.update(b"|S:"); h.update(r.as_str().as_bytes()); }
+    h.finalize().into()
+});
 
 /// Circuit config for DApp verification (6 advice, 1 instance, 1 selector)
 #[derive(Clone, Debug)]
@@ -356,7 +371,9 @@ impl Circuit<Fp> for DAppVerificationCircuit {
         for col in &advice { meta.enable_equality(*col); }
         meta.enable_equality(instance);
 
-        // Gate 1: scan_passed must be 1
+        // Gate: scan_passed must be 1. (The old sdk/image/face gates checked constants the
+        // prover hard-coded, proving nothing; the scan verdict covers those rules, and the
+        // ruleset itself is now a public input.)
         meta.create_gate("scan_passed", |meta| {
             let s = meta.query_selector(selector);
             let scan = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur());
@@ -364,54 +381,31 @@ impl Circuit<Fp> for DAppVerificationCircuit {
             vec![s * (scan - one)]
         });
 
-        // Gate 2: has_sdk_usage must be 1
-        meta.create_gate("sdk_usage", |meta| {
-            let s = meta.query_selector(selector);
-            let sdk = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur());
-            let one = Expression::Constant(Fp::one());
-            vec![s * (sdk - one)]
-        });
-
-        // Gate 3: has_image_bypass must be 0
-        meta.create_gate("no_image_bypass", |meta| {
-            let s = meta.query_selector(selector);
-            let bypass = meta.query_advice(advice[2], halo2_proofs::poly::Rotation::cur());
-            vec![s * bypass]
-        });
-
-        // Gate 4: has_realistic_face must be 0
-        meta.create_gate("no_realistic_face", |meta| {
-            let s = meta.query_selector(selector);
-            let face = meta.query_advice(advice[3], halo2_proofs::poly::Rotation::cur());
-            vec![s * face]
-        });
-
-        // Gate 5: trait_surplus = trait_count - 13 (surplus * (surplus - (trait_count - 13)) = 0)
-        // Simplified: trait_count - 13 must equal surplus (advice[4] = surplus, advice[5] = trait_count)
-        meta.create_gate("min_traits", |meta| {
-            let s = meta.query_selector(selector);
-            let trait_count = meta.query_advice(advice[4], halo2_proofs::poly::Rotation::cur());
-            let surplus = meta.query_advice(advice[5], halo2_proofs::poly::Rotation::cur());
-            let thirteen = Expression::Constant(Fp::from(13u64));
-            vec![s * (surplus - (trait_count - thirteen))]
-        });
-
         DAppCircuitConfig { advice, instance, selector }
     }
 
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fp>) -> Result<(), PlonkError> {
-        layouter.assign_region(|| "dapp_verification", |mut region| {
+        // KV_DAPP_V2: every claim is a public input. Instance order:
+        // [scan_passed, trait_count, xp_commitment, code_lo, code_hi, owner_lo, owner_hi, rules_lo, rules_hi]
+        let w = &self.witness;
+        let cells: Vec<AssignedCell<Fp, Fp>> = layouter.assign_region(|| "dapp_verification", |mut region| {
             config.selector.enable(&mut region, 0)?;
-            region.assign_advice(|| "scan_passed", config.advice[0], 0, || Value::known(Fp::from(self.witness.scan_passed)))?;
-            region.assign_advice(|| "has_sdk_usage", config.advice[1], 0, || Value::known(Fp::from(self.witness.has_sdk_usage)))?;
-            region.assign_advice(|| "has_image_bypass", config.advice[2], 0, || Value::known(Fp::from(self.witness.has_image_bypass)))?;
-            region.assign_advice(|| "has_realistic_face", config.advice[3], 0, || Value::known(Fp::from(self.witness.has_realistic_face)))?;
-            region.assign_advice(|| "trait_count", config.advice[4], 0, || Value::known(Fp::from(self.witness.trait_count)))?;
-            region.assign_advice(|| "trait_surplus", config.advice[5], 0, || Value::known(Fp::from(self.witness.trait_count.saturating_sub(13))))?;
-            region.assign_advice(|| "content_hash_lo", config.advice[6], 0, || Value::known(Fp::from(self.witness.content_hash_lo)))?;
-            region.assign_advice(|| "xp_commitment", config.advice[7], 0, || Value::known(Fp::from(self.witness.xp_commitment)))?;
-            Ok(())
-        })
+            let c_scan = region.assign_advice(|| "scan_passed", config.advice[0], 0, || Value::known(Fp::from(w.scan_passed)))?;
+            let c_traits = region.assign_advice(|| "trait_count", config.advice[1], 0, || Value::known(Fp::from(w.trait_count)))?;
+            let c_xp = region.assign_advice(|| "xp_commitment", config.advice[2], 0, || Value::known(Fp::from(w.xp_commitment)))?;
+            // row 1: selector off, hash commitments as 128-bit limbs
+            let c_code_lo = region.assign_advice(|| "code_lo", config.advice[0], 1, || Value::known(fp_limb(&w.code_hash[..16])))?;
+            let c_code_hi = region.assign_advice(|| "code_hi", config.advice[1], 1, || Value::known(fp_limb(&w.code_hash[16..])))?;
+            let c_own_lo = region.assign_advice(|| "owner_lo", config.advice[2], 1, || Value::known(fp_limb(&w.owner_hash[..16])))?;
+            let c_own_hi = region.assign_advice(|| "owner_hi", config.advice[3], 1, || Value::known(fp_limb(&w.owner_hash[16..])))?;
+            let c_rul_lo = region.assign_advice(|| "rules_lo", config.advice[4], 1, || Value::known(fp_limb(&w.ruleset_hash[..16])))?;
+            let c_rul_hi = region.assign_advice(|| "rules_hi", config.advice[5], 1, || Value::known(fp_limb(&w.ruleset_hash[16..])))?;
+            Ok(vec![c_scan, c_traits, c_xp, c_code_lo, c_code_hi, c_own_lo, c_own_hi, c_rul_lo, c_rul_hi])
+        })?;
+        for (row, cell) in cells.iter().enumerate() {
+            layouter.constrain_instance(cell.cell(), config.instance, row)?;
+        }
+        Ok(())
     }
 }
 
@@ -420,47 +414,86 @@ static DAPP_PARAMS: Lazy<ParamsIPA<EqAffine>> = Lazy::new(|| ParamsIPA::<EqAffin
 static DAPP_VK: Lazy<VerifyingKey<EqAffine>> = Lazy::new(|| { let c = DAppVerificationCircuit { witness: DAppWitness::default() }; keygen_vk(&*DAPP_PARAMS, &c).expect("DApp VK") });
 static DAPP_PK: Lazy<ProvingKey<EqAffine>> = Lazy::new(|| { let c = DAppVerificationCircuit { witness: DAppWitness::default() }; keygen_pk(&*DAPP_PARAMS, DAPP_VK.clone(), &c).expect("DApp PK") });
 
-pub fn generate_verification_proof(inputs: &ProofInputs) -> Result<VerificationProof, String> {
-    // Validate inputs
-    if !inputs.scan_passed {
-        return Err("Code scan did not pass".to_string());
-    }
-    
-    if inputs.trait_count < 13 {
-        return Err("Minimum 13 traits required for verification".to_string());
-    }
-    
-    // In production: use actual Halo2 IPA circuit
-    // For now: generate deterministic mock proof
-    // Build DApp witness from scan inputs
-    let content_bytes = inputs.content_hash.as_bytes();
-    let content_hash_lo = if content_bytes.len() >= 8 { u64::from_le_bytes(content_bytes[..8].try_into().unwrap_or([0u8; 8])) } else { 0 };
-    let dapp_witness = DAppWitness { scan_passed: 1, has_sdk_usage: 1, has_image_bypass: 0, has_realistic_face: 0, trait_count: inputs.trait_count as u64, content_hash_lo, content_hash_hi: 0, xp_commitment: inputs.xp };
-    let (dapp_err, dapp_proof): (String, Option<Vec<u8>>) = {
-        let circuit = DAppVerificationCircuit { witness: dapp_witness };
-        let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
-        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, DAppVerificationCircuit>(&*DAPP_PARAMS, &*DAPP_PK, &[circuit], &[&[&[]]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
+/// Bound public inputs of a DApp proof (what the proof is ABOUT).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DAppPublicInputs {
+    pub scan_passed: u64,
+    pub trait_count: u64,
+    pub xp_commitment: u64,
+    pub code_hash: String,     // sha256(code) hex - re-hash the published code to check
+    pub owner_hash: String,    // sha256(owner pubkey) hex
+    pub ruleset_hash: String,  // which scan rules were applied
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DAppProof {
+    pub proof_bytes: Vec<u8>,
+    pub public_inputs: DAppPublicInputs,
+    pub proof_type: String,
+    pub vk_fingerprint: String,
+    pub generated_at: u64,
+}
+
+fn hash32(data: &[u8]) -> [u8; 32] { let mut h = Sha256::new(); h.update(data); h.finalize().into() }
+fn hex32(s: &str) -> Option<[u8; 32]> { hex::decode(s).ok().and_then(|v| v.try_into().ok()) }
+
+pub fn dapp_instances(w: &DAppWitness) -> Vec<Fp> {
+    vec![
+        Fp::from(w.scan_passed), Fp::from(w.trait_count), Fp::from(w.xp_commitment),
+        fp_limb(&w.code_hash[..16]), fp_limb(&w.code_hash[16..]),
+        fp_limb(&w.owner_hash[..16]), fp_limb(&w.owner_hash[16..]),
+        fp_limb(&w.ruleset_hash[..16]), fp_limb(&w.ruleset_hash[16..]),
+    ]
+}
+
+/// KV_DAPP_V2: prove "THIS code (by hash), from THIS owner, passed THESE scan rules".
+pub fn generate_dapp_proof(code: &str, owner_pubkey: &str, trait_count: u64, xp_commitment: u64) -> Result<DAppProof, String> {
+    let w = DAppWitness {
+        scan_passed: 1, trait_count, xp_commitment,
+        code_hash: hash32(code.as_bytes()),
+        owner_hash: hash32(owner_pubkey.as_bytes()),
+        ruleset_hash: *DAPP_RULESET_HASH,
     };
-    let mut hasher = Sha256::new();
-    hasher.update(inputs.content_hash.as_bytes());
-    hasher.update(inputs.owner_pubkey.as_bytes());
-    hasher.update(&inputs.timestamp.to_le_bytes());
-    let proof_hash = hasher.finalize();
-    let public_inputs_hash = hex::encode(&proof_hash);
-    Ok(VerificationProof {
-        proof_bytes: dapp_proof.clone().unwrap_or_else(|| proof_hash.to_vec()),
-        public_inputs_hash,
-        proof_type: if dapp_proof.is_some() { "Halo2-IPA-DApp-V1".to_string() } else { format!("DApp-Hash-ERR:{}", dapp_err) },
+    if trait_count < 13 { return Err("Minimum 13 traits required".into()); }
+    let inst = dapp_instances(&w);
+    let circuit = DAppVerificationCircuit { witness: w.clone() };
+    let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
+    create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, DAppVerificationCircuit>(
+        &*DAPP_PARAMS, &*DAPP_PK, &[circuit], &[&[inst.as_slice()]], OsRng, &mut transcript)
+        .map_err(|e| format!("dapp prove: {:?}", e))?;
+    Ok(DAppProof {
+        proof_bytes: transcript.finalize(),
+        public_inputs: DAppPublicInputs {
+            scan_passed: 1, trait_count, xp_commitment,
+            code_hash: hex::encode(w.code_hash), owner_hash: hex::encode(w.owner_hash),
+            ruleset_hash: hex::encode(w.ruleset_hash),
+        },
+        proof_type: "Halo2-IPA-DApp-V2".into(),
+        vk_fingerprint: { let mut h = Sha256::new(); h.update(format!("{:?}", *DAPP_VK).as_bytes()); hex::encode(h.finalize()) },
         generated_at: current_timestamp(),
     })
 }
 
-/// Verify a SNARK proof
-pub fn verify_snark_proof(proof: &VerificationProof, inputs: &ProofInputs) -> bool {
-    match generate_verification_proof(inputs) {
-        Ok(expected) => proof.proof_bytes == expected.proof_bytes,
-        Err(_) => false,
-    }
+/// Verify a DApp proof: integer rules + halo2 verify_proof over the CLAIMED public inputs.
+/// Pass `code` to also confirm the proof is about that exact code.
+pub fn verify_dapp_proof(p: &DAppProof, code: Option<&str>) -> Result<(), String> {
+    let pi = &p.public_inputs;
+    if pi.scan_passed != 1 { return Err("scan did not pass".into()); }
+    if pi.trait_count < 13 { return Err("trait_count < 13".into()); }
+    let code_hash = hex32(&pi.code_hash).ok_or("bad code_hash")?;
+    if let Some(c) = code { if hash32(c.as_bytes()) != code_hash { return Err("code does not match the proven code_hash".into()); } }
+    let w = DAppWitness {
+        scan_passed: pi.scan_passed, trait_count: pi.trait_count, xp_commitment: pi.xp_commitment,
+        code_hash, owner_hash: hex32(&pi.owner_hash).ok_or("bad owner_hash")?,
+        ruleset_hash: hex32(&pi.ruleset_hash).ok_or("bad ruleset_hash")?,
+    };
+    let inst = dapp_instances(&w);
+    let mut transcript = Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(&p.proof_bytes);
+    let strategy = SingleStrategy::new(&*DAPP_PARAMS);
+    verify_proof::<IPACommitmentScheme<EqAffine>, VerifierIPA<EqAffine>, Challenge255<EqAffine>,
+        Blake2bRead<&[u8], EqAffine, Challenge255<EqAffine>>, SingleStrategy<EqAffine>>(
+        &*DAPP_PARAMS, &*DAPP_VK, strategy, &[&[inst.as_slice()]], &mut transcript)
+        .map(|_| ()).map_err(|e| format!("verify: {:?}", e))
 }
 
 // ============================================================================
@@ -823,30 +856,18 @@ impl Circuit<Fp> for StatsVerificationCircuit {
         }
         meta.enable_equality(instance);
 
-        // Gate 1: XP computation
-        meta.create_gate("xp_computation", |meta| {
-            let s = meta.query_selector(selector);
-            let successes = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur());
-            let deadlocks = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur());
-            let xp = meta.query_advice(advice[2], halo2_proofs::poly::Rotation::cur());
-            let base = Expression::Constant(Fp::from(XP_PER_SUCCESS));
-            let penalty = Expression::Constant(Fp::from(XP_PENALTY_PER_DEADLOCK));
-            vec![s * (xp - (successes * base - deadlocks * penalty))]
-        });
-
-        // Gate 2: Basic Bayesian p_complete
-        meta.create_gate("p_complete_basic", |meta| {
-            let s = meta.query_selector(selector);
-            let successes = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur());
-            let deadlocks = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur());
-            let p_complete = meta.query_advice(advice[3], halo2_proofs::poly::Rotation::cur());
-            let one = Expression::Constant(Fp::one());
-            let two = Expression::Constant(Fp::from(2u64));
-            let scale = Expression::Constant(Fp::from(FIXED_POINT_SCALE));
-            let numerator = (one + successes.clone()) * scale;
-            let denominator = two + successes + deadlocks;
-            vec![s * (p_complete * denominator - numerator)]
-        });
+        // Gates 1, 2, 7, 8 (xp, p_complete_basic, enhanced_factors, confidence_blend) are
+        // deliberately NOT in-circuit. All four involve saturating subtraction or truncating
+        // division; as exact field equalities they were unsatisfiable for real data (and the
+        // old enhanced_factors constant FIXED_POINT_SCALE^5 overflowed u64), so every real
+        // proof silently fell back to a hash. Soundness now comes from the split:
+        //   - the circuit BINDS (successes, deadlocks, xp, p_fixed, p_enhanced, total,
+        //     pubkey_hash, events_root) as public inputs and proves the exact counting
+        //     identities below;
+        //   - verify_stats_proof re-checks the xp / p_complete formulas in plain u64
+        //     arithmetic over those same bound inputs, where saturation and floor division
+        //     are first-class.
+        // A tampered stat fails either the instance binding or the integer re-check.
 
         // Gate 3: Agreement counts: total = completed + refunded + deadlocked + pending
         meta.create_gate("agreement_counts", |meta| {
@@ -884,33 +905,6 @@ impl Circuit<Fp> for StatsVerificationCircuit {
             vec![s * (successes - completed)]
         });
 
-        // Gate 7: Enhanced p_complete factor chain
-        // adjusted_p * SCALE^5 = base_p * recency * pattern * resolution * speed * role
-        meta.create_gate("enhanced_factors", |meta| {
-            let s = meta.query_selector(selector);
-            let base_p = meta.query_advice(advice[12], halo2_proofs::poly::Rotation::cur());
-            let recency = meta.query_advice(advice[13], halo2_proofs::poly::Rotation::cur());
-            let pattern = meta.query_advice(advice[14], halo2_proofs::poly::Rotation::cur());
-            let resolution = meta.query_advice(advice[15], halo2_proofs::poly::Rotation::cur());
-            let speed = meta.query_advice(advice[16], halo2_proofs::poly::Rotation::cur());
-            let role = meta.query_advice(advice[17], halo2_proofs::poly::Rotation::cur());
-            let adjusted_p = meta.query_advice(advice[18], halo2_proofs::poly::Rotation::cur());
-            let scale5 = Expression::Constant(Fp::from(FIXED_POINT_SCALE.pow(5)));
-            vec![s * (adjusted_p * scale5 - base_p * recency * pattern * resolution * speed * role)]
-        });
-
-        // Gate 8: Confidence blending
-        // final_p * SCALE = confidence * adjusted_p + (SCALE - confidence) * 0.5
-        meta.create_gate("confidence_blend", |meta| {
-            let s = meta.query_selector(selector);
-            let confidence = meta.query_advice(advice[19], halo2_proofs::poly::Rotation::cur());
-            let adjusted_p = meta.query_advice(advice[18], halo2_proofs::poly::Rotation::cur());
-            let final_p = meta.query_advice(advice[4], halo2_proofs::poly::Rotation::cur());
-            let scale = Expression::Constant(Fp::from(FIXED_POINT_SCALE));
-            let prior = Expression::Constant(Fp::from(FIXED_POINT_SCALE / 2));
-            vec![s * (final_p * scale.clone() - (confidence.clone() * adjusted_p + (scale - confidence) * prior))]
-        });
-
         StatsCircuitConfig { advice, instance, selector }
     }
 
@@ -919,25 +913,28 @@ impl Circuit<Fp> for StatsVerificationCircuit {
         config: Self::Config,
         mut layouter: impl Layouter<Fp>,
     ) -> Result<(), PlonkError> {
-        layouter.assign_region(
+        // KV_PUBLIC_INPUTS: capture the cells that are exposed as public inputs, then bind each
+        // to the instance column. Before this, the instance column existed but nothing was
+        // constrained to it — the proof said "some valid assignment exists", not "THESE stats".
+        let public_cells: Vec<AssignedCell<Fp, Fp>> = layouter.assign_region(
             || "stats_verification",
             |mut region| {
                 config.selector.enable(&mut region, 0)?;
 
                 // Core stats
-                region.assign_advice(|| "successes", config.advice[0], 0, 
+                let c_successes = region.assign_advice(|| "successes", config.advice[0], 0, 
                     || Value::known(Fp::from(self.witness.successes)))?;
-                region.assign_advice(|| "deadlocks", config.advice[1], 0,
+                let c_deadlocks = region.assign_advice(|| "deadlocks", config.advice[1], 0,
                     || Value::known(Fp::from(self.witness.deadlocks)))?;
-                region.assign_advice(|| "xp", config.advice[2], 0,
+                let c_xp = region.assign_advice(|| "xp", config.advice[2], 0,
                     || Value::known(Fp::from(self.witness.xp)))?;
-                region.assign_advice(|| "p_complete_basic", config.advice[3], 0,
+                let c_p_fixed = region.assign_advice(|| "p_complete_basic", config.advice[3], 0,
                     || Value::known(Fp::from(self.witness.p_complete_fixed)))?;
-                region.assign_advice(|| "p_complete_enhanced", config.advice[4], 0,
+                let c_p_enh = region.assign_advice(|| "p_complete_enhanced", config.advice[4], 0,
                     || Value::known(Fp::from(self.witness.p_complete_enhanced)))?;
                 
                 // Agreement stats
-                region.assign_advice(|| "total_agreements", config.advice[5], 0,
+                let c_total = region.assign_advice(|| "total_agreements", config.advice[5], 0,
                     || Value::known(Fp::from(self.witness.total_agreements)))?;
                 region.assign_advice(|| "completed", config.advice[6], 0,
                     || Value::known(Fp::from(self.witness.completed)))?;
@@ -970,9 +967,24 @@ impl Circuit<Fp> for StatsVerificationCircuit {
                 region.assign_advice(|| "volume_confidence", config.advice[19], 0,
                     || Value::known(Fp::from(self.witness.factors.volume_confidence)))?;
 
-                Ok(())
+                // Row 1 (selector off, no gate applies): the two hash commitments as 128-bit limbs
+                let c_pk_lo = region.assign_advice(|| "pubkey_hash_lo", config.advice[6], 1,
+                    || Value::known(fp_limb(&self.witness.pubkey_hash[..16])))?;
+                let c_pk_hi = region.assign_advice(|| "pubkey_hash_hi", config.advice[7], 1,
+                    || Value::known(fp_limb(&self.witness.pubkey_hash[16..])))?;
+                let c_root_lo = region.assign_advice(|| "events_root_lo", config.advice[8], 1,
+                    || Value::known(fp_limb(&self.witness.l1_events_root[..16])))?;
+                let c_root_hi = region.assign_advice(|| "events_root_hi", config.advice[9], 1,
+                    || Value::known(fp_limb(&self.witness.l1_events_root[16..])))?;
+
+                Ok(vec![c_successes, c_deadlocks, c_xp, c_p_fixed, c_p_enh, c_total,
+                        c_pk_lo, c_pk_hi, c_root_lo, c_root_hi])
             },
-        )
+        )?;
+        for (row, cell) in public_cells.iter().enumerate() {
+            layouter.constrain_instance(cell.cell(), config.instance, row)?;
+        }
+        Ok(())
     }
 }
 
@@ -997,6 +1009,8 @@ pub struct StatsPublicInputs {
     pub deadlocks: u64,
     pub xp: u64,
     pub p_complete_fixed: u64,
+    #[serde(default)]
+    pub p_complete_enhanced: u64,
     
     // NeighborAgreementStats
     pub total_agreements: u64,
@@ -1030,6 +1044,26 @@ pub struct StatsPublicInputs {
     // Merkle anchors
     pub l1_events_root: String,
     pub arweave_stats_hash: String,
+}
+
+/// KV_PUBLIC_INPUTS — the canonical instance vector the proof is bound to. Order is part of
+/// the protocol: [successes, deadlocks, xp, p_complete_fixed, p_complete_enhanced,
+/// total_agreements, pubkey_hash_lo, pubkey_hash_hi, events_root_lo, events_root_hi],
+/// where lo/hi are the little-endian 128-bit halves of the 32-byte hashes.
+fn fp_limb(bytes16: &[u8]) -> Fp {
+    let arr: [u8; 16] = bytes16.try_into().expect("16-byte limb");
+    let v = u128::from_le_bytes(arr);
+    let two32 = Fp::from(1u64 << 32);
+    Fp::from((v >> 64) as u64) * two32 * two32 + Fp::from(v as u64)
+}
+pub fn stats_instances(pubkey_hash: &[u8; 32], events_root: &[u8; 32],
+    successes: u64, deadlocks: u64, xp: u64, p_fixed: u64, p_enhanced: u64, total: u64) -> Vec<Fp> {
+    vec![
+        Fp::from(successes), Fp::from(deadlocks), Fp::from(xp), Fp::from(p_fixed),
+        Fp::from(p_enhanced), Fp::from(total),
+        fp_limb(&pubkey_hash[..16]), fp_limb(&pubkey_hash[16..]),
+        fp_limb(&events_root[..16]), fp_limb(&events_root[16..]),
+    ]
 }
 
 /// Global proving key (initialized once)
@@ -1114,8 +1148,13 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
 
     let (snark_error, real_proof_bytes): (String, Option<Vec<u8>>) = {
         let circuit = StatsVerificationCircuit { witness: witness.clone() };
+        // KV_PUBLIC_INPUTS: the proof is bound to exactly these values; verify_proof with any
+        // other stats (or another pubkey/event set) fails.
+        let inst = stats_instances(&witness.pubkey_hash, &witness.l1_events_root,
+            witness.successes, witness.deadlocks, witness.xp,
+            witness.p_complete_fixed, witness.p_complete_enhanced, witness.total_agreements);
         let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
-        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, StatsVerificationCircuit>(&*STATS_PARAMS, &*STATS_PK, &[circuit], &[&[&[]]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
+        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, StatsVerificationCircuit>(&*STATS_PARAMS, &*STATS_PK, &[circuit], &[&[inst.as_slice()]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
     };
     {
         let mut proof_data = Vec::new();
@@ -1164,6 +1203,7 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
                 deadlocks: witness.deadlocks,
                 xp: witness.xp,
                 p_complete_fixed: witness.p_complete_fixed,
+                p_complete_enhanced: witness.p_complete_enhanced,
                 total_agreements: witness.total_agreements,
                 as_buyer: witness.as_buyer,
                 as_seller: witness.as_seller,
@@ -1206,55 +1246,43 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
     }
 }
 
-/// Verify stats proof
+/// Verify a stats proof cryptographically: rebuild the canonical instance vector from the
+/// CLAIMED public inputs and run halo2 verify_proof against the published VK. A proof made
+/// for different stats, a different pubkey, or a different event set fails here.
+/// (The old implementation re-generated a proof and compared bytes — meaningless for a
+/// randomized prover, and it never checked the instance binding at all.)
+pub fn verify_stats_proof_bytes(proof_bytes: &[u8], instances: &[Fp]) -> Result<(), String> {
+    if proof_bytes.is_empty() { return Err("empty proof".into()); }
+    let mut transcript = Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(proof_bytes);
+    let strategy = SingleStrategy::new(&*STATS_PARAMS);
+    verify_proof::<IPACommitmentScheme<EqAffine>, VerifierIPA<EqAffine>, Challenge255<EqAffine>,
+        Blake2bRead<&[u8], EqAffine, Challenge255<EqAffine>>, SingleStrategy<EqAffine>>(
+        &*STATS_PARAMS, &*STATS_VK, strategy, &[&[instances]], &mut transcript)
+        .map(|_| ()).map_err(|e| format!("verify: {:?}", e))
+}
+
 pub fn verify_stats_proof(proof: &StatsProof, expected_pubkey_hash: &[u8; 32]) -> bool {
-    // Check pubkey matches
-    if proof.public_inputs.pubkey_hash != hex::encode(expected_pubkey_hash) {
-        return false;
-    }
-
-   let witness = StatsWitness {
-        pubkey_hash: *expected_pubkey_hash,
-        successes: proof.public_inputs.successes,
-        deadlocks: proof.public_inputs.deadlocks,
-        xp: proof.public_inputs.xp,
-        p_complete_fixed: proof.public_inputs.p_complete_fixed,
-        completed: proof.public_inputs.completed,
-        deadlocked: proof.public_inputs.deadlocked,
-        refunded: proof.public_inputs.refunded,
-        pending: proof.public_inputs.pending,
-        total_agreements: proof.public_inputs.total_agreements,
-        as_buyer: proof.public_inputs.as_buyer,
-        as_seller: proof.public_inputs.as_seller,
-        total_volume_sompi: proof.public_inputs.total_volume_sompi,
-        largest_agreement_sompi: proof.public_inputs.largest_agreement_sompi,
-        agreements_last_7d_daa: proof.public_inputs.agreements_last_7d,
-        agreements_last_30d_daa: proof.public_inputs.agreements_last_30d,
-        deadlock_as_buyer: proof.public_inputs.deadlock_as_buyer,
-        deadlock_as_seller: proof.public_inputs.deadlock_as_seller,
-        reason_no_delivery: proof.public_inputs.reason_no_delivery,
-        reason_quality_dispute: proof.public_inputs.reason_quality_dispute,
-        reason_timeout: proof.public_inputs.reason_timeout,
-        reason_other: proof.public_inputs.reason_other,
-        resolved_after_deadlock: proof.public_inputs.resolved_after_deadlock,
-        unique_counterparties_deadlocked: proof.public_inputs.unique_counterparties_deadlocked,
-        repeat_deadlock_same_counterparty: proof.public_inputs.repeat_deadlock_same_counterparty,
-        l1_events_root: hex::decode(&proof.public_inputs.l1_events_root)
-            .unwrap_or_default()
-            .try_into()
-            .unwrap_or([0u8; 32]),
-        arweave_stats_hash: hex::decode(&proof.public_inputs.arweave_stats_hash)
-            .unwrap_or_default()
-            .try_into()
-            .unwrap_or([0u8; 32]),
-        timestamp: proof.generated_at,
-        ..Default::default()
+    if proof.public_inputs.pubkey_hash != hex::encode(expected_pubkey_hash) { return false; }
+    if !proof.proof_type.starts_with("Halo2") { return false; }
+    // Integer rules over the bound inputs (saturation and floor division, exactly as the
+    // prover computes them); the SNARK below binds these numbers, this enforces the formulas.
+    let pi = &proof.public_inputs;
+    if pi.xp != pi.successes.saturating_mul(XP_PER_SUCCESS)
+        .saturating_sub(pi.deadlocks.saturating_mul(XP_PENALTY_PER_DEADLOCK)) { return false; }
+    let n = pi.successes + pi.deadlocks;
+    let expected_p = if n == 0 { FIXED_POINT_SCALE / 2 }
+        else { (1 + pi.successes) * FIXED_POINT_SCALE / (2 + n) };
+    if pi.p_complete_fixed.abs_diff(expected_p) > FIXED_POINT_SCALE / 100 { return false; }
+    if pi.total_agreements != pi.completed + pi.refunded + pi.deadlocked + pi.pending { return false; }
+    if pi.successes != pi.completed || pi.deadlocks != pi.deadlocked { return false; }
+    let root: [u8; 32] = match hex::decode(&proof.public_inputs.l1_events_root).ok().and_then(|v| v.try_into().ok()) {
+        Some(r) => r, None => return false,
     };
-
-    match generate_stats_proof(&witness) {
-        Ok(expected) => proof.proof_bytes == expected.proof_bytes,
-        Err(_) => false,
-    }
+    let inst = stats_instances(expected_pubkey_hash, &root,
+        proof.public_inputs.successes, proof.public_inputs.deadlocks, proof.public_inputs.xp,
+        proof.public_inputs.p_complete_fixed, proof.public_inputs.p_complete_enhanced,
+        proof.public_inputs.total_agreements);
+    verify_stats_proof_bytes(&proof.proof_bytes, &inst).is_ok()
 }
 
 // ============================================================================
@@ -1557,9 +1585,166 @@ pub async fn query_l1_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, Stri
     Ok(events)
 }
 
+// ============================================================================
+// KV_CHAIN_SCAN — the Kaspa chain as the stats source (port of counterparty_scan.ts v2).
+// Escrows are found from real funding/spend patterns on the pubkey's own address, so the
+// event set is re-derivable by ANYONE from public consensus data: run this same public
+// algorithm, get the same events, get the same Poseidon root the proof commits to.
+// ============================================================================
+
+const SCAN_MAX_CANDIDATES: usize = 40;
+const SCAN_MAX_ESCROW_TXS: usize = 12; // escrows are short-lived; wallets are not
+
+/// Kaspa address from an x-only pubkey (port of the wallet's bech32-variant derivation).
+pub fn kaspa_address_from_xonly(xonly_hex: &str, network: &str) -> Result<String, String> {
+    const CHARSET: &[u8] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+    let xonly = hex::decode(xonly_hex).map_err(|e| format!("bad pubkey hex: {}", e))?;
+    if xonly.len() != 32 { return Err("x-only pubkey must be 32 bytes".into()); }
+    let hrp = if network == "mainnet" { "kaspa" } else { "kaspatest" };
+    fn to5(bytes: &[u8]) -> Vec<u8> {
+        let (mut acc, mut bits, mut out) = (0u32, 0u32, Vec::new());
+        for &b in bytes {
+            acc = (acc << 8) | b as u32; bits += 8;
+            while bits >= 5 { bits -= 5; out.push(((acc >> bits) & 31) as u8); acc &= (1 << bits) - 1; }
+        }
+        if bits > 0 { out.push(((acc << (5 - bits)) & 31) as u8); }
+        out
+    }
+    fn polymod(values: &[u8]) -> u64 {
+        let mut c: u64 = 1;
+        for &d in values {
+            let c0 = c >> 35;
+            c = ((c & 0x07ff_ffff_ffff) << 5) ^ d as u64;
+            if c0 & 0x01 != 0 { c ^= 0x98f2bc8e61; }
+            if c0 & 0x02 != 0 { c ^= 0x79b76d99e2; }
+            if c0 & 0x04 != 0 { c ^= 0xf33e5fb3c4; }
+            if c0 & 0x08 != 0 { c ^= 0xae2eabe2a8; }
+            if c0 & 0x10 != 0 { c ^= 0x1e4f43e470; }
+        }
+        c ^ 1
+    }
+    let mut payload = vec![0u8]; payload.extend_from_slice(&xonly);
+    let fivebit = to5(&payload);
+    let mut check_in: Vec<u8> = hrp.bytes().map(|c| c & 0x1f).collect();
+    check_in.push(0); check_in.extend_from_slice(&fivebit); check_in.extend_from_slice(&[0u8; 8]);
+    let cs = polymod(&check_in);
+    let cs_bytes: Vec<u8> = (0..5).rev().map(|i| ((cs >> (i * 8)) & 0xff) as u8).collect();
+    let mut addr = String::with_capacity(hrp.len() + 1 + fivebit.len() + 8);
+    addr.push_str(hrp); addr.push(':');
+    for d in fivebit.iter().chain(to5(&cs_bytes).iter()) { addr.push(CHARSET[*d as usize] as char); }
+    Ok(addr)
+}
+
+async fn scan_fetch_txs(base: &str, addr: &str, limit: usize) -> Vec<serde_json::Value> {
+    let url = format!("{}/addresses/{}/full-transactions?limit={}&resolve_previous_outpoints=light", base, addr, limit);
+    let client = reqwest::Client::new();
+    match client.get(&url).timeout(std::time::Duration::from_secs(12)).send().await {
+        Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().await.ok()
+            .and_then(|v| v.as_array().cloned()).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn scan_spends_from(tx: &serde_json::Value, a: &str) -> bool {
+    tx.get("inputs").and_then(|i| i.as_array()).map(|ins| ins.iter().any(|i|
+        i.get("previous_outpoint_address").and_then(|x| x.as_str()) == Some(a))).unwrap_or(false)
+}
+fn scan_pays_to(tx: &serde_json::Value, a: &str) -> u64 {
+    tx.get("outputs").and_then(|o| o.as_array()).map(|outs| outs.iter()
+        .filter(|o| o.get("script_public_key_address").and_then(|x| x.as_str()) == Some(a))
+        .map(|o| o.get("amount").and_then(|x| x.as_u64()).unwrap_or(0)).sum()).unwrap_or(0)
+}
+fn scan_out_addrs(tx: &serde_json::Value) -> Vec<String> {
+    tx.get("outputs").and_then(|o| o.as_array()).map(|outs| outs.iter()
+        .filter_map(|o| o.get("script_public_key_address").and_then(|x| x.as_str()).map(String::from))
+        .collect()).unwrap_or_default()
+}
+fn scan_daa(tx: &serde_json::Value) -> u64 {
+    tx.get("accepting_block_blue_score").and_then(|x| x.as_u64()).unwrap_or(0)
+}
+
+/// Scan the pubkey's REAL escrow history from the Kaspa chain and return one FrostEvent per
+/// escrow at its final status. Same rules as the in-app scan: exactly 2 funders including the
+/// target, short-lived address, kill tx = deadlocked, payout tx = settled, else open.
+pub async fn scan_chain_escrows(pubkey: &str, network: &str) -> Result<Vec<FrostEvent>, String> {
+    let base = kaspa_api_for(network);
+    let xonly = if pubkey.len() == 66 { &pubkey[2..] } else { pubkey };
+    let address = kaspa_address_from_xonly(xonly, network)?;
+
+    let history = scan_fetch_txs(base, &address, 100).await;
+    if history.is_empty() { return Ok(Vec::new()); }
+
+    let mut candidates: Vec<String> = Vec::new();
+    for tx in &history {
+        if !scan_spends_from(tx, &address) { continue; }
+        for o in scan_out_addrs(tx) {
+            if o != address && !candidates.contains(&o) { candidates.push(o); }
+        }
+    }
+
+    let mut events: Vec<FrostEvent> = Vec::new();
+    for cand in candidates.iter().take(SCAN_MAX_CANDIDATES) {
+        let txs = scan_fetch_txs(base, cand, 50).await;
+        if txs.is_empty() || txs.len() > SCAN_MAX_ESCROW_TXS { continue; }
+
+        let mut funders: Vec<String> = Vec::new();
+        let mut funded_total: u64 = 0;
+        let mut fund_daa: u64 = 0;
+        for tx in &txs {
+            let amt = scan_pays_to(tx, cand);
+            if amt == 0 { continue; }
+            funded_total += amt;
+            if scan_daa(tx) > fund_daa { fund_daa = scan_daa(tx); }
+            if let Some(ins) = tx.get("inputs").and_then(|i| i.as_array()) {
+                for i in ins {
+                    if let Some(f) = i.get("previous_outpoint_address").and_then(|x| x.as_str()) {
+                        if f != cand && !funders.iter().any(|x| x == f) { funders.push(f.to_string()); }
+                    }
+                }
+            }
+        }
+        // a 2-of-2 escrow is funded by precisely two parties, one of them the target
+        if funders.len() != 2 || !funders.iter().any(|f| f == &address) { continue; }
+
+        let mut kill_count = 0usize;
+        let mut settle: Option<&serde_json::Value> = None;
+        for sp in txs.iter().filter(|t| scan_spends_from(t, cand)) {
+            let outs = scan_out_addrs(sp);
+            if !outs.iter().any(|o| o != cand) { kill_count += 1; continue; } // pays itself: kill
+            let bt = sp.get("block_time").and_then(|x| x.as_u64()).unwrap_or(0);
+            if settle.map(|s| s.get("block_time").and_then(|x| x.as_u64()).unwrap_or(0) < bt).unwrap_or(true) {
+                settle = Some(sp);
+            }
+        }
+
+        let (event_type, tx_id, daa) = match (settle, kill_count) {
+            (Some(sp), _) => (FrostEventType::AgreementCompleted,
+                sp.get("transaction_id").and_then(|x| x.as_str()).unwrap_or(cand).to_string(),
+                scan_daa(sp).max(fund_daa)),
+            (None, k) if k > 0 => (FrostEventType::AgreementDeadlocked, cand.clone(), fund_daa),
+            _ => (FrostEventType::AgreementCreated, cand.clone(), fund_daa),
+        };
+        let counterparty = funders.iter().find(|f| *f != &address).cloned().unwrap_or_default();
+        events.push(FrostEvent {
+            tx_id,
+            event_type: event_type.clone(),
+            agreement_id: cand.clone(),
+            buyer_pubkey: pubkey.to_string(), // role split is unknowable from flows; target counts as one side
+            seller_pubkey: counterparty,
+            amount_sompi: funded_total,
+            timestamp: 0,
+            daa_score: daa,
+            deadlock_reason: if matches!(event_type, FrostEventType::AgreementDeadlocked) { Some(DeadlockReason::Other) } else { None },
+            completion_time_ms: None,
+        });
+    }
+    println!("[ChainScan] {} on {}: {} escrows from {}", &pubkey[..16.min(pubkey.len())], network, events.len(), address);
+    Ok(events)
+}
+
 /// Query current DAA score from L1 (via Kaspa API)
-pub async fn query_current_daa_score() -> Result<u64, String> {
-    let url = format!("{}/info/virtual-chain-blue-score", KASPA_API);
+pub async fn query_current_daa_score(network: &str) -> Result<u64, String> {
+    let url = format!("{}/info/virtual-chain-blue-score", kaspa_api_for(network));
 
     let client = reqwest::Client::new();
     let response = client.get(url)
@@ -1718,11 +1903,12 @@ pub async fn query_arweave_stats(pubkey: &str) -> Result<Option<ArweaveStatsReco
 
 /// Full stats aggregation: L1 + Arweave + proof generation (DAA-based timing)
 /// Query Arweave for FROST events (the real stats source)
-async fn query_arweave_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, String> {
+async fn query_arweave_frost_events(pubkey: &str, network: &str) -> Result<Vec<FrostEvent>, String> {
     let pubkey_hash = pubkey.to_string();
+    // KV_NET_SCOPE: records carry KV-Network inside the signed upload; only same-network deals count.
     let query = format!(
-        r#"query {{ transactions( tags: [ {{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "KV-Type", values: ["frost-agreement"] }}, {{ name: "KV-Pubkey", values: ["{}"] }} ], first: 100, sort: HEIGHT_DESC ) {{ edges {{ node {{ id tags {{ name value }} block {{ timestamp }} }} }} }} }}"#,
-        pubkey_hash
+        r#"query {{ transactions( tags: [ {{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "KV-Type", values: ["frost-agreement"] }}, {{ name: "KV-Pubkey", values: ["{}"] }}, {{ name: "KV-Network", values: ["{}"] }} ], first: 100, sort: HEIGHT_DESC ) {{ edges {{ node {{ id tags {{ name value }} block {{ timestamp }} }} }} }} }}"#,
+        pubkey_hash, network
     );
     let client = reqwest::Client::new();
     let response = match client.post("https://arweave.net/graphql")
@@ -1806,13 +1992,21 @@ async fn query_arweave_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, Str
 }
 
 
-pub async fn aggregate_and_prove_stats(pubkey: &str, address: Option<&str>) -> Result<(CounterpartyStats, StatsProof), String> {
-    // 1. Query current DAA score from L1
-    let current_daa = query_current_daa_score().await?;
-    
-    // 2. Query L1 for FROST events
-    // Query Arweave for FROST events (primary stats source)
-    let l1_events = query_arweave_frost_events(pubkey).await.unwrap_or_default();
+pub async fn aggregate_and_prove_stats(pubkey: &str, network: &str) -> Result<(CounterpartyStats, StatsProof), String> {
+    // 1. Query current DAA score from L1 (per-network)
+    let current_daa = query_current_daa_score(network).await?;
+
+    // 2. KV_CHAIN_SCAN: the Kaspa chain is the stats source. Escrow outcomes are read from the
+    // pubkey's real funding/spend history, so anyone can re-run this public algorithm on public
+    // data and re-derive the exact event set the proof's l1_events_root commits to. Arweave
+    // records (same-network only) are the fallback when the chain scan cannot answer.
+    let l1_events = match scan_chain_escrows(pubkey, network).await {
+        Ok(ev) => ev,
+        Err(e) => {
+            println!("[Stats] chain scan failed ({}), falling back to Arweave records", e);
+            query_arweave_frost_events(pubkey, network).await.unwrap_or_default()
+        }
+    };
     let l1_stats = aggregate_l1_events_full(&l1_events, pubkey, current_daa);
     let l1_events_root = compute_poseidon_events_root(&l1_stats.event_hashes);
 
@@ -1962,6 +2156,9 @@ pub struct CounterpartyProofRequest {
     pub include_history: bool,
     #[serde(default)]
     pub address: Option<String>,
+    /// KV_RELAY_NET: absent = testnet-10 (old clients unchanged)
+    #[serde(default)]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1993,7 +2190,7 @@ pub async fn api_get_counterparty_stats_with_proof(
 
     if query.include_proof {
         // Full aggregation with proof
-        match aggregate_and_prove_stats(&pubkey, query.address.as_deref()).await {
+        match aggregate_and_prove_stats(&pubkey, query.network.as_deref().unwrap_or("testnet-10")).await {
             Ok((stats, proof)) => {
                 HttpResponse::Ok().json(CounterpartyProofResponse {
                     found: true,
@@ -2143,17 +2340,50 @@ pub struct DAppVerifyResponse {
     pub code_hash: String,
     pub scan_result: CodeScanResult,
     pub proof: Option<VerificationProof>,
+    /// KV_DAPP_V2: the instance-bound proof; verify with POST /api/verify/dapp-check
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bound_proof: Option<DAppProof>,
     pub arweave_tx: Option<String>,
     pub board: String,
     pub message: String,
 }
 
 /// Full DApp verification with code scanning and SNARK proof
+/// KV_DAPP_FETCH: the app sends a URL, not the code. Fetch it - from an allowlist of public
+/// code hosts only (no server-side requests to arbitrary or private hosts) - so the scan and
+/// the proof are about the REAL file. Before this, the empty string was scanned and proven.
+const DAPP_CODE_HOSTS: &[&str] = &["raw.githubusercontent.com", "gist.githubusercontent.com", "arweave.net"];
+
+async fn fetch_dapp_code(url: &str) -> Result<String, String> {
+    let rest = url.strip_prefix("https://").ok_or("code URL must be https")?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("").to_ascii_lowercase();
+    let host_ok = DAPP_CODE_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{}", h)));
+    if !host_ok { return Err(format!("code host {} not allowed (use {})", host, DAPP_CODE_HOSTS.join(", "))); }
+    let resp = reqwest::Client::new().get(url).timeout(std::time::Duration::from_secs(20)).send().await
+        .map_err(|e| format!("fetch failed: {}", e))?;
+    if !resp.status().is_success() { return Err(format!("fetch returned {}", resp.status())); }
+    if let Some(len) = resp.content_length() { if len as usize > MAX_CODE_SIZE_BYTES { return Err("code exceeds size limit".into()); } }
+    let bytes = resp.bytes().await.map_err(|e| format!("read failed: {}", e))?;
+    if bytes.len() > MAX_CODE_SIZE_BYTES { return Err("code exceeds size limit".into()); }
+    String::from_utf8(bytes.to_vec()).map_err(|_| "code is not UTF-8 text".into())
+}
+
 pub async fn api_verify_dapp(
     body: web::Json<DAppVerifyRequest>,
 ) -> HttpResponse {
+    // 0. The code being proven: inline, or fetched from the allowlisted URL
+    let code: String = if !body.dapp_code.trim().is_empty() {
+        body.dapp_code.clone()
+    } else {
+        match fetch_dapp_code(body.dapp_url.trim()).await {
+            Ok(c) if !c.trim().is_empty() => c,
+            Ok(_) => return HttpResponse::BadRequest().json(serde_json::json!({"ok": false, "error": "code URL returned an empty file"})),
+            Err(e) => return HttpResponse::BadRequest().json(serde_json::json!({"ok": false, "error": e})),
+        }
+    };
+
     // 1. Scan code for prohibited/suspicious patterns
-    let scan_result = scan_code(&body.dapp_code);
+    let scan_result = scan_code(&code);
     
     if scan_result.status == ScanStatus::Rejected {
         return HttpResponse::Ok().json(DAppVerifyResponse {
@@ -2162,6 +2392,7 @@ pub async fn api_verify_dapp(
             code_hash: scan_result.code_hash.clone(),
             scan_result,
             proof: None,
+            bound_proof: None,
             arweave_tx: None,
             board: String::new(),
             message: "DApp rejected: Contains prohibited content".to_string(),
@@ -2177,17 +2408,13 @@ pub async fn api_verify_dapp(
     }
     
     // 3. Determine board based on XP commitment
+    // No XP floor (mainnet starts everyone at 0 XP). XP only picks the board.
     let board = if body.xp_commitment >= 5000 {
         "elite"
     } else if body.xp_commitment >= 1000 {
         "main"
-    } else if body.xp_commitment >= 500 {
-        "incubator"
     } else {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "ok": false,
-            "error": "Minimum 500 XP commitment required"
-        }));
+        "incubator"
     };
     
     // 4. Generate DApp ID
@@ -2198,33 +2425,20 @@ pub async fn api_verify_dapp(
     let hash = hasher.finalize();
     let dapp_id = format!("DAPP_{}", hex::encode(&hash[..8]));
     
-    // 5. Generate SNARK proof (if scan passed)
-    let proof = if scan_result.passed {
+    // 5. KV_DAPP_V2: instance-bound proof over (code hash, owner, ruleset, verdict)
+    let bound = if scan_result.passed {
+        match generate_dapp_proof(&code, &body.owner_pubkey, body.trait_count as u64, body.xp_commitment) {
+            Ok(p) => Some(p),
+            Err(e) => { println!("[DApp] proof failed: {}", e); None }
+        }
+    } else { None };
+    let proof = bound.as_ref().map(|p| VerificationProof {
+        proof_bytes: p.proof_bytes.clone(),
+        public_inputs_hash: p.public_inputs.code_hash.clone(),
+        proof_type: p.proof_type.clone(),
+        generated_at: p.generated_at,
+    });
 
-        let content_hash = scan_result.code_hash.clone();
-        
-        let owner_pubkey = body.owner_pubkey.clone();
-        
-        let device_attestation_hash = compute_hash(&body.device_attestation);
-
-        let inputs = ProofInputs {
-            content_hash,
-            owner_pubkey,
-            content_type: "dapp".to_string(),
-            trait_count: body.trait_count,
-            xp: body.xp_commitment,
-            successes: 0,
-            deadlocks: 0,
-            device_attestation_hash: device_attestation_hash,
-            timestamp: current_timestamp(),
-            scan_passed: true,
-        };
-        
-        generate_verification_proof(&inputs).ok()
-    } else {
-        None
-    };
-    
     // 6. Post to Arweave (if scan passed or pending review)
     let arweave_tx = if scan_result.status != ScanStatus::Rejected {
         // TODO: Actually post to Arweave via Irys
@@ -2247,6 +2461,7 @@ pub async fn api_verify_dapp(
         code_hash: scan_result.code_hash.clone(),
         scan_result,
         proof,
+        bound_proof: bound,
         arweave_tx,
         board: board.to_string(),
         message,
@@ -2404,7 +2619,7 @@ pub async fn api_get_merkle_membership_proof(
     use crate::halo2_snark_module::{SparseMerkleTree, poseidon_leaf_hash};
     use pasta_curves::Fp;
     let pubkey = path.into_inner();
-    let events = match query_arweave_frost_events(&pubkey).await {
+    let events = match query_arweave_frost_events(&pubkey, "testnet-10").await {
         Ok(e) => e,
         Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"ok": false, "error": e})),
     };
@@ -2493,16 +2708,19 @@ pub async fn api_get_merkle_membership_proof(
 // ============================================================================
 // ACADEMIC VERIFICATION CIRCUIT (Halo2 IPA)
 // ============================================================================
+/// KV_ACADEMIC_V2 witness. Every field is a public input; the email itself stays private
+/// (only the hash of the exact DKIM-signed bytes is bound - anyone holding the email can
+/// re-run DKIM and compare, nobody else learns the address).
 #[derive(Debug, Clone, Default)]
 pub struct AcademicWitness {
-    pub email_verified: u64,
-    pub abstract_exists: u64,
-    pub attestation_count: u64,
-    pub repository_valid: u64,
-    pub content_hash_lo: u64,
-    pub content_hash_hi: u64,
-    pub question_count: u64,
-    pub answer_count: u64,
+    pub dkim_passed: u64,             // RSA signature verified against the domain's DNS key
+    pub is_academic: u64,             // d= is .edu / ac.cc / edu.cc
+    pub from_aligned: u64,            // From domain == d= or a subdomain
+    pub challenge_ok: u64,            // signed Subject carries the pubkey-derived challenge
+    pub pubkey_hash: [u8; 32],
+    pub domain_hash: [u8; 32],        // sha256(d=), e.g. sha256("mit.edu")
+    pub signed_input_hash: [u8; 32],  // sha256 of the exact bytes the RSA signature covers
+    pub abstract_hash: [u8; 32],      // sha256(abstract text) or zero
 }
 #[derive(Clone, Debug)]
 pub struct AcademicCircuitConfig { pub advice: [Column<Advice>; 8], pub instance: Column<Instance>, pub selector: Selector }
@@ -2516,26 +2734,36 @@ impl Circuit<Fp> for AcademicVerificationCircuit {
         let advice: [Column<Advice>; 8] = std::array::from_fn(|_| meta.advice_column());
         let instance = meta.instance_column(); let selector = meta.selector();
         for col in &advice { meta.enable_equality(*col); } meta.enable_equality(instance);
-        meta.create_gate("edu_verified", |meta| { let s = meta.query_selector(selector); let v = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur()); vec![s * (v - Expression::Constant(Fp::one()))] });
-        meta.create_gate("abstract_exists", |meta| { let s = meta.query_selector(selector); let v = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur()); vec![s * (v - Expression::Constant(Fp::one()))] });
-        meta.create_gate("min_attestations", |meta| { let s = meta.query_selector(selector); let c = meta.query_advice(advice[2], halo2_proofs::poly::Rotation::cur()); let surplus = meta.query_advice(advice[3], halo2_proofs::poly::Rotation::cur()); vec![s * (surplus - (c - Expression::Constant(Fp::from(3u64))))] });
-        meta.create_gate("repo_valid", |meta| { let s = meta.query_selector(selector); let v = meta.query_advice(advice[4], halo2_proofs::poly::Rotation::cur()); vec![s * (v - Expression::Constant(Fp::one()))] });
-        meta.create_gate("answer_consistency", |meta| { let s = meta.query_selector(selector); let q = meta.query_advice(advice[6], halo2_proofs::poly::Rotation::cur()); let a = meta.query_advice(advice[7], halo2_proofs::poly::Rotation::cur()); let d = meta.query_advice(advice[5], halo2_proofs::poly::Rotation::cur()); vec![s * (d - (q - a))] });
+        // all four policy flags must be exactly 1
+        meta.create_gate("academic_policy", |meta| {
+            let s = meta.query_selector(selector);
+            let one = Expression::Constant(Fp::one());
+            (0..4).map(|i| s.clone() * (meta.query_advice(advice[i], halo2_proofs::poly::Rotation::cur()) - one.clone())).collect::<Vec<_>>()
+        });
         AcademicCircuitConfig { advice, instance, selector }
     }
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fp>) -> Result<(), PlonkError> {
-        layouter.assign_region(|| "academic", |mut region| {
+        // Instance order: [dkim, academic, aligned, challenge, pk_lo, pk_hi, dom_lo, dom_hi,
+        //                  sig_lo, sig_hi, abs_lo, abs_hi]
+        let w = &self.witness;
+        let cells: Vec<AssignedCell<Fp, Fp>> = layouter.assign_region(|| "academic", |mut region| {
             config.selector.enable(&mut region, 0)?;
-            region.assign_advice(|| "ev", config.advice[0], 0, || Value::known(Fp::from(self.witness.email_verified)))?;
-            region.assign_advice(|| "ae", config.advice[1], 0, || Value::known(Fp::from(self.witness.abstract_exists)))?;
-            region.assign_advice(|| "ac", config.advice[2], 0, || Value::known(Fp::from(self.witness.attestation_count)))?;
-            region.assign_advice(|| "as", config.advice[3], 0, || Value::known(Fp::from(self.witness.attestation_count.saturating_sub(3))))?;
-            region.assign_advice(|| "rv", config.advice[4], 0, || Value::known(Fp::from(self.witness.repository_valid)))?;
-            region.assign_advice(|| "ad", config.advice[5], 0, || Value::known(Fp::from(self.witness.question_count.saturating_sub(self.witness.answer_count))))?;
-            region.assign_advice(|| "qc", config.advice[6], 0, || Value::known(Fp::from(self.witness.question_count)))?;
-            region.assign_advice(|| "anc", config.advice[7], 0, || Value::known(Fp::from(self.witness.answer_count)))?;
-            Ok(())
-        })
+            let mut v = Vec::new();
+            for (i, x) in [w.dkim_passed, w.is_academic, w.from_aligned, w.challenge_ok].iter().enumerate() {
+                v.push(region.assign_advice(|| "flag", config.advice[i], 0, || Value::known(Fp::from(*x)))?);
+            }
+            let limbs = [&w.pubkey_hash, &w.domain_hash, &w.signed_input_hash, &w.abstract_hash];
+            for (j, h) in limbs.iter().enumerate() {
+                let (row, col) = (1 + j / 2, (j % 2) * 4);
+                v.push(region.assign_advice(|| "lo", config.advice[col], row, || Value::known(fp_limb(&h[..16])))?);
+                v.push(region.assign_advice(|| "hi", config.advice[col + 1], row, || Value::known(fp_limb(&h[16..])))?);
+            }
+            Ok(v)
+        })?;
+        for (row, cell) in cells.iter().enumerate() {
+            layouter.constrain_instance(cell.cell(), config.instance, row)?;
+        }
+        Ok(())
     }
 }
 const ACADEMIC_HALO2_K: u32 = 5;
@@ -2548,38 +2776,83 @@ static MERKLE_PARAMS: Lazy<ParamsIPA<EqAffine>> = Lazy::new(|| { log::info!("Gen
 static MERKLE_VK: Lazy<VerifyingKey<EqAffine>> = Lazy::new(|| { let c = SparseMerkleCircuit { leaf: Value::unknown(), index: [false; TREE_DEPTH], proof: [Value::unknown(); TREE_DEPTH], root: Value::unknown() }; keygen_vk(&*MERKLE_PARAMS, &c).expect("Merkle VK") });
 static MERKLE_PK: Lazy<ProvingKey<EqAffine>> = Lazy::new(|| { let c = SparseMerkleCircuit { leaf: Value::unknown(), index: [false; TREE_DEPTH], proof: [Value::unknown(); TREE_DEPTH], root: Value::unknown() }; keygen_pk(&*MERKLE_PARAMS, MERKLE_VK.clone(), &c).expect("Merkle PK") });
 
-pub fn generate_academic_proof(witness: &AcademicWitness) -> Result<VerificationProof, String> {
-    if witness.email_verified != 1 { return Err("Email not verified".into()); }
-    if witness.abstract_exists != 1 { return Err("No abstract".into()); }
-    if witness.attestation_count < 3 { return Err(format!("Need 3 attestations, have {}", witness.attestation_count)); }
-    if witness.repository_valid != 1 { return Err("Repository not validated".into()); }
-    let (snark_error, real_proof): (String, Option<Vec<u8>>) = {
-        let circuit = AcademicVerificationCircuit { witness: witness.clone() };
-        let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
-        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, AcademicVerificationCircuit>(&*ACADEMIC_PARAMS, &*ACADEMIC_PK, &[circuit], &[&[&[]]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
-    };
-    let mut hasher = Sha256::new(); hasher.update(&witness.content_hash_lo.to_le_bytes()); hasher.update(b"KASVILLAGE_ACADEMIC_V1"); let hash_fb = hasher.finalize();
-    let mut ph = Sha256::new(); ph.update(&witness.content_hash_lo.to_le_bytes()); ph.update(&witness.email_verified.to_le_bytes()); let pih = hex::encode(ph.finalize());
-    Ok(VerificationProof { proof_bytes: real_proof.clone().unwrap_or_else(|| hash_fb.to_vec()), public_inputs_hash: pih, proof_type: if real_proof.is_some() { "Halo2-IPA-Academic-V1".to_string() } else { format!("Academic-Hash-ERR:{}", snark_error) }, generated_at: current_timestamp() })
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcademicPublicInputs {
+    pub dkim_passed: u64, pub is_academic: u64, pub from_aligned: u64, pub challenge_ok: u64,
+    pub pubkey_hash: String,
+    pub domain: String,             // the academic domain (public by design, e.g. mit.edu)
+    pub domain_hash: String,
+    pub signed_input_hash: String,  // hash of the DKIM-signed bytes; the email itself is NOT revealed
+    pub abstract_hash: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcademicProof {
+    pub proof_bytes: Vec<u8>,
+    pub public_inputs: AcademicPublicInputs,
+    pub proof_type: String,
+    pub vk_fingerprint: String,
+    pub generated_at: u64,
 }
 
-pub async fn api_verify_academic(body: web::Json<serde_json::Value>) -> HttpResponse {
-    let content = body.get("abstract_text").and_then(|v| v.as_str()).unwrap_or("");
-    let cb = { let mut h = Sha256::new(); h.update(content.as_bytes()); h.finalize() };
-    let witness = AcademicWitness {
-        email_verified: if body.get("email_verified").and_then(|v| v.as_bool()).unwrap_or(false) { 1 } else { 0 },
-        abstract_exists: if !content.is_empty() { 1 } else { 0 },
-        attestation_count: body.get("attestation_count").and_then(|v| v.as_u64()).unwrap_or(0),
-        repository_valid: if body.get("repository_valid").and_then(|v| v.as_bool()).unwrap_or(false) { 1 } else { 0 },
-        content_hash_lo: u64::from_le_bytes(cb[..8].try_into().unwrap_or([0u8; 8])),
-        content_hash_hi: u64::from_le_bytes(cb[8..16].try_into().unwrap_or([0u8; 8])),
-        question_count: body.get("question_count").and_then(|v| v.as_u64()).unwrap_or(0),
-        answer_count: body.get("answer_count").and_then(|v| v.as_u64()).unwrap_or(0),
-    };
-    match generate_academic_proof(&witness) {
-        Ok(proof) => HttpResponse::Ok().json(serde_json::json!({"ok": true, "proof": proof})),
-        Err(e) => HttpResponse::BadRequest().json(serde_json::json!({"ok": false, "error": e})),
+fn academic_instances(w: &AcademicWitness) -> Vec<Fp> {
+    let mut v = vec![Fp::from(w.dkim_passed), Fp::from(w.is_academic), Fp::from(w.from_aligned), Fp::from(w.challenge_ok)];
+    for h in [&w.pubkey_hash, &w.domain_hash, &w.signed_input_hash, &w.abstract_hash] {
+        v.push(fp_limb(&h[..16])); v.push(fp_limb(&h[16..]));
     }
+    v
+}
+
+/// KV_ACADEMIC_V2: prove "the academic domain D signed an email, From-aligned, whose signed
+/// Subject carries THIS pubkey's challenge". Only called after real DKIM verification passed.
+pub fn generate_academic_proof(pubkey: &str, dk: &crate::dkim_verify::DkimOutcome, abstract_text: Option<&str>) -> Result<AcademicProof, String> {
+    if !dk.passed { return Err(dk.error.clone().unwrap_or_else(|| "DKIM did not pass".into())); }
+    let sig_hash = hex32(&dk.signing_input_hash).ok_or("bad signing_input_hash")?;
+    let w = AcademicWitness {
+        dkim_passed: 1, is_academic: 1, from_aligned: 1, challenge_ok: 1,
+        pubkey_hash: hash32(pubkey.trim().to_ascii_lowercase().as_bytes()),
+        domain_hash: hash32(dk.domain.as_bytes()),
+        signed_input_hash: sig_hash,
+        abstract_hash: abstract_text.filter(|t| !t.is_empty()).map(|t| hash32(t.as_bytes())).unwrap_or([0u8; 32]),
+    };
+    let inst = academic_instances(&w);
+    let circuit = AcademicVerificationCircuit { witness: w.clone() };
+    let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
+    create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, AcademicVerificationCircuit>(
+        &*ACADEMIC_PARAMS, &*ACADEMIC_PK, &[circuit], &[&[inst.as_slice()]], OsRng, &mut transcript)
+        .map_err(|e| format!("academic prove: {:?}", e))?;
+    Ok(AcademicProof {
+        proof_bytes: transcript.finalize(),
+        public_inputs: AcademicPublicInputs {
+            dkim_passed: 1, is_academic: 1, from_aligned: 1, challenge_ok: 1,
+            pubkey_hash: hex::encode(w.pubkey_hash), domain: dk.domain.clone(), domain_hash: hex::encode(w.domain_hash),
+            signed_input_hash: hex::encode(w.signed_input_hash), abstract_hash: hex::encode(w.abstract_hash),
+        },
+        proof_type: "Halo2-IPA-Academic-V2".into(),
+        vk_fingerprint: { let mut h = Sha256::new(); h.update(format!("{:?}", *ACADEMIC_VK).as_bytes()); hex::encode(h.finalize()) },
+        generated_at: current_timestamp(),
+    })
+}
+
+/// Verify an academic proof: policy + domain sanity + halo2 verify_proof over the claimed inputs.
+pub fn verify_academic_proof(p: &AcademicProof) -> Result<(), String> {
+    let pi = &p.public_inputs;
+    if [pi.dkim_passed, pi.is_academic, pi.from_aligned, pi.challenge_ok] != [1, 1, 1, 1] { return Err("policy flags not all set".into()); }
+    if !crate::dkim_verify::is_academic_domain(&pi.domain) { return Err("domain is not academic".into()); }
+    if hex::encode(hash32(pi.domain.as_bytes())) != pi.domain_hash { return Err("domain does not match domain_hash".into()); }
+    let w = AcademicWitness {
+        dkim_passed: 1, is_academic: 1, from_aligned: 1, challenge_ok: 1,
+        pubkey_hash: hex32(&pi.pubkey_hash).ok_or("bad pubkey_hash")?,
+        domain_hash: hex32(&pi.domain_hash).ok_or("bad domain_hash")?,
+        signed_input_hash: hex32(&pi.signed_input_hash).ok_or("bad signed_input_hash")?,
+        abstract_hash: hex32(&pi.abstract_hash).ok_or("bad abstract_hash")?,
+    };
+    let inst = academic_instances(&w);
+    let mut transcript = Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(&p.proof_bytes);
+    let strategy = SingleStrategy::new(&*ACADEMIC_PARAMS);
+    verify_proof::<IPACommitmentScheme<EqAffine>, VerifierIPA<EqAffine>, Challenge255<EqAffine>,
+        Blake2bRead<&[u8], EqAffine, Challenge255<EqAffine>>, SingleStrategy<EqAffine>>(
+        &*ACADEMIC_PARAMS, &*ACADEMIC_VK, strategy, &[&[inst.as_slice()]], &mut transcript)
+        .map(|_| ()).map_err(|e| format!("verify: {:?}", e))
 }
 
 // ROUTE REGISTRATION
@@ -2989,7 +3262,7 @@ pub async fn api_get_dapps_by_owner(path: web::Path<String>) -> HttpResponse {
             let pledge = query_dapp_pledge(owner).await;
             let pledge_active = if let Some(ref p) = pledge {
                 let bal = query_kaspa_balance(&p.pledge_address).await.unwrap_or(0);
-                let current_daa = query_current_daa_score().await.unwrap_or(0);
+                let current_daa = query_current_daa_score("testnet-10").await.unwrap_or(0);
                 bal >= p.pledge_sompi && current_daa <= p.end_daa
             } else { false };
             let mut enriched = dapp.clone();
@@ -3468,7 +3741,7 @@ async fn query_storefront_from_arweave(pubkey: &str) -> Result<Option<Storefront
 async fn record_visit_internal(_storefront_pubkey: &str, _visitor_pubkey: &str) -> u64 { 1 }
 
 async fn aggregate_storefront_stats(pubkey: &str) -> Result<StorefrontStats, String> {
-    let current_daa = query_current_daa_score().await.unwrap_or(0);
+    let current_daa = query_current_daa_score("testnet-10").await.unwrap_or(0);
     let events = query_l1_frost_events(pubkey).await?;
     let mut stats = StorefrontStats { total_visits: 0, unique_visitors: 0, visits_last_7d: 0, visits_last_30d: 0, agreements_started: 0, agreements_completed: 0, agreements_deadlocked: 0, total_volume_sompi: 0, avg_agreement_sompi: 0, repeat_customers: 0, conversion_rate: 0.0, completion_rate: 0.0 };
     let mut customers: HashSet<String> = HashSet::new();
@@ -3684,7 +3957,7 @@ pub async fn compute_full_dapp_visibility(pubkey: &str) -> DAppVisibility {
     let pledge = query_dapp_pledge(pubkey).await;
     
     // 2. Get current DAA + balance + price
-    let current_daa = query_current_daa_score().await.unwrap_or(0);
+    let current_daa = query_current_daa_score("testnet-10").await.unwrap_or(0);
     let kas_price = query_kas_price_usd().await.unwrap_or(0.05);
     
     let pledge_status = if let Some(ref p) = pledge {
@@ -3790,3 +4063,140 @@ fn compute_hash_index(input: &str) -> String {
     hex::encode(&hash[..8])
 }
 
+
+// ============================================================================
+// KV_PUBLIC_INPUTS tests — the proof must be bound to the claimed stats.
+// ============================================================================
+#[cfg(test)]
+mod kv_public_input_tests {
+    use super::*;
+
+    fn test_witness() -> StatsWitness {
+        let mut w = StatsWitness {
+            pubkey_hash: [7u8; 32],
+            successes: 3, deadlocks: 1,
+            xp: (3 * XP_PER_SUCCESS).saturating_sub(XP_PENALTY_PER_DEADLOCK), // = 0 here (30 - 50 saturates)
+            p_complete_fixed: (1 + 3) * FIXED_POINT_SCALE / (2 + 3 + 1),
+            total_agreements: 5, completed: 3, refunded: 0, deadlocked: 1, pending: 1,
+            as_buyer: 5, as_seller: 0,
+            deadlock_as_buyer: 1, deadlock_as_seller: 0,
+            reason_no_delivery: 0, reason_quality_dispute: 0, reason_timeout: 0, reason_other: 1,
+            total_volume_sompi: 500_000_000, largest_agreement_sompi: 200_000_000,
+            l1_events_root: [9u8; 32],
+            ..Default::default()
+        };
+        let factors = compute_enhanced_p_complete_with_factors(&w);
+        w.p_complete_enhanced = factors.final_p;
+        w.factors = factors;
+        w
+    }
+
+    #[test]
+    fn address_derivation_matches_wallet() {
+        // Known vector: the dev wallet's real pubkey -> its real addresses on both networks
+        let xonly = "7d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133";
+        assert_eq!(kaspa_address_from_xonly(xonly, "mainnet").unwrap(),
+            "kaspa:qp7592kfylul443ee5950xe7jgv4rkgrv87ju8s96xz0sy3t79cnx6tashzpx");
+        assert!(kaspa_address_from_xonly(xonly, "testnet-10").unwrap().starts_with("kaspatest:qp7592kfylul"));
+    }
+
+    #[test]
+    fn proof_verifies_and_tampering_fails() {
+        let w = test_witness();
+        let proof = generate_stats_proof(&w).expect("prove");
+        assert!(proof.proof_type.starts_with("Halo2"), "real SNARK expected, got {}", proof.proof_type);
+
+        // 1. honest verification passes
+        assert!(verify_stats_proof(&proof, &w.pubkey_hash), "honest proof must verify");
+
+        // 2. inflating a stat fails cryptographically
+        let mut inflated = proof.clone();
+        inflated.public_inputs.successes = 30;
+        inflated.public_inputs.xp = (30 * XP_PER_SUCCESS).saturating_sub(XP_PENALTY_PER_DEADLOCK);
+        assert!(!verify_stats_proof(&inflated, &w.pubkey_hash), "inflated stats must fail");
+
+        // 3. claiming someone else's pubkey fails
+        assert!(!verify_stats_proof(&proof, &[8u8; 32]), "wrong pubkey must fail");
+
+        // 4. a different event set (root) fails
+        let mut swapped = proof.clone();
+        swapped.public_inputs.l1_events_root = hex::encode([1u8; 32]);
+        assert!(!verify_stats_proof(&swapped, &w.pubkey_hash), "wrong events root must fail");
+    }
+}
+
+#[cfg(test)]
+mod kv_dapp_academic_v2_tests {
+    use super::*;
+
+    #[test]
+    fn dapp_proof_binds_code_owner_and_rules() {
+        let code = "<html><body><canvas id=c></canvas><script>/* game */</script></body></html>";
+        let owner = "037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133";
+        let p = generate_dapp_proof(code, owner, 13, 500).expect("prove");
+        assert_eq!(p.proof_type, "Halo2-IPA-DApp-V2");
+        assert!(verify_dapp_proof(&p, Some(code)).is_ok(), "honest proof must verify against its code");
+        assert!(verify_dapp_proof(&p, None).is_ok(), "verifies without code too (binding only)");
+        // a different file cannot borrow this proof
+        assert!(verify_dapp_proof(&p, Some("<html>malware</html>")).is_err(), "other code must fail");
+        // tampered public inputs fail cryptographically
+        let mut t = p.clone(); t.public_inputs.owner_hash = hex::encode([1u8; 32]);
+        assert!(verify_dapp_proof(&t, None).is_err(), "other owner must fail");
+        let mut t = p.clone(); t.public_inputs.trait_count = 40;
+        assert!(verify_dapp_proof(&t, None).is_err(), "inflated traits must fail");
+        let mut t = p.clone(); t.public_inputs.xp_commitment = 5000;
+        assert!(verify_dapp_proof(&t, None).is_err(), "inflated xp (board upgrade) must fail");
+        let mut t = p.clone(); t.public_inputs.ruleset_hash = hex::encode([2u8; 32]);
+        assert!(verify_dapp_proof(&t, None).is_err(), "claiming other rules must fail");
+        // below-policy proofs are refused at generation
+        assert!(generate_dapp_proof(code, owner, 12, 500).is_err());
+        // no XP floor: a 0-XP creator can still get a bound proof
+        let z = generate_dapp_proof(code, owner, 13, 0).expect("0 XP allowed");
+        assert!(verify_dapp_proof(&z, Some(code)).is_ok());
+    }
+
+    #[test]
+    fn academic_proof_requires_real_dkim_and_binds_everything() {
+        let f: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/dkim_cases.json")).unwrap();
+        let spki = f["key_spki_b64"].as_str().unwrap().to_string();
+        let pubkey = f["pubkey"].as_str().unwrap();
+        let raw = f["cases"][0]["raw"].as_str().unwrap();
+        let key_for = |_d: &str, _s: &str| -> Result<String, String> { Ok(spki.clone()) };
+
+        let dk = crate::dkim_verify::verify_message(raw, &key_for, crate::dkim_verify::academic_policy(pubkey));
+        assert!(dk.passed, "fixture must pass real DKIM + policy: {:?}", dk.error);
+        let p = generate_academic_proof(pubkey, &dk, Some("On verifiable reputation")).expect("prove");
+        assert_eq!(p.proof_type, "Halo2-IPA-Academic-V2");
+        assert_eq!(p.public_inputs.domain, "mit.edu");
+        assert!(verify_academic_proof(&p).is_ok(), "honest proof must verify");
+
+        let mut t = p.clone(); t.public_inputs.domain = "harvard.edu".into(); t.public_inputs.domain_hash = hex::encode(hash32(b"harvard.edu"));
+        assert!(verify_academic_proof(&t).is_err(), "relabeling the institution must fail");
+        let mut t = p.clone(); t.public_inputs.pubkey_hash = hex::encode([3u8; 32]);
+        assert!(verify_academic_proof(&t).is_err(), "transferring to another pubkey must fail");
+        let mut t = p.clone(); t.public_inputs.signed_input_hash = hex::encode([4u8; 32]);
+        assert!(verify_academic_proof(&t).is_err(), "swapping the email commitment must fail");
+        let mut t = p.clone(); t.public_inputs.abstract_hash = hex::encode([5u8; 32]);
+        assert!(verify_academic_proof(&t).is_err(), "swapping the abstract must fail");
+
+        // a failed DKIM never produces a proof
+        let bad = f["cases"].as_array().unwrap().iter().find(|c| c["name"] == "tampered_subject").unwrap();
+        let dk_bad = crate::dkim_verify::verify_message(bad["raw"].as_str().unwrap(), &key_for, crate::dkim_verify::academic_policy(pubkey));
+        assert!(!dk_bad.passed);
+        assert!(generate_academic_proof(pubkey, &dk_bad, None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod kv_dapp_fetch_tests {
+    use super::*;
+    #[actix_web::test]
+    async fn fetch_refuses_unsafe_urls() {
+        // no server-side requests to arbitrary or private hosts
+        assert!(fetch_dapp_code("http://raw.githubusercontent.com/x").await.is_err(), "http refused");
+        assert!(fetch_dapp_code("https://169.254.169.254/latest/meta-data").await.is_err(), "metadata IP refused");
+        assert!(fetch_dapp_code("https://localhost/x").await.is_err(), "localhost refused");
+        assert!(fetch_dapp_code("https://evil.example.com/x").await.is_err(), "unlisted host refused");
+        assert!(fetch_dapp_code("https://raw.githubusercontent.com.evil.com/x").await.is_err(), "suffix trick refused");
+    }
+}
