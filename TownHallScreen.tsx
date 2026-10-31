@@ -533,7 +533,7 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#166534' }}>
-              🔒 SNARK Proof Verified
+              🏛️ Town Hall attested (posted to Arweave)
             </Text>
             <Text style={{ fontSize: rs.font(10), color: '#166534' }}>
               {result.proofType}
@@ -555,7 +555,7 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
           borderColor: '#fde68a',
         }}>
           <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#92400e' }}>
-            ⚠️ No SNARK proof on Arweave
+            ⚠️ No Town Hall attestation on Arweave
           </Text>
           <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginTop: 2 }}>
             This user has not generated a verifiable stats proof yet
@@ -1187,7 +1187,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
         
         Alert.alert(
           'Submitted!',
-          `Your ${sendType} has been submitted for verification. Town Hall will generate a SNARK proof and post to Arweave.`,
+          `Your ${sendType} has been submitted for verification. Town Hall will review it and post a signed attestation to Arweave.`,
           [{ text: 'OK' }]
         );
       } else {
@@ -1817,7 +1817,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
         <View style={styles.card}>
           <Text style={styles.cardTitle}>📊 Stats Lookup & Proof</Text>
           <Text style={styles.cardSubtitle}>
-            Look up any user's stats or generate a SNARK proof of your own stats
+            Stats proofs are chain-bound SNARKs: the numbers are public inputs, the event set is re-derivable from the Kaspa chain, and anyone can verify at /api/verify/stats-check
           </Text>
           
           <StatsLookup 
@@ -1827,6 +1827,18 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           />
         </View>
         
+        {/* KV_IC3: report fraud - permanent home for the disclaimer's ic3.gov link */}
+        <TouchableOpacity
+          onPress={() => { try { Linking.openURL('https://www.ic3.gov'); } catch {} }}
+          style={{ backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: rs.s(10), padding: rs.s(12), marginBottom: rs.s(12) }}
+        >
+          <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#991b1b' }}>🚨 Report fraud</Text>
+          <Text style={{ fontSize: rs.font(10), color: '#7f1d1d', marginTop: 2 }}>
+            Scammed or targeted in a scam? KasVillage has no company behind it to call. Report internet crime
+            to the FBI at ic3.gov (tap here) and flag the listing in the Mailbox so the mod can delist it.
+          </Text>
+        </TouchableOpacity>
+
         {/* Info Section */}
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>How Verification Works</Text>
@@ -1839,7 +1851,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           <View style={styles.infoRow}>
             <Text style={styles.infoBullet}>2.</Text>
             <Text style={styles.infoText}>
-              Click "Verify Now" — Town Hall runs SNARK proof
+              Click "Verify Now" — Town Hall checks it and posts an attestation
             </Text>
           </View>
           <View style={styles.infoRow}>
@@ -1873,7 +1885,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
             </View>
             
             <Text style={styles.modalSubtitle}>
-              Submit your content for Town Hall to verify. We'll generate a SNARK proof and post to Arweave (FREE).
+              Submit your content for Town Hall to review. It posts a signed attestation to Arweave (FREE). Attestations are Town Hall's word; stats proofs are SNARK-bound and verifiable by anyone.
             </Text>
             
             {/* Type selector */}

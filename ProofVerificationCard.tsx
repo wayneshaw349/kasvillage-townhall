@@ -46,18 +46,20 @@ export const ProofVerificationCard: React.FC<Props> = ({ proof, pubkey }) => {
       system: 'KasVillage Halo2-IPA Stats Proof',
       proof_type: proof.proof_type,
       circuit: {
-        k: 8,
-        gates: 8,
+        k: 12,
         advice_columns: 20,
         instance_columns: 1,
-        gate_1: 'xp = successes × 10 - deadlocks × 50',
-        gate_2: 'p_complete × (2 + S + F) = (1 + S) × 1000000',
-        gate_3: 'total = completed + refunded + deadlocked + pending',
-        gate_4: 'total = as_buyer + as_seller',
-        gate_5: 'deadlocks = deadlocked',
-        gate_6: 'successes = completed',
-        gate_7: 'adjusted_p × SCALE^5 = base × recency × pattern × resolution × speed × role',
-        gate_8: 'final_p × SCALE = confidence × adjusted + (SCALE - confidence) × prior',
+        // In-circuit: the exact counting identities, with every public stat BOUND to the
+        // instance column (order: successes, deadlocks, xp, p_fixed, p_enhanced, total,
+        // pubkey_hash lo/hi, events_root lo/hi as little-endian 128-bit limbs).
+        gate_counts: 'total = completed + refunded + deadlocked + pending',
+        gate_roles: 'total = as_buyer + as_seller',
+        gate_deadlocks: 'deadlocks = deadlocked',
+        gate_successes: 'successes = completed',
+        // Outside the circuit, enforced by every verifier in plain u64 arithmetic over the
+        // SAME bound inputs (saturation and floor division are not field operations):
+        integer_rule_xp: 'xp = sat(successes × 10 - deadlocks × 50)',
+        integer_rule_p: 'p_complete = (1 + S) × 1000000 / (2 + S + F)',
       },
       vk_fingerprint: proof.vk_fingerprint,
       merkle_root: proof.merkle_root,
@@ -65,14 +67,15 @@ export const ProofVerificationCard: React.FC<Props> = ({ proof, pubkey }) => {
       proof_bytes_hex: proof.proof_bytes.map(b => b.toString(16).padStart(2, '0')).join(''),
       generated_at: proof.generated_at,
       pubkey,
-      verify_endpoint: 'https://kasvillage.app.runonflux.io/api/verify/stats-vk',
+      verify_endpoint: 'POST https://kasvillage.app.runonflux.io/api/verify/stats-check  body: { proof: <this proof object> }',
+      vk_endpoint: 'https://kasvillage.app.runonflux.io/api/verify/stats-vk',
+      events_root_recipe: 'Re-derive it yourself: scan the pubkey address full-transactions on the Kaspa REST API, find escrow addresses funded by exactly two parties including it (<=12 txs each); payout tx = settled, self-pay (kill) = deadlocked, else open; Poseidon-root the event ids. Same algorithm the app ships in counterparty_scan.ts.',
       merkle_proof_endpoint: `https://kasvillage.app.runonflux.io/api/verify/merkle-proof/${pubkey}`,
       instructions: [
-        '1. Reconstruct StatsVerificationCircuit with the 8 gates above',
-        '2. Generate VK from ParamsIPA(K=8) using PSE Halo2 v2023_04_20',
-        '3. Compare VK fingerprint (SHA256 of Debug format)',
-        '4. Verify proof_bytes against public_inputs using verify_proof',
-        '5. Check merkle_root matches L1 events via /api/verify/merkle-proof',
+        '1. Cheapest check: POST this object to verify_endpoint - any tampered stat, pubkey or events root fails',
+        '2. Independent check: rebuild the circuit from the repo (src/townhall_verification_complete.rs), compare VK fingerprint, run halo2 verify_proof with the instance order above',
+        '3. Trustless check: re-derive the events root from the Kaspa chain with events_root_recipe and compare',
+        '4. Then apply the two integer rules to the bound public inputs',
       ],
     };
 
@@ -85,7 +88,7 @@ export const ProofVerificationCard: React.FC<Props> = ({ proof, pubkey }) => {
       {/* Proof Type Badge */}
       <TouchableOpacity style={s.header} onPress={() => setExpanded(!expanded)}>
         <View style={[s.badge, isReal ? s.badgeReal : s.badgeMock]}>
-          <Text style={s.badgeText}>{isReal ? '🔐 SNARK Verified' : '⚠️ Hash Only'}</Text>
+          <Text style={s.badgeText}>{isReal ? '🔐 SNARK-bound (check it: stats-check)' : '⚠️ Unproven (hash only)'}</Text>
         </View>
         <Text style={s.proofType}>{proof.proof_type}</Text>
         <Text style={s.expandIcon}>{expanded ? '▲' : '▼'}</Text>

@@ -682,7 +682,8 @@ export function getProofStatusLabel(proof: StatsProof | undefined): string {
   if (!proof) return '❓ Unverified';
   if (!isProofFresh(proof)) return '⏰ Stale Proof';
   if (proof.proofType.includes('Mock')) return '🧪 Mock Proof';
-  return '✓ ZK Verified';
+  if (proof.proofType.startsWith('Hash')) return '⚠️ Unproven (hash only)';
+  return '✓ SNARK-bound'; // numbers are public inputs; anyone can verify at /api/verify/stats-check
 }
 
 export function getProofStatusColor(proof: StatsProof | undefined): string {
