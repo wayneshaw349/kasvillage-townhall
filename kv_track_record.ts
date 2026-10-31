@@ -26,6 +26,7 @@ async function usdByDay(): Promise<Map<string, number>> {
   } catch {}
   return m;
 }
+const sha256Hex = (t: string, sha256: any, bytesToHex: any, utf8ToBytes: any) => bytesToHex(sha256(utf8ToBytes(t)));
 const priceOn = (m: Map<string, number>, ms: number) => { for (let i = 0; i < 7; i++) { const p = m.get(day(ms - i * 86400000)); if (p) return p; } return 0; };
 
 /** A partner is "established" if their own wallet holds >= 100 KAS in coins >= 30 days old.
@@ -59,6 +60,7 @@ export async function buildTrackRecord(): Promise<{ tr: TrackRecord; html: strin
 
   const rows: string[] = [];
   const perCp = new Map<string, number>();
+  const months = new Map<string, { n: number; kas: number; usd: number; cps: Set<string> }>();
   let completed = 0, cancelled = 0, deadlocked = 0, volKas = 0, volUsd = 0, priced = 0, first = 0, last = 0;
   for (const r of chain) {
     const t = Number((r.anchor && r.anchor.blockTime) || r.ts || 0);
@@ -66,6 +68,7 @@ export async function buildTrackRecord(): Promise<{ tr: TrackRecord; html: strin
     if (r.outcome === 'complete') {
       completed++; volKas += v;
       const p = priceOn(prices, t); if (p) { volUsd += v * p; priced++; }
+      if (t) { const mk = day(t).slice(0, 7); const mm = months.get(mk) || { n: 0, kas: 0, usd: 0, cps: new Set<string>() }; mm.n++; mm.kas += v; mm.usd += p ? v * p : 0; mm.cps.add(r.cpPubkey); months.set(mk, mm); }
       perCp.set(r.cpPubkey, (perCp.get(r.cpPubkey) || 0) + 1);
     } else if (r.outcome === 'cancel') cancelled++; else deadlocked++;
     if (t) { first = first ? Math.min(first, t) : t; last = Math.max(last, t); }
@@ -73,8 +76,12 @@ export async function buildTrackRecord(): Promise<{ tr: TrackRecord; html: strin
     rows.push('<tr><td>' + (t ? day(t) : '-') + '</td><td>' + esc(r.outcome) + '</td><td>' + v.toFixed(2) + '</td><td>' + (priceOn(prices, t) ? '$' + (v * priceOn(prices, t)).toFixed(2) : '-') + '</td><td>' + esc(String(r.cpPubkey).slice(0, 12)) + '…</td><td>' + (tx ? '<a href="' + explorer(net, tx) + '">' + esc(tx.slice(0, 10)) + '…</a>' : '-') + '</td></tr>');
   }
   const cps = Array.from(perCp.keys());
-  let est = 0; const checked = cps.slice(0, 15);
-  if (nowDaa) for (const cp of checked) if (await established(cp, net, nowDaa)) est++;
+  // Every partner is checked, 6 at a time.
+  let est = 0; const checked = cps;
+  if (nowDaa) for (let i = 0; i < checked.length; i += 6) {
+    const r = await Promise.all(checked.slice(i, i + 6).map((cp) => established(cp, net, nowDaa)));
+    est += r.filter(Boolean).length;
+  }
 
   let boardSales = 0, boardBuyers = 0;
   try { const lg: any[] = JSON.parse((await AsyncStorage.getItem('kv_sales_log')) || '[]'); boardSales = lg.length; boardBuyers = new Set(lg.map((x: any) => x.buyer)).size; } catch {}
@@ -97,8 +104,23 @@ export async function buildTrackRecord(): Promise<{ tr: TrackRecord; html: strin
     tr.distinctPartners + ' distinct partners, ' + pct(tr.repeatRate) + ' came back' + (tr.establishedChecked ? ', ' + est + '/' + tr.establishedChecked + ' established (≥' + SETTLED_MIN_KAS + ' KAS held ≥' + SETTLED_MIN_DAYS + ' days)' : ''),
     boardSales ? boardSales + ' game boards delivered to ' + boardBuyers + ' distinct buyers' : '',
     first ? 'Active ' + day(first) + ' to ' + day(last) : '',
+    months.size ? months.size + ' active months, avg $' + Math.round(volUsd / months.size).toLocaleString('en-US') + '/month' : '',
   ].filter(Boolean).join('\n');
   const bundle = await exportBundle();
+  const monthRows = Array.from(months.keys()).sort().map((k) => { const m = months.get(k)!; return '<tr><td>' + k + '</td><td>' + m.n + '</td><td>' + m.kas.toFixed(2) + '</td><td>$' + Math.round(m.usd).toLocaleString('en-US') + '</td><td>' + m.cps.size + '</td></tr>'; }).join('');
+  const activeMonths = months.size;
+  // Ownership: the wallet key signs the report summary + date, so a lender knows the
+  // records belong to whoever controls this wallet (verifyRecord-style schnorr).
+  let owner = '', ownSig = '', ownMsg = '';
+  try {
+    const priv: string = await require('./proposal_share')._kvResolvePrivHex();
+    const { secp256k1, schnorr } = require('@noble/curves/secp256k1');
+    const { sha256 } = require('@noble/hashes/sha256');
+    const { bytesToHex, hexToBytes, utf8ToBytes } = require('@noble/hashes/utils');
+    owner = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
+    ownMsg = 'KasVillage track record | ' + net + ' | ' + new Date().toISOString() + ' | ' + sha256Hex(text, sha256, bytesToHex, utf8ToBytes);
+    ownSig = bytesToHex(schnorr.sign(sha256(utf8ToBytes(ownMsg)), hexToBytes(priv)));
+  } catch {}
   const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Track record</title>'
     + '<style>body{font:14px -apple-system,Segoe UI,sans-serif;margin:16px;color:#2f2418;background:#fffaf0}h1{font-size:20px}table{border-collapse:collapse;width:100%;font-size:12px}td,th{border-bottom:1px solid #e5d9c3;padding:4px;text-align:left}.k{font-size:22px;font-weight:800}.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:12px 0}.c{background:#f3ead9;border-radius:8px;padding:8px}pre{white-space:pre-wrap;word-break:break-all;font-size:9px;background:#f3ead9;padding:8px;border-radius:8px}</style></head><body>'
     + '<h1>KasVillage track record</h1><p>Network: ' + esc(net) + (first ? ' · active ' + day(first) + ' – ' + day(last) : '') + '</p><div class="g">'
@@ -107,8 +129,10 @@ export async function buildTrackRecord(): Promise<{ tr: TrackRecord; html: strin
     + '<div class="c"><div class="k">' + tr.distinctPartners + '</div>distinct partners · ' + pct(tr.repeatRate) + ' repeat</div>'
     + (tr.establishedChecked ? '<div class="c"><div class="k">' + est + '/' + tr.establishedChecked + '</div>established partners (≥' + SETTLED_MIN_KAS + ' KAS held ≥' + SETTLED_MIN_DAYS + ' days)</div>' : '')
     + (boardSales ? '<div class="c"><div class="k">' + boardSales + '</div>game boards to ' + boardBuyers + ' distinct buyers</div>' : '')
-    + '</div><h2>Deals</h2><table><tr><th>Date</th><th>Outcome</th><th>KAS</th><th>USD then</th><th>Partner</th><th>Proof tx</th></tr>' + rows.join('') + '</table>'
+    + '</div><h2>Monthly revenue</h2><p>' + activeMonths + ' active month' + (activeMonths === 1 ? '' : 's') + (activeMonths ? ' · average $' + Math.round(volUsd / activeMonths).toLocaleString('en-US') + '/month' : '') + '</p><table><tr><th>Month</th><th>Deals</th><th>KAS</th><th>USD then</th><th>Partners</th></tr>' + monthRows + '</table>'
+    + '<h2>Deals</h2><table><tr><th>Date</th><th>Outcome</th><th>KAS</th><th>USD then</th><th>Partner</th><th>Proof tx</th></tr>' + rows.join('') + '</table>'
     + '<h2>How to verify</h2><p>Every deal below is signed by the other party (schnorr over the deal terms) and bound to its escrow address and transaction. Paste the bundle into KasVillage → Phone Proof → verify, or check each proof tx on the explorer. USD uses the CoinGecko daily KAS price on each deal date. Partner counts are honest signals, not guarantees: one person can control several wallets; "established" partners raise the cost of faking demand.</p>'
+    + (ownSig ? '<h2>Wallet ownership</h2><p>The holder of this wallet signed this statement (BIP340 schnorr, sha256 of the message). To prove it is you, sign any phrase the lender picks in the app while they watch.</p><pre>pubkey: ' + esc(owner) + '\nmessage: ' + esc(ownMsg) + '\nsignature: ' + esc(ownSig) + '</pre>' : '')
     + '<h2>Signed bundle</h2><pre>' + esc(bundle) + '</pre></body></html>';
   return { tr, html, text };
 }
