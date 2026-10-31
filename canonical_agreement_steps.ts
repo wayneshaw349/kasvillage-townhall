@@ -163,6 +163,7 @@ export interface TxTemplate {
   o: TxTemplateOutput[];  // Outputs [buyer, seller]
   f: string;              // Fee sompi
 R: string[];            // Buyer R nonces - ONE PER INPUT, aligned with u[]
+  R2?: string[];          // KV_MUSIG2: buyer's SECOND nonce per input (present = two-nonce signing)
   agr: string;            // Agreement ID
   lt?: string;            // lockTime (DAA) — '0' for release/cancel, set for refund
 }
@@ -173,6 +174,7 @@ R: string[];            // Buyer R nonces - ONE PER INPUT, aligned with u[]
 
 export interface SellerResponse {
 R: string[];     // Seller R nonces - ONE PER INPUT, aligned with the template u[]
+  R2?: string[];   // KV_MUSIG2: seller's SECOND nonce per input
   s: string[];     // Partial s values (one per input, hex)
   ss?: string;     // StatSig attestation (KVSTAT3 schnorr sig) - transport only, NOT in signed bytes
 }
@@ -284,6 +286,7 @@ export function buildReleaseTemplate(params: {
       o: outputs,
       f: fee.toString(),
       R: nonces.map((n) => n.R_hex),
+      R2: nonces.map((n) => n.R2_hex as string), // KV_MUSIG2
       agr: params.agrId,
     },
     description,
@@ -590,6 +593,8 @@ export interface FrostNonce {
   k: bigint;           // PRIVATE — never leaves device, destroyed after use
   d_tweaked: bigint;   // PRIVATE — binding-adjusted private key
   R_hex: string;       // PUBLIC — shared via clipboard
+  k2?: bigint;         // KV_MUSIG2: PRIVATE second nonce (same lifetime rules as k)
+  R2_hex?: string;     // KV_MUSIG2: PUBLIC second nonce point
 }
 
 /**
@@ -624,10 +629,17 @@ export function generateNonce(
 
   const R = G.multiply(k);
 
+  // KV_MUSIG2: an independent second nonce. Every signing step (release, refund, kill)
+  // is two-nonce; k2 has exactly the same never-reuse rule as k.
+  let k2 = mod(BigInt('0x' + bytesToHex((secp256k1 as any).utils.randomPrivateKey())), N);
+  if (k2 === 0n) k2 = 1n;
+
   return {
     k,
     d_tweaked: d,
     R_hex: bytesToHex(R.toRawBytes(true)),
+    k2,
+    R2_hex: bytesToHex(G.multiply(k2).toRawBytes(true)),
   };
 }
 
@@ -673,6 +685,42 @@ export function partialSign(
     s_hex: s.toString(16).padStart(64, '0'),
     R_agg_x_hex: bytesToHex(Rx),
   };
+}
+
+/**
+ * KV_MUSIG2 — two-nonce partial signature (MuSig2, Nick/Ruffing/Seurin 2021).
+ * Each signer contributes (R1, R2). The effective nonce is R = R1agg + b·R2agg with
+ * b = H(R1agg || R2agg || P || m). Because b depends on BOTH parties' nonces, the
+ * party who answers second can no longer steer the challenge the first party signs
+ * under — this is what defeats the Wagner/ROS concurrent-session forgery that plain
+ * two-round Schnorr (partialSign) is exposed to when many inputs are signed at once.
+ *   s_i = (k1 + b·k2) [negated if R has odd y] + e·d_tweaked
+ */
+export function musig2NonceCoef(R1agg: Uint8Array, R2agg: Uint8Array, aggXOnly: string, sighash_hex: string): bigint {
+  const tag = sha256(new TextEncoder().encode('KasVillage/MuSig2/noncecoef'));
+  return mod(BigInt('0x' + bytesToHex(sha256(new Uint8Array([...tag, ...tag, ...R1agg, ...R2agg, ...hexToBytes(aggXOnly), ...hexToBytes(sighash_hex)])))), N);
+}
+
+export function partialSign2(
+  nonce: FrostNonce,
+  counterpartyR1_hex: string,
+  counterpartyR2_hex: string,
+  aggXOnly: string,
+  sighash_hex: string
+): { s_hex: string; R_agg_x_hex: string } {
+  if (nonce.k2 === undefined || !nonce.R2_hex) throw new Error('two-nonce signing needs k2');
+  const R1agg: any = (G.multiply(nonce.k) as any).add(secp256k1.ProjectivePoint.fromHex(counterpartyR1_hex)); // type-only cast; runtime proven
+  const R2agg: any = (G.multiply(nonce.k2) as any).add(secp256k1.ProjectivePoint.fromHex(counterpartyR2_hex));
+  const b = musig2NonceCoef(R1agg.toRawBytes(true), R2agg.toRawBytes(true), aggXOnly, sighash_hex);
+  let R: any = R1agg.add(R2agg.multiply(b));
+  if (R.equals((secp256k1.ProjectivePoint as any).ZERO)) throw new Error('degenerate aggregate nonce - rebuild');
+  let k = mod(nonce.k + mod(b * nonce.k2, N), N);
+  if (R.toRawBytes(true)[0] === 0x03) { k = mod(N - k, N); R = R.negate(); }
+  const Rx = R.toRawBytes(true).slice(1);
+  const tag = sha256(new TextEncoder().encode('BIP0340/challenge'));
+  const e = mod(BigInt('0x' + bytesToHex(sha256(new Uint8Array([...tag, ...tag, ...Rx, ...hexToBytes(aggXOnly), ...hexToBytes(sighash_hex)])))), N);
+  const s = mod(k + mod(e * nonce.d_tweaked, N), N);
+  return { s_hex: s.toString(16).padStart(64, '0'), R_agg_x_hex: bytesToHex(Rx) };
 }
 
 /**
@@ -1120,6 +1168,7 @@ export function buyerBuildTemplate(params: {
     o: outputs,
     f: fee.toString(),
     R: nonces.map((n) => n.R_hex),
+    R2: nonces.map((n) => n.R2_hex as string), // KV_MUSIG2
     agr: params.agrId,
     lt: (params.lockTime ?? 0n).toString(),
   };
@@ -1175,6 +1224,11 @@ export function sellerSignTemplate(params: {
   if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
     return { error: 'Template carries ' + (Array.isArray(template.R) ? template.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). One k per input is required - refusing to sign. Ask for a fresh template.' };
   }
+  // KV_MUSIG2: release/cancel templates must carry the second nonce set. A one-nonce
+  // template is the old scheme (exposed to concurrent-session forgery) - both phones update.
+  if (!Array.isArray(template.R2) || template.R2.length !== template.u.length) {
+    return { error: 'This template uses the old one-nonce signing. Both of you need the latest KasVillage - ask your counterparty to update and build a fresh template.' };
+  }
 
   const sellerXOnly =
     sellerPubkey.length === 66 ? sellerPubkey.slice(2) : sellerPubkey;
@@ -1203,16 +1257,18 @@ export function sellerSignTemplate(params: {
 
   const partials: string[] = [];
   const myR: string[] = [];
+  const myR2: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    // Fresh k for THIS input only. Born and dies inside this loop iteration.
+    // Fresh (k, k2) for THIS input only. Born and die inside this loop iteration.
     const nonce = generateNonce(privateKeyHex, buyerPubkey, sellerPubkey, counter);
     myR.push(nonce.R_hex);
+    myR2.push(nonce.R2_hex as string);
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
-    const ps = partialSign(nonce, template.R[i], agg.aggXOnly, shHex);
+    const ps = partialSign2(nonce, template.R[i], (template.R2 as string[])[i], agg.aggXOnly, shHex);
     partials.push(ps.s_hex);
   }
 
-  const response: SellerResponse = { R: myR, s: partials };
+  const response: SellerResponse = { R: myR, R2: myR2, s: partials };
 
   return {
     response,
@@ -1250,6 +1306,15 @@ export function buyerAggregate(params: {
   if (sellerResponse.s.length !== template.u.length) {
     return { error: 'Counterparty sent ' + sellerResponse.s.length + ' partial(s) for ' + template.u.length + ' input(s).' };
   }
+  const _twoNonce = Array.isArray(template.R2);
+  if (!_twoNonce) return { error: 'This template uses the old one-nonce signing - build a fresh one (both phones on the latest KasVillage).' };
+  {
+    if (template.R2!.length !== template.u.length) return { error: 'Template carries the wrong number of second nonces - refusing.' };
+    if (!Array.isArray(sellerResponse.R2) || sellerResponse.R2.length !== template.u.length) {
+      return { error: 'Counterparty answered with the old one-nonce signing. Do NOT broadcast - ask them to update KasVillage and sign again.' };
+    }
+    if (nonces.some((n) => n.k2 === undefined)) return { error: 'Stored nonces are missing the second nonce - tap Build TX Template again.' };
+  }
 
   const agg = deriveAggregateKey(buyerPubkey, sellerPubkey, counter);
   assertLMatch(agg, template.u, 'sellerSignTemplate/buyerAggregate', counter); // [L-GUARD]
@@ -1271,7 +1336,10 @@ export function buyerAggregate(params: {
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
 
     // nonces[i] signed input i and nothing else.
-    const buyerPartial = partialSign(nonces[i], sellerResponse.R[i], agg.aggXOnly, shHex);
+    // KV_MUSIG2: a two-nonce template must get a two-nonce answer; never fall back.
+    const buyerPartial = _twoNonce
+      ? partialSign2(nonces[i], sellerResponse.R[i], (sellerResponse.R2 as string[])[i], agg.aggXOnly, shHex)
+      : partialSign(nonces[i], sellerResponse.R[i], agg.aggXOnly, shHex);
 
     const sigHex = aggregateSigs(
       buyerPartial.R_agg_x_hex,
@@ -1366,6 +1434,11 @@ export function cosignRefundTemplate(params: {
   if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
     return { error: 'Refund template carries ' + (Array.isArray(template.R) ? template.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). One k per input is required - refusing to sign.' };
   }
+  // KV_MUSIG2: two-nonce only. The first signer's nonces are mixed with ours through a
+  // hash of all four, so neither side can steer the other's challenge.
+  if (!Array.isArray(template.R2) || template.R2.length !== template.u.length) {
+    return { error: 'This refund template uses the old one-nonce signing. Both of you need the latest KasVillage - update and re-accept.' };
+  }
 
   const funderXOnly = funderPubkey.length === 66 ? funderPubkey.slice(2) : funderPubkey;
   const v = verifyRefundTemplate(template, funderXOnly, params.expected);
@@ -1379,14 +1452,15 @@ export function cosignRefundTemplate(params: {
 
   const partials: string[] = [];
   const myR: string[] = [];
+  const myR2: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);  // fresh k per input
-    myR.push(nonce.R_hex);
+    const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);  // fresh (k, k2) per input
+    myR.push(nonce.R_hex); myR2.push(nonce.R2_hex as string);
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, BigInt(template.lt || '0')));
-    partials.push(partialSign(nonce, template.R[i], agg.aggXOnly, shHex).s_hex);
+    partials.push(partialSign2(nonce, template.R[i], (template.R2 as string[])[i], agg.aggXOnly, shHex).s_hex);
   }
 
-  const response: SellerResponse = { R: myR, s: partials };
+  const response: SellerResponse = { R: myR, R2: myR2, s: partials };
   return { response, responseB64: encodeResponse(response) };
 }
 
@@ -1431,6 +1505,7 @@ export function buildKillTx(params: {
     o: [{ v: (totalIn - fee).toString(), s: u.scriptPubKey }],  // back to the escrow
     f: fee.toString(),
     R: nonces.map((n) => n.R_hex),
+    R2: nonces.map((n) => n.R2_hex as string),                  // KV_MUSIG2
     agr: params.agrId,
     lt: '0',                                                    // spendable immediately
   };
@@ -1486,6 +1561,11 @@ export function cosignKillTemplate(params: {
   if (!Array.isArray(template.R) || template.R.length !== template.u.length) {
     return { error: 'Kill template carries ' + (Array.isArray(template.R) ? template.R.length : 1) + ' R nonce(s) for ' + template.u.length + ' input(s). One k per input is required - refusing to sign.' };
   }
+  // KV_MUSIG2: two-nonce only. The first signer's nonces are mixed with ours through a
+  // hash of all four, so neither side can steer the other's challenge.
+  if (!Array.isArray(template.R2) || template.R2.length !== template.u.length) {
+    return { error: 'This kill template uses the old one-nonce signing. Both of you need the latest KasVillage - update and re-accept.' };
+  }
 
   const v = verifyKillTemplate(template, params.expected);
   if (!v.valid) return { error: v.error || 'Kill verification failed' };
@@ -1498,14 +1578,15 @@ export function cosignKillTemplate(params: {
 
   const partials: string[] = [];
   const myR: string[] = [];
+  const myR2: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);  // fresh k per input
-    myR.push(nonce.R_hex);
+    const nonce = generateNonce(privateKeyHex, funderPubkey, myPubkey, counter);  // fresh (k, k2) per input
+    myR.push(nonce.R_hex); myR2.push(nonce.R2_hex as string);
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, 0n));
-    partials.push(partialSign(nonce, template.R[i], agg.aggXOnly, shHex).s_hex);
+    partials.push(partialSign2(nonce, template.R[i], (template.R2 as string[])[i], agg.aggXOnly, shHex).s_hex);
   }
 
-  const response: SellerResponse = { R: myR, s: partials };
+  const response: SellerResponse = { R: myR, R2: myR2, s: partials };
   return { response, responseB64: encodeResponse(response) };
 }
 

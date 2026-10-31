@@ -38,13 +38,19 @@ App:
 22. Moderator-removed games no longer play from the installed cache.
 23. Listing links (Q&A / repository) open only `https:`/`mailto:`.
 
+24. **FROST 2-of-2 now two-nonce (KV_MUSIG2)** for release, refund and kill: each signer sends (R1, R2); effective
+    nonce R = R1agg + b·R2agg with b = H(tag, R1agg, R2agg, P, m) — defeats Wagner/ROS concurrent-session forgery
+    (including across several agreements with the same key). Same pastes, same escrow address, standard BIP340
+    signature on chain. Old one-nonce templates/answers are refused with an "update KasVillage" message.
+    Tested: 311/311 checks (25 random wallet pairs, 1-4 inputs, refund + kill, independent BIP340 verify,
+    old-format refusal). Vault 2-device signing (frost_qr_signer.ts) left single-nonce: both devices are the owner's.
+
 ## NEEDS A DECISION (not changed)
 - **Dev relay host + `'unsafe-eval'` (HIGH):** a publisher's `relay` host joins the game's network allowlist, giving a game a data exit (e.g. a fake seed prompt). Options: per-host user consent, or moderator-approved hosts; drop `'unsafe-eval'` if games don't need it.
 - **Apple 3.1.1 (HIGH for review):** iOS shows "N KAS / board", "send to the address on the card", and grants unlock items in-game. Hide price/contact/grant unlocks on iOS, or make boards free on iOS.
 - **Head squatting (MEDIUM):** whoever announces a head first owns the card. Bind head → publisher (manifest signed by, or funded from, the announce key).
 - **Moderator delist is per head (MEDIUM):** a 1-byte change = new head. Option: moderator delists also apply to the publisher key.
 - **3-flag auto-hide with no appeal (MEDIUM):** ~30 KAS of reusable balance + 0.6 KAS hides any game. Existing decision (no arbitration); options: require flagger history/age, or time-locked stake.
-- **2-of-2 signing is naive two-round Schnorr (theoretical):** Wagner/ROS-style forgery needs ~30+ dusted inputs and large offline work. Long-term: MuSig2 or commit-then-reveal R.
 - **Some sends skip simulation/Face ID:** IOU Pay & Settle, keeper tip.
 - **Archive cache size:** capped per address but not globally (LRU).
 

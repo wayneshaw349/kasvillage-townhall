@@ -2601,7 +2601,7 @@ counter: contract.frostData?.frostCounter || 0,
 agrId: contract.agreementId || '',
         });
 // v2: one k per input, array order == template u[] order.
-await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: _cNonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })), createdAt: Date.now() }));
+await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: _cNonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex, ...(n.k2 !== undefined ? { k2: n.k2.toString(16), R2_hex: n.R2_hex } : {}) })), createdAt: Date.now() }));
         await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(_cTmpl));
         const _b64 = encodeTemplate(_cTmpl);
         let _ssigC = ''; try { const _srecC = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: kvStatEscrowTxId(_b64), escrowDaaScore: 0, myPubkey: contract.buyerPubkey || '', cpPubkey: contract.sellerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(_b64)) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: kvStatTimeoutN(contract), descriptionHash: srDescHash(kvStatDescription(contract)), outcome: ((((JSON.parse(atob(_b64)) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, frostCounter: Number(contract.frostData?.frostCounter || 0), anchor: null }); _ssigC = srSign(_srecC, wallet.privKeyHex); await SecureStore.setItemAsync('kv_statrec_my_' + (contract.agreementId || ''), JSON.stringify({ rec: _srecC, mySig: _ssigC })); } catch (_se) { console.warn('[StatSig] build/sign failed:', _se); }
@@ -2625,7 +2625,7 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
       });
 
       // v2: one k per input, array order == template u[] order.
-      await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: result.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })), createdAt: Date.now() }));
+      await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.stringify({ v: 2, nonces: result.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex, ...(n.k2 !== undefined ? { k2: n.k2.toString(16), R2_hex: n.R2_hex } : {}) })), createdAt: Date.now() }));
       await SecureStore.setItemAsync('kv_frost_template_' + contract.agreementId, JSON.stringify(result.template));
       let _ssig = ''; try { const _srec = await srBuild({ agrId: contract.agreementId || '', frostAddr: contract.multisigAddress || '', escrowTxId: kvStatEscrowTxId(result.templateB64), escrowDaaScore: 0, myPubkey: contract.buyerPubkey || '', cpPubkey: contract.sellerPubkey || '', buyerAmountSompi: String(Math.floor(contract.itemPriceKas * 1e8)), sellerAmountSompi: String(Math.floor(contract.sellerCommitmentKas * 1e8)), network: contract.frostData?.network || 'testnet-10', agreementType: ((((JSON.parse(atob(result.templateB64)) as any).o) || []).length === 1 ? 'trade' : 'simple'), timeoutN: kvStatTimeoutN(contract), descriptionHash: srDescHash(kvStatDescription(contract)), outcome: ((((JSON.parse(atob(result.templateB64)) as any).o) || []).length === 1 ? 'complete' : 'cancel') as any, frostCounter: Number(contract.frostData?.frostCounter || 0), anchor: null }); _ssig = srSign(_srec, wallet.privKeyHex); await SecureStore.setItemAsync('kv_statrec_my_' + (contract.agreementId || ''), JSON.stringify({ rec: _srec, mySig: _ssig })); } catch (_se) { console.warn('[StatSig] build/sign failed:', _se); }
       try { await Clipboard.setStringAsync('KV-STEP-6-TEMPLATE|' + (contract.agreementId || '') + (_ssig ? '|STATSIG:' + _ssig : '') + '\n' + result.templateB64); } catch {}
@@ -2693,7 +2693,7 @@ await SecureStore.setItemAsync('kv_frost_nonce_' + contract.agreementId, JSON.st
 // k and publish the wallet key by division. There is no migration - one k cannot
 // become N. Refuse and make them rebuild.
 if (!Array.isArray(savedNonce?.nonces)) { Alert.alert('Rebuild the Template', 'The stored nonce is from the old single-k format and cannot be used safely. Tap Build TX Template again.'); return; }
-const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_tweaked: BigInt('0x' + n.d_tweaked), R_hex: n.R_hex }));
+const nonces = savedNonce.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_tweaked: BigInt('0x' + n.d_tweaked), R_hex: n.R_hex, ...(n.k2 ? { k2: BigInt('0x' + n.k2), R2_hex: n.R2_hex } : {}) }));
 
       aggResult = buyerAggregate({
         nonces,
@@ -3406,9 +3406,9 @@ const nextActionMsg = (ph: string, rl: string): string => {
                 preparedTx: txResult.preparedTx,
                 predictedTxId: txResult.predictedTxId,
                 template: _refund.template,
-nonces: _refund.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })),
+nonces: _refund.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex, ...(n.k2 !== undefined ? { k2: n.k2.toString(16), R2_hex: n.R2_hex } : {}) })),
                 killTemplate: _kill.template,
-killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex })),
+killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_tweaked.toString(16), R_hex: n.R_hex, ...(n.k2 !== undefined ? { k2: n.k2.toString(16), R2_hex: n.R2_hex } : {}) })),
                 currentDAA: _rNow.toString(),
                 N: String(canon.timeoutN || 0),
                 amountSompi: String(immediateSendAmount),
@@ -4842,7 +4842,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
 // v1 pending blob: single k for refund AND kill. Cannot be signed safely, and
 // nothing has moved yet, so refusing costs only a re-accept.
 if (!Array.isArray(_p.nonces) || !Array.isArray(_p.killNonces)) { Alert.alert('Re-accept Required', 'This pending refund was frozen under the old single-k format and cannot be signed safely. Your collateral was NOT sent - re-accept the agreement to start over.'); setIsLoading(false); return; }
-const _nonces = _p.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_tweaked: BigInt('0x' + n.d_tweaked), R_hex: n.R_hex }));
+const _nonces = _p.nonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_tweaked: BigInt('0x' + n.d_tweaked), R_hex: n.R_hex, ...(n.k2 ? { k2: BigInt('0x' + n.k2), R2_hex: n.R2_hex } : {}) }));
                               // Party mapping mirrors buildSellerRefund: funder (me) in the buyerPubkey slot.
                               _agg = buyerAggregate({
 nonces: _nonces,
@@ -4860,7 +4860,7 @@ nonces: _nonces,
                               // Aggregate the kill tx BEFORE funding: if the buyer's kill partial is
                               // bad, the seller must not fund at all — a live refund with no kill is
                               // exactly the setup that lets a seller strand the buyer's payment.
-const _killNonces = _p.killNonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_tweaked: BigInt('0x' + n.d_tweaked), R_hex: n.R_hex }));
+const _killNonces = _p.killNonces.map((n: any) => ({ k: BigInt('0x' + n.k), d_tweaked: BigInt('0x' + n.d_tweaked), R_hex: n.R_hex, ...(n.k2 ? { k2: BigInt('0x' + n.k2), R2_hex: n.R2_hex } : {}) }));
                               _killAgg = buyerAggregate({
 nonces: _killNonces,
                                 buyerPubkey: _p.sellerPubkey,
