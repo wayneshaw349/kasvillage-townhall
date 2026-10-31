@@ -690,8 +690,9 @@ export async function rebuildDirectory(category: string, registryAddress: string
 
 /** Announce record for a registry address. Sign, then buildPayloadHex, then
  *  the sender sends dust to the registry address with this payload. */
-export function makeRegistryAnnounce(ownerPubkey: string, storeAddress: string, name: string, category: string, extra?: { primaryLink?: string; configHash?: string; coords?: any; dkim?: boolean; dkimDomain?: string }): KvRecord {
+export function makeRegistryAnnounce(ownerPubkey: string, storeAddress: string, name: string, category: string, extra?: { primaryLink?: string; configHash?: string; coords?: any; dkim?: boolean; dkimDomain?: string; age?: string }): KvRecord {
   const d: any = { storeAddress, name, category };
+  if (extra?.age) d.age = extra.age; // KV_AGE_RATING (Apple 4.7)
   if (extra?.primaryLink) d.primaryLink = extra.primaryLink;
   if (extra?.configHash) d.configHash = extra.configHash;
   // Coordinates: anchor_hash + daa span + pledge, same as a game quad. Stores

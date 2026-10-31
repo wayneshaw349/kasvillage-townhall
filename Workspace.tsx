@@ -5316,6 +5316,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                       const _sr = await fetch('https://kasvillage.app.runonflux.io/api/kaspa/sink?' + require('./kv_relay_net').kvRelayNetQ());
                       _dpAnchor = String((await _sr.json()).sink || '');
                     } catch {}
+                    const _dAge = await require('./kv_age').askGameAge(_gname); // KV_AGE_RATING (Apple 4.7)
+                    if (!_dAge) { Alert.alert('Not published', 'An age rating is required. Nothing was spent.'); return; }
                     const _pub: any = await publishContent(_owner, 'dapp', { name: _gname, category: 'GameGrid', contentHash: _cHash }, 1, 500_000_000n);
                     if (!_pub || _pub.success === false) throw new Error('dapp publish failed: ' + (_pub && _pub.error));
                     setGameStage('Publishing descriptor...');
@@ -5338,7 +5340,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                       } catch {}
                       if (hi > 0) _dpCoords = { pledge_kas: Math.round(pl / 1e7) / 10, daa_from: Math.max(0, Math.max(lo, hi - 14400) - 600), daa_to: hi + 600, ...(_dpAnchor ? { anchor_hash: _dpAnchor } : {}), ...(_dpTip && _owner.address ? { tip_addr: _owner.address } : {}) };
                     } catch (de) { console.warn('[Game] dapp daa span skipped:', de); }
-                    const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, _gname, 'GameGrid', 'dapp', { configHash: _ck.hash, coords: _dpCoords });
+                    const _ann: any = await announceToRegistry(_owner, _pub.storeAddress, _gname, 'GameGrid', 'dapp', { configHash: _ck.hash, coords: _dpCoords, age: _dAge });
                     if (!_ann || _ann.success === false) console.warn('[Game] announce failed:', _ann && _ann.error);
                     Alert.alert('Game Published!', _gname + ' is live on Kaspa L1.\nDescriptor hash: ' + _ck.hash.slice(0, 16) + '...');
                     console.log('[Game] published - addr:', _pub.storeAddress, 'hash:', _ck.hash.slice(0, 16));

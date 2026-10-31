@@ -664,7 +664,7 @@ function DAppCard({ item, onPress }: { item: DAppEntry; onPress: () => void }) {
   return (
     <KvBizEnvelope name={item.name} cat={'DApp · ' + (item.category || item.board)} stamp={'\u{1F9E9}'} colors={col}
       verified={!!(item.townhall && item.townhall.verified)} postedAt={item.createdAt}
-      lines={[item.description || item.name, (item.templateVerified ? 'SDK ✓ · ' : '') + 'sandboxed', item.board + ' board']}
+      lines={[(item.description || item.name) + ' \u00B7 ' + (require('./kv_age').normAge((item as any).record && (item as any).record.d && (item as any).record.d.age) || 'unrated 17+'), (item.templateVerified ? 'SDK ✓ · ' : '') + 'sandboxed', item.board + ' board']}
       info={[((item as any).publisherXp != null ? '⭐ ' + (item as any).publisherXp + ' XP' : ''), (item.xpCommitment ? '⛓ pledge in place' : ''), '\u{1F552} ' + (kvAgo(item.createdAt) || 'new').toLowerCase()]}
       action={{ label: 'OPEN', onPress }} onPress={onPress} />
   );
@@ -1674,6 +1674,12 @@ export default function VillageMailbox() {
           }
         })();
       } else if (section === 'dapps') {
+        const _dAge = (item as any).record && (item as any).record.d && (item as any).record.d.age;
+        if (!(globalThis as any).__kvAgeOk) (globalThis as any).__kvAgeOk = {};
+        if (!(globalThis as any).__kvAgeOk[item.id]) { // KV_AGE_GATE (Apple 4.7): async check, then re-press
+          require('./kv_age').ageAllowed(_dAge, item.name || 'this DApp').then((ok: boolean) => { if (ok) { (globalThis as any).__kvAgeOk[item.id] = 1; onPress(); } });
+          return;
+        }
         if ((item as any).gameHash) {
           setGameView({ name: item.name, addr: item.arweaveTx, hash: (item as any).gameHash, loading: false, game: null, error: '' });
           return;

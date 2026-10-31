@@ -1134,6 +1134,8 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
             if (_priv && myPubkey && _addr) {
               const _owner = { privateKeyHex: _priv, pubkeyHex: myPubkey, address: _addr, network: require('./kv_net').KV_NET as any };
               const DAPP_PLEDGE_SOMPI = 500_000_000n; // 5 KAS anchor
+              const _dAge = await require('./kv_age').askGameAge(sendName || 'this DApp'); // KV_AGE_RATING (Apple 4.7)
+              if (!_dAge) throw new Error('age rating required - nothing published');
               const _pub: any = await publishContent(_owner, 'dapp', {
                 name: sendName,
                 category: 'UtilityTool',
@@ -1144,7 +1146,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
               }, 1, DAPP_PLEDGE_SOMPI); // nonce 1 = dapp slot (0 = store)
               if (_pub && _pub.success !== false) {
                 console.log('[DAppAttest] published · addr:', _pub.storeAddress);
-                try { await announceToRegistry(_owner, _pub.storeAddress, sendName, 'GameGrid', 'dapp'); } catch {} // KV_DKIM_ANNOUNCE: kind arg was missing - announce landed on the store registry
+                try { await announceToRegistry(_owner, _pub.storeAddress, sendName, 'GameGrid', 'dapp', { age: _dAge }); } catch {} // KV_DKIM_ANNOUNCE: kind arg was missing - announce landed on the store registry
                 const _attest = {
                   kind: 'dapp_verify',
                   dappId: data.dapp_id,
