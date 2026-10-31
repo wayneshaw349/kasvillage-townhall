@@ -8,7 +8,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator, Modal, Dimensions, PixelRatio,
+  ScrollView, ActivityIndicator, Modal, Dimensions, PixelRatio, Alert,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
@@ -48,6 +48,7 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
   const [myChain, setMyChain] = useState<any[]>([]);
   const [chainVerdict, setChainVerdict] = useState('');
   const [chainCopied, setChainCopied] = useState(false);
+  const [trBusy, setTrBusy] = useState(false);
   const [anchorMsg, setAnchorMsg] = useState(''); // KV_PHONE_LOCAL3
   // KV_BUNDLE_VERIFY: paste someone else's evidence bundle and check it against the chain
   const [bundleIn, setBundleIn] = useState('');
@@ -247,6 +248,11 @@ export function PhoneProofScreen({ visible, onClose }: PhoneProofScreenProps) {
                 <Text style={{ color: anchorMsg ? C.primary : C.muted, fontSize: rs.font(11), fontWeight: 'bold' }}>{anchorMsg || 'Fetch Anchors'}</Text>
               </TouchableOpacity>
             </View>
+            {/* KV_TRACK_RECORD: one-tap report for pitching buyers/publishers */}
+            <TouchableOpacity onPress={async () => { setTrBusy(true); try { await require('./kv_track_record').shareTrackRecord(); } catch (e: any) { Alert.alert('Track record', String((e && e.message) || e)); } finally { setTrBusy(false); } }}
+              disabled={trBusy} style={{ marginTop: rs.s(8), backgroundColor: C.gold, borderRadius: rs.s(8), paddingVertical: rs.s(10), alignItems: 'center', opacity: trBusy ? 0.6 : 1 }}>
+              <Text style={{ color: '#fff', fontSize: rs.font(12), fontWeight: 'bold' }}>{trBusy ? 'Building track record…' : 'Export track record'}</Text>
+            </TouchableOpacity>
           </View>
 
           {/* KV_BUNDLE_VERIFY: check a bundle someone sent you */}
