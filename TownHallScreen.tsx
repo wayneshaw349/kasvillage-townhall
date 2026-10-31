@@ -4,7 +4,7 @@
 // Town Hall features:
 // - Verification search (check any APT/address/DApp/user stats)
 // - SEND: Submit codebase/content for verification → Town Hall generates SNARK proof
-// - RECEIVE: Download your verification proof from Arweave
+// - RECEIVE: Your proofs (on-phone; verifiable at /api/verify/*-check)
 // - User Stats verification (prove stats are real)
 // - DApp/Store rule compliance verification
 // - APT conflict resolution (same number → prompt change)
@@ -67,6 +67,37 @@ import { lookupByAddress, lookupByApt, lookupCounterparty } from './counterparty
 import { LedgerService } from './LedgerService';
 
 const TOWNHALL_BASE = 'https://kasvillage.app.runonflux.io';
+
+// KV_NO_ARWEAVE: Arweave/Turbo is dead (402). Proofs live on the phone and are checked against
+// the live verifier (POST /api/verify/{kind}-check) the moment they arrive - anyone can repeat
+// that check with the copied proof. Nothing waits on an upload, so nothing sits "pending".
+const KV_TH_PROOFS = 'kv_th_proofs_v2';
+type KvProofKind = 'stats' | 'dapp' | 'academic';
+async function kvCheckProof(kind: KvProofKind, proof: any): Promise<boolean> {
+  try {
+    const r = await fetch(TOWNHALL_BASE + '/api/verify/' + kind + '-check', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proof }),
+    });
+    const j = await r.json();
+    return !!(j && j.valid);
+  } catch { return false; }
+}
+async function kvSaveProof(id: string, kind: KvProofKind, proof: any): Promise<void> {
+  try {
+    const AS = require('@react-native-async-storage/async-storage').default;
+    const all = JSON.parse((await AS.getItem(KV_TH_PROOFS)) || '{}');
+    all[id] = { kind, proof, savedAt: Date.now() };
+    const ids = Object.keys(all).sort((a, b) => (all[b].savedAt || 0) - (all[a].savedAt || 0));
+    for (const old of ids.slice(30)) delete all[old];   // keep the newest 30
+    await AS.setItem(KV_TH_PROOFS, JSON.stringify(all));
+  } catch (e) { console.warn('[TownHall] proof save failed:', e); }
+}
+async function kvLoadProof(id: string): Promise<{ kind: KvProofKind; proof: any } | null> {
+  try {
+    const AS = require('@react-native-async-storage/async-storage').default;
+    return JSON.parse((await AS.getItem(KV_TH_PROOFS)) || '{}')[id] || null;
+  } catch { return null; }
+}
 
 // ============================================================================
 // RESPONSIVE SCALER
@@ -180,8 +211,10 @@ interface VerificationEvent {
   id: string;
   type: 'dapp' | 'store' | 'academic' | 'service' | 'stats' | 'identity';
   name: string;
-  status: 'pending' | 'verified' | 'rejected';
-  arweaveTx?: string;
+  status: 'pending' | 'verified' | 'rejected' | 'expired';
+  arweaveTx?: string;        // legacy (Arweave era); unused
+  proofId?: string;          // key into the on-phone proof store (KV_TH_PROOFS)
+  proofType?: string;
   timestamp: number;
 }
 
@@ -289,62 +322,26 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         let lastAttested = 0;
         let deviceHashPrefix = '';
         let attestationFound = false;
-        try {
-          const attQuery = `{
-            transactions(
-              tags: [
-                { name: "App-Name", values: ["KasVillage"] },
-                { name: "KV-Type", values: ["device-attestation"] },
-                { name: "KV-Pubkey", values: ["${lookupResult.pubkey}"] }
-              ],
-              sort: HEIGHT_DESC,
-              first: 1
-            ) {
-              edges { node { tags { name value } } }
-            }
-          }`;
-          const attRes = await fetch('https://arweave.net/graphql', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: attQuery }),
-          });
-          if (attRes.ok) {
-            const attData = await attRes.json();
-            const attTags = attData?.data?.transactions?.edges?.[0]?.node?.tags;
-            if (attTags) {
-              attestationFound = true;
-              for (const tag of attTags) {
-                if (tag.name === 'KV-Platform') platform = tag.value;
-                if (tag.name === 'KV-DeviceHash') deviceHashPrefix = tag.value.slice(0, 8);
-              }
-              // Get timestamp from attestation payload or block time
-              const tsTag = attTags.find((t: {name: string}) => t.name === 'KV-Timestamp');
-              if (tsTag) lastAttested = parseInt(tsTag.value, 10);
-            }
-          }
-        } catch (e) {
-          console.warn('[StatsLookup] Attestation query failed:', e);
-        }
+        // KV_NO_ARWEAVE: device-attestation lookups lived on Arweave (dead); not shown.
 
-        // Query Arweave for stats proof
+        // KV_NO_ARWEAVE: ask Town Hall for a FRESH chain-sourced stats proof, then check it
+        // against the public verifier right here.
         let proofTxId = "";
         let proofType = "";
         let l1EventsRoot = "";
         let proofVerified = false;
+        let proofJson: any = null;
         try {
-          const proofGql = JSON.stringify({ query: `{transactions(tags:[{name:"App-Name",values:["KasVillage"]},{name:"KV-Type",values:["stats-proof"]},{name:"KV-Pubkey",values:["${lookupResult.pubkey}"]}],first:1,sort:HEIGHT_DESC){edges{node{id tags{name value}}}}}` });
-          const proofRes = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: proofGql });
-          if (proofRes.ok) {
-            const proofData = await proofRes.json();
-            const proofEdge = proofData?.data?.transactions?.edges?.[0];
-            if (proofEdge) {
-              proofTxId = proofEdge.node.id;
-              proofVerified = true;
-              const tags = proofEdge.node.tags || [];
-              proofType = tags.find((t: any) => t.name === 'KV-ProofType')?.value || 'Halo2-IPA';
-            }
+          const pr = await fetch(TOWNHALL_BASE + '/api/verify/stats', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pubkey: lookupResult.pubkey, network: require('./kv_vault_active').kvActiveNet() }) });
+          const pj = await pr.json();
+          if (pj && pj.proof) {
+            proofJson = pj.proof;
+            proofType = String(pj.proof.proof_type || '');
+            l1EventsRoot = String(pj.proof.public_inputs?.l1_events_root || '');
+            proofVerified = await kvCheckProof('stats', pj.proof);
           }
-        } catch (e) { console.warn('[StatsLookup] Proof query failed:', e); }
+        } catch (e) { console.warn('[StatsLookup] Proof fetch/check failed:', e); }
 
         const _useChain = _scanRes && !_scanRes.error && _scanRes.total > 0;
         const _cs = _useChain ? _scanRes.settled : (s.successes ?? 0);
@@ -365,7 +362,8 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
           proofType,
           l1EventsRoot,
           proofVerified,
-        });
+          proofJson,
+        } as any);
       } else {
         setResult({ pubkey: '', apt: '', xp: 0, pComplete: 0, successes: 0, deadlocks: 0, attestationFound: false, error: 'Not found — user may not have completed a transaction yet' });
       }
@@ -521,7 +519,7 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
 
       {result && !result.error && result.proofVerified && (
         <TouchableOpacity
-          onPress={() => result.proofTxId && Linking.openURL("https://arweave.net/" + result.proofTxId)}
+          onPress={async () => { if ((result as any).proofJson) { await Clipboard.setStringAsync(JSON.stringify({ kind: 'stats', proof: (result as any).proofJson, check: 'POST ' + TOWNHALL_BASE + '/api/verify/stats-check' })); Alert.alert('Proof copied', 'Anyone can verify it at /api/verify/stats-check.'); } }}
           style={{
             marginTop: rs.s(8),
             padding: rs.s(10),
@@ -533,14 +531,14 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#166534' }}>
-              {String(result.proofType || '').includes('-V2') ? '🔐 SNARK-bound proof (anyone can check it)' : '🏛️ Town Hall attested (posted to Arweave)'}
+              🔐 Stats proof verified (fresh from the chain)
             </Text>
             <Text style={{ fontSize: rs.font(10), color: '#166534' }}>
               {result.proofType}
             </Text>
           </View>
           <Text style={{ fontSize: rs.font(9), color: COLORS.stone400, marginTop: rs.s(4) }}>
-            TX: {result.proofTxId?.slice(0, 24)}... (tap to view on Arweave)
+            Events root {String(result.l1EventsRoot || '').slice(0, 16)}… · tap to copy the proof
           </Text>
         </TouchableOpacity>
       )}
@@ -555,10 +553,10 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
           borderColor: '#fde68a',
         }}>
           <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#92400e' }}>
-            ⚠️ No Town Hall attestation on Arweave
+            ⚠️ Stats proof not verified
           </Text>
           <Text style={{ fontSize: rs.font(10), color: COLORS.stone500, marginTop: 2 }}>
-            This user has not generated a verifiable stats proof yet
+            Town Hall did not return a proof that passes the public check (offline, or the proof failed). The chain scan above still stands on its own.
           </Text>
         </View>
       )}
@@ -923,7 +921,10 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
       // Load verification events from storage
       const eventsJson = await SecureStore.getItemAsync('kv_verification_events');
       if (eventsJson) {
-        setVerificationEvents(JSON.parse(eventsJson));
+        // KV_NO_ARWEAVE: Arweave-era "pending" entries waited on an upload that never lands
+        const evs: VerificationEvent[] = JSON.parse(eventsJson).map((e: VerificationEvent) =>
+          e.status === 'pending' && !e.proofId ? { ...e, status: 'expired' as const } : e);
+        setVerificationEvents(evs);
       }
     };
     loadData();
@@ -1079,11 +1080,27 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
       
       if (data.ok || data.found || data.proof) {
         // Add to verification events
+        const _evId = String(data.verification_id || data.dapp_id || (sendType + '-' + Date.now()));
+        let _status: VerificationEvent['status'] = 'rejected';
+        let _proofId: string | undefined;
+        let _ptype: string | undefined;
+        const _bound = sendType === 'stats' ? data.proof : sendType === 'dapp' ? data.bound_proof : null;
+        if (_bound) {
+          // KV_NO_ARWEAVE: check it right now against the live verifier, keep it on the phone
+          const _ok = await kvCheckProof(sendType as KvProofKind, _bound);
+          _status = _ok ? 'verified' : 'rejected';
+          _proofId = _evId; _ptype = _bound.proof_type;
+          await kvSaveProof(_evId, sendType as KvProofKind, _bound);
+        } else if (sendType === 'store') {
+          _status = data.verified ? 'verified' : 'rejected';   // stores: Town Hall attestation (no SNARK)
+        }
         const newEvent: VerificationEvent = {
-          id: data.verification_id,
+          id: _evId,
           type: sendType,
           name: sendName,
-          status: 'pending',
+          status: _status,
+          proofId: _proofId,
+          proofType: _ptype,
           timestamp: Date.now(),
         };
         
@@ -1125,6 +1142,8 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                   board: data.board,
                   proofType: data.proof.proof_type,
                   publicInputsHash: data.proof.public_inputs_hash,
+                  publicInputs: data.bound_proof ? data.bound_proof.public_inputs : undefined,
+                  vkFingerprint: data.bound_proof ? data.bound_proof.vk_fingerprint : undefined,
                   proofB64: (() => { try {
                     const bytes = data.proof.proof_bytes;
                     if (typeof bytes === 'string') return bytes;
@@ -1142,41 +1161,6 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
             }
           } catch (e) { console.warn('[DAppAttest] anchor error (verify still succeeded):', e); }
         }
-        // Inscribe stats proof to Arweave
-        if (data.proof && myPubkey) {
-          try {
-            const { uploadToIrys: statsUpload } = await import('./arweave_upload');
-            const proofPayload = JSON.stringify({
-              v: 1,
-              type: 'stats-proof',
-              pubkey: myPubkey,
-              apt: myApt,
-              stats: data.stats,
-              proof: data.proof,
-              timestamp: Date.now(),
-            });
-            const tags = [
-              { name: 'App-Name', value: 'KasVillage' },
-              { name: 'KV-Type', value: 'stats-proof' },
-              { name: 'KV-Pubkey', value: myPubkey },
-              { name: 'KV-Apt', value: (myApt || '').replace(/^APT-/i,'') },
-              { name: 'KV-Address', value: myAddress || '' },
-              { name: 'KV-ProofType', value: data.proof.proof_type || 'Halo2-IPA-Stats-Mock-V2' },
-              { name: 'KV-Successes', value: String(data.stats?.successes || 0) },
-              { name: 'KV-Deadlocks', value: String(data.stats?.deadlocks || 0) },
-              { name: 'KV-XP', value: String(data.stats?.xp || 0) },
-              { name: 'Content-Type', value: 'application/json' },
-            ];
-            const result = await statsUpload(proofPayload, tags);
-            const txId = result?.txId || '';
-            if (txId) {
-              await SecureStore.setItemAsync('kv_stats_proof_tx', txId);
-              console.log('[TownHall] Stats proof inscribed:', txId);
-            }
-          } catch (e) {
-            console.warn('[TownHall] Stats proof inscription failed:', e);
-          }
-        }
         const updatedEvents = [newEvent, ...verificationEvents];
         setVerificationEvents(updatedEvents);
         await SecureStore.setItemAsync('kv_verification_events', JSON.stringify(updatedEvents));
@@ -1187,8 +1171,12 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
         setSendDescription('');
         
         Alert.alert(
-          'Submitted!',
-          `Your ${sendType} has been submitted for verification. Town Hall will review it and post a signed attestation to Arweave.`,
+          newEvent.status === 'verified' ? 'Verified ✓' : 'Not verified',
+          newEvent.status === 'verified'
+            ? (newEvent.proofId
+                ? `Your ${sendType} proof was checked against the public verifier and saved on your phone. Copy it from Receive Proofs - anyone can check it.`
+                : `Town Hall verified your ${sendType}.`)
+            : (data.error || (data.scan_result && data.scan_result.status) || `The ${sendType} did not pass verification.`),
           [{ text: 'OK' }]
         );
       } else {
@@ -1217,23 +1205,8 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
     setIsLoadingProofs(true);
     
     try {
-      // Query Arweave directly for user proofs
-      const gql = JSON.stringify({ query: `{transactions(tags:[{name:"App-Name",values:["KasVillage"]},{name:"KV-Pubkey",values:["${myPubkey}"]}],first:10,sort:HEIGHT_DESC){edges{node{id tags{name value} block{timestamp}}}}}` });
-      const arRes = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: gql });
-      const arData = await arRes.json();
-      const edges = arData?.data?.transactions?.edges || [];
-      const proofs = edges.map((e: any) => {
-        const getTag = (name: string) => e.node.tags?.find((t: any) => t.name === name)?.value || '';
-        return {
-          id: e.node.id,
-          type: getTag('KV-Type').includes('stats') ? 'stats' : getTag('KV-Type').includes('verification') ? 'identity' : 'dapp',
-          name: getTag('KV-Type') || 'Proof',
-          status: 'verified' as const,
-          arweaveTx: e.node.id,
-          timestamp: e.node.block?.timestamp ? e.node.block.timestamp * 1000 : Date.now(),
-        };
-      });
-      setMyProofs(proofs);
+      // KV_NO_ARWEAVE: proofs live on this phone (checked when they arrived)
+      setMyProofs(verificationEvents.filter((e) => !!e.proofId));
     } catch (error) {
       Alert.alert('Error', 'Failed to load proofs');
     }
@@ -1241,14 +1214,16 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
     setIsLoadingProofs(false);
   };
   
-  // Download proof from Arweave
-  const handleDownloadProof = async (arweaveTx: string, name: string) => {
+  // KV_NO_ARWEAVE: copy the proof itself + where anyone can check it
+  const handleDownloadProof = async (proofId: string, name: string) => {
     try {
-      const url = `https://arweave.net/${arweaveTx}`;
-      await Clipboard.setStringAsync(url);
-      Alert.alert('Copied!', `Arweave proof URL copied:\n${url}`);
+      const p = await kvLoadProof(proofId);
+      if (!p) { Alert.alert('Not found', 'This proof is no longer on this phone.'); return; }
+      const bundle = { kind: p.kind, name, proof: p.proof, check: 'POST ' + TOWNHALL_BASE + '/api/verify/' + p.kind + '-check  body: {"proof": <proof>}' };
+      await Clipboard.setStringAsync(JSON.stringify(bundle));
+      Alert.alert('Proof copied', 'Paste it anywhere. Anyone can verify it at /api/verify/' + p.kind + '-check against the published VK.');
     } catch (error) {
-      Alert.alert('Error', 'Failed to copy proof URL');
+      Alert.alert('Error', 'Failed to copy proof');
     }
   };
   
@@ -1358,25 +1333,10 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           await pollForProof();
         }
         setIsVerified(true);
-        let arweaveTxId = null;
-        try {
-          const privKey = await SecureStore.getItemAsync('kv_l1_privkey') || await SecureStore.getItemAsync('kv_private_key') || '';
-          if (privKey && data.proof_hash) {
-            const proofPayload = JSON.stringify({ v:1, type:'identity-verification', pubkey:myPubkey, apt:myApt, tier:data.tier, traits:data.traits, proof_hash:data.proof_hash, public_inputs:data.proof_public_inputs||[], timestamp:Date.now() });
-            const tags = [{ name:'App-Name', value:'KasVillage' },{ name:'KV-Type', value:'verification-proof' },{ name:'KV-Pubkey', value:myPubkey||'' },{ name:'KV-ProofHash', value:(data.proof_hash||'').slice(0,64) },{ name:'KV-Tier', value:data.tier||'Guest' },{ name:'Content-Type', value:'application/json' }];
-            const arweaveUpload = await import('./arweave_upload');
-              console.log('[TownHall] Starting Arweave inscription, payload:', proofPayload.length, 'bytes');
-              if (arweaveUpload.uploadToTurbo) {
-              const result = await arweaveUpload.uploadToTurbo(proofPayload, tags);
-              console.log('[TownHall] Upload result:', JSON.stringify(result));
-              arweaveTxId = result?.txId || null;
-              console.log('[TownHall] Proof inscribed:', arweaveTxId);
-              if (arweaveTxId) await SecureStore.setItemAsync('kv_townhall_verified', 'true');
-              if (arweaveTxId) await SecureStore.setItemAsync('kv_verification_tx', arweaveTxId);
-            }
-          }
-        } catch (e) { console.warn('[TownHall] Arweave inscription failed:', e); }
-        Alert.alert('✓ Verified!', arweaveTxId ? 'Proof on Arweave! TX: '+arweaveTxId.slice(0,24)+'...' : 'Verified! Proof: '+(data.proof_hash||'').slice(0,24)+'...', [{ text: 'OK' }]);
+        // KV_NO_ARWEAVE: the verified flag no longer depends on a (dead) Arweave upload
+        await SecureStore.setItemAsync('kv_townhall_verified', 'true');
+        if (data.proof_hash) await SecureStore.setItemAsync('kv_verification_tx', String(data.proof_hash));
+        Alert.alert('✓ Verified!', 'Town Hall verified your identity' + (data.proof_hash ? '. Proof: ' + String(data.proof_hash).slice(0, 24) + '…' : '.'));
       } else {
         Alert.alert('Verification Failed', data.error || 'Please try again.');
       }
@@ -1405,46 +1365,12 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
   const [aptRegistering, setAptRegistering] = React.useState(false);
   // Register (backfill) APT -> pubkey mapping on Arweave. APT is derived from pubkey, so record is self-verifying.
   const handleRegisterApt = async () => {
-    if (!myPubkey) { Alert.alert('No pubkey', 'Cannot register APT without a public key.'); return; }
-    setAptRegistering(true);
-    try {
-      const { deriveApt } = await import('./apt_derivation');
-      const aptNum = deriveApt(myPubkey);
-      // Skip if a record already maps this APT to this pubkey
-      try {
-        const gql = JSON.stringify({ query: `{ transactions(tags: [{ name: "App-Name", values: ["KasVillage"] }, { name: "KV-Apt", values: ["${aptNum}"] }], sort: HEIGHT_DESC, first: 1) { edges { node { tags { name value } } } } }` });
-        const chk = await fetch('https://arweave.net/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: gql });
-        if (chk.ok) {
-          const j = await chk.json();
-          const tags = j?.data?.transactions?.edges?.[0]?.node?.tags;
-          const existingPk = tags?.find((t: {name:string}) => t.name === 'KV-Pubkey')?.value;
-          if (existingPk === myPubkey) { Alert.alert('Already registered', `APT-${aptNum} is already linked to your key.`); setAptRegistering(false); return; }
-        }
-      } catch (e) { console.warn('[APT-Register] pre-check failed, proceeding', e); }
-      const arweaveUpload = await import('./arweave_upload');
-      const payload = JSON.stringify({ v: 1, type: 'apt-registration', apt: 'APT-' + aptNum, pubkey: myPubkey, address: myAddress || '', timestamp: Date.now() });
-      const tags = [
-        { name: 'App-Name', value: 'KasVillage' },
-        { name: 'KV-Type', value: 'apt-registration' },
-        { name: 'KV-Apt', value: aptNum },
-        { name: 'KV-Pubkey', value: myPubkey },
-        { name: 'KV-Address', value: myAddress || '' },
-        { name: 'Content-Type', value: 'application/json' },
-      ];
-      let txId = '';
-      let upErr = '';
-      const _up = arweaveUpload.uploadToTurbo || (arweaveUpload as any).uploadToIrys;
-      if (_up) {
-        const r: any = await _up(payload, tags);
-        txId = r?.txId || r?.id || r?.transaction?.id || '';
-        if (!txId) upErr = r?.error || (r?.success === false ? 'Upload rejected' : 'No transaction id returned');
-      } else { upErr = 'No upload function available'; }
-      if (txId) { Alert.alert('APT Registered', `APT-${aptNum} is now searchable.\nTX: ${txId.slice(0,16)}...`); }
-      else { Alert.alert('Upload failed', upErr + '.\nEnsure your wallet key is available, then retry.'); }
-    } catch (e: any) {
-      console.warn('[APT-Register] failed', e);
-      Alert.alert('Registration failed', String(e?.message || e));
-    } finally { setAptRegistering(false); }
+    // KV_NO_ARWEAVE: APT search used an Arweave index (dead). An APT is derived FROM the pubkey,
+    // so it can't be looked up without an index - share your pubkey or kaspa: address instead;
+    // Town Hall looks those up straight from the chain.
+    const share = myAddress || myPubkey || '';
+    if (share) { await Clipboard.setStringAsync(share); }
+    Alert.alert('Share your address instead', 'People can look you up by your kaspa: address or pubkey - both resolve straight from the chain. ' + (share ? 'Your address was copied.' : ''));
   };
   
   // Get icon for result type
@@ -1586,12 +1512,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                     </View>
                   )}
                   
-                  {searchResult.arweaveTx && (
-                    <TouchableOpacity style={styles.arweaveLink} onPress={() => Linking.openURL('https://arweave.net/' + searchResult.arweaveTx)}>
-                      <ExternalLink size={rs.s(12)} color={COLORS.indigo500} />
-                      <Text style={styles.arweaveLinkText}>View on Arweave</Text>
-                    </TouchableOpacity>
-                  )}
+                  {/* KV_NO_ARWEAVE: Arweave links retired */}
                 </>
               ) : (
                 <View style={styles.notFoundBox}>
@@ -1623,7 +1544,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                 disabled={aptRegistering}
                 onPress={handleRegisterApt}
               >
-                <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>{aptRegistering ? 'Registering…' : 'Register APT (make searchable)'}</Text>
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>{'Copy my address (how people find you)'}</Text>
               </TouchableOpacity>
               
               <View style={styles.identityRow}>
@@ -1706,7 +1627,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
               </View>
               <Text style={styles.proofNote}>
                 Send: Submit DApp/Store/Stats for verification{'\n'}
-                Receive: Download your Arweave proofs
+                Receive: Your proofs (saved on this phone)
               </Text>
             </>
           ) : (
@@ -1744,11 +1665,11 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                   event.status === 'rejected' && styles.eventStatusRejected,
                 ]}>
                   <Text style={styles.eventStatusText}>
-                    {event.status === 'verified' ? '✓' : event.status === 'pending' ? '⏳' : '✗'}
+                    {event.status === 'verified' ? '✓' : event.status === 'pending' ? '⏳' : event.status === 'expired' ? '–' : '✗'}
                   </Text>
                 </View>
-                {event.arweaveTx && (
-                  <TouchableOpacity onPress={() => handleDownloadProof(event.arweaveTx!, event.name)}>
+                {event.proofId && (
+                  <TouchableOpacity onPress={() => handleDownloadProof(event.proofId!, event.name)}>
                     <ExternalLink size={rs.s(16)} color={COLORS.indigo500} />
                   </TouchableOpacity>
                 )}
@@ -1762,7 +1683,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           <Text style={styles.cardTitle}>🛡️ Verify Your Content</Text>
           <Text style={styles.cardSubtitle}>
             Verification makes your storefronts, DApps, academics, and services visible in search.
-            Town Hall posts the proof to Arweave for FREE.
+            Proofs are checked against the public verifier and kept on your phone - FREE.
           </Text>
           
           {isVerified ? (
@@ -1776,7 +1697,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                 style={{ backgroundColor: '#F59E0B', borderRadius: 10, padding: 12, marginTop: 10, alignItems: 'center', width: '100%' }}
                 onPress={() => { setIsVerified(false); }}
               >
-                <Text style={{ color: '#000', fontWeight: '700', fontSize: 13 }}>Re-verify + Inscribe to Arweave</Text>
+                <Text style={{ color: '#000', fontWeight: '700', fontSize: 13 }}>Re-verify</Text>
               </TouchableOpacity>
             </View>
           ) : traitCount >= 6 ? (
@@ -1858,7 +1779,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           <View style={styles.infoRow}>
             <Text style={styles.infoBullet}>3.</Text>
             <Text style={styles.infoText}>
-              Town Hall posts proof to Arweave (FREE for you)
+              Your proof is checked on the spot and saved on your phone (FREE)
             </Text>
           </View>
           <View style={styles.infoRow}>
@@ -2008,7 +1929,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
             </View>
             
             <Text style={styles.modalSubtitle}>
-              Download your verification proofs from Arweave. These are permanent, verifiable records.
+              Your proofs, saved on this phone. Copy one to share it - anyone can verify it at the public check endpoint.
             </Text>
             
             {isLoadingProofs ? (
@@ -2045,13 +1966,13 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                       </View>
                     </View>
                     
-                    {proof.arweaveTx && (
+                    {proof.proofId && (
                       <TouchableOpacity
                         style={styles.downloadProofBtn}
-                        onPress={() => handleDownloadProof(proof.arweaveTx!, proof.name)}
+                        onPress={() => handleDownloadProof(proof.proofId!, proof.name)}
                       >
                         <Download size={rs.s(16)} color={COLORS.white} />
-                        <Text style={styles.downloadProofText}>Copy Arweave URL</Text>
+                        <Text style={styles.downloadProofText}>Copy proof</Text>
                       </TouchableOpacity>
                     )}
                     
