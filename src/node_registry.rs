@@ -355,11 +355,26 @@ pub async fn run_audit(q: web::Query<AuditQuery>) -> impl Responder {
 // ---------------------------------------------------------------------------
 pub async fn get_game_index(q: web::Query<NetQuery>) -> impl Responder {
     let net = norm_net(q.network.as_deref());
-    let reg = registry_address("game", net);
+    let (games, reg) = match index_kind(net, "game").await { Ok(v) => v, Err(e) => return HttpResponse::BadGateway().json(json!({ "error": e })) };
+    let (dapps, dreg) = index_kind(net, "dapp").await.unwrap_or((Vec::new(), String::new()));
+    HttpResponse::Ok().json(json!({
+        "index": "KasVillage community mini-apps (HTML5 games + DApps, sandboxed, verified by hash)",
+        "network": net,
+        "registries": { "game": reg, "dapp": dreg },
+        "count": games.len() + dapps.len(),
+        "games": games,
+        "dapps": dapps,
+        "age_ratings": "4+ / 9+ / 13+ / 17+; unrated listings are treated as 17+ and gated in the app",
+        "report": "Flag in app: Mailbox > listing > Flag",
+    }))
+}
+
+async fn index_kind(net: &str, kind: &str) -> Result<(Vec<serde_json::Value>, String), String> {
+    let reg = registry_address(kind, net);
     let url = format!("{}/addresses/{}/full-transactions?limit={}&resolve_previous_outpoints=no", api_base(net), reg, MAX_REGISTRY_TXS);
     let txs: serde_json::Value = match http().get(&url).send().await {
         Ok(r) => r.json().await.unwrap_or(json!([])),
-        Err(e) => return HttpResponse::BadGateway().json(json!({ "error": e.to_string() })),
+        Err(e) => return Err(e.to_string()),
     };
     let mut delisted: std::collections::HashSet<(String, String)> = Default::default();
     let mut games: Vec<serde_json::Value> = Vec::new();
@@ -378,9 +393,12 @@ pub async fn get_game_index(q: web::Query<NetQuery>) -> impl Responder {
             Some("registry") => {
                 let quad: serde_json::Value = d.get("primaryLink").and_then(|p| p.as_str())
                     .and_then(|p| serde_json::from_str(p).ok()).unwrap_or(json!({}));
-                let head = quad.get("head").and_then(|h| h.as_str()).unwrap_or("").to_string();
+                // games key on the bundle head; dapps on their store address
+                let head = quad.get("head").and_then(|h| h.as_str())
+                    .or_else(|| if kind == "dapp" { d.get("storeAddress").and_then(|h| h.as_str()) } else { None })
+                    .unwrap_or("").to_string();
                 if head.is_empty() || !seen.insert(head.clone()) { continue; }
-                let age = quad.get("age").and_then(|a| a.as_str()).filter(|a| matches!(*a, "4+" | "9+" | "13+" | "17+")).unwrap_or("unrated (17+)");
+                let age = quad.get("age").or_else(|| d.get("age")).and_then(|a| a.as_str()).filter(|a| matches!(*a, "4+" | "9+" | "13+" | "17+")).unwrap_or("unrated (17+)");
                 games.push(json!({
                     "name": d.get("name").cloned().unwrap_or(json!("")),
                     "head": head,
@@ -395,14 +413,7 @@ pub async fn get_game_index(q: web::Query<NetQuery>) -> impl Responder {
         }
     }
     games.retain(|g| !delisted.contains(&(g["publisher"].as_str().unwrap_or("").to_string(), g["head"].as_str().unwrap_or("").to_string())));
-    HttpResponse::Ok().json(json!({
-        "index": "KasVillage community games (HTML5, sandboxed, verified by hash)",
-        "network": net,
-        "registry": reg,
-        "count": games.len(),
-        "games": games,
-        "report": "Flag in app: Mailbox > Games > game > Flag",
-    }))
+    Ok((games, reg))
 }
 
 pub fn configure_node_registry_routes(cfg: &mut web::ServiceConfig) {
