@@ -325,7 +325,7 @@ pub struct VerificationProof {
 pub struct DAppWitness {
     pub scan_passed: u64,         // 1 = passed (in-circuit)
     pub trait_count: u64,         // >= 13 (integer rule, verifier)
-    pub xp_commitment: u64,       // >= 500 (integer rule, verifier)
+    pub xp_commitment: u64,       // declared XP (bound; picks the board, no floor)
     pub code_hash: [u8; 32],      // sha256 of the exact code scanned (anyone re-hashes the published code)
     pub owner_hash: [u8; 32],     // sha256 of the owner's pubkey
     pub ruleset_hash: [u8; 32],   // which scan rules were applied (DAPP_RULESET_HASH at prove time)
@@ -455,7 +455,6 @@ pub fn generate_dapp_proof(code: &str, owner_pubkey: &str, trait_count: u64, xp_
         ruleset_hash: *DAPP_RULESET_HASH,
     };
     if trait_count < 13 { return Err("Minimum 13 traits required".into()); }
-    if xp_commitment < 500 { return Err("Minimum 500 XP commitment required".into()); }
     let inst = dapp_instances(&w);
     let circuit = DAppVerificationCircuit { witness: w.clone() };
     let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
@@ -481,7 +480,6 @@ pub fn verify_dapp_proof(p: &DAppProof, code: Option<&str>) -> Result<(), String
     let pi = &p.public_inputs;
     if pi.scan_passed != 1 { return Err("scan did not pass".into()); }
     if pi.trait_count < 13 { return Err("trait_count < 13".into()); }
-    if pi.xp_commitment < 500 { return Err("xp_commitment < 500".into()); }
     let code_hash = hex32(&pi.code_hash).ok_or("bad code_hash")?;
     if let Some(c) = code { if hash32(c.as_bytes()) != code_hash { return Err("code does not match the proven code_hash".into()); } }
     let w = DAppWitness {
@@ -2351,11 +2349,41 @@ pub struct DAppVerifyResponse {
 }
 
 /// Full DApp verification with code scanning and SNARK proof
+/// KV_DAPP_FETCH: the app sends a URL, not the code. Fetch it - from an allowlist of public
+/// code hosts only (no server-side requests to arbitrary or private hosts) - so the scan and
+/// the proof are about the REAL file. Before this, the empty string was scanned and proven.
+const DAPP_CODE_HOSTS: &[&str] = &["raw.githubusercontent.com", "gist.githubusercontent.com", "arweave.net"];
+
+async fn fetch_dapp_code(url: &str) -> Result<String, String> {
+    let rest = url.strip_prefix("https://").ok_or("code URL must be https")?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("").to_ascii_lowercase();
+    let host_ok = DAPP_CODE_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{}", h)));
+    if !host_ok { return Err(format!("code host {} not allowed (use {})", host, DAPP_CODE_HOSTS.join(", "))); }
+    let resp = reqwest::Client::new().get(url).timeout(std::time::Duration::from_secs(20)).send().await
+        .map_err(|e| format!("fetch failed: {}", e))?;
+    if !resp.status().is_success() { return Err(format!("fetch returned {}", resp.status())); }
+    if let Some(len) = resp.content_length() { if len as usize > MAX_CODE_SIZE_BYTES { return Err("code exceeds size limit".into()); } }
+    let bytes = resp.bytes().await.map_err(|e| format!("read failed: {}", e))?;
+    if bytes.len() > MAX_CODE_SIZE_BYTES { return Err("code exceeds size limit".into()); }
+    String::from_utf8(bytes.to_vec()).map_err(|_| "code is not UTF-8 text".into())
+}
+
 pub async fn api_verify_dapp(
     body: web::Json<DAppVerifyRequest>,
 ) -> HttpResponse {
+    // 0. The code being proven: inline, or fetched from the allowlisted URL
+    let code: String = if !body.dapp_code.trim().is_empty() {
+        body.dapp_code.clone()
+    } else {
+        match fetch_dapp_code(body.dapp_url.trim()).await {
+            Ok(c) if !c.trim().is_empty() => c,
+            Ok(_) => return HttpResponse::BadRequest().json(serde_json::json!({"ok": false, "error": "code URL returned an empty file"})),
+            Err(e) => return HttpResponse::BadRequest().json(serde_json::json!({"ok": false, "error": e})),
+        }
+    };
+
     // 1. Scan code for prohibited/suspicious patterns
-    let scan_result = scan_code(&body.dapp_code);
+    let scan_result = scan_code(&code);
     
     if scan_result.status == ScanStatus::Rejected {
         return HttpResponse::Ok().json(DAppVerifyResponse {
@@ -2380,17 +2408,13 @@ pub async fn api_verify_dapp(
     }
     
     // 3. Determine board based on XP commitment
+    // No XP floor (mainnet starts everyone at 0 XP). XP only picks the board.
     let board = if body.xp_commitment >= 5000 {
         "elite"
     } else if body.xp_commitment >= 1000 {
         "main"
-    } else if body.xp_commitment >= 500 {
-        "incubator"
     } else {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "ok": false,
-            "error": "Minimum 500 XP commitment required"
-        }));
+        "incubator"
     };
     
     // 4. Generate DApp ID
@@ -2403,7 +2427,7 @@ pub async fn api_verify_dapp(
     
     // 5. KV_DAPP_V2: instance-bound proof over (code hash, owner, ruleset, verdict)
     let bound = if scan_result.passed {
-        match generate_dapp_proof(&body.dapp_code, &body.owner_pubkey, body.trait_count as u64, body.xp_commitment) {
+        match generate_dapp_proof(&code, &body.owner_pubkey, body.trait_count as u64, body.xp_commitment) {
             Ok(p) => Some(p),
             Err(e) => { println!("[DApp] proof failed: {}", e); None }
         }
@@ -4126,7 +4150,9 @@ mod kv_dapp_academic_v2_tests {
         assert!(verify_dapp_proof(&t, None).is_err(), "claiming other rules must fail");
         // below-policy proofs are refused at generation
         assert!(generate_dapp_proof(code, owner, 12, 500).is_err());
-        assert!(generate_dapp_proof(code, owner, 13, 499).is_err());
+        // no XP floor: a 0-XP creator can still get a bound proof
+        let z = generate_dapp_proof(code, owner, 13, 0).expect("0 XP allowed");
+        assert!(verify_dapp_proof(&z, Some(code)).is_ok());
     }
 
     #[test]
@@ -4158,5 +4184,19 @@ mod kv_dapp_academic_v2_tests {
         let dk_bad = crate::dkim_verify::verify_message(bad["raw"].as_str().unwrap(), &key_for, crate::dkim_verify::academic_policy(pubkey));
         assert!(!dk_bad.passed);
         assert!(generate_academic_proof(pubkey, &dk_bad, None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod kv_dapp_fetch_tests {
+    use super::*;
+    #[actix_web::test]
+    async fn fetch_refuses_unsafe_urls() {
+        // no server-side requests to arbitrary or private hosts
+        assert!(fetch_dapp_code("http://raw.githubusercontent.com/x").await.is_err(), "http refused");
+        assert!(fetch_dapp_code("https://169.254.169.254/latest/meta-data").await.is_err(), "metadata IP refused");
+        assert!(fetch_dapp_code("https://localhost/x").await.is_err(), "localhost refused");
+        assert!(fetch_dapp_code("https://evil.example.com/x").await.is_err(), "unlisted host refused");
+        assert!(fetch_dapp_code("https://raw.githubusercontent.com.evil.com/x").await.is_err(), "suffix trick refused");
     }
 }

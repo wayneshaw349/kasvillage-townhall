@@ -1034,10 +1034,11 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           owner_pubkey: myPubkey || '',
           apt_number: myApt || '',
           dapp_name: sendName,
-          dapp_code: '', // Code fetched by TownHall from URL
-          dapp_url: sendCodeUrl,
+          dapp_code: '', // Town Hall fetches the code from dapp_url (allowlisted hosts) and proves THAT file
+          dapp_url: sendCodeUrl.trim(),
           category: 'UtilityTool',
-          xp_commitment: 500,
+          // KV_DAPP_V2: the real (network-scoped) XP; it's bound into the proof and picks the board
+          xp_commitment: await (async () => { try { const _us: any = await require('./wallet_registration_v2').getUserStats(); return Math.max(0, Math.floor(Number(_us?.xp || 0))); } catch { return 0; } })(),
           trait_count: traitCount,
           signature: 'self-attest',
           device_attestation: 'pending',
