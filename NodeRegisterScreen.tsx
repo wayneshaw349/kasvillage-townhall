@@ -12,8 +12,7 @@ const C = {
 };
 
 const SERVICES: Array<{ id: 'index' | 'archive'; label: string; blurb: string }> = [
-  { id: 'index',   label: 'Indexer', blurb: 'Scans L1 payloads, serves search queries.' },
-  { id: 'archive', label: 'Archive', blurb: 'Stores full KasVillage history, answers audits.' },
+  { id: 'archive', label: 'Archive', blurb: 'kaspad --archival + an indexer (e.g. simply-kaspa-indexer) + kaspa-rest-server, keeping tx payloads. Answers /transactions/{id} audits.' },
 ];
 
 export function NodeRegisterScreen({ onClose }: { onClose: () => void }) {
@@ -109,7 +108,7 @@ export function NodeRegisterScreen({ onClose }: { onClose: () => void }) {
           }}
         />
         <Text style={{ color: C.dim, fontSize: 12, marginTop: 6 }}>
-          Must be reachable from the public internet. Auditors fetch challenge responses here.
+          The kaspa-rest-server URL. Must be public: audits ask it for KasVillage transactions older than ~30h and check each one hashes to its txid.
         </Text>
 
         <View style={{ backgroundColor: C.card, borderColor: C.border, borderWidth: 1, borderRadius: 10, padding: 12, marginTop: 16 }}>
