@@ -1,9 +1,9 @@
 // NodeRegisterScreen.tsx - register as a KasVillage archival/indexer operator.
-// Bond 10 KAS (own address, unspent = active) + 1 KAS announce to the registry.
+// Bond 10 KAS (pledge at own derived address, reclaimable) + 1 KAS announce to the registry.
 // Payout address and keys come from SecureStore inside registerNode().
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
-import { registerNode, NODE_REGISTRY_ADDRESS } from './node_registry';
+import { registerNode, nodeRegistryAddress } from './node_registry';
 import * as SecureStore from 'expo-secure-store';
 
 const C = {
@@ -39,7 +39,7 @@ export function NodeRegisterScreen({ onClose }: { onClose: () => void }) {
     }
     Alert.alert(
       'Register operator?',
-      'This spends 11 KAS: 10 KAS bond (returns to you, unspent while active) + 1 KAS announce. Your node must stay reachable to pass audits.',
+      'This spends 11 KAS: a 10 KAS bond pledged at your own derived address (reclaim any time in My Pledges; reclaiming deregisters you) + 1 KAS announce. Your node must stay reachable to pass audits.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -119,16 +119,16 @@ export function NodeRegisterScreen({ onClose }: { onClose: () => void }) {
             {payout || 'wallet address unavailable'}
           </Text>
           <Text style={{ color: C.dim, fontSize: 11, marginTop: 6 }}>
-            This phone's wallet. The same key signs the announce and holds the bond.
+            This phone's wallet. The same key signs the announce and controls the bond pledge.
           </Text>
         </View>
 
         <View style={{ backgroundColor: C.card, borderColor: C.border, borderWidth: 1, borderRadius: 10, padding: 12, marginTop: 16 }}>
           <Text style={{ color: C.text, fontWeight: '700', marginBottom: 6 }}>Cost</Text>
-          <Text style={{ color: C.dim, fontSize: 13 }}>10 KAS bond - held at your own address, unspent while active</Text>
+          <Text style={{ color: C.dim, fontSize: 13 }}>10 KAS bond - a pledge only your key controls; reclaim in My Pledges to deregister</Text>
           <Text style={{ color: C.dim, fontSize: 13 }}>1 KAS announce - burned to the registry address</Text>
           <Text style={{ color: C.dim, fontSize: 11, marginTop: 8 }} numberOfLines={2}>
-            Registry: {NODE_REGISTRY_ADDRESS}
+            Registry: {nodeRegistryAddress()}
           </Text>
         </View>
 

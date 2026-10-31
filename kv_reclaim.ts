@@ -6,7 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 
-export type PledgeKind = 'store' | 'dapp' | 'academic' | 'game';
+export type PledgeKind = 'store' | 'dapp' | 'academic' | 'game' | 'node';
 export interface MyPledge { key: string; kind: PledgeKind; label: string; nonces: number[]; sompi: bigint; note: string; }
 
 const NET = require('./kv_net').KV_NET;
@@ -37,6 +37,7 @@ export async function listMyPledges(): Promise<MyPledge[]> {
   };
   await add('store', 'store', 'Store / Service listing', [0], NOTE_DELIST);
   await add('dapp', 'dapp', 'DApp listing', [1], NOTE_DELIST);
+  await add('node', 'node', 'Operator bond (Ledger Service)', [5], 'Reclaiming deregisters you as an operator; audits and tips stop.');
   try {
     const abs: any[] = JSON.parse((await SecureStore.getItemAsync('kv_abstracts')) || '[]');
     for (const a of abs) {

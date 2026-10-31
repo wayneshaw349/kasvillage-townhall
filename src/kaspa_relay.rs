@@ -156,8 +156,8 @@ fn gate_node_record(v: &serde_json::Value) -> Result<(), String> {
         return Err("node record: payout must be a kaspa address".into());
     }
     let net = v.get("net").and_then(|s| s.as_str()).unwrap_or("");
-    if net != "tn10" {
-        return Err("node record: net must be tn10".into());
+    if !matches!(net, "tn10" | "testnet-10" | "mainnet") {
+        return Err("node record: net must be mainnet or testnet-10".into());
     }
     Ok(())
 }

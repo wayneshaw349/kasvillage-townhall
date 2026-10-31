@@ -1,36 +1,31 @@
-// node_registry.ts — KasVillage Archival/Indexer Registry (app side)
+// node_registry.ts — KasVillage operator registry (app side), on the pledge rail.
 //
-// registerNode(): operator sends bonded KVP1 node record
-//   output 0 = bond (to operator's own address; unspent = active)
-//   output 1 = 1 KAS announce to NODE_REGISTRY_ADDRESS (discovery)
-//   payload  = KVP1{"k":"node","svc","api","payout","net":"tn10"}
+// registerNode():
+//   1. publishContent: 10 KAS bond -> your own derived pledge address (nonce NODE_NONCE)
+//      carrying a signed KVP1 'node' record. Reclaimable in My Pledges.
+//   2. 1 KAS signed announce -> registryAddress('node', net) with svc/api/payout.
+//   Active operator = pledge address holds >= 10 KAS funded from your own wallet.
+//   Deregister = reclaim the pledge (My Pledges). No main-wallet coin is ever "the bond".
 //
-// fetchRegistry()/fetchAudit(): query TownHall's scan + proof-of-storage audit
-// tipOperators(): one tx, one output per passing operator — user-funded tips
-//   (e.g. offered after a store publish/update).
-//
-// Rides the proven payload rail: sendKaspaViaRest -> payload sighash -> relay.
+// fetchRegistry()/fetchAudit(): TownHall rebuilds both from chain every call/sweep
+//   (?network=), so an ephemeral relay loses nothing.
+// tipOperators(): one plain send per passing operator.
 
 import * as SecureStore from 'expo-secure-store';
+import { secp256k1 } from '@noble/curves/secp256k1';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 import { sendKaspaViaRest, KaspaNetwork } from './kaspa_rest_tx';
+import { publishContent, registryAddress, OwnerKeys } from './payload_publish';
+import { signRecord, buildPayloadHex } from './kaspa_payload';
 
-// Derived, not chosen: sha256("KV-REGISTRY-V1-node") as x-only -> bech32m.
-// Nobody holds the key; announce dust burns here. Must equal payload_publish's
-// registryAddress('node', net) · asserted at import below.
-export const NODE_REGISTRY_ADDRESS = 'kaspatest:qp35q2e5maacw03gyuh5pdr389y92nxp4dttxlr728pf0xcxytxd7nspt3z2k';
-try {
-  const { registryAddress } = require('./payload_publish');
-  const _derived = registryAddress('node', 'testnet-10');
-  if (_derived !== NODE_REGISTRY_ADDRESS) {
-    console.error('[NodeRegistry] ADDRESS MISMATCH · const:', NODE_REGISTRY_ADDRESS, 'derived:', _derived);
-    throw new Error('NODE_REGISTRY_ADDRESS does not match registryAddress("node")');
-  }
-  console.log('[NodeRegistry] address verified:', NODE_REGISTRY_ADDRESS);
-} catch (e) { console.error('[NodeRegistry] address assertion failed:', e); throw e; }
 const TOWNHALL_BASE = 'https://kasvillage.app.runonflux.io';
+export const NODE_NONCE = 5;                   // pledge slot (store 0, dapp 1, academics 7000+, games 2M+)
 export const NODE_BOND_SOMPI = 1_000_000_000n; // 10 KAS
 export const ANNOUNCE_SOMPI = 100_000_000n;    // 1 KAS
-const MIN_TIP_SOMPI = 10_000_000n;             // 0.1 KAS floor per operator
+const MIN_TIP_SOMPI = 20_000_000n;             // 0.2 KAS floor (KIP-9 storage mass)
+
+const NET = (): KaspaNetwork => require('./kv_net').KV_NET as KaspaNetwork;
+export const nodeRegistryAddress = (net: string = NET()) => registryAddress('node', net);
 
 export interface NodeRegistryEntry {
   txid: string;
@@ -38,7 +33,7 @@ export interface NodeRegistryEntry {
   api: string;
   payout: string;
   net: string;
-  bond_outpoint: string;
+  bond_address: string;
   bond_amount: number;
   bond_unspent: boolean;
 }
@@ -54,103 +49,71 @@ export interface NodeAuditEntry {
   reason?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Operator: register this device's node
-// ---------------------------------------------------------------------------
+async function ownerKeys(): Promise<OwnerKeys> {
+  const { _kvResolvePrivHex } = require('./proposal_share');
+  const priv: string | null = await _kvResolvePrivHex();
+  const address = (await SecureStore.getItemAsync('kv_kaspa_address')) || (await SecureStore.getItemAsync('kaspa_address')) || '';
+  if (!priv || !address) throw new Error('wallet keys unavailable');
+  return { privateKeyHex: priv, pubkeyHex: bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true)), address, network: NET() as any };
+}
+
 export async function registerNode(params: {
   svc: 'index' | 'relay' | 'archive';
   apiBaseUrl: string;
-  network?: KaspaNetwork;
-}): Promise<{ success: boolean; txid?: string; error?: string }> {
+}): Promise<{ success: boolean; txid?: string; bondAddress?: string; error?: string }> {
   try {
-    const network = params.network || 'testnet-10';
-    const address = (await SecureStore.getItemAsync('kv_kaspa_address'))
-      || (await SecureStore.getItemAsync('kaspa_address')) || '';
-    const privateKeyHex = (await SecureStore.getItemAsync('kv_private_key')) || '';
-    if (!address || !privateKeyHex) return { success: false, error: 'wallet keys unavailable' };
-
-    const record = {
-      k: 'node',
-      svc: params.svc,
-      api: params.apiBaseUrl.replace(/\/+$/, ''),
-      payout: address,
-      net: 'tn10',
-      v: 1,
-    };
-    const payloadHex = Array.from(new TextEncoder().encode('KVP1' + JSON.stringify(record)))
-      .map((b) => b.toString(16).padStart(2, '0')).join('');
-
-    console.log('[NodeReg] registering', record.svc, record.api);
-    const res = await sendKaspaViaRest({
-      fromAddress: address,
-      privateKeyHex,
-      network,
-      payloadHex,
-      outputs: [
-        { address, amountSompi: NODE_BOND_SOMPI },                       // 0: bond to self
-        { address: NODE_REGISTRY_ADDRESS, amountSompi: ANNOUNCE_SOMPI }, // 1: announce
-      ],
-    } as any);
-    if (!res.success) return { success: false, error: res.error };
-    console.log('[NodeReg] registered — bond outpoint', res.transactionId + ':0');
-    return { success: true, txid: res.transactionId };
+    const o = await ownerKeys();
+    const net = o.network;
+    const d = { svc: params.svc, api: params.apiBaseUrl.replace(/\/+$/, ''), payout: o.address, net };
+    console.log('[NodeReg] bond', d.svc, d.api, net);
+    const bond: any = await publishContent(o, 'service', { node: d }, NODE_NONCE, NODE_BOND_SOMPI);
+    if (!bond || !bond.success) return { success: false, error: 'bond: ' + (bond?.error || 'send failed') };
+    const rec = signRecord({ k: 'registry', v: 1, o: o.pubkeyHex, t: Date.now(),
+      d: { storeAddress: bond.storeAddress, name: 'operator', category: 'node', ...d } }, o.privateKeyHex);
+    const ann: any = await sendKaspaViaRest({
+      senderAddress: o.address, recipientAddress: nodeRegistryAddress(net), amountSompi: ANNOUNCE_SOMPI,
+      privateKeyHex: o.privateKeyHex, network: net as any, payload: buildPayloadHex(rec),
+    });
+    if (!ann || !ann.success) return { success: false, bondAddress: bond.storeAddress, error: 'announce: ' + (ann?.error || 'send failed') + ' (bond is safe in My Pledges)' };
+    try { await SecureStore.setItemAsync('kv_node_registered', JSON.stringify({ net, svc: d.svc, api: d.api, at: Date.now() })); } catch {}
+    return { success: true, txid: ann.txId, bondAddress: bond.storeAddress };
   } catch (e: any) {
     return { success: false, error: String(e?.message || e) };
   }
 }
 
-// Deregister = spend the bond back to yourself (plain send consuming txid:0).
-// The wallet's normal send flow covers this; no special tx needed.
-
-// ---------------------------------------------------------------------------
-// Anyone: query registry + audits via TownHall
-// ---------------------------------------------------------------------------
-export async function fetchRegistry(): Promise<NodeRegistryEntry[]> {
-  const r = await fetch(TOWNHALL_BASE + '/api/nodes/registry');
+export async function fetchRegistry(net: string = NET()): Promise<NodeRegistryEntry[]> {
+  const r = await fetch(TOWNHALL_BASE + '/api/nodes/registry?network=' + net);
   if (!r.ok) throw new Error('registry fetch ' + r.status);
   const j = await r.json();
   return (j.nodes || []) as NodeRegistryEntry[];
 }
 
-export async function fetchAudit(): Promise<NodeAuditEntry[]> {
-  const r = await fetch(TOWNHALL_BASE + '/api/nodes/audit');
+export async function fetchAudit(net: string = NET()): Promise<NodeAuditEntry[]> {
+  const r = await fetch(TOWNHALL_BASE + '/api/nodes/audit?network=' + net);
   if (!r.ok) throw new Error('audit fetch ' + r.status);
   const j = await r.json();
   return (j.nodes || []) as NodeAuditEntry[];
 }
 
-// ---------------------------------------------------------------------------
-// User: tip passing operators (one tx, one output per operator)
-// ---------------------------------------------------------------------------
 export async function tipOperators(params: {
   totalSompi: bigint;
-  network?: KaspaNetwork;
 }): Promise<{ success: boolean; txid?: string; paid?: number; error?: string }> {
   try {
-    const network = params.network || 'testnet-10';
-    const address = (await SecureStore.getItemAsync('kv_kaspa_address'))
-      || (await SecureStore.getItemAsync('kaspa_address')) || '';
-    const privateKeyHex = (await SecureStore.getItemAsync('kv_private_key')) || '';
-    if (!address || !privateKeyHex) return { success: false, error: 'wallet keys unavailable' };
-
-    const audit = await fetchAudit();
-    const passing = audit.filter((n) => n.audited && n.pass && n.payout && n.payout !== address);
+    const o = await ownerKeys();
+    const audit = await fetchAudit(o.network);
+    const passing = audit.filter((n) => n.audited && n.pass && n.payout && n.payout !== o.address);
     if (passing.length === 0) return { success: false, error: 'no passing operators to tip' };
-
     const per = params.totalSompi / BigInt(passing.length);
-    if (per < MIN_TIP_SOMPI) {
-      return { success: false, error: 'tip too small: < 0.1 KAS per operator across ' + passing.length + ' operators' };
+    if (per < MIN_TIP_SOMPI) return { success: false, error: 'tip too small: < 0.2 KAS per operator across ' + passing.length + ' operators' };
+    let paid = 0; let last = ''; const errs: string[] = [];
+    for (const n of passing) {
+      const r: any = await sendKaspaViaRest({ senderAddress: o.address, recipientAddress: n.payout, amountSompi: per, privateKeyHex: o.privateKeyHex, network: o.network as any });
+      if (r && r.success) { paid++; last = r.txId; } else errs.push(String(r?.error || 'failed'));
+      await new Promise((res) => setTimeout(res, 1500)); // let change settle between sends
     }
-
-    console.log('[NodeTip] tipping', passing.length, 'operators,', per.toString(), 'sompi each');
-    const res = await sendKaspaViaRest({
-      fromAddress: address,
-      privateKeyHex,
-      network,
-      outputs: passing.map((n) => ({ address: n.payout, amountSompi: per })),
-    } as any);
-    if (!res.success) return { success: false, error: res.error };
-    return { success: true, txid: res.transactionId, paid: passing.length };
+    if (!paid) return { success: false, error: errs[0] || 'tip failed' };
+    return { success: true, txid: last, paid, error: errs.length ? errs.length + ' tip(s) failed' : undefined };
   } catch (e: any) {
     return { success: false, error: String(e?.message || e) };
   }
