@@ -1649,7 +1649,7 @@ export function IOUBalanceSheetModal(rawProps: Partial<Props> & { visible: boole
     <Modal visible animationType="slide" presentationStyle="pageSheet">
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>IOU Balance Sheet</Text>
+          <Text style={styles.title}>Village Tab</Text>
           <View style={styles.headerRight}>
             {(pendingIOUs.length > 0 || settleRequests.length > 0) && (
               <View style={styles.badge}>

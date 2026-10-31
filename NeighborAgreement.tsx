@@ -3746,7 +3746,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
             <TouchableOpacity onPress={() => { if (step > 1) { setStep(1); } else { onClose(); } }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#2563eb", fontSize: 12, fontWeight: "bold" }}>{"< Back"}</Text></TouchableOpacity>
             <TouchableOpacity onPress={async () => { await clearAgreementSession(); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setRole(null); setAgreementType(null); setTemplateBuilt(false); setTemplateBuilt(false); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, itemDescription: "", stipulations: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "", expiryHours: 24 }); Alert.alert("Cleared", "Session reset"); }} style={{ padding: 8, backgroundColor: "#fee2e2", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "bold" }}>Reset</Text></TouchableOpacity>
             <TouchableOpacity onPress={async () => { const keys = await AsyncStorage.getAllKeys(); const kvKeys = keys.filter((k) => k.startsWith("kv_") || k.startsWith("frost_") || k.startsWith("FROST_")); await AsyncStorage.multiRemove(kvKeys); await AsyncStorage.removeItem("kv_agreement_session"); await AsyncStorage.removeItem("kv_frost_active_list"); setStep(1); setContract({ itemPriceKas: 0, sellerCommitmentKas: 0, description: "", buyerPubkey: "", sellerPubkey: "", frostData: undefined, agreementId: "", partialReleaseTx: "" }); Alert.alert("Cleared", "All FROST state cleared (" + kvKeys.length + " keys)"); }} style={{ padding: 8, backgroundColor: "#fef3c7", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#92400e", fontSize: 10, fontWeight: "bold" }}>Clear All</Text></TouchableOpacity><TouchableOpacity onPress={async () => { try { const _cj = (await AsyncStorage.getItem("kv_stat_chain_v1")) || "[]"; const _ca = JSON.parse(_cj); await Clipboard.setStringAsync(JSON.stringify({ kind: "KVSTAT-BUNDLE", v: 3, records: _ca })); Alert.alert("Rep Exported", _ca.length + " records copied to clipboard"); } catch (_e) { Alert.alert("Export failed", String(_e)); } }} style={{ padding: 8, backgroundColor: "#dcfce7", borderRadius: 8, marginRight: 6 }}><Text style={{ color: "#166534", fontSize: 10, fontWeight: "bold" }}>Export Rep</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => { setShowBalanceSheet(!showBalanceSheet); }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Balance Sheet</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { setShowBalanceSheet(!showBalanceSheet); }} style={{ paddingHorizontal: 8, paddingVertical: 4 }}><Text style={{ color: "#1d4ed8", fontSize: 12, fontWeight: "bold" }}>View Village Tab</Text></TouchableOpacity>
           </View>
           <Text style={{ fontSize: 10, color: "#78716c", textAlign: "center", paddingVertical: 4 }}>(Two-Party Collateral / Good Faith Deposit)</Text>
           <KvQuote size={9} />
@@ -5238,7 +5238,7 @@ nonces: _killNonces,
                         onPress={() => setIouModalVisible(true)}
                       >
                         <Coins size={rs.s(18)} color={COLORS.purple600} />
-                        <Text style={styles.iouBtnText}>💰 IOU Balance Sheet</Text>
+                        <Text style={styles.iouBtnText}>💰 Village Tab</Text>
                       </TouchableOpacity>
                     ) : (
                       <View style={styles.iouBtnDisabled}>
@@ -5277,7 +5277,7 @@ nonces: _killNonces,
                         onPress={() => setIouModalVisible(true)}
                       >
                         <Coins size={rs.s(18)} color={COLORS.purple600} />
-                        <Text style={styles.iouBtnText}>💰 IOU Balance Sheet</Text>
+                        <Text style={styles.iouBtnText}>💰 Village Tab</Text>
                       </TouchableOpacity>
                     ) : (
                       <View style={styles.iouBtnDisabled}>

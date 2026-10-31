@@ -229,7 +229,7 @@ export class LocalP2PServer {
 <html><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Sign Balance Sheet</title>
+<title>Sign Village Tab</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:#1a1a2e;color:#fff;padding:20px;min-height:100vh}
@@ -261,7 +261,7 @@ h1{text-align:center;color:#49d6aa;font-size:20px;margin-bottom:24px}
 <body>
 <div class="c">
   <div class="logo">🏘️</div>
-  <h1>Balance Sheet</h1>
+  <h1>Village Tab</h1>
   
   <div class="box balance">
     <div class="amount">${absNet} KAS</div>

@@ -1231,7 +1231,7 @@ const WalletOverview: React.FC<{
       </TouchableOpacity>
       <TouchableOpacity style={walletStyles.actionBtn} onPress={() => onNavigateBalanceSheet?.()}>
         <Text style={walletStyles.actionIcon}>{' '}</Text>
-        <Text style={walletStyles.actionLabel}>Balance Sheet</Text>
+        <Text style={walletStyles.actionLabel}>Village Tab</Text>
       </TouchableOpacity>
     </View>
     </ScrollView>
