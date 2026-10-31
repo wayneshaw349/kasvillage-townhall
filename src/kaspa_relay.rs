@@ -144,11 +144,11 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
 // KVP1 k:"node" registry records get structural validation on top of the word gate.
 fn gate_node_record(v: &serde_json::Value) -> Result<(), String> {
     let svc = v.get("svc").and_then(|s| s.as_str()).unwrap_or("");
-    if !matches!(svc, "index" | "relay" | "archive") {
-        return Err("node record: svc must be index|relay|archive".into());
+    if !matches!(svc, "index" | "archive") {
+        return Err("node record: svc must be index|archive".into());
     }
     let api = v.get("api").and_then(|s| s.as_str()).unwrap_or("");
-    if svc != "relay" && !api.starts_with("https://") {
+    if !api.starts_with("https://") {
         return Err("node record: api must be https".into());
     }
     let payout = v.get("payout").and_then(|s| s.as_str()).unwrap_or("");
