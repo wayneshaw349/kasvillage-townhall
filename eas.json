@@ -20,6 +20,18 @@
     },
     "production": {
       "autoIncrement": true
+    },
+    "development-wallet2": {
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
+        "APP_VARIANT": "wallet2"
+      },
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      }
     }
   },
   "submit": {
