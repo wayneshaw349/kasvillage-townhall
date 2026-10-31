@@ -1064,7 +1064,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
       let response;
       if (sendType === 'stats') {
         // SNARK proof via counterparty endpoint
-        response = await fetch(`${TOWNHALL_BASE}/api/counterparty/${myPubkey}/proof?include_proof=true&address=${encodeURIComponent(sendAddress || myAddress || "")}`);
+        response = await fetch(`${TOWNHALL_BASE}/api/counterparty/${myPubkey}/proof?include_proof=true&network=${require('./kv_vault_active').kvActiveNet()}&address=${encodeURIComponent(sendAddress || myAddress || "")}`);
       } else {
         const sendEndpoint = sendType === 'dapp' ? '/api/verify/dapp' : '/api/verify/store';
         response = await fetch(`${TOWNHALL_BASE}${sendEndpoint}`, {

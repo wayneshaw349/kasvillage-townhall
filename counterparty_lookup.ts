@@ -418,6 +418,7 @@ export async function lookupCounterparty(
     const params = new URLSearchParams();
     if (options.includeHistory) params.set('include_history', 'true');
     if (options.includeProof) params.set('include_proof', 'true');
+    params.set('network', require('./kv_vault_active').kvActiveNet()); // KV_RELAY_NET: proofs are per-network
     
     const url = endpoint
       ? `${TOWNHALL_API}/api/counterparty/${pubkey}/${endpoint}?${params.toString()}`

@@ -20,13 +20,14 @@ use once_cell::sync::Lazy;
 // Halo2 imports (PSE fork with IPA)
 use halo2_proofs::{
     arithmetic::Field,
-    circuit::{Layouter, SimpleFloorPlanner, Value},
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, ConstraintSystem, Error as PlonkError, Column, Advice, Instance, Selector, Expression, create_proof, verify_proof, keygen_pk, keygen_vk, ProvingKey, VerifyingKey},
     poly::{
         commitment::ParamsProver,
         ipa::{commitment::{ParamsIPA, IPACommitmentScheme}, multiopen::{ProverIPA, VerifierIPA}, strategy::SingleStrategy},
+        VerificationStrategy,
     },
-    transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptWriterBuffer},
+    transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptWriterBuffer, TranscriptReadBuffer},
 };
 use pasta_curves::{pallas, vesta, Fp, EqAffine};
 use rand_core::OsRng;
@@ -38,8 +39,13 @@ use crate::halo2_snark_module::{SparseMerkleTree, SparseMerkleCircuit, poseidon_
 const VERIFICATION_FEE_SOMPI: u64 = 0; // FREE verification
 const MAX_CODE_SIZE_BYTES: usize = 5 * 1024 * 1024; // 5MB
 
-// Kaspa network API — swap comment to switch mainnet/testnet
+// Kaspa network API — legacy default (testnet). Stats paths take the network per request.
 const KASPA_API: &str = "https://api-tn10.kaspa.org"; // testnet-10
+
+/// KV_RELAY_NET: per-request network -> REST base (same convention as kaspa_relay).
+pub fn kaspa_api_for(network: &str) -> &'static str {
+    if network == "mainnet" { "https://api.kaspa.org" } else { "https://api-tn10.kaspa.org" }
+}
 
 // ============================================================================
 // CODE SCANNER - PROHIBITED PATTERNS
@@ -823,30 +829,18 @@ impl Circuit<Fp> for StatsVerificationCircuit {
         }
         meta.enable_equality(instance);
 
-        // Gate 1: XP computation
-        meta.create_gate("xp_computation", |meta| {
-            let s = meta.query_selector(selector);
-            let successes = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur());
-            let deadlocks = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur());
-            let xp = meta.query_advice(advice[2], halo2_proofs::poly::Rotation::cur());
-            let base = Expression::Constant(Fp::from(XP_PER_SUCCESS));
-            let penalty = Expression::Constant(Fp::from(XP_PENALTY_PER_DEADLOCK));
-            vec![s * (xp - (successes * base - deadlocks * penalty))]
-        });
-
-        // Gate 2: Basic Bayesian p_complete
-        meta.create_gate("p_complete_basic", |meta| {
-            let s = meta.query_selector(selector);
-            let successes = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur());
-            let deadlocks = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur());
-            let p_complete = meta.query_advice(advice[3], halo2_proofs::poly::Rotation::cur());
-            let one = Expression::Constant(Fp::one());
-            let two = Expression::Constant(Fp::from(2u64));
-            let scale = Expression::Constant(Fp::from(FIXED_POINT_SCALE));
-            let numerator = (one + successes.clone()) * scale;
-            let denominator = two + successes + deadlocks;
-            vec![s * (p_complete * denominator - numerator)]
-        });
+        // Gates 1, 2, 7, 8 (xp, p_complete_basic, enhanced_factors, confidence_blend) are
+        // deliberately NOT in-circuit. All four involve saturating subtraction or truncating
+        // division; as exact field equalities they were unsatisfiable for real data (and the
+        // old enhanced_factors constant FIXED_POINT_SCALE^5 overflowed u64), so every real
+        // proof silently fell back to a hash. Soundness now comes from the split:
+        //   - the circuit BINDS (successes, deadlocks, xp, p_fixed, p_enhanced, total,
+        //     pubkey_hash, events_root) as public inputs and proves the exact counting
+        //     identities below;
+        //   - verify_stats_proof re-checks the xp / p_complete formulas in plain u64
+        //     arithmetic over those same bound inputs, where saturation and floor division
+        //     are first-class.
+        // A tampered stat fails either the instance binding or the integer re-check.
 
         // Gate 3: Agreement counts: total = completed + refunded + deadlocked + pending
         meta.create_gate("agreement_counts", |meta| {
@@ -884,33 +878,6 @@ impl Circuit<Fp> for StatsVerificationCircuit {
             vec![s * (successes - completed)]
         });
 
-        // Gate 7: Enhanced p_complete factor chain
-        // adjusted_p * SCALE^5 = base_p * recency * pattern * resolution * speed * role
-        meta.create_gate("enhanced_factors", |meta| {
-            let s = meta.query_selector(selector);
-            let base_p = meta.query_advice(advice[12], halo2_proofs::poly::Rotation::cur());
-            let recency = meta.query_advice(advice[13], halo2_proofs::poly::Rotation::cur());
-            let pattern = meta.query_advice(advice[14], halo2_proofs::poly::Rotation::cur());
-            let resolution = meta.query_advice(advice[15], halo2_proofs::poly::Rotation::cur());
-            let speed = meta.query_advice(advice[16], halo2_proofs::poly::Rotation::cur());
-            let role = meta.query_advice(advice[17], halo2_proofs::poly::Rotation::cur());
-            let adjusted_p = meta.query_advice(advice[18], halo2_proofs::poly::Rotation::cur());
-            let scale5 = Expression::Constant(Fp::from(FIXED_POINT_SCALE.pow(5)));
-            vec![s * (adjusted_p * scale5 - base_p * recency * pattern * resolution * speed * role)]
-        });
-
-        // Gate 8: Confidence blending
-        // final_p * SCALE = confidence * adjusted_p + (SCALE - confidence) * 0.5
-        meta.create_gate("confidence_blend", |meta| {
-            let s = meta.query_selector(selector);
-            let confidence = meta.query_advice(advice[19], halo2_proofs::poly::Rotation::cur());
-            let adjusted_p = meta.query_advice(advice[18], halo2_proofs::poly::Rotation::cur());
-            let final_p = meta.query_advice(advice[4], halo2_proofs::poly::Rotation::cur());
-            let scale = Expression::Constant(Fp::from(FIXED_POINT_SCALE));
-            let prior = Expression::Constant(Fp::from(FIXED_POINT_SCALE / 2));
-            vec![s * (final_p * scale.clone() - (confidence.clone() * adjusted_p + (scale - confidence) * prior))]
-        });
-
         StatsCircuitConfig { advice, instance, selector }
     }
 
@@ -919,25 +886,28 @@ impl Circuit<Fp> for StatsVerificationCircuit {
         config: Self::Config,
         mut layouter: impl Layouter<Fp>,
     ) -> Result<(), PlonkError> {
-        layouter.assign_region(
+        // KV_PUBLIC_INPUTS: capture the cells that are exposed as public inputs, then bind each
+        // to the instance column. Before this, the instance column existed but nothing was
+        // constrained to it — the proof said "some valid assignment exists", not "THESE stats".
+        let public_cells: Vec<AssignedCell<Fp, Fp>> = layouter.assign_region(
             || "stats_verification",
             |mut region| {
                 config.selector.enable(&mut region, 0)?;
 
                 // Core stats
-                region.assign_advice(|| "successes", config.advice[0], 0, 
+                let c_successes = region.assign_advice(|| "successes", config.advice[0], 0, 
                     || Value::known(Fp::from(self.witness.successes)))?;
-                region.assign_advice(|| "deadlocks", config.advice[1], 0,
+                let c_deadlocks = region.assign_advice(|| "deadlocks", config.advice[1], 0,
                     || Value::known(Fp::from(self.witness.deadlocks)))?;
-                region.assign_advice(|| "xp", config.advice[2], 0,
+                let c_xp = region.assign_advice(|| "xp", config.advice[2], 0,
                     || Value::known(Fp::from(self.witness.xp)))?;
-                region.assign_advice(|| "p_complete_basic", config.advice[3], 0,
+                let c_p_fixed = region.assign_advice(|| "p_complete_basic", config.advice[3], 0,
                     || Value::known(Fp::from(self.witness.p_complete_fixed)))?;
-                region.assign_advice(|| "p_complete_enhanced", config.advice[4], 0,
+                let c_p_enh = region.assign_advice(|| "p_complete_enhanced", config.advice[4], 0,
                     || Value::known(Fp::from(self.witness.p_complete_enhanced)))?;
                 
                 // Agreement stats
-                region.assign_advice(|| "total_agreements", config.advice[5], 0,
+                let c_total = region.assign_advice(|| "total_agreements", config.advice[5], 0,
                     || Value::known(Fp::from(self.witness.total_agreements)))?;
                 region.assign_advice(|| "completed", config.advice[6], 0,
                     || Value::known(Fp::from(self.witness.completed)))?;
@@ -970,9 +940,24 @@ impl Circuit<Fp> for StatsVerificationCircuit {
                 region.assign_advice(|| "volume_confidence", config.advice[19], 0,
                     || Value::known(Fp::from(self.witness.factors.volume_confidence)))?;
 
-                Ok(())
+                // Row 1 (selector off, no gate applies): the two hash commitments as 128-bit limbs
+                let c_pk_lo = region.assign_advice(|| "pubkey_hash_lo", config.advice[6], 1,
+                    || Value::known(fp_limb(&self.witness.pubkey_hash[..16])))?;
+                let c_pk_hi = region.assign_advice(|| "pubkey_hash_hi", config.advice[7], 1,
+                    || Value::known(fp_limb(&self.witness.pubkey_hash[16..])))?;
+                let c_root_lo = region.assign_advice(|| "events_root_lo", config.advice[8], 1,
+                    || Value::known(fp_limb(&self.witness.l1_events_root[..16])))?;
+                let c_root_hi = region.assign_advice(|| "events_root_hi", config.advice[9], 1,
+                    || Value::known(fp_limb(&self.witness.l1_events_root[16..])))?;
+
+                Ok(vec![c_successes, c_deadlocks, c_xp, c_p_fixed, c_p_enh, c_total,
+                        c_pk_lo, c_pk_hi, c_root_lo, c_root_hi])
             },
-        )
+        )?;
+        for (row, cell) in public_cells.iter().enumerate() {
+            layouter.constrain_instance(cell.cell(), config.instance, row)?;
+        }
+        Ok(())
     }
 }
 
@@ -997,6 +982,8 @@ pub struct StatsPublicInputs {
     pub deadlocks: u64,
     pub xp: u64,
     pub p_complete_fixed: u64,
+    #[serde(default)]
+    pub p_complete_enhanced: u64,
     
     // NeighborAgreementStats
     pub total_agreements: u64,
@@ -1030,6 +1017,26 @@ pub struct StatsPublicInputs {
     // Merkle anchors
     pub l1_events_root: String,
     pub arweave_stats_hash: String,
+}
+
+/// KV_PUBLIC_INPUTS — the canonical instance vector the proof is bound to. Order is part of
+/// the protocol: [successes, deadlocks, xp, p_complete_fixed, p_complete_enhanced,
+/// total_agreements, pubkey_hash_lo, pubkey_hash_hi, events_root_lo, events_root_hi],
+/// where lo/hi are the little-endian 128-bit halves of the 32-byte hashes.
+fn fp_limb(bytes16: &[u8]) -> Fp {
+    let arr: [u8; 16] = bytes16.try_into().expect("16-byte limb");
+    let v = u128::from_le_bytes(arr);
+    let two32 = Fp::from(1u64 << 32);
+    Fp::from((v >> 64) as u64) * two32 * two32 + Fp::from(v as u64)
+}
+pub fn stats_instances(pubkey_hash: &[u8; 32], events_root: &[u8; 32],
+    successes: u64, deadlocks: u64, xp: u64, p_fixed: u64, p_enhanced: u64, total: u64) -> Vec<Fp> {
+    vec![
+        Fp::from(successes), Fp::from(deadlocks), Fp::from(xp), Fp::from(p_fixed),
+        Fp::from(p_enhanced), Fp::from(total),
+        fp_limb(&pubkey_hash[..16]), fp_limb(&pubkey_hash[16..]),
+        fp_limb(&events_root[..16]), fp_limb(&events_root[16..]),
+    ]
 }
 
 /// Global proving key (initialized once)
@@ -1114,8 +1121,13 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
 
     let (snark_error, real_proof_bytes): (String, Option<Vec<u8>>) = {
         let circuit = StatsVerificationCircuit { witness: witness.clone() };
+        // KV_PUBLIC_INPUTS: the proof is bound to exactly these values; verify_proof with any
+        // other stats (or another pubkey/event set) fails.
+        let inst = stats_instances(&witness.pubkey_hash, &witness.l1_events_root,
+            witness.successes, witness.deadlocks, witness.xp,
+            witness.p_complete_fixed, witness.p_complete_enhanced, witness.total_agreements);
         let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
-        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, StatsVerificationCircuit>(&*STATS_PARAMS, &*STATS_PK, &[circuit], &[&[&[]]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
+        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, StatsVerificationCircuit>(&*STATS_PARAMS, &*STATS_PK, &[circuit], &[&[inst.as_slice()]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
     };
     {
         let mut proof_data = Vec::new();
@@ -1164,6 +1176,7 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
                 deadlocks: witness.deadlocks,
                 xp: witness.xp,
                 p_complete_fixed: witness.p_complete_fixed,
+                p_complete_enhanced: witness.p_complete_enhanced,
                 total_agreements: witness.total_agreements,
                 as_buyer: witness.as_buyer,
                 as_seller: witness.as_seller,
@@ -1206,55 +1219,43 @@ pub fn generate_stats_proof(witness: &StatsWitness) -> Result<StatsProof, String
     }
 }
 
-/// Verify stats proof
+/// Verify a stats proof cryptographically: rebuild the canonical instance vector from the
+/// CLAIMED public inputs and run halo2 verify_proof against the published VK. A proof made
+/// for different stats, a different pubkey, or a different event set fails here.
+/// (The old implementation re-generated a proof and compared bytes — meaningless for a
+/// randomized prover, and it never checked the instance binding at all.)
+pub fn verify_stats_proof_bytes(proof_bytes: &[u8], instances: &[Fp]) -> Result<(), String> {
+    if proof_bytes.is_empty() { return Err("empty proof".into()); }
+    let mut transcript = Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(proof_bytes);
+    let strategy = SingleStrategy::new(&*STATS_PARAMS);
+    verify_proof::<IPACommitmentScheme<EqAffine>, VerifierIPA<EqAffine>, Challenge255<EqAffine>,
+        Blake2bRead<&[u8], EqAffine, Challenge255<EqAffine>>, SingleStrategy<EqAffine>>(
+        &*STATS_PARAMS, &*STATS_VK, strategy, &[&[instances]], &mut transcript)
+        .map(|_| ()).map_err(|e| format!("verify: {:?}", e))
+}
+
 pub fn verify_stats_proof(proof: &StatsProof, expected_pubkey_hash: &[u8; 32]) -> bool {
-    // Check pubkey matches
-    if proof.public_inputs.pubkey_hash != hex::encode(expected_pubkey_hash) {
-        return false;
-    }
-
-   let witness = StatsWitness {
-        pubkey_hash: *expected_pubkey_hash,
-        successes: proof.public_inputs.successes,
-        deadlocks: proof.public_inputs.deadlocks,
-        xp: proof.public_inputs.xp,
-        p_complete_fixed: proof.public_inputs.p_complete_fixed,
-        completed: proof.public_inputs.completed,
-        deadlocked: proof.public_inputs.deadlocked,
-        refunded: proof.public_inputs.refunded,
-        pending: proof.public_inputs.pending,
-        total_agreements: proof.public_inputs.total_agreements,
-        as_buyer: proof.public_inputs.as_buyer,
-        as_seller: proof.public_inputs.as_seller,
-        total_volume_sompi: proof.public_inputs.total_volume_sompi,
-        largest_agreement_sompi: proof.public_inputs.largest_agreement_sompi,
-        agreements_last_7d_daa: proof.public_inputs.agreements_last_7d,
-        agreements_last_30d_daa: proof.public_inputs.agreements_last_30d,
-        deadlock_as_buyer: proof.public_inputs.deadlock_as_buyer,
-        deadlock_as_seller: proof.public_inputs.deadlock_as_seller,
-        reason_no_delivery: proof.public_inputs.reason_no_delivery,
-        reason_quality_dispute: proof.public_inputs.reason_quality_dispute,
-        reason_timeout: proof.public_inputs.reason_timeout,
-        reason_other: proof.public_inputs.reason_other,
-        resolved_after_deadlock: proof.public_inputs.resolved_after_deadlock,
-        unique_counterparties_deadlocked: proof.public_inputs.unique_counterparties_deadlocked,
-        repeat_deadlock_same_counterparty: proof.public_inputs.repeat_deadlock_same_counterparty,
-        l1_events_root: hex::decode(&proof.public_inputs.l1_events_root)
-            .unwrap_or_default()
-            .try_into()
-            .unwrap_or([0u8; 32]),
-        arweave_stats_hash: hex::decode(&proof.public_inputs.arweave_stats_hash)
-            .unwrap_or_default()
-            .try_into()
-            .unwrap_or([0u8; 32]),
-        timestamp: proof.generated_at,
-        ..Default::default()
+    if proof.public_inputs.pubkey_hash != hex::encode(expected_pubkey_hash) { return false; }
+    if !proof.proof_type.starts_with("Halo2") { return false; }
+    // Integer rules over the bound inputs (saturation and floor division, exactly as the
+    // prover computes them); the SNARK below binds these numbers, this enforces the formulas.
+    let pi = &proof.public_inputs;
+    if pi.xp != pi.successes.saturating_mul(XP_PER_SUCCESS)
+        .saturating_sub(pi.deadlocks.saturating_mul(XP_PENALTY_PER_DEADLOCK)) { return false; }
+    let n = pi.successes + pi.deadlocks;
+    let expected_p = if n == 0 { FIXED_POINT_SCALE / 2 }
+        else { (1 + pi.successes) * FIXED_POINT_SCALE / (2 + n) };
+    if pi.p_complete_fixed.abs_diff(expected_p) > FIXED_POINT_SCALE / 100 { return false; }
+    if pi.total_agreements != pi.completed + pi.refunded + pi.deadlocked + pi.pending { return false; }
+    if pi.successes != pi.completed || pi.deadlocks != pi.deadlocked { return false; }
+    let root: [u8; 32] = match hex::decode(&proof.public_inputs.l1_events_root).ok().and_then(|v| v.try_into().ok()) {
+        Some(r) => r, None => return false,
     };
-
-    match generate_stats_proof(&witness) {
-        Ok(expected) => proof.proof_bytes == expected.proof_bytes,
-        Err(_) => false,
-    }
+    let inst = stats_instances(expected_pubkey_hash, &root,
+        proof.public_inputs.successes, proof.public_inputs.deadlocks, proof.public_inputs.xp,
+        proof.public_inputs.p_complete_fixed, proof.public_inputs.p_complete_enhanced,
+        proof.public_inputs.total_agreements);
+    verify_stats_proof_bytes(&proof.proof_bytes, &inst).is_ok()
 }
 
 // ============================================================================
@@ -1557,9 +1558,166 @@ pub async fn query_l1_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, Stri
     Ok(events)
 }
 
+// ============================================================================
+// KV_CHAIN_SCAN — the Kaspa chain as the stats source (port of counterparty_scan.ts v2).
+// Escrows are found from real funding/spend patterns on the pubkey's own address, so the
+// event set is re-derivable by ANYONE from public consensus data: run this same public
+// algorithm, get the same events, get the same Poseidon root the proof commits to.
+// ============================================================================
+
+const SCAN_MAX_CANDIDATES: usize = 40;
+const SCAN_MAX_ESCROW_TXS: usize = 12; // escrows are short-lived; wallets are not
+
+/// Kaspa address from an x-only pubkey (port of the wallet's bech32-variant derivation).
+pub fn kaspa_address_from_xonly(xonly_hex: &str, network: &str) -> Result<String, String> {
+    const CHARSET: &[u8] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+    let xonly = hex::decode(xonly_hex).map_err(|e| format!("bad pubkey hex: {}", e))?;
+    if xonly.len() != 32 { return Err("x-only pubkey must be 32 bytes".into()); }
+    let hrp = if network == "mainnet" { "kaspa" } else { "kaspatest" };
+    fn to5(bytes: &[u8]) -> Vec<u8> {
+        let (mut acc, mut bits, mut out) = (0u32, 0u32, Vec::new());
+        for &b in bytes {
+            acc = (acc << 8) | b as u32; bits += 8;
+            while bits >= 5 { bits -= 5; out.push(((acc >> bits) & 31) as u8); acc &= (1 << bits) - 1; }
+        }
+        if bits > 0 { out.push(((acc << (5 - bits)) & 31) as u8); }
+        out
+    }
+    fn polymod(values: &[u8]) -> u64 {
+        let mut c: u64 = 1;
+        for &d in values {
+            let c0 = c >> 35;
+            c = ((c & 0x07ff_ffff_ffff) << 5) ^ d as u64;
+            if c0 & 0x01 != 0 { c ^= 0x98f2bc8e61; }
+            if c0 & 0x02 != 0 { c ^= 0x79b76d99e2; }
+            if c0 & 0x04 != 0 { c ^= 0xf33e5fb3c4; }
+            if c0 & 0x08 != 0 { c ^= 0xae2eabe2a8; }
+            if c0 & 0x10 != 0 { c ^= 0x1e4f43e470; }
+        }
+        c ^ 1
+    }
+    let mut payload = vec![0u8]; payload.extend_from_slice(&xonly);
+    let fivebit = to5(&payload);
+    let mut check_in: Vec<u8> = hrp.bytes().map(|c| c & 0x1f).collect();
+    check_in.push(0); check_in.extend_from_slice(&fivebit); check_in.extend_from_slice(&[0u8; 8]);
+    let cs = polymod(&check_in);
+    let cs_bytes: Vec<u8> = (0..5).rev().map(|i| ((cs >> (i * 8)) & 0xff) as u8).collect();
+    let mut addr = String::with_capacity(hrp.len() + 1 + fivebit.len() + 8);
+    addr.push_str(hrp); addr.push(':');
+    for d in fivebit.iter().chain(to5(&cs_bytes).iter()) { addr.push(CHARSET[*d as usize] as char); }
+    Ok(addr)
+}
+
+async fn scan_fetch_txs(base: &str, addr: &str, limit: usize) -> Vec<serde_json::Value> {
+    let url = format!("{}/addresses/{}/full-transactions?limit={}&resolve_previous_outpoints=light", base, addr, limit);
+    let client = reqwest::Client::new();
+    match client.get(&url).timeout(std::time::Duration::from_secs(12)).send().await {
+        Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().await.ok()
+            .and_then(|v| v.as_array().cloned()).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn scan_spends_from(tx: &serde_json::Value, a: &str) -> bool {
+    tx.get("inputs").and_then(|i| i.as_array()).map(|ins| ins.iter().any(|i|
+        i.get("previous_outpoint_address").and_then(|x| x.as_str()) == Some(a))).unwrap_or(false)
+}
+fn scan_pays_to(tx: &serde_json::Value, a: &str) -> u64 {
+    tx.get("outputs").and_then(|o| o.as_array()).map(|outs| outs.iter()
+        .filter(|o| o.get("script_public_key_address").and_then(|x| x.as_str()) == Some(a))
+        .map(|o| o.get("amount").and_then(|x| x.as_u64()).unwrap_or(0)).sum()).unwrap_or(0)
+}
+fn scan_out_addrs(tx: &serde_json::Value) -> Vec<String> {
+    tx.get("outputs").and_then(|o| o.as_array()).map(|outs| outs.iter()
+        .filter_map(|o| o.get("script_public_key_address").and_then(|x| x.as_str()).map(String::from))
+        .collect()).unwrap_or_default()
+}
+fn scan_daa(tx: &serde_json::Value) -> u64 {
+    tx.get("accepting_block_blue_score").and_then(|x| x.as_u64()).unwrap_or(0)
+}
+
+/// Scan the pubkey's REAL escrow history from the Kaspa chain and return one FrostEvent per
+/// escrow at its final status. Same rules as the in-app scan: exactly 2 funders including the
+/// target, short-lived address, kill tx = deadlocked, payout tx = settled, else open.
+pub async fn scan_chain_escrows(pubkey: &str, network: &str) -> Result<Vec<FrostEvent>, String> {
+    let base = kaspa_api_for(network);
+    let xonly = if pubkey.len() == 66 { &pubkey[2..] } else { pubkey };
+    let address = kaspa_address_from_xonly(xonly, network)?;
+
+    let history = scan_fetch_txs(base, &address, 100).await;
+    if history.is_empty() { return Ok(Vec::new()); }
+
+    let mut candidates: Vec<String> = Vec::new();
+    for tx in &history {
+        if !scan_spends_from(tx, &address) { continue; }
+        for o in scan_out_addrs(tx) {
+            if o != address && !candidates.contains(&o) { candidates.push(o); }
+        }
+    }
+
+    let mut events: Vec<FrostEvent> = Vec::new();
+    for cand in candidates.iter().take(SCAN_MAX_CANDIDATES) {
+        let txs = scan_fetch_txs(base, cand, 50).await;
+        if txs.is_empty() || txs.len() > SCAN_MAX_ESCROW_TXS { continue; }
+
+        let mut funders: Vec<String> = Vec::new();
+        let mut funded_total: u64 = 0;
+        let mut fund_daa: u64 = 0;
+        for tx in &txs {
+            let amt = scan_pays_to(tx, cand);
+            if amt == 0 { continue; }
+            funded_total += amt;
+            if scan_daa(tx) > fund_daa { fund_daa = scan_daa(tx); }
+            if let Some(ins) = tx.get("inputs").and_then(|i| i.as_array()) {
+                for i in ins {
+                    if let Some(f) = i.get("previous_outpoint_address").and_then(|x| x.as_str()) {
+                        if f != cand && !funders.iter().any(|x| x == f) { funders.push(f.to_string()); }
+                    }
+                }
+            }
+        }
+        // a 2-of-2 escrow is funded by precisely two parties, one of them the target
+        if funders.len() != 2 || !funders.iter().any(|f| f == &address) { continue; }
+
+        let mut kill_count = 0usize;
+        let mut settle: Option<&serde_json::Value> = None;
+        for sp in txs.iter().filter(|t| scan_spends_from(t, cand)) {
+            let outs = scan_out_addrs(sp);
+            if !outs.iter().any(|o| o != cand) { kill_count += 1; continue; } // pays itself: kill
+            let bt = sp.get("block_time").and_then(|x| x.as_u64()).unwrap_or(0);
+            if settle.map(|s| s.get("block_time").and_then(|x| x.as_u64()).unwrap_or(0) < bt).unwrap_or(true) {
+                settle = Some(sp);
+            }
+        }
+
+        let (event_type, tx_id, daa) = match (settle, kill_count) {
+            (Some(sp), _) => (FrostEventType::AgreementCompleted,
+                sp.get("transaction_id").and_then(|x| x.as_str()).unwrap_or(cand).to_string(),
+                scan_daa(sp).max(fund_daa)),
+            (None, k) if k > 0 => (FrostEventType::AgreementDeadlocked, cand.clone(), fund_daa),
+            _ => (FrostEventType::AgreementCreated, cand.clone(), fund_daa),
+        };
+        let counterparty = funders.iter().find(|f| *f != &address).cloned().unwrap_or_default();
+        events.push(FrostEvent {
+            tx_id,
+            event_type: event_type.clone(),
+            agreement_id: cand.clone(),
+            buyer_pubkey: pubkey.to_string(), // role split is unknowable from flows; target counts as one side
+            seller_pubkey: counterparty,
+            amount_sompi: funded_total,
+            timestamp: 0,
+            daa_score: daa,
+            deadlock_reason: if matches!(event_type, FrostEventType::AgreementDeadlocked) { Some(DeadlockReason::Other) } else { None },
+            completion_time_ms: None,
+        });
+    }
+    println!("[ChainScan] {} on {}: {} escrows from {}", &pubkey[..16.min(pubkey.len())], network, events.len(), address);
+    Ok(events)
+}
+
 /// Query current DAA score from L1 (via Kaspa API)
-pub async fn query_current_daa_score() -> Result<u64, String> {
-    let url = format!("{}/info/virtual-chain-blue-score", KASPA_API);
+pub async fn query_current_daa_score(network: &str) -> Result<u64, String> {
+    let url = format!("{}/info/virtual-chain-blue-score", kaspa_api_for(network));
 
     let client = reqwest::Client::new();
     let response = client.get(url)
@@ -1718,11 +1876,12 @@ pub async fn query_arweave_stats(pubkey: &str) -> Result<Option<ArweaveStatsReco
 
 /// Full stats aggregation: L1 + Arweave + proof generation (DAA-based timing)
 /// Query Arweave for FROST events (the real stats source)
-async fn query_arweave_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, String> {
+async fn query_arweave_frost_events(pubkey: &str, network: &str) -> Result<Vec<FrostEvent>, String> {
     let pubkey_hash = pubkey.to_string();
+    // KV_NET_SCOPE: records carry KV-Network inside the signed upload; only same-network deals count.
     let query = format!(
-        r#"query {{ transactions( tags: [ {{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "KV-Type", values: ["frost-agreement"] }}, {{ name: "KV-Pubkey", values: ["{}"] }} ], first: 100, sort: HEIGHT_DESC ) {{ edges {{ node {{ id tags {{ name value }} block {{ timestamp }} }} }} }} }}"#,
-        pubkey_hash
+        r#"query {{ transactions( tags: [ {{ name: "App-Name", values: ["KasVillage"] }}, {{ name: "KV-Type", values: ["frost-agreement"] }}, {{ name: "KV-Pubkey", values: ["{}"] }}, {{ name: "KV-Network", values: ["{}"] }} ], first: 100, sort: HEIGHT_DESC ) {{ edges {{ node {{ id tags {{ name value }} block {{ timestamp }} }} }} }} }}"#,
+        pubkey_hash, network
     );
     let client = reqwest::Client::new();
     let response = match client.post("https://arweave.net/graphql")
@@ -1806,13 +1965,21 @@ async fn query_arweave_frost_events(pubkey: &str) -> Result<Vec<FrostEvent>, Str
 }
 
 
-pub async fn aggregate_and_prove_stats(pubkey: &str, address: Option<&str>) -> Result<(CounterpartyStats, StatsProof), String> {
-    // 1. Query current DAA score from L1
-    let current_daa = query_current_daa_score().await?;
-    
-    // 2. Query L1 for FROST events
-    // Query Arweave for FROST events (primary stats source)
-    let l1_events = query_arweave_frost_events(pubkey).await.unwrap_or_default();
+pub async fn aggregate_and_prove_stats(pubkey: &str, network: &str) -> Result<(CounterpartyStats, StatsProof), String> {
+    // 1. Query current DAA score from L1 (per-network)
+    let current_daa = query_current_daa_score(network).await?;
+
+    // 2. KV_CHAIN_SCAN: the Kaspa chain is the stats source. Escrow outcomes are read from the
+    // pubkey's real funding/spend history, so anyone can re-run this public algorithm on public
+    // data and re-derive the exact event set the proof's l1_events_root commits to. Arweave
+    // records (same-network only) are the fallback when the chain scan cannot answer.
+    let l1_events = match scan_chain_escrows(pubkey, network).await {
+        Ok(ev) => ev,
+        Err(e) => {
+            println!("[Stats] chain scan failed ({}), falling back to Arweave records", e);
+            query_arweave_frost_events(pubkey, network).await.unwrap_or_default()
+        }
+    };
     let l1_stats = aggregate_l1_events_full(&l1_events, pubkey, current_daa);
     let l1_events_root = compute_poseidon_events_root(&l1_stats.event_hashes);
 
@@ -1962,6 +2129,9 @@ pub struct CounterpartyProofRequest {
     pub include_history: bool,
     #[serde(default)]
     pub address: Option<String>,
+    /// KV_RELAY_NET: absent = testnet-10 (old clients unchanged)
+    #[serde(default)]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1993,7 +2163,7 @@ pub async fn api_get_counterparty_stats_with_proof(
 
     if query.include_proof {
         // Full aggregation with proof
-        match aggregate_and_prove_stats(&pubkey, query.address.as_deref()).await {
+        match aggregate_and_prove_stats(&pubkey, query.network.as_deref().unwrap_or("testnet-10")).await {
             Ok((stats, proof)) => {
                 HttpResponse::Ok().json(CounterpartyProofResponse {
                     found: true,
@@ -2404,7 +2574,7 @@ pub async fn api_get_merkle_membership_proof(
     use crate::halo2_snark_module::{SparseMerkleTree, poseidon_leaf_hash};
     use pasta_curves::Fp;
     let pubkey = path.into_inner();
-    let events = match query_arweave_frost_events(&pubkey).await {
+    let events = match query_arweave_frost_events(&pubkey, "testnet-10").await {
         Ok(e) => e,
         Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"ok": false, "error": e})),
     };
@@ -2989,7 +3159,7 @@ pub async fn api_get_dapps_by_owner(path: web::Path<String>) -> HttpResponse {
             let pledge = query_dapp_pledge(owner).await;
             let pledge_active = if let Some(ref p) = pledge {
                 let bal = query_kaspa_balance(&p.pledge_address).await.unwrap_or(0);
-                let current_daa = query_current_daa_score().await.unwrap_or(0);
+                let current_daa = query_current_daa_score("testnet-10").await.unwrap_or(0);
                 bal >= p.pledge_sompi && current_daa <= p.end_daa
             } else { false };
             let mut enriched = dapp.clone();
@@ -3468,7 +3638,7 @@ async fn query_storefront_from_arweave(pubkey: &str) -> Result<Option<Storefront
 async fn record_visit_internal(_storefront_pubkey: &str, _visitor_pubkey: &str) -> u64 { 1 }
 
 async fn aggregate_storefront_stats(pubkey: &str) -> Result<StorefrontStats, String> {
-    let current_daa = query_current_daa_score().await.unwrap_or(0);
+    let current_daa = query_current_daa_score("testnet-10").await.unwrap_or(0);
     let events = query_l1_frost_events(pubkey).await?;
     let mut stats = StorefrontStats { total_visits: 0, unique_visitors: 0, visits_last_7d: 0, visits_last_30d: 0, agreements_started: 0, agreements_completed: 0, agreements_deadlocked: 0, total_volume_sompi: 0, avg_agreement_sompi: 0, repeat_customers: 0, conversion_rate: 0.0, completion_rate: 0.0 };
     let mut customers: HashSet<String> = HashSet::new();
@@ -3684,7 +3854,7 @@ pub async fn compute_full_dapp_visibility(pubkey: &str) -> DAppVisibility {
     let pledge = query_dapp_pledge(pubkey).await;
     
     // 2. Get current DAA + balance + price
-    let current_daa = query_current_daa_score().await.unwrap_or(0);
+    let current_daa = query_current_daa_score("testnet-10").await.unwrap_or(0);
     let kas_price = query_kas_price_usd().await.unwrap_or(0.05);
     
     let pledge_status = if let Some(ref p) = pledge {
@@ -3790,3 +3960,64 @@ fn compute_hash_index(input: &str) -> String {
     hex::encode(&hash[..8])
 }
 
+
+// ============================================================================
+// KV_PUBLIC_INPUTS tests — the proof must be bound to the claimed stats.
+// ============================================================================
+#[cfg(test)]
+mod kv_public_input_tests {
+    use super::*;
+
+    fn test_witness() -> StatsWitness {
+        let mut w = StatsWitness {
+            pubkey_hash: [7u8; 32],
+            successes: 3, deadlocks: 1,
+            xp: (3 * XP_PER_SUCCESS).saturating_sub(XP_PENALTY_PER_DEADLOCK), // = 0 here (30 - 50 saturates)
+            p_complete_fixed: (1 + 3) * FIXED_POINT_SCALE / (2 + 3 + 1),
+            total_agreements: 5, completed: 3, refunded: 0, deadlocked: 1, pending: 1,
+            as_buyer: 5, as_seller: 0,
+            deadlock_as_buyer: 1, deadlock_as_seller: 0,
+            reason_no_delivery: 0, reason_quality_dispute: 0, reason_timeout: 0, reason_other: 1,
+            total_volume_sompi: 500_000_000, largest_agreement_sompi: 200_000_000,
+            l1_events_root: [9u8; 32],
+            ..Default::default()
+        };
+        let factors = compute_enhanced_p_complete_with_factors(&w);
+        w.p_complete_enhanced = factors.final_p;
+        w.factors = factors;
+        w
+    }
+
+    #[test]
+    fn address_derivation_matches_wallet() {
+        // Known vector: the dev wallet's real pubkey -> its real addresses on both networks
+        let xonly = "7d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133";
+        assert_eq!(kaspa_address_from_xonly(xonly, "mainnet").unwrap(),
+            "kaspa:qp7592kfylul443ee5950xe7jgv4rkgrv87ju8s96xz0sy3t79cnx6tashzpx");
+        assert!(kaspa_address_from_xonly(xonly, "testnet-10").unwrap().starts_with("kaspatest:qp7592kfylul"));
+    }
+
+    #[test]
+    fn proof_verifies_and_tampering_fails() {
+        let w = test_witness();
+        let proof = generate_stats_proof(&w).expect("prove");
+        assert!(proof.proof_type.starts_with("Halo2"), "real SNARK expected, got {}", proof.proof_type);
+
+        // 1. honest verification passes
+        assert!(verify_stats_proof(&proof, &w.pubkey_hash), "honest proof must verify");
+
+        // 2. inflating a stat fails cryptographically
+        let mut inflated = proof.clone();
+        inflated.public_inputs.successes = 30;
+        inflated.public_inputs.xp = (30 * XP_PER_SUCCESS).saturating_sub(XP_PENALTY_PER_DEADLOCK);
+        assert!(!verify_stats_proof(&inflated, &w.pubkey_hash), "inflated stats must fail");
+
+        // 3. claiming someone else's pubkey fails
+        assert!(!verify_stats_proof(&proof, &[8u8; 32]), "wrong pubkey must fail");
+
+        // 4. a different event set (root) fails
+        let mut swapped = proof.clone();
+        swapped.public_inputs.l1_events_root = hex::encode([1u8; 32]);
+        assert!(!verify_stats_proof(&swapped, &w.pubkey_hash), "wrong events root must fail");
+    }
+}

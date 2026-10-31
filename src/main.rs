@@ -7928,6 +7928,7 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/proof-status/{id}", web::get().to(get_proof_status))
         .route("/user-stats", web::post().to(stateless_get_user_stats))
         .route("/api/verify/stats", web::post().to(api_verify_stats_proof))
+        .route("/api/verify/stats-check", web::post().to(api_verify_stats_check))
         .route("/xp-ledger", web::post().to(stateless_get_xp_ledger))
         .route("/api/scan", web::post().to(scan_code_api))
         .route("/api/scan/game", web::post().to(verify_game))
@@ -8490,7 +8491,8 @@ async fn api_verify_stats_proof(body: web::Json<serde_json::Value>) -> HttpRespo
         _ => return HttpResponse::BadRequest().json(serde_json::json!({"error": "pubkey required"})),
     };
     
-    match townhall_verification_complete::aggregate_and_prove_stats(&pubkey, None).await {
+    let network = body.get("network").and_then(|v| v.as_str()).unwrap_or("testnet-10").to_string(); // KV_RELAY_NET
+    match townhall_verification_complete::aggregate_and_prove_stats(&pubkey, &network).await {
         Ok((stats, proof)) => {
             HttpResponse::Ok().json(serde_json::json!({
                 "ok": true,
@@ -8505,6 +8507,31 @@ async fn api_verify_stats_proof(body: web::Json<serde_json::Value>) -> HttpRespo
             }))
         }
     }
+}
+
+/// KV_STATS_CHECK: anyone verifies a StatsProof against the published VK. The caller supplies
+/// the proof object exactly as /api/verify/stats returned it (possibly relayed by the person
+/// it is about); verification rebuilds the instance vector from the CLAIMED public inputs, so
+/// a tampered stat, pubkey, or events root fails cryptographically. The verifier can then
+/// re-derive the events root themselves by re-running the public chain scan.
+async fn api_verify_stats_check(body: web::Json<serde_json::Value>) -> HttpResponse {
+    let proof: townhall_verification_complete::StatsProof =
+        match serde_json::from_value(body.get("proof").cloned().unwrap_or(serde_json::Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return HttpResponse::BadRequest().json(serde_json::json!({"valid": false, "error": format!("bad proof object: {}", e)})),
+        };
+    let pk_hash: [u8; 32] = match hex::decode(&proof.public_inputs.pubkey_hash).ok().and_then(|v| v.try_into().ok()) {
+        Some(h) => h,
+        None => return HttpResponse::BadRequest().json(serde_json::json!({"valid": false, "error": "bad pubkey_hash"})),
+    };
+    let valid = townhall_verification_complete::verify_stats_proof(&proof, &pk_hash);
+    HttpResponse::Ok().json(serde_json::json!({
+        "valid": valid,
+        "proof_type": proof.proof_type,
+        "vk_fingerprint": proof.vk_fingerprint,
+        "l1_events_root": proof.public_inputs.l1_events_root,
+        "note": "events root is re-derivable: run the public escrow scan on the pubkey's chain history and recompute the Poseidon root",
+    }))
 }
 
 #[actix_web::main]
