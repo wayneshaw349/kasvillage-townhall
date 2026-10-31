@@ -39,3 +39,7 @@ proof.txt
 headers.txt
 *.eml
 kv_cold_key_SECRET_qr.png
+
+# moderator key material, never commit
+modkey_qr.png
+*_qr.png
