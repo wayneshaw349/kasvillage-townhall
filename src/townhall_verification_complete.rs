@@ -2595,14 +2595,28 @@ use crate::content_validator_sync::validate_content_text;
 // ============================================================================
 /// GET /api/verify/stats-vk - Export stats verifying key for independent verification
 pub async fn api_get_stats_vk() -> HttpResponse {
-    let vk_fingerprint = {
-        let mut hasher = Sha256::new();
-        hasher.update(format!("{:?}", *STATS_VK).as_bytes());
-        hex::encode(hasher.finalize())
-    };
-    HttpResponse::Ok().json(serde_json::json!({"ok": true, "vk_fingerprint": vk_fingerprint, "k": 8, "gates": 8, "advice_columns": 20, "instance_columns": 1, "proof_type": "Halo2-IPA-Stats-V2",
-        "circuit": {"gate_1":"xp=S*10-F*50","gate_2":"p*(2+S+F)=(1+S)*SCALE","gate_3":"total=completed+refunded+deadlocked+pending","gate_4":"total=buyer+seller","gate_5":"deadlocks=deadlocked","gate_6":"successes=completed","gate_7":"adjusted_p*SCALE^5=base*recency*pattern*resolution*speed*role","gate_8":"final_p*SCALE=confidence*adjusted+(SCALE-confidence)*prior"},
-        "verify_instructions": "Reconstruct StatsVerificationCircuit, generate VK from ParamsIPA(K=8), compare fingerprint"}))
+    let fp = |dbg: String| { let mut h = Sha256::new(); h.update(dbg.as_bytes()); hex::encode(h.finalize()) };
+    HttpResponse::Ok().json(serde_json::json!({
+        "ok": true,
+        "relay_version": "v74",
+        "vk_fingerprint": fp(format!("{:?}", *STATS_VK)),
+        "proof_type": "Halo2-IPA-Stats-V2",
+        "k": HALO2_K, "advice_columns": 20, "instance_columns": 1,
+        "public_inputs": ["successes","deadlocks","xp","p_complete_fixed","p_complete_enhanced","total_agreements",
+                          "pubkey_hash_lo","pubkey_hash_hi","events_root_lo","events_root_hi"],
+        "circuit": {
+            "in_circuit": ["total = completed + refunded + deadlocked + pending", "total = as_buyer + as_seller",
+                           "deadlocks = deadlocked", "successes = completed", "all public inputs constrained to the instance column"],
+            "verifier_integer_rules": ["xp = sat(successes*10 - deadlocks*50)", "p_complete = (1+S)*1000000/(2+S+F)"],
+        },
+        "events_root": "Poseidon root of event ids from the public Kaspa escrow scan of the pubkey's address (re-derivable by anyone)",
+        "check_endpoints": {"stats": "/api/verify/stats-check", "dapp": "/api/verify/dapp-check", "academic": "/api/verify/academic-check"},
+        "other_vks": {
+            "Halo2-IPA-DApp-V2": fp(format!("{:?}", *DAPP_VK)),
+            "Halo2-IPA-Academic-V2": fp(format!("{:?}", *ACADEMIC_VK)),
+        },
+        "verify_instructions": "Build the circuits from src/townhall_verification_complete.rs, generate VKs from ParamsIPA(k), compare fingerprints (sha256 of the VK Debug format)",
+    }))
 }
 
 
@@ -4198,5 +4212,19 @@ mod kv_dapp_fetch_tests {
         assert!(fetch_dapp_code("https://localhost/x").await.is_err(), "localhost refused");
         assert!(fetch_dapp_code("https://evil.example.com/x").await.is_err(), "unlisted host refused");
         assert!(fetch_dapp_code("https://raw.githubusercontent.com.evil.com/x").await.is_err(), "suffix trick refused");
+    }
+}
+
+#[cfg(test)]
+mod kv_vk_fingerprint_pins {
+    use super::*;
+    // Pinned so a circuit change can never ship silently: if one of these fails, the circuit
+    // changed - bump the relay version and publish the new fingerprint deliberately.
+    #[test]
+    fn vk_fingerprints_are_pinned() {
+        let fp = |s: String| { let mut h = Sha256::new(); h.update(s.as_bytes()); hex::encode(h.finalize()) };
+        assert_eq!(fp(format!("{:?}", *STATS_VK)), "987c8d0e5fc706dabd886f5a3873fb28522d62259104ec60697c454f8444b697");
+        assert_eq!(fp(format!("{:?}", *DAPP_VK)), "14ea12364e1d1fc81ffc8de24ac4168836f86d1d86fb589b1b37685a2be7626a");
+        assert_eq!(fp(format!("{:?}", *ACADEMIC_VK)), "64391391047c6c0824c1ab0027dba807693faf72c7ebb7788156e37e41133168");
     }
 }

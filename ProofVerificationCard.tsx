@@ -46,7 +46,7 @@ export const ProofVerificationCard: React.FC<Props> = ({ proof, pubkey }) => {
       system: 'KasVillage Halo2-IPA Stats Proof',
       proof_type: proof.proof_type,
       circuit: {
-        k: 12,
+        k: 8,
         advice_columns: 20,
         instance_columns: 1,
         // In-circuit: the exact counting identities, with every public stat BOUND to the
