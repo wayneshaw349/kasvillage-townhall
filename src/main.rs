@@ -9053,9 +9053,12 @@ mod tests_remaining {
         stats.record_success();
         assert!(!stats.is_new_user());
         
-        // Good standing - no snail mode
+        // Good standing - no snail mode. record_success() tracks samples but grants no XP
+        // (XP comes from the settle pipeline), so good standing must set XP explicitly; the
+        // old assertion ran at 0 XP and has failed ever since the 150-XP threshold existed.
+        stats.xp = SNAIL_MODE_XP_THRESHOLD;
         assert!(!stats.should_snail_mode());
-        
+
         // Drop XP below threshold
         stats.xp = 100;
         assert!(stats.should_snail_mode());
