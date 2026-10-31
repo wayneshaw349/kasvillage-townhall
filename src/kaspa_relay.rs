@@ -129,11 +129,8 @@ fn val_to_u64(v: &serde_json::Value) -> Result<u64, String> {
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
-    if s.len() % 2 != 0 { return Err("odd-length hex".into()); }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
-        .collect()
+    // hex::decode never slices inside a UTF-8 char (the old byte-slicing panicked on "aéb").
+    hex::decode(s).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -494,16 +491,18 @@ pub async fn sink_info(nq: web::Query<NetQ>) -> impl Responder {
         Ok(c) => c,
         Err(e) => return HttpResponse::ServiceUnavailable().json(json!({ "error": e })),
     };
+    let mut __kv_conn_err = false;
     let out = match client.get_block_dag_info().await {
         Ok(i) => HttpResponse::Ok().json(json!({
             "sink": i.sink.to_string(),
             "virtual_daa_score": i.virtual_daa_score,
             "pruning_point": i.pruning_point_hash.to_string(),
         })),
-        Err(e) => HttpResponse::BadGateway().json(json!({ "error": format!("{}", e) })),
+        Err(e) => { __kv_conn_err = is_conn_error(&e.to_string()); HttpResponse::BadGateway().json(json!({ "error": format!("{}", e) })) }
     };
     release_client(client, __kv_m).await;
-    if __kv_m && out.status().is_server_error() { reset_mainnet_client().await; } // v73: stale conn -> reconnect next call
+    // Only a transport failure resets the shared connection; a bad request (unknown hash) must not.
+    if __kv_m && __kv_conn_err { reset_mainnet_client().await; }
     out
 }
 
@@ -524,6 +523,7 @@ pub async fn blocks_page(q: web::Query<BlocksQ>) -> impl Responder {
         Ok(c) => c,
         Err(e) => return HttpResponse::ServiceUnavailable().json(json!({ "error": e })),
     };
+    let mut __kv_conn_err = false;
     let out = match client.get_blocks(Some(low), true, want_txs).await {
         Ok(r) => {
             let daa_max = q.daa_max.unwrap_or(u64::MAX);
@@ -557,10 +557,11 @@ pub async fn blocks_page(q: web::Query<BlocksQ>) -> impl Responder {
                 "page_daa_max": max_daa,
             }))
         }
-        Err(e) => HttpResponse::BadGateway().json(json!({ "error": format!("{}", e) })),
+        Err(e) => { __kv_conn_err = is_conn_error(&e.to_string()); HttpResponse::BadGateway().json(json!({ "error": format!("{}", e) })) }
     };
     release_client(client, __kv_m).await;
-    if __kv_m && out.status().is_server_error() { reset_mainnet_client().await; } // v73: stale conn -> reconnect next call
+    // Only a transport failure resets the shared connection; a bad request (unknown hash) must not.
+    if __kv_m && __kv_conn_err { reset_mainnet_client().await; }
     out
 }
 

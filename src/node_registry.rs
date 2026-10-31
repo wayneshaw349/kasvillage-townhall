@@ -47,6 +47,18 @@ static AUDIT_CACHE: Lazy<RwLock<HashMap<String, (u64, serde_json::Value)>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 const AUDIT_INTERVAL_SECS: u64 = 600;
+
+// 60s response cache for the chain-rebuilt read endpoints, so a request flood can't
+// turn into a flood of upstream api.kaspa.org calls (and get the relay rate-limited).
+static RESP_CACHE: Lazy<RwLock<HashMap<String, (u64, serde_json::Value)>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+const RESP_TTL_SECS: u64 = 60;
+fn cache_get(k: &str) -> Option<serde_json::Value> {
+    RESP_CACHE.read().ok()?.get(k).filter(|(at, _)| now_secs().saturating_sub(*at) < RESP_TTL_SECS).map(|(_, v)| v.clone())
+}
+fn cache_put(k: &str, v: &serde_json::Value) {
+    if let Ok(mut w) = RESP_CACHE.write() { if w.len() > 64 { w.clear(); } w.insert(k.to_string(), (now_secs(), v.clone())); }
+}
 const MAX_REGISTRY_TXS: usize = 200;
 const NODE_BOND_SOMPI: u64 = 1_000_000_000; // 10 KAS
 const NETS: [&str; 2] = ["mainnet", "testnet-10"];
@@ -83,6 +95,45 @@ pub struct NodeRecord {
     pub daa_registered: u64,
 }
 
+/// Client for operator-supplied URLs: no redirects, short timeout.
+fn op_http() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+/// True only if `host` resolves, and every address is public (no loopback, private,
+/// link-local, CGNAT, unspecified or v4-mapped). Shared SSRF guard.
+pub async fn resolves_public(host: &str, port: u16) -> bool {
+    if host.is_empty() || host.starts_with('[') || host.contains('@') { return false; }
+    let Ok(addrs) = tokio::net::lookup_host((host, port)).await else { return false };
+    let addrs: Vec<_> = addrs.collect();
+    !addrs.is_empty() && addrs.iter().all(|a| match a.ip() {
+        std::net::IpAddr::V4(v) => { let o = v.octets(); !(v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_broadcast() || o[0] == 0 || (o[0] == 100 && (o[1] & 0xc0) == 64)) }
+        std::net::IpAddr::V6(v) => !(v.is_loopback() || v.is_unspecified() || (v.segments()[0] & 0xfe00) == 0xfc00 || (v.segments()[0] & 0xffc0) == 0xfe80 || v.to_ipv4_mapped().is_some()),
+    })
+}
+
+async fn public_https(api: &str) -> bool {
+    let Some(rest) = api.strip_prefix("https://") else { return false };
+    let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host_port.split(':').next().unwrap_or("");
+    let port: u16 = host_port.split(':').nth(1).and_then(|p| p.parse().ok()).unwrap_or(443);
+    resolves_public(host, port).await
+}
+
+/// Read at most `cap` bytes of a response body.
+async fn capped_json(mut r: reqwest::Response, cap: usize) -> Option<serde_json::Value> {
+    let mut buf: Vec<u8> = Vec::new();
+    while let Ok(Some(chunk)) = r.chunk().await {
+        buf.extend_from_slice(&chunk);
+        if buf.len() > cap { return None; }
+    }
+    serde_json::from_slice(&buf).ok()
+}
+
 fn http() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -110,7 +161,8 @@ fn canon(v: &serde_json::Value) -> String {
 pub fn verify_record(rec: &serde_json::Value) -> Option<String> {
     let sig_hex = rec.get("sig")?.as_str()?;
     let o = rec.get("o")?.as_str()?;
-    let xb = hex::decode(if o.len() == 66 { &o[2..] } else { o }).ok()?;
+    // strip_prefix never slices inside a UTF-8 char (o is attacker-controlled).
+    let xb = hex::decode(if o.len() == 66 { o.strip_prefix("02").or_else(|| o.strip_prefix("03"))? } else { o }).ok()?;
     let xonly = secp256k1::XOnlyPublicKey::from_slice(&xb).ok()?;
     let mut body = rec.clone();
     body.as_object_mut()?.remove("sig");
@@ -133,7 +185,10 @@ async fn owner_funded_sompi(client: &reqwest::Client, api: &str, own: &str, addr
     let Ok(utxos) = resp.json::<serde_json::Value>().await else { return 0 };
     let mut funded: HashMap<String, bool> = HashMap::new();
     let mut sum = 0u64;
-    for u in utxos.as_array().cloned().unwrap_or_default().iter().take(20) {
+    let mut list = utxos.as_array().cloned().unwrap_or_default();
+    // Largest first, so dust sent to the bond address can't push the bond out of the window.
+    list.sort_by_key(|u| std::cmp::Reverse(num(u.pointer("/utxoEntry/amount")).unwrap_or(0)));
+    for u in list.iter().take(20) {
         let txid = u.pointer("/outpoint/transactionId").and_then(|t| t.as_str()).unwrap_or("").to_string();
         let amt = u.pointer("/utxoEntry/amount").and_then(|a| a.as_str().and_then(|s| s.parse().ok()).or(a.as_u64())).unwrap_or(0);
         if txid.len() != 64 || amt == 0 { continue; }
@@ -174,10 +229,12 @@ async fn fetch_registry_records(net: &str) -> Result<Vec<NodeRecord>, String> {
         let txid = tx.get("transaction_id").and_then(|t| t.as_str()).unwrap_or("").to_string();
         if txid.is_empty() || g("storeAddress").is_empty() { continue; }
         if !matches!(g("svc").as_str(), "index" | "archive") || !g("api").starts_with("https://") { continue; }
+        if rec.get("t").and_then(|t| t.as_u64()).unwrap_or(0) > now_secs() * 1000 + 600_000 { continue; } // future-dated
         records.push(NodeRecord {
             txid, svc: g("svc"), api: g("api"), payout: g("payout"), net: net.to_string(),
             owner, bond_address: g("storeAddress"), bond_amount: 0, bond_unspent: false,
-            daa_registered: tx.get("accepting_block_blue_score").and_then(|d| d.as_u64()).unwrap_or(0),
+            // signed announce time: a replayed old announce keeps its old t and loses
+            daa_registered: rec.get("t").and_then(|t| t.as_u64()).unwrap_or(0),
         });
     }
 
@@ -200,13 +257,14 @@ pub struct NetQuery { network: Option<String> }
 
 pub async fn get_registry(q: web::Query<NetQuery>) -> impl Responder {
     let net = norm_net(q.network.as_deref());
+    let ck = format!("registry|{}", net);
+    if let Some(v) = cache_get(&ck) { return HttpResponse::Ok().json(v); }
     match fetch_registry_records(net).await {
-        Ok(records) => HttpResponse::Ok().json(json!({
-            "registry": registry_address("node", net),
-            "network": net,
-            "count": records.len(),
-            "nodes": records,
-        })),
+        Ok(records) => {
+            let v = json!({ "registry": registry_address("node", net), "network": net, "count": records.len(), "nodes": records });
+            cache_put(&ck, &v);
+            HttpResponse::Ok().json(v)
+        }
         Err(e) => HttpResponse::BadGateway().json(json!({ "error": e, "network": net })),
     }
 }
@@ -322,10 +380,12 @@ pub fn rest_tx_id(j: &serde_json::Value) -> Option<String> {
 
 /// Ask an operator for the challenge tx; pass only if its txid recomputes, the
 /// surviving coin is in it, and it carries a non-empty payload.
-async fn operator_answers(client: &reqwest::Client, api: &str, c: &Challenge) -> (bool, &'static str) {
+async fn operator_answers(_client: &reqwest::Client, api: &str, c: &Challenge) -> (bool, &'static str) {
+    if !public_https(api).await { return (false, "api must be a public https host"); }
     let url = format!("{}/transactions/{}?inputs=true&outputs=true&resolve_previous_outpoints=no", api.trim_end_matches('/'), c.txid);
-    let j: serde_json::Value = match client.get(&url).send().await {
-        Ok(r) => match r.json().await { Ok(j) => j, Err(_) => return (false, "bad json") },
+    let j: serde_json::Value = match op_http().get(&url).send().await {
+        Ok(r) if r.status().is_success() => match capped_json(r, 256 * 1024).await { Some(j) => j, None => return (false, "bad or oversized json") },
+        Ok(_) => return (false, "http error"),
         Err(_) => return (false, "unreachable"),
     };
     if j.get("payload").and_then(|p| p.as_str()).map(|p| p.is_empty()).unwrap_or(true) { return (false, "no payload"); }
@@ -366,7 +426,9 @@ pub struct AuditQuery {
 
 pub async fn run_audit(q: web::Query<AuditQuery>) -> impl Responder {
     let net = norm_net(q.network.as_deref());
-    let want_fresh = q.fresh.as_deref().map(|v| v == "1" || v == "true").unwrap_or(false);
+    let cached_age = AUDIT_CACHE.read().ok().and_then(|r| r.get(net).map(|(at, _)| now_secs().saturating_sub(*at)));
+    // ?fresh=1 is honoured at most once a minute per network (a full sweep is expensive).
+    let want_fresh = q.fresh.as_deref().map(|v| v == "1" || v == "true").unwrap_or(false) && cached_age.map(|a| a >= 60).unwrap_or(true);
     if !want_fresh {
         if let Ok(r) = AUDIT_CACHE.read() {
             if let Some((at, body)) = r.get(net) {
@@ -391,9 +453,11 @@ pub async fn run_audit(q: web::Query<AuditQuery>) -> impl Responder {
 // ---------------------------------------------------------------------------
 pub async fn get_game_index(q: web::Query<NetQuery>) -> impl Responder {
     let net = norm_net(q.network.as_deref());
+    let ck = format!("index|{}", net);
+    if let Some(v) = cache_get(&ck) { return HttpResponse::Ok().json(v); }
     let (games, reg) = match index_kind(net, "game").await { Ok(v) => v, Err(e) => return HttpResponse::BadGateway().json(json!({ "error": e })) };
     let (dapps, dreg) = index_kind(net, "dapp").await.unwrap_or((Vec::new(), String::new()));
-    HttpResponse::Ok().json(json!({
+    let v = json!({
         "index": "KasVillage community mini-apps (HTML5 games + DApps, sandboxed, verified by hash)",
         "network": net,
         "registries": { "game": reg, "dapp": dreg },
@@ -402,7 +466,9 @@ pub async fn get_game_index(q: web::Query<NetQuery>) -> impl Responder {
         "dapps": dapps,
         "age_ratings": "4+ / 9+ / 13+ / 17+; unrated listings are treated as 17+ and gated in the app",
         "report": "Flag in app: Mailbox > listing > Flag",
-    }))
+    });
+    cache_put(&ck, &v);
+    HttpResponse::Ok().json(v)
 }
 
 async fn index_kind(net: &str, kind: &str) -> Result<(Vec<serde_json::Value>, String), String> {
@@ -433,7 +499,7 @@ async fn index_kind(net: &str, kind: &str) -> Result<(Vec<serde_json::Value>, St
                 let head = quad.get("head").and_then(|h| h.as_str())
                     .or_else(|| if kind == "dapp" { d.get("storeAddress").and_then(|h| h.as_str()) } else { None })
                     .unwrap_or("").to_string();
-                if head.is_empty() || !seen.insert(head.clone()) { continue; }
+                if head.is_empty() || !seen.insert((owner.clone(), head.clone())) { continue; }
                 let age = quad.get("age").or_else(|| d.get("age")).and_then(|a| a.as_str()).filter(|a| matches!(*a, "4+" | "9+" | "13+" | "17+")).unwrap_or("unrated (17+)");
                 games.push(json!({
                     "name": d.get("name").cloned().unwrap_or(json!("")),

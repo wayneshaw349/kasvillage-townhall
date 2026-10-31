@@ -171,10 +171,16 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
     if is_private_host(&host) {
         return HttpResponse::BadRequest().json(serde_json::json!({"error":"private/IP hosts not scannable"}));
     }
+    // AUDIT 2026-10-31: string checks miss [::1], 0x7f000001, "localhost." and DNS names
+    // pointing inside; resolve and check every address. Redirects are not followed.
+    let port: u16 = if url.starts_with("https://") { 443 } else { 80 };
+    if !crate::node_registry::resolves_public(&host, port).await {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error":"host does not resolve to a public address"}));
+    }
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS))
-        .redirect(reqwest::redirect::Policy::limited(3))
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent("TownHallCanary/1.0")
         .build()
     {
@@ -194,12 +200,18 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
         return HttpResponse::BadRequest().json(serde_json::json!({"error":"redirected to private host"}));
     }
 
-    let bytes = match resp.bytes().await {
-        Ok(b) => b,
-        Err(e) => return HttpResponse::Ok().json(serde_json::json!({
-            "error": format!("body read failed: {}", e), "fetchable": false
-        })),
-    };
+    // stream with a cap instead of buffering the whole body
+    let mut resp = resp;
+    let mut bytes: Vec<u8> = Vec::new();
+    loop {
+        match resp.chunk().await {
+            Ok(Some(c)) => { bytes.extend_from_slice(&c); if bytes.len() >= MAX_BODY_BYTES { break; } }
+            Ok(None) => break,
+            Err(e) => return HttpResponse::Ok().json(serde_json::json!({
+                "error": format!("body read failed: {}", e), "fetchable": false
+            })),
+        }
+    }
     let slice = &bytes[..bytes.len().min(MAX_BODY_BYTES)];
     let text = String::from_utf8_lossy(slice);
 
