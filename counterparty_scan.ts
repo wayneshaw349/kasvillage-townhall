@@ -36,7 +36,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deriveAddress } from './canonical_agreement_steps';
 
-const CACHE_KEY = 'kv_scan_cache_v2';
+const CACHE_KEY = 'kv_scan_cache_v3'; // v3: keyed by network|pubkey (v2 mixed testnet into mainnet)
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_ESCROW_TXS = 12; // escrows are short-lived; wallets are not
 
@@ -120,7 +120,7 @@ export async function scanCounterparty(
     try {
       const raw = await AsyncStorage.getItem(CACHE_KEY);
       const cache = raw ? JSON.parse(raw) : {};
-      const hit = cache[pubkey];
+      const hit = cache[network + '|' + pubkey]; // KV_SCAN_NET: cache is per-network
       if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.result;
     } catch {}
   }
@@ -226,7 +226,7 @@ export async function scanCounterparty(
     try {
       const raw = await AsyncStorage.getItem(CACHE_KEY);
       const cache = raw ? JSON.parse(raw) : {};
-      cache[pubkey] = { at: Date.now(), result };
+      cache[network + '|' + pubkey] = { at: Date.now(), result };
       await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cache));
     } catch {}
   }

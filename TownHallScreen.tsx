@@ -301,6 +301,14 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         }
       }
 
+      // KV_LOOKUP_NET: the network this lookup is ABOUT follows the Real/Tutorial toggle.
+      // On mainnet the chain is the ONLY source: the relay's /user-stats tallies are
+      // testnet-era and carry no network, so they must never stand in for mainnet history.
+      const _net: string = require('./kv_vault_active').kvActiveNet();
+      if (_net === 'mainnet' && lookupResult?.pubkey) lookupResult = { pubkey: lookupResult.pubkey, stats: {} };
+      // A pubkey/address resolves straight from its bytes - no relay record needed to look it up
+      if (!lookupResult?.pubkey && /^0[23][0-9a-f]{64}$/.test(_qLow)) lookupResult = { pubkey: _qLow, stats: {} };
+
       // KASPA-AUTHORITATIVE: scan awaited; chain result feeds setResult below.
       let _scanRes: any = null;
       if (lookupResult?.pubkey) {
@@ -308,7 +316,7 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         setKvScan(null);
         setKvScanning(true);
         try {
-          _scanRes = await (await import('./counterparty_scan')).scanCounterparty(_pk, require('./kv_net').KV_NET, 40);
+          _scanRes = await (await import('./counterparty_scan')).scanCounterparty(_pk, _net, 40, false);
           setKvScan(_scanRes);
         } catch (e) { console.warn('[StatsLookup] scan failed:', e); setKvScan({ error: true }); }
         finally { setKvScanning(false); }
@@ -333,7 +341,7 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         let proofJson: any = null;
         try {
           const pr = await fetch(TOWNHALL_BASE + '/api/verify/stats', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pubkey: lookupResult.pubkey, network: require('./kv_vault_active').kvActiveNet() }) });
+            body: JSON.stringify({ pubkey: lookupResult.pubkey, network: _net }) });
           const pj = await pr.json();
           if (pj && pj.proof) {
             proofJson = pj.proof;
@@ -343,7 +351,9 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
           }
         } catch (e) { console.warn('[StatsLookup] Proof fetch/check failed:', e); }
 
-        const _useChain = _scanRes && !_scanRes.error && _scanRes.total > 0;
+        // mainnet: the scan is authoritative even at zero (a fresh record is a real answer);
+        // testnet keeps the legacy relay fallback when the scan finds nothing
+        const _useChain = _scanRes && !_scanRes.error && (_net === 'mainnet' || _scanRes.total > 0);
         const _cs = _useChain ? _scanRes.settled : (s.successes ?? 0);
         const _cd = _useChain ? _scanRes.deadlocked : (s.deadlocks ?? 0);
         if (_useChain) console.log('[StatsLookup] KASPA-AUTHORITATIVE — settled:', _cs, 'deadlocked:', _cd);
