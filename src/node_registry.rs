@@ -214,12 +214,6 @@ pub async fn get_registry(q: web::Query<NetQuery>) -> impl Responder {
 // ---------------------------------------------------------------------------
 // Proof-of-storage audit
 // ---------------------------------------------------------------------------
-async fn truth_payload(client: &reqwest::Client, api: &str, txid: &str) -> Option<String> {
-    let url = format!("{}/transactions/{}?inputs=false&outputs=false", api, txid);
-    let v: serde_json::Value = client.get(&url).send().await.ok()?.json().await.ok()?;
-    v.get("payload").and_then(|p| p.as_str()).map(|s| s.to_string())
-}
-
 /// Runs one full audit sweep and returns the JSON body. Used by both the
 /// HTTP handler and the background task.
 pub async fn audit_once(net: &str) -> serde_json::Value {
@@ -230,75 +224,117 @@ pub async fn audit_once(net: &str) -> serde_json::Value {
     };
     let client = http();
 
-    // Challenge set: announces on EVERY registry (store/academic, dapp, game, node)
-    // older than the ~30h pruning window — only a real archive still has those.
-    // Recent txs are on every ordinary node, so they would prove nothing.
-    let mut challenges: Vec<String> = Vec::new();
+    // Challenge set: surviving registry coins (store/academic, dapp, game, node)
+    // older than the ~30h window. The answer is self-verifying: the operator's
+    // transaction must hash to the challenged txid — no outside "truth" needed.
+    let Some(now_daa) = virtual_daa(api).await else { return json!({ "network": net, "nodes": [], "note": "could not read virtual DAA" }) };
+    let mut challenges: Vec<Challenge> = Vec::new();
     for kind in ["store", "dapp", "game", "node"] {
-        challenges.extend(fetch_aged_txids(net, kind).await.unwrap_or_default());
+        challenges.extend(fetch_aged_challenges(net, kind, now_daa).await);
     }
-    if let Ok(extra) = std::env::var("KV_AUDIT_TXIDS") {
-        challenges.extend(extra.split(',').map(|s| s.trim().to_string()).filter(|s| s.len() == 64));
-    }
-    challenges.sort();
-    challenges.dedup();
     if challenges.is_empty() {
-        return json!({ "network": net, "nodes": [], "note": "no history older than 30h yet - nothing provable to challenge" });
+        return json!({ "network": net, "nodes": [], "note": "no records older than ~30h yet - nothing only an archive could answer" });
     }
-
-    // Pseudo-random pick (time-seeded) — good enough: operators can't predict
-    // which id is chosen and must store all of them to always pass.
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs()).unwrap_or(0) as usize;
+    let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as usize;
 
     let mut results = Vec::new();
     for (i, r) in records.iter().enumerate() {
         if !r.bond_unspent {
-            results.push(json!({ "payout": r.payout, "audited": false, "pass": false, "reason": "bond spent" }));
+            results.push(json!({ "payout": r.payout, "audited": false, "pass": false, "reason": "bond below 10 KAS" }));
             continue;
         }
-        let challenge = &challenges[(seed + i) % challenges.len()];
-        let truth = truth_payload(&client, api, challenge).await;
-        let their_url = format!("{}/transactions/{}?inputs=false&outputs=false", r.api.trim_end_matches('/'), challenge);
-        let theirs: Option<String> = match client.get(&their_url).send().await {
-            Ok(resp) => resp.json::<serde_json::Value>().await.ok()
-                .and_then(|v| v.get("payload").and_then(|p| p.as_str()).map(|s| s.to_string())),
-            Err(_) => None,
-        };
-        let pass = match (&truth, &theirs) {
-            (Some(t), Some(o)) => !t.is_empty() && t == o,
-            _ => false,
-        };
+        let c = &challenges[(seed.wrapping_mul(2654435761) + i) % challenges.len()];
+        let (pass, reason) = operator_answers(&client, &r.api, c).await;
         results.push(json!({
-            "payout": r.payout,
-            "svc": r.svc,
-            "api": r.api,
-            "challenge_txid": challenge,
-            "audited": true,
-            "pass": pass,
-            "bond_unspent": r.bond_unspent,
-            "bond_amount": r.bond_amount,
+            "payout": r.payout, "svc": r.svc, "api": r.api,
+            "challenge_txid": c.txid, "challenge_index": c.index, "challenge_amount": c.amount,
+            "audited": true, "pass": pass, "reason": reason,
+            "bond_unspent": r.bond_unspent, "bond_amount": r.bond_amount,
         }));
     }
 
     json!({ "audited_at": seed, "network": net, "nodes": results })
 }
 
-/// Txids on a registry address accepted more than PRUNE_SECS ago.
-const PRUNE_SECS: u64 = 30 * 3600;
-async fn fetch_aged_txids(net: &str, kind: &str) -> Result<Vec<String>, String> {
-    let url = format!("{}/addresses/{}/full-transactions?limit={}&resolve_previous_outpoints=no", api_base(net), registry_address(kind, net), MAX_REGISTRY_TXS);
-    let v: serde_json::Value = http().get(&url).send().await.map_err(|e| e.to_string())?
-        .json().await.map_err(|e| e.to_string())?;
-    let cutoff_ms = now_secs().saturating_sub(PRUNE_SECS) * 1000;
-    Ok(v.as_array().map(|arr| arr.iter()
-        .filter(|t| {
-            let bt = t.get("block_time").or_else(|| t.get("accepting_block_time")).and_then(|b| b.as_u64()).unwrap_or(u64::MAX);
-            bt < cutoff_ms && t.get("payload").and_then(|p| p.as_str()).map(|p| !p.is_empty()).unwrap_or(false)
+/// One surviving coin at a registry address. Its txid is the challenge; the coin
+/// itself (index, amount, script) must reappear in the operator's transaction.
+#[derive(Clone)]
+pub struct Challenge { pub txid: String, pub index: u32, pub amount: u64, pub spk: String }
+
+// ~30h of DAA at 10 BPS, same window the app uses (1.1M).
+const PRUNE_DAA: u64 = 1_100_000;
+
+fn num(v: Option<&serde_json::Value>) -> Option<u64> {
+    v.and_then(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
+}
+
+async fn virtual_daa(api: &str) -> Option<u64> {
+    let v: serde_json::Value = http().get(format!("{}/info/blockdag", api)).send().await.ok()?.json().await.ok()?;
+    num(v.get("virtualDaaScore"))
+}
+
+/// Pruning drops tx history and payloads from the public API, but the UTXO set
+/// survives, and registry dust is unspendable — so registry UTXOs older than
+/// the window name exactly the records only an archive still holds.
+async fn fetch_aged_challenges(net: &str, kind: &str, now_daa: u64) -> Vec<Challenge> {
+    let url = format!("{}/addresses/{}/utxos", api_base(net), registry_address(kind, net));
+    let Ok(r) = http().get(&url).send().await else { return vec![] };
+    let Ok(v) = r.json::<serde_json::Value>().await else { return vec![] };
+    v.as_array().cloned().unwrap_or_default().iter().filter_map(|u| {
+        let daa = num(u.pointer("/utxoEntry/blockDaaScore"))?;
+        if now_daa < daa + PRUNE_DAA { return None; }
+        Some(Challenge {
+            txid: u.pointer("/outpoint/transactionId")?.as_str()?.to_string(),
+            index: num(u.pointer("/outpoint/index")).unwrap_or(0) as u32,
+            amount: num(u.pointer("/utxoEntry/amount"))?,
+            spk: u.pointer("/utxoEntry/scriptPublicKey/scriptPublicKey").and_then(|x| x.as_str()).unwrap_or("").to_string(),
         })
-        .filter_map(|t| t.get("transaction_id").and_then(|s| s.as_str()).map(|s| s.to_string()))
-        .collect()).unwrap_or_default())
+    }).collect()
+}
+
+/// Rebuild the consensus transaction from a kaspa-rest-server tx JSON and return
+/// its txid. v0, lock_time 0, gas 0, sequence 0 (what KasVillage txs use).
+pub fn rest_tx_id(j: &serde_json::Value) -> Option<String> {
+    use kaspa_consensus_core::tx::{Transaction, TransactionInput, TransactionOutpoint, TransactionOutput, ScriptPublicKey};
+    let h32 = |s: &str| -> Option<kaspa_rpc_core::RpcHash> {
+        let b: [u8; 32] = hex::decode(s).ok()?.try_into().ok()?; Some(kaspa_rpc_core::RpcHash::from_bytes(b))
+    };
+    let mut ins = j.get("inputs")?.as_array()?.clone();
+    ins.sort_by_key(|i| num(i.get("index")).unwrap_or(0));
+    let mut inputs = Vec::new();
+    for i in &ins {
+        let prev = h32(i.get("previous_outpoint_hash")?.as_str()?)?;
+        let idx = num(i.get("previous_outpoint_index"))? as u32;
+        inputs.push(TransactionInput::new(TransactionOutpoint::new(prev, idx), vec![], 0, 1));
+    }
+    let mut outs = j.get("outputs")?.as_array()?.clone();
+    outs.sort_by_key(|o| num(o.get("index")).unwrap_or(0));
+    let mut outputs = Vec::new();
+    for o in &outs {
+        let script = hex::decode(o.get("script_public_key")?.as_str()?).ok()?;
+        outputs.push(TransactionOutput::new(num(o.get("amount"))?, ScriptPublicKey::from_vec(0, script)));
+    }
+    let subnet: [u8; 20] = hex::decode(j.get("subnetwork_id").and_then(|s| s.as_str()).unwrap_or("0000000000000000000000000000000000000000")).ok()?.try_into().ok()?;
+    let payload = hex::decode(j.get("payload").and_then(|p| p.as_str()).unwrap_or("")).ok()?;
+    let tx = Transaction::new(0, inputs, outputs, 0, kaspa_consensus_core::subnets::SubnetworkId::from_bytes(subnet), 0, payload);
+    Some(tx.id().to_string())
+}
+
+/// Ask an operator for the challenge tx; pass only if its txid recomputes, the
+/// surviving coin is in it, and it carries a non-empty payload.
+async fn operator_answers(client: &reqwest::Client, api: &str, c: &Challenge) -> (bool, &'static str) {
+    let url = format!("{}/transactions/{}?inputs=true&outputs=true&resolve_previous_outpoints=no", api.trim_end_matches('/'), c.txid);
+    let j: serde_json::Value = match client.get(&url).send().await {
+        Ok(r) => match r.json().await { Ok(j) => j, Err(_) => return (false, "bad json") },
+        Err(_) => return (false, "unreachable"),
+    };
+    if j.get("payload").and_then(|p| p.as_str()).map(|p| p.is_empty()).unwrap_or(true) { return (false, "no payload"); }
+    if rest_tx_id(&j).as_deref() != Some(c.txid.as_str()) { return (false, "txid mismatch"); }
+    let coin_ok = j.get("outputs").and_then(|o| o.as_array()).map(|outs| outs.iter().any(|o|
+        num(o.get("index")) == Some(c.index as u64) && num(o.get("amount")) == Some(c.amount)
+        && (c.spk.is_empty() || o.get("script_public_key").and_then(|x| x.as_str()) == Some(c.spk.as_str())))).unwrap_or(false);
+    if !coin_ok { return (false, "coin mismatch"); }
+    (true, "ok")
 }
 
 fn now_secs() -> u64 {
@@ -445,5 +481,27 @@ mod tests {
         assert_eq!(verify_record(&rec).as_deref(), Some("4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa"));
         rec["d"]["payout"] = json!("kaspa:qthief");
         assert!(verify_record(&rec).is_none());
+    }
+    #[test]
+    fn rest_tx_id_matches_consensus() {
+        use kaspa_consensus_core::tx::*;
+        let j = json!({
+            "subnetwork_id": "0000000000000000000000000000000000000000",
+            "payload": "4b565031",
+            "inputs": [{ "index": 0, "previous_outpoint_hash": "11".repeat(32), "previous_outpoint_index": "1", "signature_script": "41ab" }],
+            "outputs": [
+                { "index": 1, "amount": "5000", "script_public_key": "20" .to_string() + &"22".repeat(32) + "ac" },
+                { "index": 0, "amount": 100000000u64, "script_public_key": "20".to_string() + &"33".repeat(32) + "ac" }
+            ]
+        });
+        let h = |b: u8| kaspa_rpc_core::RpcHash::from_bytes([b; 32]);
+        let spk = |b: u8| { let mut v = vec![0x20]; v.extend([b; 32]); v.push(0xac); ScriptPublicKey::from_vec(0, v) };
+        let tx = Transaction::new(0,
+            vec![TransactionInput::new(TransactionOutpoint::new(h(0x11), 1), vec![0x41, 0xab], 0, 1)],
+            vec![TransactionOutput::new(100000000, spk(0x33)), TransactionOutput::new(5000, spk(0x22))],
+            0, kaspa_consensus_core::subnets::SUBNETWORK_ID_NATIVE, 0, b"KVP1".to_vec());
+        let want = tx.id().to_string();
+        assert_eq!(rest_tx_id(&j).as_deref(), Some(want.as_str()));
+        println!("TXID_VECTOR {}", want);
     }
 }

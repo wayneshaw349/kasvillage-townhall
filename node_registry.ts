@@ -96,16 +96,13 @@ export async function fetchAudit(net: string = NET()): Promise<NodeAuditEntry[]>
   return (j.nodes || []) as NodeAuditEntry[];
 }
 
-// Phone re-runs the relay's challenge itself (truth from the public Kaspa API, not
-// the relay), so a lying or hacked relay cannot steer tips to a non-archive.
-async function phoneRecheck(api: string, n: NodeAuditEntry): Promise<boolean> {
+// Phone re-runs the relay's challenge itself: the operator's transaction must hash
+// to the challenged txid (kv_archive.restTxId), so neither a lying relay nor a
+// proxying operator can collect tips without actually holding the record.
+async function phoneRecheck(_api: string, n: NodeAuditEntry): Promise<boolean> {
   const id = String(n.challenge_txid || '');
-  if (!/^[0-9a-f]{64}$/.test(id) || !n.api || !/^https:\/\//.test(n.api)) return false;
-  const get = async (base: string) => {
-    try { const j: any = await (await fetch(base.replace(/\/+$/, '') + '/transactions/' + id + '?inputs=false&outputs=false')).json(); return String((j && j.payload) || ''); } catch { return ''; }
-  };
-  const [truth, theirs] = await Promise.all([get(api), get(n.api)]);
-  return !!truth && truth === theirs;
+  const j = await require('./kv_archive').fetchVerifiedTx(String(n.api || ''), id);
+  return !!(j && j.payload);
 }
 
 export async function tipOperators(params: {

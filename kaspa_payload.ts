@@ -345,6 +345,15 @@ export async function fetchRecords(address: string, network = require('./kv_net'
     if (!rec) continue;
     out.push({ record: rec, txid: tx.transaction_id || '', blockTime: Number(tx.block_time || 0), sender: String((tx.inputs && tx.inputs[0] && tx.inputs[0].previous_outpoint_address) || '') });
   }
+  // KV_ARCHIVE_READ: records older than the ~30h public window come from audited
+  // archive operators, each answer txid-verified on the phone (kv_archive.ts).
+  try {
+    const _have = new Set<string>(out.map((o) => o.txid));
+    for (const t of await require('./kv_archive').archiveRecordsAt(address, network, _have)) {
+      const rec = decodePayloadHex(t.payload);
+      if (rec) out.push({ record: rec, txid: t.txid, blockTime: Number(t.block_time || 0) });
+    }
+  } catch {}
   if (out.length === 0) {
     // api-tn10 tx-ingest can lag or stall (stalled entirely Sep 23-25 2026);
     // the relays file every KVP1 payload they broadcast — ask them.
