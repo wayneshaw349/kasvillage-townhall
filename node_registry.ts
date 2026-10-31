@@ -29,7 +29,7 @@ export const nodeRegistryAddress = (net: string = NET()) => registryAddress('nod
 
 export interface NodeRegistryEntry {
   txid: string;
-  svc: 'index' | 'relay' | 'archive';
+  svc: 'index' | 'archive';
   api: string;
   payout: string;
   net: string;
@@ -58,7 +58,7 @@ async function ownerKeys(): Promise<OwnerKeys> {
 }
 
 export async function registerNode(params: {
-  svc: 'index' | 'relay' | 'archive';
+  svc: 'index' | 'archive';
   apiBaseUrl: string;
 }): Promise<{ success: boolean; txid?: string; bondAddress?: string; error?: string }> {
   try {
@@ -96,6 +96,18 @@ export async function fetchAudit(net: string = NET()): Promise<NodeAuditEntry[]>
   return (j.nodes || []) as NodeAuditEntry[];
 }
 
+// Phone re-runs the relay's challenge itself (truth from the public Kaspa API, not
+// the relay), so a lying or hacked relay cannot steer tips to a non-archive.
+async function phoneRecheck(api: string, n: NodeAuditEntry): Promise<boolean> {
+  const id = String(n.challenge_txid || '');
+  if (!/^[0-9a-f]{64}$/.test(id) || !n.api || !/^https:\/\//.test(n.api)) return false;
+  const get = async (base: string) => {
+    try { const j: any = await (await fetch(base.replace(/\/+$/, '') + '/transactions/' + id + '?inputs=false&outputs=false')).json(); return String((j && j.payload) || ''); } catch { return ''; }
+  };
+  const [truth, theirs] = await Promise.all([get(api), get(n.api)]);
+  return !!truth && truth === theirs;
+}
+
 export async function tipOperators(params: {
   totalSompi: bigint;
 }): Promise<{ success: boolean; txid?: string; paid?: number; error?: string }> {
@@ -107,7 +119,9 @@ export async function tipOperators(params: {
     const per = params.totalSompi / BigInt(passing.length);
     if (per < MIN_TIP_SOMPI) return { success: false, error: 'tip too small: < 0.2 KAS per operator across ' + passing.length + ' operators' };
     let paid = 0; let last = ''; const errs: string[] = [];
+    const api = require('./kaspa_payload').apiBase(o.network);
     for (const n of passing) {
+      if (!(await phoneRecheck(api, n))) { errs.push('skipped ' + n.payout.slice(0, 18) + '… (failed phone re-check)'); continue; }
       const r: any = await sendKaspaViaRest({ senderAddress: o.address, recipientAddress: n.payout, amountSompi: per, privateKeyHex: o.privateKeyHex, network: o.network as any });
       if (r && r.success) { paid++; last = r.txId; } else errs.push(String(r?.error || 'failed'));
       await new Promise((res) => setTimeout(res, 1500)); // let change settle between sends

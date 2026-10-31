@@ -11,14 +11,13 @@ const C = {
   text: '#3E2F23', dim: '#7A6A57', accent: '#D98E2B',
 };
 
-const SERVICES: Array<{ id: 'index' | 'relay' | 'archive'; label: string; blurb: string }> = [
+const SERVICES: Array<{ id: 'index' | 'archive'; label: string; blurb: string }> = [
   { id: 'index',   label: 'Indexer', blurb: 'Scans L1 payloads, serves search queries.' },
-  { id: 'relay',   label: 'Relay',   blurb: 'Accepts signed txs, submits to the Kaspa node.' },
   { id: 'archive', label: 'Archive', blurb: 'Stores full KasVillage history, answers audits.' },
 ];
 
 export function NodeRegisterScreen({ onClose }: { onClose: () => void }) {
-  const [svc, setSvc] = useState<'index' | 'relay' | 'archive'>('archive');
+  const [svc, setSvc] = useState<'index' | 'archive'>('archive');
   const [apiBaseUrl, setApiBaseUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [payout, setPayout] = useState('');
@@ -33,8 +32,8 @@ export function NodeRegisterScreen({ onClose }: { onClose: () => void }) {
 
   const submit = async () => {
     const url = apiBaseUrl.trim();
-    if (!/^https?:\/\/.+/.test(url)) {
-      Alert.alert('Invalid URL', 'Enter a reachable base URL, e.g. https://node.example.com');
+    if (!/^https:\/\/.+/.test(url)) {
+      Alert.alert('Invalid URL', 'Enter a reachable https base URL, e.g. https://node.example.com');
       return;
     }
     Alert.alert(

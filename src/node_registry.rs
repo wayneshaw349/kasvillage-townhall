@@ -173,6 +173,7 @@ async fn fetch_registry_records(net: &str) -> Result<Vec<NodeRecord>, String> {
         let g = |k: &str| d.get(k).and_then(|s| s.as_str()).unwrap_or("").to_string();
         let txid = tx.get("transaction_id").and_then(|t| t.as_str()).unwrap_or("").to_string();
         if txid.is_empty() || g("storeAddress").is_empty() { continue; }
+        if !matches!(g("svc").as_str(), "index" | "archive") || !g("api").starts_with("https://") { continue; }
         records.push(NodeRecord {
             txid, svc: g("svc"), api: g("api"), payout: g("payout"), net: net.to_string(),
             owner, bond_address: g("storeAddress"), bond_amount: 0, bond_unspent: false,
@@ -229,15 +230,20 @@ pub async fn audit_once(net: &str) -> serde_json::Value {
     };
     let client = http();
 
-    // Challenge set: node announces + STORE registry txids (real marketplace
-    // history) + env extras. Storing only your own announce is not enough.
-    let mut challenges: Vec<String> = records.iter().map(|r| r.txid.clone()).collect();
-    challenges.extend(fetch_store_txids(net).await.unwrap_or_default());
-    if let Ok(extra) = std::env::var("KV_AUDIT_TXIDS") {
-        challenges.extend(extra.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+    // Challenge set: announces on EVERY registry (store/academic, dapp, game, node)
+    // older than the ~30h pruning window — only a real archive still has those.
+    // Recent txs are on every ordinary node, so they would prove nothing.
+    let mut challenges: Vec<String> = Vec::new();
+    for kind in ["store", "dapp", "game", "node"] {
+        challenges.extend(fetch_aged_txids(net, kind).await.unwrap_or_default());
     }
+    if let Ok(extra) = std::env::var("KV_AUDIT_TXIDS") {
+        challenges.extend(extra.split(',').map(|s| s.trim().to_string()).filter(|s| s.len() == 64));
+    }
+    challenges.sort();
+    challenges.dedup();
     if challenges.is_empty() {
-        return json!({ "nodes": [], "note": "no challenges available" });
+        return json!({ "network": net, "nodes": [], "note": "no history older than 30h yet - nothing provable to challenge" });
     }
 
     // Pseudo-random pick (time-seeded) — good enough: operators can't predict
@@ -248,10 +254,6 @@ pub async fn audit_once(net: &str) -> serde_json::Value {
 
     let mut results = Vec::new();
     for (i, r) in records.iter().enumerate() {
-        if r.svc != "index" && r.svc != "archive" {
-            results.push(json!({ "payout": r.payout, "svc": r.svc, "audited": false, "reason": "svc not auditable" }));
-            continue;
-        }
         if !r.bond_unspent {
             results.push(json!({ "payout": r.payout, "audited": false, "pass": false, "reason": "bond spent" }));
             continue;
@@ -265,7 +267,7 @@ pub async fn audit_once(net: &str) -> serde_json::Value {
             Err(_) => None,
         };
         let pass = match (&truth, &theirs) {
-            (Some(t), Some(o)) => t == o,
+            (Some(t), Some(o)) => !t.is_empty() && t == o,
             _ => false,
         };
         results.push(json!({
@@ -283,13 +285,18 @@ pub async fn audit_once(net: &str) -> serde_json::Value {
     json!({ "audited_at": seed, "network": net, "nodes": results })
 }
 
-/// Txids of store announces — real KasVillage content operators must archive.
-async fn fetch_store_txids(net: &str) -> Result<Vec<String>, String> {
-    let client = http();
-    let url = format!("{}/addresses/{}/full-transactions?limit={}&resolve_previous_outpoints=no", api_base(net), registry_address("store", net), MAX_REGISTRY_TXS);
-    let v: serde_json::Value = client.get(&url).send().await.map_err(|e| e.to_string())?
+/// Txids on a registry address accepted more than PRUNE_SECS ago.
+const PRUNE_SECS: u64 = 30 * 3600;
+async fn fetch_aged_txids(net: &str, kind: &str) -> Result<Vec<String>, String> {
+    let url = format!("{}/addresses/{}/full-transactions?limit={}&resolve_previous_outpoints=no", api_base(net), registry_address(kind, net), MAX_REGISTRY_TXS);
+    let v: serde_json::Value = http().get(&url).send().await.map_err(|e| e.to_string())?
         .json().await.map_err(|e| e.to_string())?;
+    let cutoff_ms = now_secs().saturating_sub(PRUNE_SECS) * 1000;
     Ok(v.as_array().map(|arr| arr.iter()
+        .filter(|t| {
+            let bt = t.get("block_time").or_else(|| t.get("accepting_block_time")).and_then(|b| b.as_u64()).unwrap_or(u64::MAX);
+            bt < cutoff_ms && t.get("payload").and_then(|p| p.as_str()).map(|p| !p.is_empty()).unwrap_or(false)
+        })
         .filter_map(|t| t.get("transaction_id").and_then(|s| s.as_str()).map(|s| s.to_string()))
         .collect()).unwrap_or_default())
 }
