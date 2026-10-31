@@ -171,7 +171,7 @@ async function getMyCredentials(): Promise<{
                  await SecureStore.getItemAsync('kv_public_key') || '';
   const address = await SecureStore.getItemAsync('kaspa_address') || '';
   const privkey = (await _kvResolvePrivHex()) || '';
-  const network = await SecureStore.getItemAsync('kv_network') || 'testnet-10';
+  const network = require('./kv_vault_active').kvActiveNet(); // AUDIT: kv_network was never written (always testnet)
 
   if (!pubkey || !address || !privkey) return null;
 

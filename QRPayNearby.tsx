@@ -172,7 +172,7 @@ export const QRPayNearby: React.FC<{ onClose: () => void; onNavigateSend?: (addr
       const pk = await SecureStore.getItemAsync('kv_l1_pubkey') ||
                  await SecureStore.getItemAsync('kaspa_pubkey') ||
                  await SecureStore.getItemAsync('kv_public_key') || '';
-      const net = await SecureStore.getItemAsync('kv_network') || 'testnet-10';
+      const net = require('./kv_vault_active').kvActiveNet(); // AUDIT: kv_network was never written
       const recipe = await SecureStore.getItemAsync('kv_avatar_recipe');
       
       setAddress(addr);

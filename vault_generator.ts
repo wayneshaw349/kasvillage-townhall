@@ -108,7 +108,7 @@ export interface BackableWallet {
  * The key is derived FROM the mnemonic, so the cards always restore this wallet.
  */
 export async function generateBackableWallet(
-  network: 'mainnet' | 'testnet-10' | 'testnet-11' = 'testnet-10',
+  network: 'mainnet' | 'testnet-10' | 'testnet-11' = require('./kv_net').KV_NET,
 ): Promise<BackableWallet> {
   const entropy = secureRandom(ENTROPY_LEN);
   const mnemonic = await entropyToMnemonic(entropy);
@@ -174,7 +174,7 @@ export function recoverIdentityBoundMnemonic(
  */
 export async function recoverAndVerify(
   scannedWires: string[],
-  network: 'mainnet' | 'testnet-10' | 'testnet-11' = 'testnet-10',
+  network: 'mainnet' | 'testnet-10' | 'testnet-11' = require('./kv_net').KV_NET,
 ): Promise<BackableWallet> {
   const { mnemonic, bindingHex } = recoverIdentityBoundMnemonic(scannedWires);
   const w = await deriveWallet(mnemonic, network);

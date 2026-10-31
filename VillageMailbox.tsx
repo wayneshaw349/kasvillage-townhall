@@ -1010,7 +1010,7 @@ export default function VillageMailbox() {
             return { name: r.d.name || quad.game, category: r.d.category || 'Game', t: r.t || 0, o: r.o || '', quad, rec: r };
           };
           const byHead = new Map<string, any>();
-          // KV_MOD_PUBKEY: moderation key - its delists apply to any head. Rotate to a dedicated key before mainnet.
+          // KV_MOD_PUBKEY: moderation key - its delists apply to any head. Dedicated cold key (rotated 2026-10-29; old 0357e12a… is retired and public).
           const KV_MOD_PUBKEY = '0268c16db707f28883ebd4217d20ffb02a38d3227159dd34bdb4d40a3a715e9483';
           const delistByHead = new Map<string, any>();
           const _kvDl = (h: string, o: string) => { let best: any = null; for (const v of delistByHead.values()) if (v.head === h && (v.o === o || v.o === KV_MOD_PUBKEY) && (!best || v.t > best.t)) best = v; return best; }; // KV_DELIST_PERSIGNER
@@ -1348,6 +1348,7 @@ export default function VillageMailbox() {
       else if (ch.indexOf('whatsapp') >= 0) url = 'https://wa.me/' + hd.replace(/\D/g, '') + '?text=' + encodeURIComponent(msg);
       else if (ch.indexOf('twitter') >= 0 || ch === 'x' || ch.indexOf('x ') === 0) url = 'https://x.com/' + hd;
       if (!url && !rawHandle && cfg && cfg.repositoryUrl) url = String(cfg.repositoryUrl); // KV_QA_ALWAYS: no DM listed -> repo page
+      if (url && !/^(https:\/\/|mailto:)/i.test(url)) url = ''; // AUDIT: listing data must not open tel:/sms:/kaspa:/app deep links
       try { Clipboard.setStringAsync(msg); } catch {}
       setQaText('');
       console.log('[QA] question #' + n, 'ref', h.slice(0, 16), '->', url || '(copy only)');
@@ -1676,8 +1677,9 @@ export default function VillageMailbox() {
       } else if (section === 'dapps') {
         const _dAge = (item as any).record && (item as any).record.d && (item as any).record.d.age;
         if (!(globalThis as any).__kvAgeOk) (globalThis as any).__kvAgeOk = {};
-        if (!(globalThis as any).__kvAgeOk[item.id]) { // KV_AGE_GATE (Apple 4.7): async check, then re-press
-          require('./kv_age').ageAllowed(_dAge, item.name || 'this DApp').then((ok: boolean) => { if (ok) { (globalThis as any).__kvAgeOk[item.id] = 1; onPress(); } });
+        const _ak = item.id + '|' + String(_dAge || ''); // re-announced at a higher rating = new check
+        if (!(globalThis as any).__kvAgeOk[_ak]) { // KV_AGE_GATE (Apple 4.7): async check, then re-press
+          require('./kv_age').ageAllowed(_dAge, item.name || 'this DApp').then((ok: boolean) => { if (ok) { (globalThis as any).__kvAgeOk[_ak] = 1; onPress(); } });
           return;
         }
         if ((item as any).gameHash) {

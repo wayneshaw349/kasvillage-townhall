@@ -96,12 +96,35 @@ export async function fetchAudit(net: string = NET()): Promise<NodeAuditEntry[]>
   return (j.nodes || []) as NodeAuditEntry[];
 }
 
-// Phone re-runs the relay's challenge itself: the operator's transaction must hash
-// to the challenged txid (kv_archive.restTxId), so neither a lying relay nor a
-// proxying operator can collect tips without actually holding the record.
-async function phoneRecheck(_api: string, n: NodeAuditEntry): Promise<boolean> {
-  const id = String(n.challenge_txid || '');
-  const j = await require('./kv_archive').fetchVerifiedTx(String(n.api || ''), id);
+// Phone re-checks everything the relay claims, from public data only:
+//  - api + payout must come from a SIGNED node announce on the registry (not the relay);
+//  - the challenge must be a registry coin older than ~30h (only an archive holds it);
+//  - the operator's tx for it must hash to that txid and carry a payload.
+interface TipCtx { signed: Set<string>; aged: Set<string>; }
+async function tipContext(net: string): Promise<TipCtx> {
+  const { fetchRecords, verifyRecord, apiBase } = require('./kaspa_payload');
+  const signed = new Set<string>();
+  try {
+    for (const r of await fetchRecords(nodeRegistryAddress(net), net, 100, 3)) {
+      const rec: any = r.record;
+      if (rec && rec.k === 'registry' && rec.d && rec.d.category === 'node' && verifyRecord(rec)) signed.add(String(rec.d.payout) + '|' + String(rec.d.api).replace(/\/+$/, ''));
+    }
+  } catch {}
+  const aged = new Set<string>();
+  try {
+    const base = apiBase(net);
+    const vdaa = Number((await (await fetch(base + '/info/blockdag')).json()).virtualDaaScore || 0);
+    for (const kind of ['store', 'dapp', 'game', 'node']) {
+      const u: any[] = (await (await fetch(base + '/addresses/' + encodeURIComponent(registryAddress(kind, net)) + '/utxos')).json()) || [];
+      for (const c of u) if (vdaa && vdaa - Number(c?.utxoEntry?.blockDaaScore || vdaa) >= 1_100_000) aged.add(String(c?.outpoint?.transactionId || ''));
+    }
+  } catch {}
+  return { signed, aged };
+}
+async function phoneRecheck(ctx: TipCtx, n: NodeAuditEntry): Promise<boolean> {
+  const api = String(n.api || '').replace(/\/+$/, ''); const id = String(n.challenge_txid || '');
+  if (!ctx.signed.has(String(n.payout) + '|' + api) || !ctx.aged.has(id)) return false;
+  const j = await require('./kv_archive').fetchVerifiedTx(api, id);
   return !!(j && j.payload);
 }
 
@@ -116,9 +139,9 @@ export async function tipOperators(params: {
     const per = params.totalSompi / BigInt(passing.length);
     if (per < MIN_TIP_SOMPI) return { success: false, error: 'tip too small: < 0.2 KAS per operator across ' + passing.length + ' operators' };
     let paid = 0; let last = ''; const errs: string[] = [];
-    const api = require('./kaspa_payload').apiBase(o.network);
+    const ctx = await tipContext(o.network);
     for (const n of passing) {
-      if (!(await phoneRecheck(api, n))) { errs.push('skipped ' + n.payout.slice(0, 18) + '… (failed phone re-check)'); continue; }
+      if (!(await phoneRecheck(ctx, n))) { errs.push('skipped ' + n.payout.slice(0, 18) + '… (failed phone re-check)'); continue; }
       const r: any = await sendKaspaViaRest({ senderAddress: o.address, recipientAddress: n.payout, amountSompi: per, privateKeyHex: o.privateKeyHex, network: o.network as any });
       if (r && r.success) { paid++; last = r.txId; } else errs.push(String(r?.error || 'failed'));
       await new Promise((res) => setTimeout(res, 1500)); // let change settle between sends

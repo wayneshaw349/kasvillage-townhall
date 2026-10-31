@@ -441,6 +441,19 @@ const _spentOutpoints = new Set<string>();
 // Change outputs from our own accepted txs · chainable before REST sees them.
 const _pendingChange = new Map<string, { txId: string; index: number; amount: string; script: string; address: string; at?: number }>(); // KV_PHANTOM_CHANGE
 
+// Did this txid reach the chain? (used when a submit errors ambiguously)
+async function _kvLanded(network: string, txid: string): Promise<boolean> {
+  for (let i = 0; i < 3; i++) {
+    await new Promise((r) => setTimeout(r, 2500));
+    try {
+      const base = network === 'mainnet' ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org';
+      const r = await fetch(base + '/transactions/' + txid + '?inputs=false&outputs=false');
+      if (r.ok) { const j: any = await r.json(); if (j && (j.transaction_id === txid || j.hash)) return true; }
+    } catch {}
+  }
+  return false;
+}
+
 export async function sendKaspaViaRest(params: {
   senderAddress: string;
   recipientAddress: string;
@@ -600,7 +613,11 @@ export async function sendKaspaViaRest(params: {
     try {
       const { getLockedTotals, getAgreementCommitments } = await import('./utxo_ledger');
       const lt = await getLockedTotals();
-      let floor = lt.total;
+      // AUDIT 2026-10-31: the floor protects the MAIN wallet's collateral/IOU backing. Pledge
+      // and vault addresses hold none of it, so applying it there blocked reclaims and vault sends.
+      const _mains: string[] = [];
+      try { const SS = require('expo-secure-store'); for (const k of ['kaspa_address_real', 'kaspa_address_tutorial', 'kaspa_address', 'kv_kaspa_address']) { const a = await SS.getItemAsync(k); if (a) _mains.push(a); } } catch {}
+      let floor = (!_mains.length || _mains.indexOf(senderAddress) >= 0) ? lt.total : 0n;
       if (params.fundingAgrId) {
         const own = await getAgreementCommitments(params.fundingAgrId);
         for (const e of own) { if (e.status === 'collateral-committed') floor -= BigInt(e.amountSompi); }
@@ -716,15 +733,23 @@ export async function sendKaspaViaRest(params: {
       }
       if (_w.error) {
         console.error('[REST-TX] wRPC submit FAILED:', _w.error);
-        return { success: false, error: 'wRPC submit failed: ' + _w.error };
+        // AUDIT 2026-10-31: a timeout/disconnect can happen AFTER the node accepted the tx.
+        // Before calling it failed (which invites a retry = double payment), look it up.
+        if (_predictedTxId && !/orphan|already spent|double|insufficient|rejected|invalid|mass|fee/i.test(_w.error) && await _kvLanded(network, _predictedTxId)) {
+          console.warn('[REST-TX] submit errored but the tx IS on chain - treating as sent');
+          result = { transactionId: _predictedTxId };
+        } else {
+          return { success: false, error: 'wRPC submit failed: ' + _w.error + (_predictedTxId ? ' (it may still land: check tx ' + _predictedTxId.slice(0, 12) + '… before retrying)' : '') };
+        }
+      } else {
+        // [KV_TXID_TRUTH] relay is untrusted: predicted id wins; a different id = failure.
+        const _rid = kvResolveSubmittedTxId(_predictedTxId, _w.transactionId);
+        if ('error' in _rid) {
+          console.error('[REST-TX] relay txid rejected:', _rid.error);
+          return { success: false, error: _rid.error };
+        }
+        result = { transactionId: _rid.txId };
       }
-      // [KV_TXID_TRUTH] relay is untrusted: predicted id wins; a different id = failure.
-      const _rid = kvResolveSubmittedTxId(_predictedTxId, _w.transactionId);
-      if ('error' in _rid) {
-        console.error('[REST-TX] relay txid rejected:', _rid.error);
-        return { success: false, error: _rid.error };
-      }
-      result = { transactionId: _rid.txId };
     } else {
       const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
         method: 'POST',

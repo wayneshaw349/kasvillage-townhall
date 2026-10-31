@@ -7155,6 +7155,13 @@ async fn verify_code_signature_api(
 async fn register_signature_api(
     body: web::Json<RegisterSignatureRequest>,
 ) -> impl Responder {
+    // AUDIT 2026-10-31: the only check was a non-empty developer_signature, so anyone could
+    // overwrite a real build's baseline (or whitelist a tampered hash) and grow the map without
+    // bound. No client calls it; closed until it verifies a real developer key.
+    if std::env::var("KV_CODE_REGISTER_OPEN").ok().as_deref() != Some("1") {
+        let _ = &body;
+        return HttpResponse::Gone().json(json!({ "success": false, "error": "code registration is closed" }));
+    }
     match register_app_signature(&body) {
         Ok(sig) => HttpResponse::Ok().json(json!({
             "success": true,
@@ -7353,10 +7360,14 @@ async fn verify_academic(
     }
     let challenge = dkim_verify::academic_challenge(&pubkey);
     let raw = body.email_headers.clone();
+    // AUDIT 2026-10-31: bound the work one request can cause (DoH lookups, header scans).
+    if raw.len() > 256 * 1024 {
+        return HttpResponse::BadRequest().json(serde_json::json!({ "verified": false, "error": "email headers too large (max 256 KB)" }));
+    }
 
     // DNS keys are fetched up front for every (d, s) in the message, then verification is sync.
     let mut keys: std::collections::HashMap<(String, String), Result<String, String>> = std::collections::HashMap::new();
-    for key in dkim_verify::signature_keys(&raw) {
+    for key in dkim_verify::signature_keys(&raw).into_iter().take(5) {
         let r = dkim_verify::fetch_dkim_key(&key.0, &key.1).await;
         keys.insert(key, r);
     }

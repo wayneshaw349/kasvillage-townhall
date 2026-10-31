@@ -2748,7 +2748,10 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       if (!_priv || !_addr) throw new Error('wallet keys unavailable');
       const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
       const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: require('./kv_net').KV_NET as any };
-      const _nonce = 7000 + (Math.floor(Date.now() / 1000) % 1000000); // unique per abstract; saved below for pledge withdrawal
+      // AUDIT 2026-10-31: the old 7000+(seconds % 1e6) repeated every ~11.6 days and overlapped the
+      // hardcoded game nonce bases (9414/10214). Monotonic counter from 20000 instead.
+      let _nonce = 20000;
+      try { const _AS = require('@react-native-async-storage/async-storage').default; _nonce = Math.max(20000, parseInt((await _AS.getItem('kv_abs_nonce_next')) || '20000', 10) || 20000); await _AS.setItem('kv_abs_nonce_next', String(_nonce + 1)); } catch {}
       const _pubRes: any = await publishContent(_owner, 'store', { name: newAbstract.title, category: 'Academic', abstractId: newAbstract.id }, _nonce, 100_000_000n);
       if (!_pubRes || _pubRes.success === false) throw new Error('abstract publish failed: ' + (_pubRes && _pubRes.error));
       try { const AS = require('@react-native-async-storage/async-storage').default; AS.setItem('kv_abs_nonce_' + newAbstract.id, String(_nonce)); } catch {}
@@ -3045,7 +3048,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                           
                           <TouchableOpacity onPress={() => {
                             const { Linking } = require('react-native');
-                            Linking.openURL(selectedAbstract.repositoryUrl);
+                            if (/^https:\/\//i.test(String(selectedAbstract.repositoryUrl || ''))) Linking.openURL(selectedAbstract.repositoryUrl); // AUDIT: https only
                           }} style={{ marginTop: 10 }}>
                             <Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>📂 View Repository</Text>
                           </TouchableOpacity>

@@ -347,7 +347,14 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
             proofJson = pj.proof;
             proofType = String(pj.proof.proof_type || '');
             l1EventsRoot = String(pj.proof.public_inputs?.l1_events_root || '');
-            proofVerified = await kvCheckProof('stats', pj.proof);
+            // Bind the proof to THIS lookup: its public pubkey_hash must be sha256(pubkey).
+            let _boundOk = false;
+            try {
+              const { sha256 } = require('@noble/hashes/sha256'); const { bytesToHex, utf8ToBytes } = require('@noble/hashes/utils');
+              _boundOk = String(pj.proof.public_inputs?.pubkey_hash || '').toLowerCase() === bytesToHex(sha256(utf8ToBytes(String(lookupResult.pubkey))));
+            } catch {}
+            proofVerified = _boundOk && (await kvCheckProof('stats', pj.proof));
+            if (!_boundOk) console.warn('[StatsLookup] proof is not about this pubkey - rejected');
           }
         } catch (e) { console.warn('[StatsLookup] Proof fetch/check failed:', e); }
 

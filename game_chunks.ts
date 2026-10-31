@@ -263,6 +263,11 @@ export async function fetchGamePuzzle(
     // CACHE FIRST: the phone is the runtime. A verified cached copy plays
     // with zero network - the manifest fetch below is only for first installs
     // and updates, so a recycled relay can never brick an installed game.
+    // AUDIT 2026-10-31: a moderator delist must also stop copies already installed.
+    try {
+      const _ga: any = JSON.parse((await require('@react-native-async-storage/async-storage').default.getItem('kv_game_mod_actions')) || '{}');
+      if (_ga[pinnedHead] && _ga[pinnedHead].del) return { html: null, error: 'This game was removed by the moderator.' };
+    } catch {}
     {
       const cachedOff = await gameCacheLoadOffline(pinnedHead);
       if (cachedOff) { onProgress && onProgress(1, 1); return { html: cachedOff }; }

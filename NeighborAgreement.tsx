@@ -1612,9 +1612,12 @@ function parseClipboard(raw: string): {
             const sentKey = 'kv_frost_poll_sent_' + entry.agrId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
             if (alreadySent) { console.log('[Crash-Recovery] Already sent for', entry.agrId.slice(0,12)); continue; }
+            // AUDIT 2026-10-31: share the poll's in-flight guard so the two paths can't both fund.
+            if (_sendInFlight.current.has(entry.agrId)) continue;
             // Auto-send buyer collateral
             const rWallet = await loadMainWallet();
             if (!rWallet?.privKeyHex) continue;
+            _sendInFlight.current.add(entry.agrId);
             console.log('[Crash-Recovery] Seller funded', entry.agrId.slice(0,12), '- auto-sending', expectedBuyer / 1e8, 'KAS');
             const { sendKaspaViaRest: sendRecover } = require('./kaspa_rest_tx');
             const rResult = await sendRecover({
@@ -1769,6 +1772,8 @@ function parseClipboard(raw: string): {
             } catch (e) { console.warn('[Kill-Gate] Check failed — NOT funding:', e); return; }
             const sentKey = 'kv_frost_poll_sent_' + contract.agreementId;
             const alreadySent = await AsyncStorage.getItem(sentKey);
+            // AUDIT 2026-10-31: the persisted marker survives a remount; the in-memory set does not.
+            if (alreadySent) { console.log('[FROST-Poll] already funded (persisted marker) - not sending again'); return; }
             if (!_sendInFlight.current.has(contract.agreementId || '') && !cancelled) {
               try {
                 const wallet = await loadMainWallet();

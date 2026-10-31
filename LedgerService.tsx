@@ -51,6 +51,11 @@ export function LedgerService({ onRegister }: { onRegister?: () => void } = {}) 
     const kas = parseFloat(tipKas);
     if (!isFinite(kas) || kas <= 0) { Alert.alert('Tip', 'Enter a valid KAS amount'); return; }
     if (passing.length === 0) { Alert.alert('Tip', 'No passing operators to tip right now'); return; }
+    // AUDIT 2026-10-31: real KAS leaves the wallet - confirm first.
+    const ok = await new Promise<boolean>((res) => Alert.alert('Send tips?',
+      kas + ' KAS split across up to ' + passing.length + ' operator(s), one payment each. Your phone re-checks each operator first and skips any that fail.',
+      [{ text: 'Cancel', style: 'cancel', onPress: () => res(false) }, { text: 'Send ' + kas + ' KAS', onPress: () => res(true) }], { cancelable: true, onDismiss: () => res(false) }));
+    if (!ok) return;
     setTipping(true);
     try {
       const res = await tipOperators({ totalSompi: BigInt(Math.round(kas * 1e8)) });

@@ -19,12 +19,17 @@ export function ageFromHtml(html: string): AgeBand | null {
   return m ? normAge(m[1]) : null;
 }
 
-/** Publisher: ask for a rating. Resolves null on cancel. */
+/** Publisher: ask for a rating. Resolves null on cancel. Android Alerts show at most
+ *  3 buttons, so this asks in two steps (each with Cancel). */
 export function askGameAge(gameId: string): Promise<AgeBand | null> {
-  return new Promise((res) => Alert.alert('Age rating for ' + gameId,
-    'Required for app-store rules. 4+ no objectionable content · 9+ mild cartoon violence · 13+ moderate violence, mild language · 17+ frequent violence, mature themes.',
-    [...AGE_BANDS.map((b) => ({ text: b, onPress: () => res(b) })), { text: 'Cancel', style: 'cancel' as const, onPress: () => res(null) }],
-    { cancelable: true, onDismiss: () => res(null) }));
+  const step = (title: string, msg: string, opts: Array<[string, () => void]>, res: (v: any) => void) =>
+    Alert.alert(title, msg, [...opts.map(([t, f]) => ({ text: t, onPress: f })), { text: 'Cancel', style: 'cancel' as const, onPress: () => res(null) }],
+      { cancelable: true, onDismiss: () => res(null) });
+  return new Promise((res) => step('Age rating for ' + gameId,
+    'Required for app-store rules. Who is it for?',
+    [['Everyone / kids', () => step('Everyone or kids', '4+: no objectionable content\n9+: mild cartoon or fantasy violence', [['4+', () => res('4+')], ['9+', () => res('9+')]], res)],
+     ['Teens / adults', () => step('Teens or adults', '13+: moderate violence, mild language\n17+: frequent violence, mature themes', [['13+', () => res('13+')], ['17+', () => res('17+')]], res)]],
+    res));
 }
 
 async function readBand(): Promise<number | null> {
@@ -36,7 +41,8 @@ export async function ensureUserAge(): Promise<number | null> {
   const have = await readBand(); if (have) return have;
   const pick: number | null = await new Promise((res) => Alert.alert('How old are you?',
     'Community games carry age ratings. This stays on your phone and is only used to filter downloads.',
-    [{ text: 'Under 13', onPress: () => res(9) }, { text: '13 - 16', onPress: () => res(13) }, { text: '17 or older', onPress: () => res(17) }, { text: 'Cancel', style: 'cancel', onPress: () => res(null) }],
+    // 3 buttons max on Android; tapping outside the dialog cancels.
+    [{ text: 'Under 13', onPress: () => res(9) }, { text: '13 - 16', onPress: () => res(13) }, { text: '17 or older', onPress: () => res(17) }],
     { cancelable: true, onDismiss: () => res(null) }));
   if (pick) { try { await AsyncStorage.setItem(KEY, String(pick)); } catch {} }
   return pick;
