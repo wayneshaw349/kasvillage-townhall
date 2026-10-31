@@ -46,6 +46,7 @@ mod canary_scanner;
 mod content_validator_sync;
 mod node_registry;
 mod game_rooms;
+mod dkim_verify;
 
 use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, Responder, middleware::Logger};
 use actix_cors::Cors;
@@ -7329,38 +7330,87 @@ impl Halo2Prover {
 #[derive(Debug, Deserialize)]
 pub struct AcademicVerifyRequest {
     pub owner_apt: String,
-    pub email_headers: String,
-    pub dkim_signature: String,
+    pub email_headers: String,        // raw email (headers, optionally + body) incl. DKIM-Signature
+    #[serde(default)]
+    pub dkim_signature: String,       // legacy field; the raw message is authoritative
     pub abstract_text: Option<String>,
+    #[serde(default)]
+    pub pubkey: Option<String>,       // else taken from the X-Pubkey header
 }
 
+/// KV_ACADEMIC_V2: real DKIM (RSA-SHA256 against the domain's DNS key) + academic policy
+/// (aligned From, academic d=, pubkey challenge in the signed Subject) -> instance-bound proof.
+/// Replaces the old path that passed any base64 blob >= 64 bytes as "edu verified".
 async fn verify_academic(
+    req: HttpRequest,
     body: web::Json<AcademicVerifyRequest>,
 ) -> impl Responder {
-    let dkim_result = verify_dkim_signature(&body.email_headers, &body.dkim_signature, "");
-    
-    let abstract_hash = body.abstract_text.as_ref().map(|t| {
-        hex::encode(sha256_hash(t.as_bytes()))
-    });
-    
-    let verified = dkim_result.passed;
-    
-    let verification = AcademicVerification {
-        profile_id: format!("AC-{}", current_timestamp()),
-        owner_apt: body.owner_apt.clone(),
-        domain_type: dkim_result.domain_type.clone(),
-        dkim_verified: dkim_result.passed,
-        abstract_hash,
-        credentials: Vec::new(),
-        verified,
-        arweave_tx: {
-            let p = { let mut lh = Sha256::new(); lh.update(b"KV_ACADEMIC_V1:"); lh.update(body.owner_apt.as_bytes()); lh.update(body.email_headers.as_bytes()); let lhash: [u8;32] = lh.finalize().into(); let leaf = bytes_to_fq(&lhash); let mut tree = SparseMerkleTree::new(8); let idx: u64 = u64::from_le_bytes([lhash[0],lhash[1],lhash[2],lhash[3],0,0,0,0]) % 256; tree.update(idx, leaf); let root = tree.root(); let mp = tree.generate_proof(idx); let mut ib = [false;8]; let mut pv = [Value::unknown();8]; for i in 0..8 { ib[i]=(idx>>i)&1==1; pv[i]=Value::known(mp.path[i].sibling); } let circ = SparseMerkleCircuit::<8>{leaf:Value::known(leaf),index:ib,proof:pv,root:Value::known(root)}; let ps = ProofSystem::new(HALO2_K_ACADEMIC); let (ph,pt) = match ps.prove_with_bytes(circ,vec![vec![root]]){Ok((b,true))=>{eprintln!("[Proof] Academic K=17: {} bytes",b.len());(hex::encode(&b),"halo2-ipa-k17")}_=>(hex::encode(&lhash),"sha256-fallback")}; VerificationProof{proof_type:format!("academic-{}",pt),subject_id:body.owner_apt.clone(),verified:true,proof_bytes:ph,public_inputs:vec!["academic".into(),format!("{:?}",root)],timestamp:current_timestamp()} };
-            Some(p.proof_bytes)
-        },
-        timestamp: current_timestamp(),
+    let pubkey = body.pubkey.clone()
+        .or_else(|| req.headers().get("X-Pubkey").and_then(|v| v.to_str().ok()).map(String::from))
+        .unwrap_or_default().trim().to_ascii_lowercase();
+    if pubkey.len() != 66 && pubkey.len() != 64 {
+        return HttpResponse::BadRequest().json(serde_json::json!({"verified": false, "dkim_verified": false, "error": "pubkey required (body.pubkey or X-Pubkey)"}));
+    }
+    let challenge = dkim_verify::academic_challenge(&pubkey);
+    let raw = body.email_headers.clone();
+
+    // DNS keys are fetched up front for every (d, s) in the message, then verification is sync.
+    let mut keys: std::collections::HashMap<(String, String), Result<String, String>> = std::collections::HashMap::new();
+    for key in dkim_verify::signature_keys(&raw) {
+        let r = dkim_verify::fetch_dkim_key(&key.0, &key.1).await;
+        keys.insert(key, r);
+    }
+    let key_for = |d: &str, sel: &str| -> Result<String, String> {
+        keys.get(&(d.to_ascii_lowercase(), sel.to_string())).cloned().unwrap_or_else(|| Err("key not fetched".into()))
     };
-    
-    HttpResponse::Ok().json(verification)
+    let dk = dkim_verify::verify_message(&raw, key_for, dkim_verify::academic_policy(&pubkey));
+
+    if !dk.passed {
+        return HttpResponse::Ok().json(serde_json::json!({
+            "verified": false, "dkim_verified": false,
+            "error": dk.error, "challenge": challenge,
+            "how_to": "From your academic address, send yourself an email whose Subject contains the challenge, then paste that email's full raw source.",
+        }));
+    }
+    match townhall_verification_complete::generate_academic_proof(&pubkey, &dk, body.abstract_text.as_deref()) {
+        Ok(proof) => HttpResponse::Ok().json(serde_json::json!({
+            "verified": true,
+            "dkim_verified": true,
+            "profile_id": format!("AC-{}", &proof.public_inputs.signed_input_hash[..12]),
+            "owner_apt": body.owner_apt,
+            "domain_type": "edu",
+            "domain": dk.domain,
+            "body_checked": dk.body_checked,
+            "abstract_hash": proof.public_inputs.abstract_hash,
+            "proof": proof,
+            "check": "POST /api/verify/academic-check { proof } - anyone holding the email can also re-run DKIM and compare signed_input_hash",
+        })),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"verified": false, "dkim_verified": true, "error": e})),
+    }
+}
+
+/// KV_DAPP_V2: anyone verifies a DApp proof; include `code` to also check it is about that code.
+async fn api_verify_dapp_check(body: web::Json<serde_json::Value>) -> HttpResponse {
+    let proof: townhall_verification_complete::DAppProof =
+        match serde_json::from_value(body.get("proof").cloned().unwrap_or(serde_json::Value::Null)) {
+            Ok(p) => p, Err(e) => return HttpResponse::BadRequest().json(serde_json::json!({"valid": false, "error": format!("bad proof object: {}", e)})),
+        };
+    let code = body.get("code").and_then(|c| c.as_str());
+    let r = townhall_verification_complete::verify_dapp_proof(&proof, code);
+    HttpResponse::Ok().json(serde_json::json!({
+        "valid": r.is_ok(), "error": r.err(), "code_checked": code.is_some(),
+        "ruleset_current": proof.public_inputs.ruleset_hash == hex::encode(*townhall_verification_complete::DAPP_RULESET_HASH),
+    }))
+}
+
+/// KV_ACADEMIC_V2: anyone verifies an academic proof against the published VK.
+async fn api_verify_academic_check(body: web::Json<serde_json::Value>) -> HttpResponse {
+    let proof: townhall_verification_complete::AcademicProof =
+        match serde_json::from_value(body.get("proof").cloned().unwrap_or(serde_json::Value::Null)) {
+            Ok(p) => p, Err(e) => return HttpResponse::BadRequest().json(serde_json::json!({"valid": false, "error": format!("bad proof object: {}", e)})),
+        };
+    let r = townhall_verification_complete::verify_academic_proof(&proof);
+    HttpResponse::Ok().json(serde_json::json!({ "valid": r.is_ok(), "error": r.err(), "domain": proof.public_inputs.domain }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -7939,8 +7989,9 @@ pub fn configure_routes_v3(cfg: &mut web::ServiceConfig) {
         .route("/api/verify/game", web::post().to(verify_game))
         .route("/api/verify/stats-vk", web::get().to(townhall_verification_complete::api_get_stats_vk))
         .route("/api/verify/merkle-proof/{pubkey}", web::post().to(townhall_verification_complete::api_get_merkle_membership_proof))
-        .route("/api/verify/academic", web::post().to(townhall_verification_complete::api_verify_academic))
-        .route("/api/verify/academic", web::post().to(townhall_verification_complete::api_verify_academic))
+        // KV_ACADEMIC_V2: the shadowing registrations of the old handler are gone; one handler below
+        .route("/api/verify/academic-check", web::post().to(api_verify_academic_check))
+        .route("/api/verify/dapp-check", web::post().to(api_verify_dapp_check))
 
         .route("/api/verify/academic", web::post().to(verify_academic))
         .route("/api/verify/service", web::post().to(verify_service))

@@ -513,6 +513,7 @@ export class TownHallClient {
       body: {
         ts,
         owner_apt: params.ownerApt,
+        pubkey: pubkey || '',
         email_headers: params.emailHeaders,
         dkim_signature: params.dkimSignature,
         abstract_text: params.abstractText || null,

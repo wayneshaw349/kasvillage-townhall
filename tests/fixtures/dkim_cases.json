@@ -1,0 +1,115 @@
+{
+ "key_spki_b64": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy6maIIpuU/NbbzzUZ6+ULPCvXtTL3YkPl+am/rZLurntcN1MnFoHKJHBM8eY0uHW9p9/k1nYXgnjq+b/hAKrKmDOvb9puuCHhPaAB4gsHoFHiPwLo1ak+u557D/D2wWBViefqSqlHgUSwEHnJ0CffMT+iFkeP5HLCNpKHW9EOq5v7j1KAckZy240DxExeI/zi7/EzfSXD+01LCd7pkogIwdR+i3uuDI7kUMin6fmU53A7+TASRHUtmkU370YORl1zd4RKn5dvrX8r76mpEOFZyP0xom8TZycUnqJn2utXSiHBdnYIbG2gaWUrqjBGmdxLsw3/lo82TW7qWjIh4Y8+wIDAQAB",
+ "key_pkcs1_b64": "MIIBCgKCAQEAy6maIIpuU/NbbzzUZ6+ULPCvXtTL3YkPl+am/rZLurntcN1MnFoHKJHBM8eY0uHW9p9/k1nYXgnjq+b/hAKrKmDOvb9puuCHhPaAB4gsHoFHiPwLo1ak+u557D/D2wWBViefqSqlHgUSwEHnJ0CffMT+iFkeP5HLCNpKHW9EOq5v7j1KAckZy240DxExeI/zi7/EzfSXD+01LCd7pkogIwdR+i3uuDI7kUMin6fmU53A7+TASRHUtmkU370YORl1zd4RKn5dvrX8r76mpEOFZyP0xom8TZycUnqJn2utXSiHBdnYIbG2gaWUrqjBGmdxLsw3/lo82TW7qWjIh4Y8+wIDAQAB",
+ "domain": "mit.edu",
+ "selector": "sel2026",
+ "pubkey": "037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133",
+ "challenge": "KV-695C02D7AE",
+ "cases": [
+  {
+   "name": "relaxed_relaxed",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=EkP9DxeKeJGVZuqauCyvtpTwoFAJlSx8L+N183g3GQWPtIzJ4YV4yfD5+VdAJHESS3rB/\r\n 4ePTPZJpm97IsMv8yGtEUIB9M76Oqvd7Kcn0KKAUCcL0LO6ZPgbu10V5LJUbrFvcAWrayoG\r\n ddfPU6xECRPmwHkL9JY5Myxg86udVX7kGAK3ABH+YWYWUFOkpy6v8NfGdt6Be9FQ+H7NDTf\r\n lIYOxqmEzVZy7KEQl8nrcBywfVy6MWycMlhnx4V7Tgfxta4fNIQK5y/GvuZuVzUfkycwsyE\r\n ZDocWqwCFhdbJ6b7b0g8Q9Vam5e9U8slj7vmCezD9jYjJBBI5DYjIaGbeZVg==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": true,
+   "note": ""
+  },
+  {
+   "name": "simple_simple",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=simple/simple; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=u/rv2YOwuzEku107UJq4etbLTBnebC7RXf7y0YO5VEU=;\r\n b=N8X6Fma33DL9RVmnpjm1Xtf+WJU13sIo9T4O14k76iaF3GNHMcZw1Sz4iZQJQLK4F25Nw\r\n SgXsgH6ueO5lhBtFB/XeNrK5AULQvVDmkonJUwGQT2FN7Kp5N1jZHt53hZsDHGqbnKxdZY7\r\n EmbYcvHe0o1wYQ51QyRmJvAxibe50GHZrtrTdb94rPCZxCxRGRlhjlkRC8TIL5mhO5vhaQR\r\n HmI4Wggug+kxcxKj8uIZGKczSbcxpbHHAhJHsZo0HGkC+Hc97O05nBdc7gCqjTF8t+2P0XB\r\n slXwKmrj6L+JjZO81q6RxmhmX3AKfEDtqT2wHlbZsBi6rZpezxaXFJJDS5IQ==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": true,
+   "note": ""
+  },
+  {
+   "name": "relaxed_simple",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=u/rv2YOwuzEku107UJq4etbLTBnebC7RXf7y0YO5VEU=;\r\n b=EiLZSFVgwnCeziEi07T0REnDInp10S+PPMtKLztvRsiHS+SfV7KJgzR2Ew91RTAKf6lsa\r\n t0q80LBaaTDq+txEe6ceDZsF0ySdO7YAxxg5Q9eJkkzsWcbUalVkpToVPaqRdkXa7udrLTn\r\n x/8jBtsoDDSJhkHubIKunwBpOU/gnbWul/nuzeJF3HGtRW8behhsXzcDeIprRL/xDp8boC1\r\n YyGkpETlkEVzv0+XlFjVdaRob+jFdLou9WUnB3/KAq+E8KZ/CfND8qSiKlFvHQOKI0iMaLj\r\n xgcMpQyHhUjxC+Skyg8oPjSd2P4b64NbAxnjvTIZ0OdvHmhczswwArvb8Png==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": true,
+   "note": ""
+  },
+  {
+   "name": "folded_subject",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=EkP9DxeKeJGVZuqauCyvtpTwoFAJlSx8L+N183g3GQWPtIzJ4YV4yfD5+VdAJHESS3rB/\r\n 4ePTPZJpm97IsMv8yGtEUIB9M76Oqvd7Kcn0KKAUCcL0LO6ZPgbu10V5LJUbrFvcAWrayoG\r\n ddfPU6xECRPmwHkL9JY5Myxg86udVX7kGAK3ABH+YWYWUFOkpy6v8NfGdt6Be9FQ+H7NDTf\r\n lIYOxqmEzVZy7KEQl8nrcBywfVy6MWycMlhnx4V7Tgfxta4fNIQK5y/GvuZuVzUfkycwsyE\r\n ZDocWqwCFhdbJ6b7b0g8Q9Vam5e9U8slj7vmCezD9jYjJBBI5DYjIaGbeZVg==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage   verification\r\n\t KV-695C02D7AE   \r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": true,
+   "note": ""
+  },
+  {
+   "name": "dup_header",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject;\r\n bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=xtbe17N4guanF463PCiZKk0iW3uTB51kNp8gPuti+DWBe9LmjPtzRiR86fZtPhi9fhebb\r\n won9rhz0h8DqoamE6PpvDGqMKRvsxQHa/+zwWLLkCU398v/bjh32L4Pf4VwfjzpO/oy5RRC\r\n pKuV5KIcKv2TGuRRXYabfmjY2Oo0WEclWxbyyLYRhaR95yamTlHkiUCkQDwHB4jAZwcMnnH\r\n WsX7+6QoxNZhG1P4l3nTqsf6nKtCkn232MqnsUGyKCUZDHrXTKHlU4ET17MNEZt+dDGVLVO\r\n LaBY62lDeNNP0259Ifh8FlS7QPLgwuSnKgPzQexTlvEgtATUHua64Dnv3yPQ==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\nTo: second@cs.mit.edu\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": true,
+   "note": ""
+  },
+  {
+   "name": "oversigned",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : subject :\r\n subject : to; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=MByExBpwrPJOaiPomXIrYnBZgpzmhTSq57xqC+3AZ5bAtmeGbyCLyb1c5jFGCY6VzrO7B\r\n b4HS+bwFG3lp14f7bQj0/6nYZggXKApnuqiWHfUe4WmVkv34IrrB0+qpmiubBKi29YhFfOm\r\n W+Q9Hxik7C4Cvm/9MCXeaMyIYGHK5a8bTVtgnxlavtsw2zYuxfb/f8Xw340wOwAhjaccLio\r\n bzkYDvtjZSTPtVTimZ6dAt2mwY8MJIiYB7GNY65mYW5UYphVMkF5/vmNf8qHY5v5T12Zirz\r\n gniJB764znLThY7JhVByhYxyG2UFjrM1SQmZpqNdalBJYkhky8avK25idZmQ==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": true,
+   "note": ""
+  },
+  {
+   "name": "headers_only",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=EkP9DxeKeJGVZuqauCyvtpTwoFAJlSx8L+N183g3GQWPtIzJ4YV4yfD5+VdAJHESS3rB/\r\n 4ePTPZJpm97IsMv8yGtEUIB9M76Oqvd7Kcn0KKAUCcL0LO6ZPgbu10V5LJUbrFvcAWrayoG\r\n ddfPU6xECRPmwHkL9JY5Myxg86udVX7kGAK3ABH+YWYWUFOkpy6v8NfGdt6Be9FQ+H7NDTf\r\n lIYOxqmEzVZy7KEQl8nrcBywfVy6MWycMlhnx4V7Tgfxta4fNIQK5y/GvuZuVzUfkycwsyE\r\n ZDocWqwCFhdbJ6b7b0g8Q9Vam5e9U8slj7vmCezD9jYjJBBI5DYjIaGbeZVg==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n",
+   "expect_dkim": true,
+   "expect_academic": true,
+   "note": ""
+  },
+  {
+   "name": "lf_endings",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\n : date : message-id; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\n b=EkP9DxeKeJGVZuqauCyvtpTwoFAJlSx8L+N183g3GQWPtIzJ4YV4yfD5+VdAJHESS3rB/\n 4ePTPZJpm97IsMv8yGtEUIB9M76Oqvd7Kcn0KKAUCcL0LO6ZPgbu10V5LJUbrFvcAWrayoG\n ddfPU6xECRPmwHkL9JY5Myxg86udVX7kGAK3ABH+YWYWUFOkpy6v8NfGdt6Be9FQ+H7NDTf\n lIYOxqmEzVZy7KEQl8nrcBywfVy6MWycMlhnx4V7Tgfxta4fNIQK5y/GvuZuVzUfkycwsyE\n ZDocWqwCFhdbJ6b7b0g8Q9Vam5e9U8slj7vmCezD9jYjJBBI5DYjIaGbeZVg==\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\nFrom: Ada Lovelace <ada@cs.mit.edu>\nTo: ada@cs.mit.edu\nSubject: KasVillage verification KV-695C02D7AE\nDate: Fri, 30 Oct 2026 20:00:00 -0400\nMessage-ID: <abc123@cs.mit.edu>\n\nHello,\n\nverifying my address.  Thanks!\n\n\n",
+   "expect_dkim": true,
+   "expect_academic": true,
+   "note": ""
+  },
+  {
+   "name": "tampered_subject",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=EkP9DxeKeJGVZuqauCyvtpTwoFAJlSx8L+N183g3GQWPtIzJ4YV4yfD5+VdAJHESS3rB/\r\n 4ePTPZJpm97IsMv8yGtEUIB9M76Oqvd7Kcn0KKAUCcL0LO6ZPgbu10V5LJUbrFvcAWrayoG\r\n ddfPU6xECRPmwHkL9JY5Myxg86udVX7kGAK3ABH+YWYWUFOkpy6v8NfGdt6Be9FQ+H7NDTf\r\n lIYOxqmEzVZy7KEQl8nrcBywfVy6MWycMlhnx4V7Tgfxta4fNIQK5y/GvuZuVzUfkycwsyE\r\n ZDocWqwCFhdbJ6b7b0g8Q9Vam5e9U8slj7vmCezD9jYjJBBI5DYjIaGbeZVg==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-0000000000\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": false,
+   "expect_academic": false,
+   "note": "signed subject altered"
+  },
+  {
+   "name": "tampered_from",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=EkP9DxeKeJGVZuqauCyvtpTwoFAJlSx8L+N183g3GQWPtIzJ4YV4yfD5+VdAJHESS3rB/\r\n 4ePTPZJpm97IsMv8yGtEUIB9M76Oqvd7Kcn0KKAUCcL0LO6ZPgbu10V5LJUbrFvcAWrayoG\r\n ddfPU6xECRPmwHkL9JY5Myxg86udVX7kGAK3ABH+YWYWUFOkpy6v8NfGdt6Be9FQ+H7NDTf\r\n lIYOxqmEzVZy7KEQl8nrcBywfVy6MWycMlhnx4V7Tgfxta4fNIQK5y/GvuZuVzUfkycwsyE\r\n ZDocWqwCFhdbJ6b7b0g8Q9Vam5e9U8slj7vmCezD9jYjJBBI5DYjIaGbeZVg==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <eve@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": false,
+   "expect_academic": false,
+   "note": "signed from altered"
+  },
+  {
+   "name": "tampered_body",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=EkP9DxeKeJGVZuqauCyvtpTwoFAJlSx8L+N183g3GQWPtIzJ4YV4yfD5+VdAJHESS3rB/\r\n 4ePTPZJpm97IsMv8yGtEUIB9M76Oqvd7Kcn0KKAUCcL0LO6ZPgbu10V5LJUbrFvcAWrayoG\r\n ddfPU6xECRPmwHkL9JY5Myxg86udVX7kGAK3ABH+YWYWUFOkpy6v8NfGdt6Be9FQ+H7NDTf\r\n lIYOxqmEzVZy7KEQl8nrcBywfVy6MWycMlhnx4V7Tgfxta4fNIQK5y/GvuZuVzUfkycwsyE\r\n ZDocWqwCFhdbJ6b7b0g8Q9Vam5e9U8slj7vmCezD9jYjJBBI5DYjIaGbeZVg==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks?\r\n\r\n\r\n",
+   "expect_dkim": false,
+   "expect_academic": false,
+   "note": "body altered -> bh mismatch"
+  },
+  {
+   "name": "wrong_challenge",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=lCFXDzgxtb2QczLrihPpTImjfQ/lc8sw00ZROjWg7xrAn9EpB3BS0JmHVQPDO+hne7kW0\r\n qjEP20CJP/ldMtI58pyDxmInlfRYnqyzzzJ7bH4H+sD7hOeO7WNe3zx4Eq6+bhsvihxCIPG\r\n /aJUljZ3JbAbKc/kvyHGsWFOMZU7cSyjT/7uyxpw1wXORxIM2dKo/m4/LGlhkyC+58Sn1d7\r\n jeWzGu+o/rGiNpEmeFdxN/rYbFAYSm9xntZCV/28txLD7KyciN8zKHPOTLUPRTwPrwythuU\r\n I4Y4gJLsRceprb476WUyB3nhYsRfK1XOxEWLMZOC1AYIAPxulhT6YjQBBqyQ==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-ABCDEF0123\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": false,
+   "note": "challenge for another pubkey"
+  },
+  {
+   "name": "not_academic",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=gmail.com;\r\n i=@gmail.com; q=dns/txt; s=sel2026; t=1793407868; h=from : to :\r\n subject : date : message-id;\r\n bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=ltHeWYPR2066Ic8mxX6pC9U5Uugmwn9wRZE9Tf0yEpODPu5CuXIdtdZLXVS6VycRRz+qb\r\n Q0jd39OX/u3vsSSoxIIy5feNoz1SFOauJubCcxgCxFL7mY9/B6bzSvW+h2j8wDszxJrkXbA\r\n cS8Uia8T2BtrHTN+8KfJac7KpWH79QWBmnsc61IEjbKx9dxyctTy/nlk/dAIM1EfzsVBW3D\r\n Lyrxz9YT0zBOuL8fy+NHRFvEuuRBfAEqIf66nRRvw3tDxMB6f2K6ZDOXIG4HYpmCqWAgcMN\r\n R5WrUNGAO7J/QZc98gfXClHH6cqXBI0e7zbOK2ZtiVsrbWwNP00UBSqhRSUw==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada <ada@gmail.com>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": false,
+   "note": "gmail is not academic"
+  },
+  {
+   "name": "misaligned_from",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : subject\r\n : date : message-id; bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=g5iYVJXmBSKdtnhoQVbLBkiyuFuHbPCELq+Afx/7YLfGnnwj/lZ5CLO9BWTg7l+vLUQNf\r\n PG3n31VYRpvwTF9d0M/95D1SZtOnkARcrCMPQLiif5xakK3da8EirSrmtQQHz90cx39gn2J\r\n ebuA6/qoM6npPoianEr8PZjZ3R8dtjQ4SZwFETBoiY1kMwZ/7BmsNrXQO5sgaw0EatEnBu3\r\n um/qLY6GLnv8MNrwdhgkbSUpI+IbpB1yy8MfTKOoi5BUxMe9WYC6FCisPLO/11ksUhpB9p0\r\n se5lTe8xfbKTGmpXgYszApBZwnLUDCuA5wOXzYCJGoL5/d+5aIAvjA3W1m4g==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada <ada@harvard.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": false,
+   "note": "From domain != d="
+  },
+  {
+   "name": "subject_unsigned",
+   "raw": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mit.edu;\r\n i=@mit.edu; q=dns/txt; s=sel2026; t=1793407868; h=from : to : date;\r\n bh=h47FIVQQZIO0LSz6vKkD58EYab2t/qZreveop2cqeyk=;\r\n b=w8QW5Bvd7itXhDuepjwNRLDq3vkBlD+gSr8kTC1tIAoDhtKgzaShVel9AkfcNQlNcNwf6\r\n jNfOcGKstfYSdtuV7NTWTKPFGnEJ3+Wq+jWZlLxhpH39YFAiICe+u9W3INf/DMvoHqCsbro\r\n cqdOgOe8HHiMdTxoaqFWSPUjuG/OWaK3hUNuciA9gvaBT+F1RNrv/MzURNMCPNoi+iI4oEY\r\n Lvcis+oXCqybTD5WVIjS8Xh5DiWcNvERc/mx50JOFu4XAHh23wUw4/4z0fQk54tSCkCt52Y\r\n UFZLD/lqNcX3gATyv2vgFgDT91v4wB4NiR9EphwJvLppmkcsP8V8ozQezk3Q==\r\nReceived: from mail.mit.edu by mx.mit.edu; Fri, 30 Oct 2026 20:00:00 -0400\r\nFrom: Ada Lovelace <ada@cs.mit.edu>\r\nTo: ada@cs.mit.edu\r\nSubject: KasVillage verification KV-695C02D7AE\r\nDate: Fri, 30 Oct 2026 20:00:00 -0400\r\nMessage-ID: <abc123@cs.mit.edu>\r\n\r\nHello,\r\n\r\nverifying my address.  Thanks!\r\n\r\n\r\n",
+   "expect_dkim": true,
+   "expect_academic": false,
+   "note": "subject not covered"
+  }
+ ]
+}

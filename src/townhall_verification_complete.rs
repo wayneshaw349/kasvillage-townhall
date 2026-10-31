@@ -323,15 +323,24 @@ pub struct VerificationProof {
 /// DApp/Game verification witness
 #[derive(Debug, Clone, Default)]
 pub struct DAppWitness {
-    pub scan_passed: u64,         // 1 = passed, 0 = failed
-    pub has_sdk_usage: u64,       // 1 = uses procedural SDK
-    pub has_image_bypass: u64,    // 0 = clean, 1 = has bypass (must be 0)
-    pub has_realistic_face: u64,  // 0 = clean, 1 = has face (must be 0)
-    pub trait_count: u64,         // >= 13 required
-    pub content_hash_lo: u64,     // lower 8 bytes of content hash
-    pub content_hash_hi: u64,     // upper 8 bytes of content hash
-    pub xp_commitment: u64,       // XP staked
+    pub scan_passed: u64,         // 1 = passed (in-circuit)
+    pub trait_count: u64,         // >= 13 (integer rule, verifier)
+    pub xp_commitment: u64,       // >= 500 (integer rule, verifier)
+    pub code_hash: [u8; 32],      // sha256 of the exact code scanned (anyone re-hashes the published code)
+    pub owner_hash: [u8; 32],     // sha256 of the owner's pubkey
+    pub ruleset_hash: [u8; 32],   // which scan rules were applied (DAPP_RULESET_HASH at prove time)
 }
+
+/// KV_DAPP_V2: fingerprint of the exact scan rules. A proof names the ruleset it was checked
+/// against, so a rules change never silently re-labels old proofs.
+pub static DAPP_RULESET_HASH: Lazy<[u8; 32]> = Lazy::new(|| {
+    let mut h = Sha256::new();
+    h.update(b"KV_DAPP_RULES_V1|max_bytes=");
+    h.update(MAX_CODE_SIZE_BYTES.to_le_bytes());
+    for r in PROHIBITED_PATTERNS.iter() { h.update(b"|P:"); h.update(r.as_str().as_bytes()); }
+    for r in SUSPICIOUS_PATTERNS.iter() { h.update(b"|S:"); h.update(r.as_str().as_bytes()); }
+    h.finalize().into()
+});
 
 /// Circuit config for DApp verification (6 advice, 1 instance, 1 selector)
 #[derive(Clone, Debug)]
@@ -362,7 +371,9 @@ impl Circuit<Fp> for DAppVerificationCircuit {
         for col in &advice { meta.enable_equality(*col); }
         meta.enable_equality(instance);
 
-        // Gate 1: scan_passed must be 1
+        // Gate: scan_passed must be 1. (The old sdk/image/face gates checked constants the
+        // prover hard-coded, proving nothing; the scan verdict covers those rules, and the
+        // ruleset itself is now a public input.)
         meta.create_gate("scan_passed", |meta| {
             let s = meta.query_selector(selector);
             let scan = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur());
@@ -370,54 +381,31 @@ impl Circuit<Fp> for DAppVerificationCircuit {
             vec![s * (scan - one)]
         });
 
-        // Gate 2: has_sdk_usage must be 1
-        meta.create_gate("sdk_usage", |meta| {
-            let s = meta.query_selector(selector);
-            let sdk = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur());
-            let one = Expression::Constant(Fp::one());
-            vec![s * (sdk - one)]
-        });
-
-        // Gate 3: has_image_bypass must be 0
-        meta.create_gate("no_image_bypass", |meta| {
-            let s = meta.query_selector(selector);
-            let bypass = meta.query_advice(advice[2], halo2_proofs::poly::Rotation::cur());
-            vec![s * bypass]
-        });
-
-        // Gate 4: has_realistic_face must be 0
-        meta.create_gate("no_realistic_face", |meta| {
-            let s = meta.query_selector(selector);
-            let face = meta.query_advice(advice[3], halo2_proofs::poly::Rotation::cur());
-            vec![s * face]
-        });
-
-        // Gate 5: trait_surplus = trait_count - 13 (surplus * (surplus - (trait_count - 13)) = 0)
-        // Simplified: trait_count - 13 must equal surplus (advice[4] = surplus, advice[5] = trait_count)
-        meta.create_gate("min_traits", |meta| {
-            let s = meta.query_selector(selector);
-            let trait_count = meta.query_advice(advice[4], halo2_proofs::poly::Rotation::cur());
-            let surplus = meta.query_advice(advice[5], halo2_proofs::poly::Rotation::cur());
-            let thirteen = Expression::Constant(Fp::from(13u64));
-            vec![s * (surplus - (trait_count - thirteen))]
-        });
-
         DAppCircuitConfig { advice, instance, selector }
     }
 
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fp>) -> Result<(), PlonkError> {
-        layouter.assign_region(|| "dapp_verification", |mut region| {
+        // KV_DAPP_V2: every claim is a public input. Instance order:
+        // [scan_passed, trait_count, xp_commitment, code_lo, code_hi, owner_lo, owner_hi, rules_lo, rules_hi]
+        let w = &self.witness;
+        let cells: Vec<AssignedCell<Fp, Fp>> = layouter.assign_region(|| "dapp_verification", |mut region| {
             config.selector.enable(&mut region, 0)?;
-            region.assign_advice(|| "scan_passed", config.advice[0], 0, || Value::known(Fp::from(self.witness.scan_passed)))?;
-            region.assign_advice(|| "has_sdk_usage", config.advice[1], 0, || Value::known(Fp::from(self.witness.has_sdk_usage)))?;
-            region.assign_advice(|| "has_image_bypass", config.advice[2], 0, || Value::known(Fp::from(self.witness.has_image_bypass)))?;
-            region.assign_advice(|| "has_realistic_face", config.advice[3], 0, || Value::known(Fp::from(self.witness.has_realistic_face)))?;
-            region.assign_advice(|| "trait_count", config.advice[4], 0, || Value::known(Fp::from(self.witness.trait_count)))?;
-            region.assign_advice(|| "trait_surplus", config.advice[5], 0, || Value::known(Fp::from(self.witness.trait_count.saturating_sub(13))))?;
-            region.assign_advice(|| "content_hash_lo", config.advice[6], 0, || Value::known(Fp::from(self.witness.content_hash_lo)))?;
-            region.assign_advice(|| "xp_commitment", config.advice[7], 0, || Value::known(Fp::from(self.witness.xp_commitment)))?;
-            Ok(())
-        })
+            let c_scan = region.assign_advice(|| "scan_passed", config.advice[0], 0, || Value::known(Fp::from(w.scan_passed)))?;
+            let c_traits = region.assign_advice(|| "trait_count", config.advice[1], 0, || Value::known(Fp::from(w.trait_count)))?;
+            let c_xp = region.assign_advice(|| "xp_commitment", config.advice[2], 0, || Value::known(Fp::from(w.xp_commitment)))?;
+            // row 1: selector off, hash commitments as 128-bit limbs
+            let c_code_lo = region.assign_advice(|| "code_lo", config.advice[0], 1, || Value::known(fp_limb(&w.code_hash[..16])))?;
+            let c_code_hi = region.assign_advice(|| "code_hi", config.advice[1], 1, || Value::known(fp_limb(&w.code_hash[16..])))?;
+            let c_own_lo = region.assign_advice(|| "owner_lo", config.advice[2], 1, || Value::known(fp_limb(&w.owner_hash[..16])))?;
+            let c_own_hi = region.assign_advice(|| "owner_hi", config.advice[3], 1, || Value::known(fp_limb(&w.owner_hash[16..])))?;
+            let c_rul_lo = region.assign_advice(|| "rules_lo", config.advice[4], 1, || Value::known(fp_limb(&w.ruleset_hash[..16])))?;
+            let c_rul_hi = region.assign_advice(|| "rules_hi", config.advice[5], 1, || Value::known(fp_limb(&w.ruleset_hash[16..])))?;
+            Ok(vec![c_scan, c_traits, c_xp, c_code_lo, c_code_hi, c_own_lo, c_own_hi, c_rul_lo, c_rul_hi])
+        })?;
+        for (row, cell) in cells.iter().enumerate() {
+            layouter.constrain_instance(cell.cell(), config.instance, row)?;
+        }
+        Ok(())
     }
 }
 
@@ -426,47 +414,88 @@ static DAPP_PARAMS: Lazy<ParamsIPA<EqAffine>> = Lazy::new(|| ParamsIPA::<EqAffin
 static DAPP_VK: Lazy<VerifyingKey<EqAffine>> = Lazy::new(|| { let c = DAppVerificationCircuit { witness: DAppWitness::default() }; keygen_vk(&*DAPP_PARAMS, &c).expect("DApp VK") });
 static DAPP_PK: Lazy<ProvingKey<EqAffine>> = Lazy::new(|| { let c = DAppVerificationCircuit { witness: DAppWitness::default() }; keygen_pk(&*DAPP_PARAMS, DAPP_VK.clone(), &c).expect("DApp PK") });
 
-pub fn generate_verification_proof(inputs: &ProofInputs) -> Result<VerificationProof, String> {
-    // Validate inputs
-    if !inputs.scan_passed {
-        return Err("Code scan did not pass".to_string());
-    }
-    
-    if inputs.trait_count < 13 {
-        return Err("Minimum 13 traits required for verification".to_string());
-    }
-    
-    // In production: use actual Halo2 IPA circuit
-    // For now: generate deterministic mock proof
-    // Build DApp witness from scan inputs
-    let content_bytes = inputs.content_hash.as_bytes();
-    let content_hash_lo = if content_bytes.len() >= 8 { u64::from_le_bytes(content_bytes[..8].try_into().unwrap_or([0u8; 8])) } else { 0 };
-    let dapp_witness = DAppWitness { scan_passed: 1, has_sdk_usage: 1, has_image_bypass: 0, has_realistic_face: 0, trait_count: inputs.trait_count as u64, content_hash_lo, content_hash_hi: 0, xp_commitment: inputs.xp };
-    let (dapp_err, dapp_proof): (String, Option<Vec<u8>>) = {
-        let circuit = DAppVerificationCircuit { witness: dapp_witness };
-        let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
-        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, DAppVerificationCircuit>(&*DAPP_PARAMS, &*DAPP_PK, &[circuit], &[&[&[]]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
+/// Bound public inputs of a DApp proof (what the proof is ABOUT).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DAppPublicInputs {
+    pub scan_passed: u64,
+    pub trait_count: u64,
+    pub xp_commitment: u64,
+    pub code_hash: String,     // sha256(code) hex - re-hash the published code to check
+    pub owner_hash: String,    // sha256(owner pubkey) hex
+    pub ruleset_hash: String,  // which scan rules were applied
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DAppProof {
+    pub proof_bytes: Vec<u8>,
+    pub public_inputs: DAppPublicInputs,
+    pub proof_type: String,
+    pub vk_fingerprint: String,
+    pub generated_at: u64,
+}
+
+fn hash32(data: &[u8]) -> [u8; 32] { let mut h = Sha256::new(); h.update(data); h.finalize().into() }
+fn hex32(s: &str) -> Option<[u8; 32]> { hex::decode(s).ok().and_then(|v| v.try_into().ok()) }
+
+pub fn dapp_instances(w: &DAppWitness) -> Vec<Fp> {
+    vec![
+        Fp::from(w.scan_passed), Fp::from(w.trait_count), Fp::from(w.xp_commitment),
+        fp_limb(&w.code_hash[..16]), fp_limb(&w.code_hash[16..]),
+        fp_limb(&w.owner_hash[..16]), fp_limb(&w.owner_hash[16..]),
+        fp_limb(&w.ruleset_hash[..16]), fp_limb(&w.ruleset_hash[16..]),
+    ]
+}
+
+/// KV_DAPP_V2: prove "THIS code (by hash), from THIS owner, passed THESE scan rules".
+pub fn generate_dapp_proof(code: &str, owner_pubkey: &str, trait_count: u64, xp_commitment: u64) -> Result<DAppProof, String> {
+    let w = DAppWitness {
+        scan_passed: 1, trait_count, xp_commitment,
+        code_hash: hash32(code.as_bytes()),
+        owner_hash: hash32(owner_pubkey.as_bytes()),
+        ruleset_hash: *DAPP_RULESET_HASH,
     };
-    let mut hasher = Sha256::new();
-    hasher.update(inputs.content_hash.as_bytes());
-    hasher.update(inputs.owner_pubkey.as_bytes());
-    hasher.update(&inputs.timestamp.to_le_bytes());
-    let proof_hash = hasher.finalize();
-    let public_inputs_hash = hex::encode(&proof_hash);
-    Ok(VerificationProof {
-        proof_bytes: dapp_proof.clone().unwrap_or_else(|| proof_hash.to_vec()),
-        public_inputs_hash,
-        proof_type: if dapp_proof.is_some() { "Halo2-IPA-DApp-V1".to_string() } else { format!("DApp-Hash-ERR:{}", dapp_err) },
+    if trait_count < 13 { return Err("Minimum 13 traits required".into()); }
+    if xp_commitment < 500 { return Err("Minimum 500 XP commitment required".into()); }
+    let inst = dapp_instances(&w);
+    let circuit = DAppVerificationCircuit { witness: w.clone() };
+    let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
+    create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, DAppVerificationCircuit>(
+        &*DAPP_PARAMS, &*DAPP_PK, &[circuit], &[&[inst.as_slice()]], OsRng, &mut transcript)
+        .map_err(|e| format!("dapp prove: {:?}", e))?;
+    Ok(DAppProof {
+        proof_bytes: transcript.finalize(),
+        public_inputs: DAppPublicInputs {
+            scan_passed: 1, trait_count, xp_commitment,
+            code_hash: hex::encode(w.code_hash), owner_hash: hex::encode(w.owner_hash),
+            ruleset_hash: hex::encode(w.ruleset_hash),
+        },
+        proof_type: "Halo2-IPA-DApp-V2".into(),
+        vk_fingerprint: { let mut h = Sha256::new(); h.update(format!("{:?}", *DAPP_VK).as_bytes()); hex::encode(h.finalize()) },
         generated_at: current_timestamp(),
     })
 }
 
-/// Verify a SNARK proof
-pub fn verify_snark_proof(proof: &VerificationProof, inputs: &ProofInputs) -> bool {
-    match generate_verification_proof(inputs) {
-        Ok(expected) => proof.proof_bytes == expected.proof_bytes,
-        Err(_) => false,
-    }
+/// Verify a DApp proof: integer rules + halo2 verify_proof over the CLAIMED public inputs.
+/// Pass `code` to also confirm the proof is about that exact code.
+pub fn verify_dapp_proof(p: &DAppProof, code: Option<&str>) -> Result<(), String> {
+    let pi = &p.public_inputs;
+    if pi.scan_passed != 1 { return Err("scan did not pass".into()); }
+    if pi.trait_count < 13 { return Err("trait_count < 13".into()); }
+    if pi.xp_commitment < 500 { return Err("xp_commitment < 500".into()); }
+    let code_hash = hex32(&pi.code_hash).ok_or("bad code_hash")?;
+    if let Some(c) = code { if hash32(c.as_bytes()) != code_hash { return Err("code does not match the proven code_hash".into()); } }
+    let w = DAppWitness {
+        scan_passed: pi.scan_passed, trait_count: pi.trait_count, xp_commitment: pi.xp_commitment,
+        code_hash, owner_hash: hex32(&pi.owner_hash).ok_or("bad owner_hash")?,
+        ruleset_hash: hex32(&pi.ruleset_hash).ok_or("bad ruleset_hash")?,
+    };
+    let inst = dapp_instances(&w);
+    let mut transcript = Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(&p.proof_bytes);
+    let strategy = SingleStrategy::new(&*DAPP_PARAMS);
+    verify_proof::<IPACommitmentScheme<EqAffine>, VerifierIPA<EqAffine>, Challenge255<EqAffine>,
+        Blake2bRead<&[u8], EqAffine, Challenge255<EqAffine>>, SingleStrategy<EqAffine>>(
+        &*DAPP_PARAMS, &*DAPP_VK, strategy, &[&[inst.as_slice()]], &mut transcript)
+        .map(|_| ()).map_err(|e| format!("verify: {:?}", e))
 }
 
 // ============================================================================
@@ -2313,6 +2342,9 @@ pub struct DAppVerifyResponse {
     pub code_hash: String,
     pub scan_result: CodeScanResult,
     pub proof: Option<VerificationProof>,
+    /// KV_DAPP_V2: the instance-bound proof; verify with POST /api/verify/dapp-check
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bound_proof: Option<DAppProof>,
     pub arweave_tx: Option<String>,
     pub board: String,
     pub message: String,
@@ -2332,6 +2364,7 @@ pub async fn api_verify_dapp(
             code_hash: scan_result.code_hash.clone(),
             scan_result,
             proof: None,
+            bound_proof: None,
             arweave_tx: None,
             board: String::new(),
             message: "DApp rejected: Contains prohibited content".to_string(),
@@ -2368,33 +2401,20 @@ pub async fn api_verify_dapp(
     let hash = hasher.finalize();
     let dapp_id = format!("DAPP_{}", hex::encode(&hash[..8]));
     
-    // 5. Generate SNARK proof (if scan passed)
-    let proof = if scan_result.passed {
+    // 5. KV_DAPP_V2: instance-bound proof over (code hash, owner, ruleset, verdict)
+    let bound = if scan_result.passed {
+        match generate_dapp_proof(&body.dapp_code, &body.owner_pubkey, body.trait_count as u64, body.xp_commitment) {
+            Ok(p) => Some(p),
+            Err(e) => { println!("[DApp] proof failed: {}", e); None }
+        }
+    } else { None };
+    let proof = bound.as_ref().map(|p| VerificationProof {
+        proof_bytes: p.proof_bytes.clone(),
+        public_inputs_hash: p.public_inputs.code_hash.clone(),
+        proof_type: p.proof_type.clone(),
+        generated_at: p.generated_at,
+    });
 
-        let content_hash = scan_result.code_hash.clone();
-        
-        let owner_pubkey = body.owner_pubkey.clone();
-        
-        let device_attestation_hash = compute_hash(&body.device_attestation);
-
-        let inputs = ProofInputs {
-            content_hash,
-            owner_pubkey,
-            content_type: "dapp".to_string(),
-            trait_count: body.trait_count,
-            xp: body.xp_commitment,
-            successes: 0,
-            deadlocks: 0,
-            device_attestation_hash: device_attestation_hash,
-            timestamp: current_timestamp(),
-            scan_passed: true,
-        };
-        
-        generate_verification_proof(&inputs).ok()
-    } else {
-        None
-    };
-    
     // 6. Post to Arweave (if scan passed or pending review)
     let arweave_tx = if scan_result.status != ScanStatus::Rejected {
         // TODO: Actually post to Arweave via Irys
@@ -2417,6 +2437,7 @@ pub async fn api_verify_dapp(
         code_hash: scan_result.code_hash.clone(),
         scan_result,
         proof,
+        bound_proof: bound,
         arweave_tx,
         board: board.to_string(),
         message,
@@ -2663,16 +2684,19 @@ pub async fn api_get_merkle_membership_proof(
 // ============================================================================
 // ACADEMIC VERIFICATION CIRCUIT (Halo2 IPA)
 // ============================================================================
+/// KV_ACADEMIC_V2 witness. Every field is a public input; the email itself stays private
+/// (only the hash of the exact DKIM-signed bytes is bound - anyone holding the email can
+/// re-run DKIM and compare, nobody else learns the address).
 #[derive(Debug, Clone, Default)]
 pub struct AcademicWitness {
-    pub email_verified: u64,
-    pub abstract_exists: u64,
-    pub attestation_count: u64,
-    pub repository_valid: u64,
-    pub content_hash_lo: u64,
-    pub content_hash_hi: u64,
-    pub question_count: u64,
-    pub answer_count: u64,
+    pub dkim_passed: u64,             // RSA signature verified against the domain's DNS key
+    pub is_academic: u64,             // d= is .edu / ac.cc / edu.cc
+    pub from_aligned: u64,            // From domain == d= or a subdomain
+    pub challenge_ok: u64,            // signed Subject carries the pubkey-derived challenge
+    pub pubkey_hash: [u8; 32],
+    pub domain_hash: [u8; 32],        // sha256(d=), e.g. sha256("mit.edu")
+    pub signed_input_hash: [u8; 32],  // sha256 of the exact bytes the RSA signature covers
+    pub abstract_hash: [u8; 32],      // sha256(abstract text) or zero
 }
 #[derive(Clone, Debug)]
 pub struct AcademicCircuitConfig { pub advice: [Column<Advice>; 8], pub instance: Column<Instance>, pub selector: Selector }
@@ -2686,26 +2710,36 @@ impl Circuit<Fp> for AcademicVerificationCircuit {
         let advice: [Column<Advice>; 8] = std::array::from_fn(|_| meta.advice_column());
         let instance = meta.instance_column(); let selector = meta.selector();
         for col in &advice { meta.enable_equality(*col); } meta.enable_equality(instance);
-        meta.create_gate("edu_verified", |meta| { let s = meta.query_selector(selector); let v = meta.query_advice(advice[0], halo2_proofs::poly::Rotation::cur()); vec![s * (v - Expression::Constant(Fp::one()))] });
-        meta.create_gate("abstract_exists", |meta| { let s = meta.query_selector(selector); let v = meta.query_advice(advice[1], halo2_proofs::poly::Rotation::cur()); vec![s * (v - Expression::Constant(Fp::one()))] });
-        meta.create_gate("min_attestations", |meta| { let s = meta.query_selector(selector); let c = meta.query_advice(advice[2], halo2_proofs::poly::Rotation::cur()); let surplus = meta.query_advice(advice[3], halo2_proofs::poly::Rotation::cur()); vec![s * (surplus - (c - Expression::Constant(Fp::from(3u64))))] });
-        meta.create_gate("repo_valid", |meta| { let s = meta.query_selector(selector); let v = meta.query_advice(advice[4], halo2_proofs::poly::Rotation::cur()); vec![s * (v - Expression::Constant(Fp::one()))] });
-        meta.create_gate("answer_consistency", |meta| { let s = meta.query_selector(selector); let q = meta.query_advice(advice[6], halo2_proofs::poly::Rotation::cur()); let a = meta.query_advice(advice[7], halo2_proofs::poly::Rotation::cur()); let d = meta.query_advice(advice[5], halo2_proofs::poly::Rotation::cur()); vec![s * (d - (q - a))] });
+        // all four policy flags must be exactly 1
+        meta.create_gate("academic_policy", |meta| {
+            let s = meta.query_selector(selector);
+            let one = Expression::Constant(Fp::one());
+            (0..4).map(|i| s.clone() * (meta.query_advice(advice[i], halo2_proofs::poly::Rotation::cur()) - one.clone())).collect::<Vec<_>>()
+        });
         AcademicCircuitConfig { advice, instance, selector }
     }
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fp>) -> Result<(), PlonkError> {
-        layouter.assign_region(|| "academic", |mut region| {
+        // Instance order: [dkim, academic, aligned, challenge, pk_lo, pk_hi, dom_lo, dom_hi,
+        //                  sig_lo, sig_hi, abs_lo, abs_hi]
+        let w = &self.witness;
+        let cells: Vec<AssignedCell<Fp, Fp>> = layouter.assign_region(|| "academic", |mut region| {
             config.selector.enable(&mut region, 0)?;
-            region.assign_advice(|| "ev", config.advice[0], 0, || Value::known(Fp::from(self.witness.email_verified)))?;
-            region.assign_advice(|| "ae", config.advice[1], 0, || Value::known(Fp::from(self.witness.abstract_exists)))?;
-            region.assign_advice(|| "ac", config.advice[2], 0, || Value::known(Fp::from(self.witness.attestation_count)))?;
-            region.assign_advice(|| "as", config.advice[3], 0, || Value::known(Fp::from(self.witness.attestation_count.saturating_sub(3))))?;
-            region.assign_advice(|| "rv", config.advice[4], 0, || Value::known(Fp::from(self.witness.repository_valid)))?;
-            region.assign_advice(|| "ad", config.advice[5], 0, || Value::known(Fp::from(self.witness.question_count.saturating_sub(self.witness.answer_count))))?;
-            region.assign_advice(|| "qc", config.advice[6], 0, || Value::known(Fp::from(self.witness.question_count)))?;
-            region.assign_advice(|| "anc", config.advice[7], 0, || Value::known(Fp::from(self.witness.answer_count)))?;
-            Ok(())
-        })
+            let mut v = Vec::new();
+            for (i, x) in [w.dkim_passed, w.is_academic, w.from_aligned, w.challenge_ok].iter().enumerate() {
+                v.push(region.assign_advice(|| "flag", config.advice[i], 0, || Value::known(Fp::from(*x)))?);
+            }
+            let limbs = [&w.pubkey_hash, &w.domain_hash, &w.signed_input_hash, &w.abstract_hash];
+            for (j, h) in limbs.iter().enumerate() {
+                let (row, col) = (1 + j / 2, (j % 2) * 4);
+                v.push(region.assign_advice(|| "lo", config.advice[col], row, || Value::known(fp_limb(&h[..16])))?);
+                v.push(region.assign_advice(|| "hi", config.advice[col + 1], row, || Value::known(fp_limb(&h[16..])))?);
+            }
+            Ok(v)
+        })?;
+        for (row, cell) in cells.iter().enumerate() {
+            layouter.constrain_instance(cell.cell(), config.instance, row)?;
+        }
+        Ok(())
     }
 }
 const ACADEMIC_HALO2_K: u32 = 5;
@@ -2718,38 +2752,83 @@ static MERKLE_PARAMS: Lazy<ParamsIPA<EqAffine>> = Lazy::new(|| { log::info!("Gen
 static MERKLE_VK: Lazy<VerifyingKey<EqAffine>> = Lazy::new(|| { let c = SparseMerkleCircuit { leaf: Value::unknown(), index: [false; TREE_DEPTH], proof: [Value::unknown(); TREE_DEPTH], root: Value::unknown() }; keygen_vk(&*MERKLE_PARAMS, &c).expect("Merkle VK") });
 static MERKLE_PK: Lazy<ProvingKey<EqAffine>> = Lazy::new(|| { let c = SparseMerkleCircuit { leaf: Value::unknown(), index: [false; TREE_DEPTH], proof: [Value::unknown(); TREE_DEPTH], root: Value::unknown() }; keygen_pk(&*MERKLE_PARAMS, MERKLE_VK.clone(), &c).expect("Merkle PK") });
 
-pub fn generate_academic_proof(witness: &AcademicWitness) -> Result<VerificationProof, String> {
-    if witness.email_verified != 1 { return Err("Email not verified".into()); }
-    if witness.abstract_exists != 1 { return Err("No abstract".into()); }
-    if witness.attestation_count < 3 { return Err(format!("Need 3 attestations, have {}", witness.attestation_count)); }
-    if witness.repository_valid != 1 { return Err("Repository not validated".into()); }
-    let (snark_error, real_proof): (String, Option<Vec<u8>>) = {
-        let circuit = AcademicVerificationCircuit { witness: witness.clone() };
-        let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
-        match create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, AcademicVerificationCircuit>(&*ACADEMIC_PARAMS, &*ACADEMIC_PK, &[circuit], &[&[&[]]], OsRng, &mut transcript) { Ok(()) => (String::new(), Some(transcript.finalize())), Err(e) => (format!("{:?}", e), None) }
-    };
-    let mut hasher = Sha256::new(); hasher.update(&witness.content_hash_lo.to_le_bytes()); hasher.update(b"KASVILLAGE_ACADEMIC_V1"); let hash_fb = hasher.finalize();
-    let mut ph = Sha256::new(); ph.update(&witness.content_hash_lo.to_le_bytes()); ph.update(&witness.email_verified.to_le_bytes()); let pih = hex::encode(ph.finalize());
-    Ok(VerificationProof { proof_bytes: real_proof.clone().unwrap_or_else(|| hash_fb.to_vec()), public_inputs_hash: pih, proof_type: if real_proof.is_some() { "Halo2-IPA-Academic-V1".to_string() } else { format!("Academic-Hash-ERR:{}", snark_error) }, generated_at: current_timestamp() })
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcademicPublicInputs {
+    pub dkim_passed: u64, pub is_academic: u64, pub from_aligned: u64, pub challenge_ok: u64,
+    pub pubkey_hash: String,
+    pub domain: String,             // the academic domain (public by design, e.g. mit.edu)
+    pub domain_hash: String,
+    pub signed_input_hash: String,  // hash of the DKIM-signed bytes; the email itself is NOT revealed
+    pub abstract_hash: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcademicProof {
+    pub proof_bytes: Vec<u8>,
+    pub public_inputs: AcademicPublicInputs,
+    pub proof_type: String,
+    pub vk_fingerprint: String,
+    pub generated_at: u64,
 }
 
-pub async fn api_verify_academic(body: web::Json<serde_json::Value>) -> HttpResponse {
-    let content = body.get("abstract_text").and_then(|v| v.as_str()).unwrap_or("");
-    let cb = { let mut h = Sha256::new(); h.update(content.as_bytes()); h.finalize() };
-    let witness = AcademicWitness {
-        email_verified: if body.get("email_verified").and_then(|v| v.as_bool()).unwrap_or(false) { 1 } else { 0 },
-        abstract_exists: if !content.is_empty() { 1 } else { 0 },
-        attestation_count: body.get("attestation_count").and_then(|v| v.as_u64()).unwrap_or(0),
-        repository_valid: if body.get("repository_valid").and_then(|v| v.as_bool()).unwrap_or(false) { 1 } else { 0 },
-        content_hash_lo: u64::from_le_bytes(cb[..8].try_into().unwrap_or([0u8; 8])),
-        content_hash_hi: u64::from_le_bytes(cb[8..16].try_into().unwrap_or([0u8; 8])),
-        question_count: body.get("question_count").and_then(|v| v.as_u64()).unwrap_or(0),
-        answer_count: body.get("answer_count").and_then(|v| v.as_u64()).unwrap_or(0),
-    };
-    match generate_academic_proof(&witness) {
-        Ok(proof) => HttpResponse::Ok().json(serde_json::json!({"ok": true, "proof": proof})),
-        Err(e) => HttpResponse::BadRequest().json(serde_json::json!({"ok": false, "error": e})),
+fn academic_instances(w: &AcademicWitness) -> Vec<Fp> {
+    let mut v = vec![Fp::from(w.dkim_passed), Fp::from(w.is_academic), Fp::from(w.from_aligned), Fp::from(w.challenge_ok)];
+    for h in [&w.pubkey_hash, &w.domain_hash, &w.signed_input_hash, &w.abstract_hash] {
+        v.push(fp_limb(&h[..16])); v.push(fp_limb(&h[16..]));
     }
+    v
+}
+
+/// KV_ACADEMIC_V2: prove "the academic domain D signed an email, From-aligned, whose signed
+/// Subject carries THIS pubkey's challenge". Only called after real DKIM verification passed.
+pub fn generate_academic_proof(pubkey: &str, dk: &crate::dkim_verify::DkimOutcome, abstract_text: Option<&str>) -> Result<AcademicProof, String> {
+    if !dk.passed { return Err(dk.error.clone().unwrap_or_else(|| "DKIM did not pass".into())); }
+    let sig_hash = hex32(&dk.signing_input_hash).ok_or("bad signing_input_hash")?;
+    let w = AcademicWitness {
+        dkim_passed: 1, is_academic: 1, from_aligned: 1, challenge_ok: 1,
+        pubkey_hash: hash32(pubkey.trim().to_ascii_lowercase().as_bytes()),
+        domain_hash: hash32(dk.domain.as_bytes()),
+        signed_input_hash: sig_hash,
+        abstract_hash: abstract_text.filter(|t| !t.is_empty()).map(|t| hash32(t.as_bytes())).unwrap_or([0u8; 32]),
+    };
+    let inst = academic_instances(&w);
+    let circuit = AcademicVerificationCircuit { witness: w.clone() };
+    let mut transcript = Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
+    create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, Challenge255<EqAffine>, _, Blake2bWrite<Vec<u8>, EqAffine, Challenge255<EqAffine>>, AcademicVerificationCircuit>(
+        &*ACADEMIC_PARAMS, &*ACADEMIC_PK, &[circuit], &[&[inst.as_slice()]], OsRng, &mut transcript)
+        .map_err(|e| format!("academic prove: {:?}", e))?;
+    Ok(AcademicProof {
+        proof_bytes: transcript.finalize(),
+        public_inputs: AcademicPublicInputs {
+            dkim_passed: 1, is_academic: 1, from_aligned: 1, challenge_ok: 1,
+            pubkey_hash: hex::encode(w.pubkey_hash), domain: dk.domain.clone(), domain_hash: hex::encode(w.domain_hash),
+            signed_input_hash: hex::encode(w.signed_input_hash), abstract_hash: hex::encode(w.abstract_hash),
+        },
+        proof_type: "Halo2-IPA-Academic-V2".into(),
+        vk_fingerprint: { let mut h = Sha256::new(); h.update(format!("{:?}", *ACADEMIC_VK).as_bytes()); hex::encode(h.finalize()) },
+        generated_at: current_timestamp(),
+    })
+}
+
+/// Verify an academic proof: policy + domain sanity + halo2 verify_proof over the claimed inputs.
+pub fn verify_academic_proof(p: &AcademicProof) -> Result<(), String> {
+    let pi = &p.public_inputs;
+    if [pi.dkim_passed, pi.is_academic, pi.from_aligned, pi.challenge_ok] != [1, 1, 1, 1] { return Err("policy flags not all set".into()); }
+    if !crate::dkim_verify::is_academic_domain(&pi.domain) { return Err("domain is not academic".into()); }
+    if hex::encode(hash32(pi.domain.as_bytes())) != pi.domain_hash { return Err("domain does not match domain_hash".into()); }
+    let w = AcademicWitness {
+        dkim_passed: 1, is_academic: 1, from_aligned: 1, challenge_ok: 1,
+        pubkey_hash: hex32(&pi.pubkey_hash).ok_or("bad pubkey_hash")?,
+        domain_hash: hex32(&pi.domain_hash).ok_or("bad domain_hash")?,
+        signed_input_hash: hex32(&pi.signed_input_hash).ok_or("bad signed_input_hash")?,
+        abstract_hash: hex32(&pi.abstract_hash).ok_or("bad abstract_hash")?,
+    };
+    let inst = academic_instances(&w);
+    let mut transcript = Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(&p.proof_bytes);
+    let strategy = SingleStrategy::new(&*ACADEMIC_PARAMS);
+    verify_proof::<IPACommitmentScheme<EqAffine>, VerifierIPA<EqAffine>, Challenge255<EqAffine>,
+        Blake2bRead<&[u8], EqAffine, Challenge255<EqAffine>>, SingleStrategy<EqAffine>>(
+        &*ACADEMIC_PARAMS, &*ACADEMIC_VK, strategy, &[&[inst.as_slice()]], &mut transcript)
+        .map(|_| ()).map_err(|e| format!("verify: {:?}", e))
 }
 
 // ROUTE REGISTRATION
@@ -4019,5 +4098,65 @@ mod kv_public_input_tests {
         let mut swapped = proof.clone();
         swapped.public_inputs.l1_events_root = hex::encode([1u8; 32]);
         assert!(!verify_stats_proof(&swapped, &w.pubkey_hash), "wrong events root must fail");
+    }
+}
+
+#[cfg(test)]
+mod kv_dapp_academic_v2_tests {
+    use super::*;
+
+    #[test]
+    fn dapp_proof_binds_code_owner_and_rules() {
+        let code = "<html><body><canvas id=c></canvas><script>/* game */</script></body></html>";
+        let owner = "037d42aac927f9fad639cd0b479b3e921951d90361fd2e1e05d184f8122bf17133";
+        let p = generate_dapp_proof(code, owner, 13, 500).expect("prove");
+        assert_eq!(p.proof_type, "Halo2-IPA-DApp-V2");
+        assert!(verify_dapp_proof(&p, Some(code)).is_ok(), "honest proof must verify against its code");
+        assert!(verify_dapp_proof(&p, None).is_ok(), "verifies without code too (binding only)");
+        // a different file cannot borrow this proof
+        assert!(verify_dapp_proof(&p, Some("<html>malware</html>")).is_err(), "other code must fail");
+        // tampered public inputs fail cryptographically
+        let mut t = p.clone(); t.public_inputs.owner_hash = hex::encode([1u8; 32]);
+        assert!(verify_dapp_proof(&t, None).is_err(), "other owner must fail");
+        let mut t = p.clone(); t.public_inputs.trait_count = 40;
+        assert!(verify_dapp_proof(&t, None).is_err(), "inflated traits must fail");
+        let mut t = p.clone(); t.public_inputs.xp_commitment = 5000;
+        assert!(verify_dapp_proof(&t, None).is_err(), "inflated xp (board upgrade) must fail");
+        let mut t = p.clone(); t.public_inputs.ruleset_hash = hex::encode([2u8; 32]);
+        assert!(verify_dapp_proof(&t, None).is_err(), "claiming other rules must fail");
+        // below-policy proofs are refused at generation
+        assert!(generate_dapp_proof(code, owner, 12, 500).is_err());
+        assert!(generate_dapp_proof(code, owner, 13, 499).is_err());
+    }
+
+    #[test]
+    fn academic_proof_requires_real_dkim_and_binds_everything() {
+        let f: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/dkim_cases.json")).unwrap();
+        let spki = f["key_spki_b64"].as_str().unwrap().to_string();
+        let pubkey = f["pubkey"].as_str().unwrap();
+        let raw = f["cases"][0]["raw"].as_str().unwrap();
+        let key_for = |_d: &str, _s: &str| -> Result<String, String> { Ok(spki.clone()) };
+
+        let dk = crate::dkim_verify::verify_message(raw, &key_for, crate::dkim_verify::academic_policy(pubkey));
+        assert!(dk.passed, "fixture must pass real DKIM + policy: {:?}", dk.error);
+        let p = generate_academic_proof(pubkey, &dk, Some("On verifiable reputation")).expect("prove");
+        assert_eq!(p.proof_type, "Halo2-IPA-Academic-V2");
+        assert_eq!(p.public_inputs.domain, "mit.edu");
+        assert!(verify_academic_proof(&p).is_ok(), "honest proof must verify");
+
+        let mut t = p.clone(); t.public_inputs.domain = "harvard.edu".into(); t.public_inputs.domain_hash = hex::encode(hash32(b"harvard.edu"));
+        assert!(verify_academic_proof(&t).is_err(), "relabeling the institution must fail");
+        let mut t = p.clone(); t.public_inputs.pubkey_hash = hex::encode([3u8; 32]);
+        assert!(verify_academic_proof(&t).is_err(), "transferring to another pubkey must fail");
+        let mut t = p.clone(); t.public_inputs.signed_input_hash = hex::encode([4u8; 32]);
+        assert!(verify_academic_proof(&t).is_err(), "swapping the email commitment must fail");
+        let mut t = p.clone(); t.public_inputs.abstract_hash = hex::encode([5u8; 32]);
+        assert!(verify_academic_proof(&t).is_err(), "swapping the abstract must fail");
+
+        // a failed DKIM never produces a proof
+        let bad = f["cases"].as_array().unwrap().iter().find(|c| c["name"] == "tampered_subject").unwrap();
+        let dk_bad = crate::dkim_verify::verify_message(bad["raw"].as_str().unwrap(), &key_for, crate::dkim_verify::academic_policy(pubkey));
+        assert!(!dk_bad.passed);
+        assert!(generate_academic_proof(pubkey, &dk_bad, None).is_err());
     }
 }

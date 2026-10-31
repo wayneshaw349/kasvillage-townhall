@@ -533,7 +533,7 @@ const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; my
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#166534' }}>
-              🏛️ Town Hall attested (posted to Arweave)
+              {String(result.proofType || '').includes('-V2') ? '🔐 SNARK-bound proof (anyone can check it)' : '🏛️ Town Hall attested (posted to Arweave)'}
             </Text>
             <Text style={{ fontSize: rs.font(10), color: '#166534' }}>
               {result.proofType}
@@ -1885,7 +1885,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
             </View>
             
             <Text style={styles.modalSubtitle}>
-              Submit your content for Town Hall to review. It posts a signed attestation to Arweave (FREE). Attestations are Town Hall's word; stats proofs are SNARK-bound and verifiable by anyone.
+              Submit your content for Town Hall to review (FREE). DApp, academic and stats proofs are SNARK-bound: every claim is a public input and anyone can verify them at /api/verify/*-check. Store and service reviews are Town Hall attestations.
             </Text>
             
             {/* Type selector */}

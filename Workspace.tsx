@@ -234,10 +234,12 @@ async function verifyAcademicWithDKIM(
       emailHeaders: emailHeaders || '',
       dkimSignature: dkimSignature || '',
     });
+    const r: any = result;
+    if (!(r.dkim_verified ?? r.dkimVerified) && r.error) console.log('[Academic] not verified:', r.error, r.challenge ? '(challenge ' + r.challenge + ')' : '');
     return {
-      verified: result.dkimVerified ?? false,
-      institution: result.domainType || email.split('@')[1],
-      profileId: result.profileId,
+      verified: !!(r.verified && (r.dkim_verified ?? r.dkimVerified)),
+      institution: r.domain || r.domain_type || r.domainType || email.split('@')[1],
+      profileId: r.profile_id || r.profileId,
     };
   } catch (error) {
     return { verified: false, institution: undefined, profileId: undefined };
@@ -3201,7 +3203,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                     <View style={{ backgroundColor: COLORS.blue50, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: COLORS.blue200, alignItems: 'center' }}>
                       <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.blue800, marginBottom: 8 }}>Your verification code:</Text>
                       <Text selectable style={{ fontSize: 36, fontWeight: '900', fontFamily: 'monospace', color: COLORS.amber900, letterSpacing: 6 }}>{magicLink || '------'}</Text>
-                      <TouchableOpacity onPress={() => { const code = Math.floor(100000 + Math.random() * 900000).toString(); setMagicLink(code); Clipboard.setStringAsync(code); Alert.alert('Code Ready!', code + ' copied. Paste it in your email subject line.'); }} style={{ backgroundColor: COLORS.amber600, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 24, marginTop: 10 }}>
+                      <TouchableOpacity onPress={async () => { /* KV_ACADEMIC_V2: challenge = KV- + first 5 bytes of sha256("KV_ACADEMIC_V2:" + pubkey); Town Hall recomputes it, so the email proves THIS key's owner controls the address */ const _pk = String((await SecureStore.getItemAsync('kv_public_key')) || '').trim().toLowerCase(); if (!_pk) { Alert.alert('No key', 'Wallet key not found.'); return; } const { sha256: _sh } = require('@noble/hashes/sha256'); const { bytesToHex: _bh, utf8ToBytes: _u8 } = require('@noble/hashes/utils'); const code = 'KV-' + _bh(_sh(_u8('KV_ACADEMIC_V2:' + _pk))).slice(0, 10).toUpperCase(); setMagicLink(code); Clipboard.setStringAsync(code); Alert.alert('Code Ready!', code + ' copied. Paste it in your email subject line.'); }} style={{ backgroundColor: COLORS.amber600, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 24, marginTop: 10 }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{magicLink ? 'Copy Code Again' : 'Generate Code'}</Text>
                       </TouchableOpacity>
                     </View>
@@ -3219,7 +3221,7 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                       <ShieldCheck size={18} color={COLORS.green600} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 11, fontWeight: 'bold', color: COLORS.green800 }}>Zero Knowledge</Text>
-                        <Text style={{ fontSize: 10, color: COLORS.green700 }}>No email field exists. We read your school from the DKIM stamp. DNS lookup for public key → RSA verify on YOUR phone. Zero PII transmitted.</Text>
+                        <Text style={{ fontSize: 10, color: COLORS.green700 }}>Town Hall checks your school's DKIM signature (RSA, against the key your school publishes in DNS). Your address is never stored: the proof carries only your school's domain and a hash of the signed email.</Text>
                       </View>
                     </View>
                   </View>
