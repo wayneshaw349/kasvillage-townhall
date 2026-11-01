@@ -263,6 +263,55 @@ interface StatsResult {
   error?: string;
 }
 
+// KV_LINK_CHECK: paste any link -> TownHall's canary fetches it (following redirects, checking
+// every hop) and scores it for phishing signs: look-alike domains, seed/key prompts, clipboard hijacks,
+// wallet-drainer scripts. Advisory - the verdict signing key is retired, so it is unsigned.
+const LinkCheck: React.FC = () => {
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<any>(null);
+  const run = async () => {
+    let u = url.trim();
+    if (!u) return;
+    if (!/^https?:\/\//i.test(u)) u = 'https://' + u.replace(/^\/+/, '');
+    setBusy(true); setRes(null);
+    try {
+      const r: any = await require('./canary_verify').scanUrl(u);
+      setRes(r && r.verdict ? { v: r.verdict } : { err: String((r && r.error) || 'TownHall unreachable - try again') });
+    } catch (e: any) { setRes({ err: String(e?.message || e) }); }
+    finally { setBusy(false); }
+  };
+  const col = (v: string) => v === 'dangerous' ? '#dc2626' : v === 'suspicious' ? '#d97706' : '#059669';
+  return (
+    <View>
+      <View style={{ flexDirection: 'row', gap: rs.s(8), marginTop: rs.s(8) }}>
+        <TextInput value={url} onChangeText={setUrl} placeholder="Paste a link (store site, DM link, airdrop...)" placeholderTextColor="#9ca3af"
+          autoCapitalize="none" autoCorrect={false} keyboardType="url"
+          style={{ flex: 1, borderWidth: 1, borderColor: '#d6d3d1', borderRadius: rs.s(8), paddingHorizontal: rs.s(10), paddingVertical: rs.s(8), fontSize: rs.font(12), color: '#1c1917', backgroundColor: '#fff' }} />
+        <TouchableOpacity onPress={run} disabled={busy || !url.trim()}
+          style={{ backgroundColor: busy ? '#a8a29e' : '#1c1917', borderRadius: rs.s(8), paddingHorizontal: rs.s(14), justifyContent: 'center' }}>
+          {busy ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '700', fontSize: rs.font(12) }}>Check</Text>}
+        </TouchableOpacity>
+      </View>
+      {res && res.err ? <Text style={{ marginTop: rs.s(8), fontSize: rs.font(11), color: '#991b1b' }}>{res.err}</Text> : null}
+      {res && res.v ? (
+        <View style={{ marginTop: rs.s(8), borderLeftWidth: 4, borderLeftColor: col(res.v.verdict), paddingLeft: rs.s(8) }}>
+          <Text style={{ fontWeight: '800', fontSize: rs.font(13), color: col(res.v.verdict) }}>
+            {res.v.verdict === 'dangerous' ? '⛔ Dangerous' : res.v.verdict === 'suspicious' ? '⚠ Suspicious' : '✓ No scam signs found'}  ·  score {res.v.score}
+          </Text>
+          <Text style={{ fontSize: rs.font(10), color: '#57534e', marginTop: 2 }} numberOfLines={2}>{String(res.v.host || '')} — {String(res.v.url || '')}</Text>
+          {(res.v.findings || []).slice(0, 6).map((f: any, i: number) => (
+            <Text key={i} style={{ fontSize: rs.font(11), color: '#44403c', marginTop: 2 }}>• {String(f.detail || f.code)}</Text>
+          ))}
+          <Text style={{ fontSize: rs.font(9), color: '#78716c', marginTop: rs.s(6) }}>
+            A clean result is not a guarantee. Never type your seed words or keys into any website.
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+};
+
 const StatsLookup: React.FC<{ myApt: string | null; myAddress: string | null; myPubkey?: string | null }> = ({ myApt, myAddress, myPubkey }) => {
   const [lookupQuery, setLookupQuery] = useState('');
   const [isLooking, setIsLooking] = useState(false);
@@ -1768,6 +1817,15 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           />
         </View>
         
+        {/* KV_LINK_CHECK */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🔎 Check a link</Text>
+          <Text style={styles.cardSubtitle}>
+            Drop a link before you open it. TownHall visits the page for you (following redirects) and looks for scam signs: look-alike domains, seed-phrase prompts, wallet drainers, clipboard hijacks, hidden code.
+          </Text>
+          <LinkCheck />
+        </View>
+
         {/* KV_IC3: report fraud - permanent home for the disclaimer's ic3.gov link */}
         <TouchableOpacity
           onPress={() => { try { Linking.openURL('https://www.ic3.gov'); } catch {} }}
