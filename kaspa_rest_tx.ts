@@ -280,6 +280,31 @@ function calculateMinFee(totalMass: bigint): bigint {
   return fee;
 }
 
+// AUDIT 2026-11-01: exact KAS text -> sompi (no float). One comma with no dot = decimal comma ("1,5" = 1.5).
+// Returns 0n for junk, thousands separators, or more than 8 decimals.
+export function kvParseKasToSompi(text: any): bigint {
+  let t = String(text == null ? '' : text).trim().replace(/\s+/g, '');
+  if (t.indexOf('.') < 0 && (t.match(/,/g) || []).length === 1) t = t.replace(',', '.');
+  const m = /^(\d*)(?:\.(\d{0,8}))?$/.exec(t);
+  if (!m || (!m[1] && !m[2])) return 0n;
+  return BigInt(m[1] || '0') * 100_000_000n + BigInt(((m[2] || '') + '00000000').slice(0, 8));
+}
+// AUDIT 2026-11-01: the fee-estimate endpoint is untrusted - floor AND cap it (10x the standard rate)
+export const KV_MAX_FEE_RATE = MIN_STANDARD_FEE_RATE * 10n;
+export const KV_MAX_FEE_SOMPI = 100_000_000n; // absolute ceiling: 1 KAS per tx
+export function kvClampFeeRate(raw: any): bigint {
+  const n = Number(raw);
+  if (!isFinite(n) || n <= 0) return MIN_STANDARD_FEE_RATE;
+  const est = BigInt(Math.ceil(Math.min(n, 1e12)));
+  return est < MIN_STANDARD_FEE_RATE ? MIN_STANDARD_FEE_RATE : (est > KV_MAX_FEE_RATE ? KV_MAX_FEE_RATE : est);
+}
+// Refuse absurd fees: > 1 KAS always; > 10% of the amount for plain (no-payload, non-sweep) sends.
+export function kvFeeCeilingError(fee: bigint, sendAmount: bigint, sweep: boolean, hasPayload: boolean): string {
+  if (fee > KV_MAX_FEE_SOMPI) return 'Network fee of ' + (Number(fee) / 1e8) + ' KAS is above the 1 KAS safety ceiling - nothing was sent. Try again later.';
+  if (!sweep && !hasPayload && sendAmount > 0n && fee * 10n > sendAmount) return 'Network fee of ' + (Number(fee) / 1e8) + ' KAS is more than 10% of the ' + (Number(sendAmount) / 1e8) + ' KAS being sent - nothing was sent. Send a larger amount or try again later.';
+  return '';
+}
+
 async function fetchFeeEstimate(network: KaspaNetwork): Promise<bigint> {
   try {
     const resp = await fetch(`${API_BASES[network]}/info/fee-estimate`);
@@ -287,8 +312,7 @@ async function fetchFeeEstimate(network: KaspaNetwork): Promise<bigint> {
       const data = await resp.json();
       // Returns priority buckets — use normal priority
       const normalFee = data?.normalBuckets?.[0]?.feerate || data?.priorityBucket?.feerate || 1;
-      const est = BigInt(Math.ceil(normalFee));
-      return est > MIN_STANDARD_FEE_RATE ? est : MIN_STANDARD_FEE_RATE;
+      return kvClampFeeRate(normalFee); // AUDIT 2026-11-01: floor + 10x cap
     }
   } catch {}
   return MIN_STANDARD_FEE_RATE; // offline fallback: Toccata floor, never 1 sompi/gram
@@ -517,6 +541,12 @@ export async function sendKaspaViaRest(params: {
         if (filtered.length > 0) { utxos.length = 0; utxos.push(...filtered); console.log('[REST-TX] Ledger filter:', before, '->', utxos.length, 'free'); }
       }
     } catch (e) { console.warn('[REST-TX] Ledger filter skipped:', e); }
+    // AUDIT 2026-11-01: inputs frozen in a prepared (not yet broadcast) tx are never spent here, even if they are the only coins
+    try {
+      const _res: Set<string> = await (await import('./utxo_ledger')).getReservedInputKeys();
+      if (_res.size) { const _k = utxos.filter(u => !_res.has(((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0))); if (_k.length !== utxos.length) { console.log('[REST-TX] Reserved filter:', utxos.length, '->', _k.length); utxos.length = 0; utxos.push(..._k); } }
+    } catch (e) { console.warn('[REST-TX] reserved-input filter skipped:', e); }
+    if (!utxos.length) return { success: false, error: 'No spendable coins: the rest are held by a prepared agreement funding tx' }; // AUDIT 2026-11-01
 
     console.log('[REST-TX] First UTXO:', JSON.stringify(utxos[0]));
     
@@ -641,6 +671,7 @@ export async function sendKaspaViaRest(params: {
       { value: sendAmount, scriptVersion: 0, script: recipientScript },
     ];
     if (sendAmount <= 0n || isDust(sendAmount, recipientScript.length)) return { success: false, error: 'Amount too small: ' + sendAmount + ' sompi after fee' };
+    { const _fe = kvFeeCeilingError(fee, sendAmount, amountSompi === 0n, payloadBytes.length > 0); if (_fe) return { success: false, error: _fe }; } // AUDIT 2026-11-01
     const _finalPlan = kvPlanOutputs(selectedUtxos.map(u => BigInt(u.utxoEntry.amount)), sendAmount, change, senderScript.length); // [KV_STORAGE_MASS_KIP9]
     if (_finalPlan.error) return { success: false, error: _finalPlan.error };
     if (change > 0n && _finalPlan.keepChange) {
@@ -736,6 +767,7 @@ export async function sendKaspaViaRest(params: {
         for (const u of selectedUtxos) { const k = ((u as any).outpoint?.transactionId || '') + ':' + ((u as any).outpoint?.index ?? 0); if (_pendingChange.has(k)) { _pendingChange.delete(k); _spentOutpoints.add(k); _ph++; } }
         if (_ph) { console.warn('[REST-TX] orphan came from remembered change that never landed - dropped ' + _ph + ', rebuilding from real coins'); return sendKaspaViaRest({ ...params, __orphanRebuilt: true } as any); }
       }
+      if (_w.error && _w.mayLand) return { success: false, error: 'wRPC submit unconfirmed: ' + _w.error + (_predictedTxId ? ' (it may still land: check tx ' + _predictedTxId.slice(0, 12) + '… before retrying)' : '') }; // AUDIT 2026-11-01
       if (_w.error) {
         console.error('[REST-TX] wRPC submit FAILED:', _w.error);
         // AUDIT 2026-10-31: a timeout/disconnect can happen AFTER the node accepted the tx.
@@ -756,17 +788,28 @@ export async function sendKaspaViaRest(params: {
         result = { transactionId: _rid.txId };
       }
     } else {
-      const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaction: tx, allowOrphan: false }),
-      });
-      if (!submitResp.ok) {
-        const errBody = await submitResp.text();
-        console.error('[REST-TX] Submit FAILED:', submitResp.status, errBody);
-        return { success: false, error: `Submit failed (${submitResp.status}): ${errBody}` };
+      // AUDIT 2026-11-01: a non-OK/thrown REST submit may still have reached the node - look up the predicted id first
+      let _subErr = '';
+      try {
+        const submitResp = await fetch(`${API_BASES[network]}/transactions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transaction: tx, allowOrphan: false }),
+        });
+        if (!submitResp.ok) {
+          const errBody = await submitResp.text();
+          console.error('[REST-TX] Submit FAILED:', submitResp.status, errBody);
+          _subErr = `Submit failed (${submitResp.status}): ${errBody}`;
+        } else result = await submitResp.json();
+      } catch (e: any) { _subErr = 'Submit failed: ' + String((e && e.message) || e); }
+      if (_subErr) {
+        if (_predictedTxId && !/orphan|already spent|double|insufficient|rejected|invalid|mass|fee/i.test(_subErr) && await _kvLanded(network, _predictedTxId)) {
+          console.warn('[REST-TX] submit errored but the tx IS on chain - treating as sent');
+          result = { transactionId: _predictedTxId };
+        } else {
+          return { success: false, error: _subErr + (_predictedTxId ? ' (it may still land: check tx ' + _predictedTxId.slice(0, 12) + '… before retrying)' : '') };
+        }
       }
-      result = await submitResp.json();
     }
     console.log('[REST-TX] Submit response:', JSON.stringify(result));
     if (_predictedTxId) {
@@ -826,7 +869,7 @@ export async function sendKaspaViaRest(params: {
 // carrying a payload must go to the node over wRPC (@kcoin/kaspa-web3.js).
 // Takes the REST-shaped tx object; returns { transactionId } or { error }.
 // ============================================================================
-async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): Promise<{ transactionId?: string; error?: string }> {
+async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): Promise<{ transactionId?: string; error?: string; mayLand?: boolean }> {
   // KV_ORPHAN_RETRY: a chained tx can reach a node that has not seen its parent yet - resend the same tx
   const _waits = [3000];   // inner retry already waits 12 s; a real orphan is rebuilt by the sender
   let _r = await _wrpcSubmitOnce(restTx, network, idHint);
@@ -834,11 +877,16 @@ async function _wrpcSubmit(restTx: any, network: KaspaNetwork, idHint: string): 
     console.warn('[REST-TX] parent not on this node yet (orphan) - resending same tx in ' + _waits[_i] + 'ms');
     await new Promise((res) => setTimeout(res, _waits[_i]));
     _r = await _wrpcSubmitOnce(restTx, network, idHint);
-    if (_r.error && /already (in the mempool|accepted)|duplicate/i.test(_r.error)) return { transactionId: idHint || '' };
+    if (_r.error && /already (in the mempool|accepted)|duplicate/i.test(_r.error)) return _kvRelayClaim(network, idHint, 'relay says already in mempool'); // AUDIT 2026-11-01
   }
   return _r;
 }
-async function _wrpcSubmitOnce(restTx: any, network: KaspaNetwork, idHint: string): Promise<{ transactionId?: string; error?: string }> {
+// AUDIT 2026-11-01: an "already in mempool" / empty-id relay reply is only a claim - confirm it on the public API.
+async function _kvRelayClaim(network: KaspaNetwork, idHint: string, why: string): Promise<{ transactionId?: string; error?: string; mayLand?: boolean }> {
+  if (idHint && await _kvLanded(network, idHint)) return { transactionId: idHint };
+  return { error: why + ' but the tx is not visible on the public API yet', mayLand: true };
+}
+async function _wrpcSubmitOnce(restTx: any, network: KaspaNetwork, idHint: string): Promise<{ transactionId?: string; error?: string; mayLand?: boolean }> {
   // RELAY-SUBMIT: public tn10 wRPC is borsh-only and REST strips payloads, so
   // payload txs go through the TownHall relay (stateless forwarder; the txid
   // commits the payload, so PREDICT CHECK verifies the broadcast independently).
@@ -862,7 +910,7 @@ async function _wrpcSubmitOnce(restTx: any, network: KaspaNetwork, idHint: strin
       try { j = JSON.parse(bodyText); } catch {}
       if (resp.status === 422 || (resp.status === 400 && j.error)) {
         const em = String(j.error || bodyText.slice(0, 200));
-        if (/already accepted by the consensus|already in the mempool/i.test(em)) { console.log('[REST-TX] tx already in - counted as sent'); return { transactionId: idHint || '' }; }
+        if (/already accepted by the consensus|already in the mempool/i.test(em)) { console.log('[REST-TX] relay says tx already in - verifying on public API'); return _kvRelayClaim(network, idHint, 'relay says already in mempool'); } // AUDIT 2026-11-01
         // orphan-retry: parent tx not yet visible on the node that got this
         // submit (LB / mempool sync gap). The tx is fine — wait, resubmit.
         if (/orphan/i.test(em) && (_orphanTries = (_orphanTries || 0) + 1) <= 6) {
@@ -891,7 +939,8 @@ async function _wrpcSubmitOnce(restTx: any, network: KaspaNetwork, idHint: strin
           fetch(mu, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: mBody }).catch(() => {});
         }
       } catch {}
-      return { transactionId: (j && j.transactionId) || '' };
+      if (!(j && j.transactionId)) return _kvRelayClaim(network, idHint, 'relay accepted with no txid'); // AUDIT 2026-11-01
+      return { transactionId: j.transactionId };
     } catch (e: any) {
       lastErr = String((e && e.message) || e);
     }
@@ -921,7 +970,7 @@ export async function broadcastPreparedTx(tx: any, network: KaspaNetwork): Promi
       const _w = await _wrpcSubmit(tx, network, _pred);
       if (_w.error) {
         console.error('[REST-TX] Prepared wRPC submit FAILED:', _w.error);
-        return { success: false, error: 'wRPC submit failed: ' + _w.error };
+        return { success: false, error: 'wRPC submit failed: ' + _w.error + (_w.mayLand && _pred ? ' (it may still land: check tx ' + _pred.slice(0, 12) + '… before retrying)' : '') }; // AUDIT 2026-11-01
       }
       const _rid = kvResolveSubmittedTxId(_pred, _w.transactionId);
       if ('error' in _rid) return { success: false, error: _rid.error };

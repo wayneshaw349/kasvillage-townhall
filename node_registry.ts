@@ -134,15 +134,19 @@ export async function tipOperators(params: {
   try {
     const o = await ownerKeys();
     const audit = await fetchAudit(o.network);
-    const passing = audit.filter((n) => n.audited && n.pass && n.payout && n.payout !== o.address);
+    const _all = audit.filter((n) => n.audited && n.pass && n.payout && n.payout !== o.address);
+    // AUDIT 2026-11-01: one share per payout address (one operator listing many nodes must not take many shares)
+    const _byPay = new Map<string, NodeAuditEntry[]>(); for (const n of _all) { const k = String(n.payout); const l = _byPay.get(k); if (l) l.push(n); else _byPay.set(k, [n]); }
+    const passing = Array.from(_byPay.values()).map((l) => l[0]);
     if (passing.length === 0) return { success: false, error: 'no passing operators to tip' };
     const per = params.totalSompi / BigInt(passing.length);
     if (per < MIN_TIP_SOMPI) return { success: false, error: 'tip too small: < 0.2 KAS per operator across ' + passing.length + ' operators' };
     let paid = 0; let last = ''; const errs: string[] = [];
     const ctx = await tipContext(o.network);
     for (const n of passing) {
-      if (!(await phoneRecheck(ctx, n))) { errs.push('skipped ' + n.payout.slice(0, 18) + '… (failed phone re-check)'); continue; }
-      const r: any = await sendKaspaViaRest({ senderAddress: o.address, recipientAddress: n.payout, amountSompi: per, privateKeyHex: o.privateKeyHex, network: o.network as any });
+      let _ok = false; for (const e of (_byPay.get(String(n.payout)) || [n])) { if (await phoneRecheck(ctx, e)) { _ok = true; break; } } // AUDIT 2026-11-01: any of its nodes may pass
+      if (!_ok) { errs.push('skipped ' + n.payout.slice(0, 18) + '… (failed phone re-check)'); continue; }
+      const r: any = await sendKaspaViaRest({ preview: 'You - tip node operator', /* AUDIT 2026-11-01 KV_TX_SIM */ senderAddress: o.address, recipientAddress: n.payout, amountSompi: per, privateKeyHex: o.privateKeyHex, network: o.network as any });
       if (r && r.success) { paid++; last = r.txId; } else errs.push(String(r?.error || 'failed'));
       await new Promise((res) => setTimeout(res, 1500)); // let change settle between sends
     }

@@ -309,7 +309,7 @@ const LinkCheck: React.FC = () => {
           {/* KV_LINK_OPEN: clean -> open in the phone's own browser (never inside KasVillage) after a confirm;
               suspicious/dangerous -> copy only. Opens exactly the link that was checked. */}
           <View style={{ flexDirection: 'row', gap: rs.s(8), marginTop: rs.s(8) }}>
-            {res.v.verdict === 'clean' && /^https?:\/\//i.test(String(res.checked || '')) ? (
+            {res.v.verdict === 'clean' && /^https:\/\//i.test(String(res.checked || '')) ? ( /* AUDIT 2026-11-01: Open only for https; http is copy-only */
               <TouchableOpacity
                 onPress={() => Alert.alert('Open in your browser?',
                   'Advisory only - not proof it is safe. This opens in your phone\'s browser, outside KasVillage. Never type your seed words or keys into a website.\n\n' + String(res.checked),
@@ -1048,15 +1048,18 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
 
       let x: string | null = null;
       let byName: any = null;
+      let fullKnown = ''; let noParity = false; let manyPub = 0; // AUDIT 2026-11-01: APT needs the real 02/03 prefix
       if (low.startsWith('kaspa:') || low.startsWith('kaspatest:')) {
         const pk = require('./kv_proposal').addressToPubkey(low);
         if (pk) x = xOf(pk);
+        noParity = true; // an address carries only the x-only key
       } else if (/^(0[23])?[0-9a-f]{64}$/.test(low)) {
-        x = xOf(low);
+        x = xOf(low); if (low.length === 66) fullKnown = low;
       } else if (/^(apt-)?\d{5,}$/.test(low)) {
         const n = low.replace(/^apt-/, '');
         for (const k of known) {
-          if ([k, '02' + k, '03' + k].some(f => verifyApt(f, n).valid)) { x = k; break; }
+          const _f = [k, '02' + k, '03' + k].find(f => verifyApt(f, n).valid);
+          if (_f) { x = k; fullKnown = _f.length === 66 ? _f : ''; break; }
         }
         if (!x) {
           setSearchResult({ found: false, error: `APT-${n} isn't a publisher or operator on ${net}. An APT number is a one-way fingerprint of a key, so other people can only be found by their kaspa: address or public key (ask them to copy it from Town Hall).` });
@@ -1064,9 +1067,11 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
         }
       } else {
         const q = low.replace(/^(dapp|game|store)-/, '');
-        byName = listings.find(g => String(g.name || '').toLowerCase() === q || String(g.head || '').toLowerCase().startsWith(q))
-          || listings.find(g => String(g.name || '').toLowerCase().includes(q));
-        if (byName) x = xOf(byName.publisher);
+        // AUDIT 2026-11-01: exact (trimmed, case-insensitive) name or head-id prefix only - no substring guess
+        const _hits = listings.filter(g => String(g.name || '').trim().toLowerCase() === q || (q.length >= 8 && String(g.head || '').toLowerCase().startsWith(q)));
+        manyPub = new Set(_hits.map(g => xOf(g.publisher))).size;
+        byName = _hits[0] || null;
+        if (byName) { x = xOf(byName.publisher); if (String(byName.publisher || '').length === 66) fullKnown = String(byName.publisher).toLowerCase(); }
       }
       if (!x || !/^[0-9a-f]{64}$/.test(x)) {
         setSearchResult({ found: false, error: 'Not found. Search an APT number, a kaspa: address, a public key, or a game/DApp name.' });
@@ -1075,19 +1080,22 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
       const mine = listings.filter(g => xOf(g.publisher) === x);
       const op = operators.find(o => xOf(o.owner) === x);
       const isMe = !!myPubkey && xOf(myPubkey) === x;
-      const fullPk = (isMe && myPubkey) ? myPubkey : '02' + x;
+      if (!fullKnown) { const _l = mine.find((g: any) => String(g.publisher || '').length === 66) || (op && String(op.owner || '').length === 66 ? { publisher: op.owner } : null); if (_l) { fullKnown = String(_l.publisher).toLowerCase(); noParity = false; } }
+      const fullPk = (isMe && myPubkey) ? myPubkey : fullKnown; // AUDIT 2026-11-01: never guess the 02 prefix
       let addr = '';
       try { addr = require('./wallet_registration_v2').kaspaAddressFromXOnly(require('@noble/hashes/utils').hexToBytes(x), net === 'mainnet' ? 'kaspa' : 'kaspatest'); } catch {}
-      const apt = isMe && myApt ? myApt : 'APT-' + deriveApt(fullPk);
-      const what = byName ? byName.name
+      const apt = isMe && myApt ? myApt : fullPk ? 'APT-' + deriveApt(fullPk) : (noParity ? 'APT unknown (address has no parity)' : 'APT unknown');
+      const what = manyPub > 1 ? 'Several publishers use this name (' + manyPub + ') - search by kaspa: address or public key instead'
+        : byName ? byName.name
         : mine.length ? `${mine.length} listing${mine.length > 1 ? 's' : ''}: ${mine.slice(0, 3).map((g: any) => g.name).join(', ')}`
         : op ? `${op.svc} operator${op.bond_unspent ? ' (10 KAS bond held)' : ''}` : (isMe ? 'You' : 'No listings yet');
       setSearchResult({
         found: true,
         type: (byName || mine.length) ? 'dapp' : op ? 'operator' as any : 'address' as any,
-        verified: mine.length > 0 || !!op,
+        verified: manyPub <= 1 && (mine.length > 0 || !!op),
         aptNumber: apt,
-        address: addr || fullPk,
+        address: addr || fullPk || x,
+        advisory: true, // AUDIT 2026-11-01: from the relay index; signatures are not re-verified on this phone
         name: what,
         isOwner: isMe,
       } as any);
@@ -1576,7 +1584,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                     {searchResult.verified ? (
                       <View style={styles.verifiedBadge}>
                         <CheckCircle size={rs.s(14)} color={COLORS.green500} />
-                        <Text style={styles.verifiedText}>Verified</Text>
+                        <Text style={styles.verifiedText}>Verified{(searchResult as any).advisory ? ' per relay index (advisory)' : ''}</Text>
                       </View>
                     ) : (
                       <View style={styles.unverifiedBadge}>

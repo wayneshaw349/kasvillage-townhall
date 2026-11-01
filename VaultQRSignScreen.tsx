@@ -29,6 +29,7 @@ import {
   parseAssembledResponse,
 } from './frost_qr_signer';
 import type { FrostNonce, TxTemplate } from './canonical_agreement_steps';
+import { kvAddressValid, kvParseKasToSompi, computeTxId } from './kaspa_rest_tx'; // AUDIT 2026-11-01
 
 // Camera is optional — require-guarded so the screen works without the dep.
 declare const require: any; // Metro provides this at runtime; type-only declaration
@@ -66,7 +67,10 @@ function addressToP2pkScript(address: string): string | null {
   } catch { return null; }
 }
 
-function isValidKaspaAddr(a: string): boolean {
+function isValidKaspaAddr(a: string, vaultAddr?: string): boolean {
+  // AUDIT 2026-11-01: bech32 checksum + same network prefix as the vault
+  if (!kvAddressValid(a)) return false;
+  if (vaultAddr && a.split(':')[0] !== String(vaultAddr).split(':')[0]) return false;
   return (a.startsWith('kaspa:') || a.startsWith('kaspatest:')) && addressToP2pkScript(a) !== null;
 }
 
@@ -98,6 +102,7 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
   const [balance, setBalance] = useState<bigint>(0n);
   const [error, setError] = useState<string | null>(null);
   const [txId, setTxId] = useState<string | null>(null);
+  const [mayLand, setMayLand] = useState(false); // AUDIT 2026-11-01: submit outcome unknown - no instant rebuild
   const [paperInput, setPaperInput] = useState(''); // KV_PAPER_COSIGN (typed fallback; cleared after use)
 
   // Ceremony state — template is display-safe; nonces are SECRET (ref only)
@@ -127,7 +132,7 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
   // Reset on open/close; wipe secrets on close/unmount
   useEffect(() => {
     if (visible) {
-      setStep('input'); setRecipient(initialRecipient || ''); setAmountKas(initialAmountKas || '');
+      setStep('input'); setMayLand(false); setRecipient(initialRecipient || ''); setAmountKas(initialAmountKas || '');
       setError(null); setTxId(null);
       wipeCeremony();
     } else {
@@ -162,11 +167,8 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
       .catch(() => setCamGranted(false));
   }, [step]);
 
-  const amountSompi = (() => {
-    const f = parseFloat(amountKas || '0');
-    return Number.isFinite(f) && f > 0 ? BigInt(Math.floor(f * 1e8)) : 0n;
-  })();
-  const recipValid = isValidKaspaAddr(recipient.trim());
+  const amountSompi: bigint = kvParseKasToSompi(amountKas); // AUDIT 2026-11-01: exact decimal -> sompi, "1,5" = 1.5
+  const recipValid = isValidKaspaAddr(recipient.trim(), vault.address);
   const canBuild = recipValid && amountSompi > 0n && amountSompi < balance;
 
   // -------------------------------------------------------------------------
@@ -175,8 +177,9 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
   const handleBuild = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
-    setStep('building'); setError(null);
+    setStep('building'); setError(null); setMayLand(false);
     try {
+      if (!isValidKaspaAddr(recipient.trim(), vault.address)) throw new Error('Recipient address is invalid (checksum) or on a different network than this vault'); // AUDIT 2026-11-01
       const recipScript = addressToP2pkScript(recipient.trim());
       if (!recipScript) throw new Error('Recipient must be a standard P2PK kaspa address');
       if (recipScript === vault.escrowScript) throw new Error('Recipient is the vault itself');
@@ -276,17 +279,37 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
       // k values are consumed — destroy immediately, before broadcast
       wipeCeremony();
 
-      const submitResp = await fetch(API_BASES[vault.network] + '/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(agg.txBody),
-      });
-      if (!submitResp.ok) {
-        const errText = await submitResp.text();
-        throw new Error('L1 rejected: ' + errText);
+      // AUDIT 2026-11-01: id of the aggregated body, so an ambiguous submit can be looked up before calling it failed
+      let _pred = '';
+      try { const _t: any = (agg.txBody as any).transaction; _pred = computeTxId({ version: Number(_t.version || 0),
+        inputs: _t.inputs.map((i: any) => ({ prevTxId: i.previousOutpoint.transactionId, prevIndex: Number(i.previousOutpoint.index), sequence: BigInt(i.sequence || 0) })),
+        outputs: _t.outputs.map((o: any) => ({ amount: BigInt(o.amount), scriptVersion: Number(o.scriptPublicKey?.version || 0), scriptHex: o.scriptPublicKey?.scriptPublicKey || '' })),
+        lockTime: BigInt(_t.lockTime || 0), subnetworkId: _t.subnetworkId, gas: BigInt(_t.gas || 0), payloadHex: _t.payload || '' }); } catch {}
+      let result: any = null; let _subErr = '';
+      try {
+        const submitResp = await fetch(API_BASES[vault.network] + '/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(agg.txBody),
+        });
+        if (!submitResp.ok) _subErr = 'L1 rejected: ' + (await submitResp.text().catch(() => String(submitResp.status)));
+        else result = await submitResp.json();
+      } catch (e: any) { _subErr = 'Submit failed: ' + String((e && e.message) || e); }
+      if (_subErr) {
+        let _landed = false;
+        for (let _i = 0; _pred && _i < 4 && !_landed; _i++) {
+          await new Promise((r) => setTimeout(r, 2500));
+          try { const _r = await fetch(API_BASES[vault.network] + '/transactions/' + _pred + '?inputs=false&outputs=false'); if (_r.ok) { const _j: any = await _r.json(); _landed = !!(_j && (_j.transaction_id === _pred || _j.hash)); } } catch {}
+        }
+        if (!_landed) {
+          // a definite node rejection means it will not land; anything else may still land - do not offer a rebuild
+          const _final = /orphan|already spent|double|insufficient|invalid|mass|fee|script|signature/i.test(_subErr);
+          if (!_final) { setMayLand(true); throw new Error(_subErr + '\n\nThis payment may still land - check your history before trying again.' + (_pred ? '\nTx: ' + _pred : '')); }
+          throw new Error(_subErr);
+        }
+        result = { transactionId: _pred };
       }
-      const result = await submitResp.json();
-      const id = result.transactionId || result.txId || '';
+      const id = (result && (result.transactionId || result.txId)) || _pred || '';
       setTxId(id);
       setStep('success');
       onSuccess?.(id);
@@ -507,11 +530,12 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
           {/* STEP: error */}
           {step === 'error' && (
             <View style={styles.center}>
-              <Text style={styles.errorTitle}>Failed</Text>
+              <Text style={styles.errorTitle}>{mayLand ? 'Not confirmed yet' : 'Failed'}</Text>
               <Text style={styles.errSmall}>{error}</Text>
+              {!mayLand ? ( /* AUDIT 2026-11-01: no instant rebuild when the tx may still land (double-spend risk) */
               <TouchableOpacity style={styles.primaryBtn} onPress={() => { setError(null); setStep('input'); }}>
                 <Text style={styles.primaryBtnText}>Try Again</Text>
-              </TouchableOpacity>
+              </TouchableOpacity>) : null}
               <TouchableOpacity style={styles.abortBtn} onPress={onClose}>
                 <Text style={styles.abortBtnText}>Close</Text>
               </TouchableOpacity>

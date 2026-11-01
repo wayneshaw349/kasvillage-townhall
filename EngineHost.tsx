@@ -252,7 +252,7 @@ export const EngineHost: React.FC<EngineHostProps> = ({
       </View>
       <WebView
         ref={webRef}
-        originWhitelist={['about:blank']}
+        originWhitelist={['*']} /* AUDIT 2026-11-01: handler below is the only gate */
         source={{ html }}
         onMessage={handleMessage}
         javaScriptEnabled

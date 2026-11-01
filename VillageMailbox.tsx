@@ -1607,16 +1607,19 @@ export default function VillageMailbox() {
     require('./kv_prompt').kvPrompt('Tip the keeper', 'Keeper of "' + nm + '"\n' + addr + '\n\nKAS goes straight to their wallet. Tips are what keep games alive.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Send tip', onPress: async (v: string) => {
-        const kas = Number(String(v || '').replace(/[^0-9.]/g, ''));
-        if (!(kas > 0) || kas > 5000) { Alert.alert('Invalid amount', 'Enter between 0 and 5000 KAS.'); return; }
+        const _sompi: bigint = require('./kaspa_rest_tx').kvParseKasToSompi(v); const kas = Number(_sompi) / 1e8; // AUDIT 2026-11-01: exact parse, "1,5" = 1.5 (was 15)
+        if (!(_sompi > 0n) || _sompi > 500_000_000_000n) { Alert.alert('Invalid amount', 'Enter between 0 and 5000 KAS.'); return; }
         try {
+          { const LA = require('expo-local-authentication'); let _a: any = null; // AUDIT 2026-11-01: fresh Face ID / passcode like other sends
+            try { _a = await LA.authenticateAsync({ promptMessage: 'Tip ' + kas + ' KAS', cancelLabel: 'Cancel', disableDeviceFallback: false }); } catch { _a = null; }
+            if (!_a || !_a.success) { Alert.alert('Not sent', 'Tipping needs Face ID or your phone passcode.'); return; } }
           const ps = require('./proposal_share'); const SS = require('expo-secure-store');
           const sender = (await SS.getItemAsync('kv_kaspa_address')) || (await SS.getItemAsync('kaspa_address'));
           const priv = await ps._kvResolvePrivHex();
           if (!sender || !priv) throw new Error('wallet identity unavailable');
           if (sender === addr) { Alert.alert('That is you', 'You kept this game alive yourself.'); return; }
           const { sendKaspaViaRest } = require('./kaspa_rest_tx');
-          const r: any = await sendKaspaViaRest({ senderAddress: sender, recipientAddress: String(addr), amountSompi: BigInt(Math.round(kas * 1e8)), privateKeyHex: priv, network: require('./kv_net').KV_NET as any });
+          const r: any = await sendKaspaViaRest({ preview: 'You - tip game keeper', /* AUDIT 2026-11-01 KV_TX_SIM */ senderAddress: sender, recipientAddress: String(addr), amountSompi: _sompi, privateKeyHex: priv, network: require('./kv_net').KV_NET as any });
           if (r && r.success === false) throw new Error(String(r.error || 'send failed'));
           console.log('[GameKeeperTip]', kas, 'KAS ->', String(addr).slice(0, 24));
           Alert.alert('Tip sent \u2713', kas + ' KAS to the keeper of "' + nm + '".');

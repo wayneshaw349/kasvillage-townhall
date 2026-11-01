@@ -188,6 +188,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
     setTimeout(() => setKvReloadN((n) => n + 1), 0);
   }, []);
   const [paySheet, setPaySheet] = useState<any>(null);
+  const kvGameIdRef = useRef(''); const kvOwnRef = useRef(false); // AUDIT 2026-11-01
   const [rot, setRot] = useState(false);
   const [land, setLand] = useState<boolean | null>(null);
   const [wv, setWv] = useState<{ w: number; h: number } | null>(null);
@@ -205,7 +206,13 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   useEffect(() => {
     if (!props.game || !html) return;
     const def = /name=["']kv-orientation["'][^>]*content=["']landscape|KV_MP2|KV_FACES/i.test(String(html).slice(0, 400000));
-    (async () => { try { const AS = require('@react-native-async-storage/async-storage').default; try { const _mc = await AS.getItem('kv_dev_contact'); if (_mc) (globalThis as any).__kvDevContact = _mc; } catch {} const v = await AS.getItem(landKey); setLand(v === null || v === undefined ? def : v === '1'); } catch { setLand(def); } })();
+    (async () => { try { const AS = require('@react-native-async-storage/async-storage').default; try { const _mc = await AS.getItem('kv_dev_contact'); if (_mc) (globalThis as any).__kvDevContact = _mc; } catch {}
+      // AUDIT 2026-11-01: resolve THIS game's id (for its grants only) and whether it is the user's own publish (for KV_MY_CONTACT)
+      try { const _h = String((props.game as any).head || ''); let _id = String((props.game as any).game || (props.game as any).id || '');
+        if (!_id) { const _in: any[] = JSON.parse((await AS.getItem('kv_installed_games')) || '[]'); const _m = _in.find((g: any) => g && g.head === _h); if (_m) _id = String(_m.game || _m.id || ''); }
+        const _my: any = JSON.parse((await AS.getItem('kv_my_games')) || '{}'); const _own = !!_h && Object.keys(_my).some((k: string) => _my[k] && _my[k].head === _h);
+        kvGameIdRef.current = _id; kvOwnRef.current = _own; } catch {}
+      const v = await AS.getItem(landKey); setLand(v === null || v === undefined ? def : v === '1'); } catch { setLand(def); } })();
   }, [html]);
   const toggleLand = () => { const n = !land; setLand(n); try { require('@react-native-async-storage/async-storage').default.setItem(landKey, n ? '1' : '0'); } catch {} };
   const [zoom, setZoom] = useState(1);
@@ -391,7 +398,7 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
   const onShouldStartLoadWithRequest = useCallback((req: any) => {
     const url = String(req?.url || '');
     if (url.startsWith('about:blank') || url === '' || url.startsWith('data:text/html')) return true;
-    if (url.startsWith('https://kv-game.local')) {
+    if (url === 'https://kv-game.local' || url.startsWith('https://kv-game.local/')) { // AUDIT 2026-11-01: exact origin (not kv-game.local.evil)
       if (!kvPageUpRef.current) return true; // initial load (iOS routes it through here)
       kvDoReload(); return false;            // KV_PAGE_RELOAD: the page asked to reload itself
     }
@@ -453,9 +460,9 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       <WebView
         key={'kvwv' + (land ? 1 : 0) + '_r' + kvReloadN + (props.game && wv ? (wv.w > wv.h ? '_L' : '_P') : '') /* KV_TABLET_SAFE */}
         source={{ html, baseUrl: 'https://kv-game.local/' }}
-        originWhitelist={['https://kv-game.local']}
+        originWhitelist={['*']} /* AUDIT 2026-11-01: RNWebView 13 opens non-whitelisted URLs in the system browser before the handler runs; route all to onShouldStartLoadWithRequest */
         ref={webRef}
-        injectedJavaScriptBeforeContentLoaded={(props.game && land && wv ? 'window.__kvRealW=' + Math.round(wv.w) + ';window.__kvRealH=' + Math.round(wv.h) + ';' + KV_LAND_SHIM : (props.game && land === false ? 'window.__kvLandOff=1;' : '')) /* KV_LAND_FIX */ + CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? KV_END_GUARD : '') /* KV_END_GUARD */ + (props.game ? KV_DLG_WATCH : '') /* KV_DLG_WATCH */ + (props.game ? KV_ROLL_RESCUE : '') /* KV_ROLL_RESCUE */ + (props.game && typeof __DEV__ !== 'undefined' && __DEV__ ? KV_ROLL_PROBE : '') /* KV_ROLL_PROBE */ + (props.game ? ('try{window.__kvStreamer=' + ((globalThis as any).__kvStreamer === true ? 'true' : 'false') /* KV_STREAMER_LINK */ + ';window.KV_GRANTS=' + JSON.stringify((globalThis as any).__kvGrantsAll || {}) + ';window.KV_TRUST=' + JSON.stringify(require('./snail_rule').publicTrust()) /* KV_SNAIL_RULE: read-only trust signal for DApps */ + ';window.KV_MY_CONTACT=' + JSON.stringify(String((globalThis as any).__kvDevContact || '').slice(0, 80)) + ';}catch(e){};') : '') /* KV_GRANTS */}
+        injectedJavaScriptBeforeContentLoaded={(props.game && land && wv ? 'window.__kvRealW=' + Math.round(wv.w) + ';window.__kvRealH=' + Math.round(wv.h) + ';' + KV_LAND_SHIM : (props.game && land === false ? 'window.__kvLandOff=1;' : '')) /* KV_LAND_FIX */ + CONSOLE_TAP + BRIDGE + KV_WNET_INJECT + (props.game ? KV_AUDIO_KEEP : '') + (props.game ? KV_END_GUARD : '') /* KV_END_GUARD */ + (props.game ? KV_DLG_WATCH : '') /* KV_DLG_WATCH */ + (props.game ? KV_ROLL_RESCUE : '') /* KV_ROLL_RESCUE */ + (props.game && typeof __DEV__ !== 'undefined' && __DEV__ ? KV_ROLL_PROBE : '') /* KV_ROLL_PROBE */ + (props.game ? ('try{window.__kvStreamer=' + ((globalThis as any).__kvStreamer === true ? 'true' : 'false') /* KV_STREAMER_LINK */ + ';window.KV_GRANTS=' + JSON.stringify(kvGameIdRef.current ? { [kvGameIdRef.current]: (((globalThis as any).__kvGrantsAll || {})[kvGameIdRef.current] || []) } : {}) /* AUDIT 2026-11-01: this game's grants only */ + ';window.KV_TRUST=' + JSON.stringify(require('./snail_rule').publicTrust()) /* KV_SNAIL_RULE: read-only trust signal for DApps */ + (kvOwnRef.current ? ';window.KV_MY_CONTACT=' + JSON.stringify(String((globalThis as any).__kvDevContact || '').slice(0, 80)) : '') /* AUDIT 2026-11-01: own games only */ + ';}catch(e){};') : '') /* KV_GRANTS */}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         onLoadEnd={() => { kvPageUpRef.current = true; }}

@@ -17,10 +17,11 @@ type Ask = { name: string; kas: number };
 let _listener: ((a: Ask) => void) | null = null;
 
 export function kvComparePrices(itemName: string, kaspaPrice?: number): void {
-  const q = String(itemName || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 100);
+  const q = Array.from(String(itemName || '').replace(/[\u0000-\u001f]/g, ' ').trim()).slice(0, 100).join('').trim(); // AUDIT 2026-11-01: code points, never split a surrogate pair
   if (!q) return;
-  const kas = Number(kaspaPrice || 0);
-  const url = 'https://www.google.com/search?tbm=shop&tbs=p_ord:p&q=' + encodeURIComponent(q);
+  const _k = Number(kaspaPrice || 0); const kas = isFinite(_k) && _k > 0 ? _k : 0; // AUDIT 2026-11-01
+  let url = '';
+  try { url = 'https://www.google.com/search?tbm=shop&tbs=p_ord:p&q=' + encodeURIComponent(q); } catch { return; } // AUDIT 2026-11-01: lone surrogate throws URIError
   Alert.alert('Compare prices',
     `Search Google Shopping for "${q}", lowest price first?\n\nOpens in your phone's browser. Google chooses and rates the stores - check store ratings, and paste any unfamiliar store into TownHall > Check a link first.`,
     [{ text: 'Cancel', style: 'cancel' },
@@ -40,6 +41,16 @@ export function kvComparePrices(itemName: string, kaspaPrice?: number): void {
      } }]);
 }
 
+// AUDIT 2026-11-01: "$1,299.50" / "1299" / "49,99" (one comma, no dot = decimal comma). Non-finite -> NaN.
+export function kvParseUsd(text: string): number {
+  let t = String(text || '').replace(/[$\s]/g, '');
+  if (t.indexOf('.') < 0 && (t.match(/,/g) || []).length === 1) t = t.replace(',', '.');
+  else t = t.replace(/,/g, '');
+  if (!/^\d*\.?\d*$/.test(t) || t === '' || t === '.') return NaN;
+  const n = parseFloat(t);
+  return isFinite(n) ? n : NaN;
+}
+
 export async function loadCompares(): Promise<PriceCompare[]> {
   try { const r = await AsyncStorage.getItem(COMPARE_KEY); const a = r ? JSON.parse(r) : []; return Array.isArray(a) ? a : []; } catch { return []; }
 }
@@ -57,10 +68,10 @@ export function KvCompareHost() {
   useEffect(() => { _listener = (a) => { setUsd(''); setAsk(a); }; return () => { _listener = null; }; }, []);
   if (!ask) return null;
   let usdPerKas = 0;
-  try { const p: any = require('./kas_price_feed').getKasPrice(); usdPerKas = Number((p && p.usdPerKas) || 0); } catch {}
+  try { const p: any = require('./kas_price_feed').getKasPrice(); usdPerKas = (p && !p.isStale) ? Number(p.usdPerKas || 0) : 0; if (!isFinite(usdPerKas)) usdPerKas = 0; } catch {} // AUDIT 2026-11-01: refuse a stale price
   const kUsd = ask.kas * usdPerKas;
-  const D = parseFloat(usd.replace(/[$,\s]/g, ''));
-  const valid = D > 0 && kUsd > 0;
+  const D = kvParseUsd(usd); // AUDIT 2026-11-01
+  const valid = isFinite(D) && isFinite(kUsd) && D > 0 && kUsd > 0;
   const d = valid ? (D - kUsd) / D : 0;
   const save = async () => {
     if (!valid) return;

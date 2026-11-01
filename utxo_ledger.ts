@@ -336,6 +336,12 @@ export async function reservePreparedInputs(id: string, keys: string[]): Promise
   console.log('[VLedger] Reserved', keys.length, 'prepared input(s) for', id);
 }
 
+// AUDIT 2026-11-01: reserved outpoint keys (live, unexpired) - the send path drops these explicitly
+export async function getReservedInputKeys(): Promise<Set<string>> {
+  const s = await loadStore(); const now = Date.now();
+  return new Set(s.pendingInputs.filter(p => now - p.at <= PENDING_EXPIRY_MS).flatMap(p => p.keys));
+}
+
 export async function releasePreparedInputs(id: string): Promise<void> {
   const s = await loadStore();
   const before = s.pendingInputs.length;

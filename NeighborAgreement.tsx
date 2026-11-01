@@ -111,7 +111,7 @@ import { sendPushToCounterparty } from './push_notifications';
 // REST API for real L1 transactions
 import { sendKaspaViaRest, broadcastPreparedTx, computeTxId } from './kaspa_rest_tx';
 import { canonicalVerify, canonicalToContract, canonicalSendAmount, canonicalSendsFirst, normalizeAgreement, canonicalCanCreatePartialSig, canonicalCanCosign, canonicalDetermineRole } from './canonical_agreement';
-import { isPureP2PK, canonicalCommit, verifyCommitment, releaseExpiredCommitments, releaseCommitment, markLocked, isAlreadyCommitted, syncLedger } from './utxo_ledger';
+import { isPureP2PK, canonicalCommit, verifyCommitment, releaseExpiredCommitments, releaseCommitment, markLocked, isAlreadyCommitted, syncLedger, reservePreparedInputs, releasePreparedInputs } from './utxo_ledger';
 import { generateProposal, parseProposal, verifyProposalForMe, parseReleaseKey } from './kv_proposal';
 import { loadMainWallet } from './kasvillage_cold_wallet';
 import { uploadPerTxProof } from './wallet_merkle_archive';
@@ -3344,6 +3344,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
           console.log('[KV_NONCE_ONCE] Frozen templates have consumed nonces - rebuilding with fresh nonces.');
           await SecureStore.deleteItemAsync('kv_refund_pending_' + agrId).catch(() => {});
           await SecureStore.deleteItemAsync('kv_refund_b64_' + agrId).catch(() => {});
+          await releasePreparedInputs('fund:' + agrId).catch(() => {}); // AUDIT 2026-11-01: old frozen tx is dropped - free its inputs before re-preparing
         } else
         if (_rgP && _rgB) {
           try { await Clipboard.setStringAsync(_rgB); } catch {}
@@ -3354,6 +3355,7 @@ const nextActionMsg = (ph: string, rl: string): string => {
       }
       console.log('[Neighbor] Seller preparing (freeze, no broadcast)', immediateSendAmount / 1e8, 'KASPA to FROST');
               // sendKaspaViaRest is already imported/available in this scope
+              await releasePreparedInputs('fund:' + agrId).catch(() => {}); // AUDIT 2026-11-01: no live frozen template here (REUSE-GUARD) - drop any stale reservation of ours
               const txResult = await sendKaspaViaRest({ preview: 'You - accept & fund agreement', /* KV_TX_SIM */
                 senderAddress: wallet.address,
                 recipientAddress: frostData.address,
@@ -3376,6 +3378,8 @@ const nextActionMsg = (ph: string, rl: string): string => {
                 setIsLoading(false); setAcceptingId(null); return;
               }
               console.log('[Refund] Funding tx FROZEN. predicted txid:', txResult.predictedTxId, '| escrow =', txResult.predictedTxId + ':0');
+              // AUDIT 2026-11-01: reserve the frozen tx's inputs so no other send spends them before broadcast
+              try { const _ri: any[] = Array.isArray(txResult.preparedTx.inputs) ? txResult.preparedTx.inputs : []; await reservePreparedInputs('fund:' + agrId, _ri.map((i: any) => String(i.previousOutpoint?.transactionId || '') + ':' + Number(i.previousOutpoint?.index ?? 0))); } catch (e) { console.warn('[Refund] input reservation failed (non-fatal):', e); }
               // lockTime = now + N. The funding tx is not broadcast yet, so no fundDAA exists.
               const _rDag = await fetch(_sApi + '/info/blockdag');
               const _rNow = BigInt((_rDag.ok ? await _rDag.json() : {})?.virtualDaaScore || 0);
@@ -4977,6 +4981,7 @@ nonces: _killNonces,
                               const _match = _br.txId === _p.predictedTxId;
                               console.log('[Refund] Funding broadcast:', _br.txId, '| predicted:', _p.predictedTxId, _match ? 'MATCH ✓' : 'MISMATCH ✗');
       laUpsert({ agrId: _agrId, escrowTxId: _br.txId }).then(() => laStep(_agrId, 'seller_funded')).catch(() => {});
+      releasePreparedInputs('fund:' + _agrId).catch(() => {}); // AUDIT 2026-11-01: broadcast done - inputs are spent on chain
                               if (!_match) {
                                 Alert.alert('WARNING — txid mismatch', 'Collateral was sent, but the broadcast txid differs from the prediction, so the stored refund will not spend it. Do not rely on the reclaim for this agreement.');
                               }
@@ -5119,6 +5124,7 @@ nonces: _killNonces,
                                   try { await releaseCommitment(_agrId); console.log('[Abort] Released UTXO tags for', _agrId); } catch (e) { console.warn('[Abort] releaseCommitment failed:', e); }
       laAbort(_agrId, 'abort').catch(() => {});
                                   await SecureStore.deleteItemAsync('kv_refund_pending_' + _agrId).catch(() => {});
+                                  await releasePreparedInputs('fund:' + _agrId).catch(() => {}); // AUDIT 2026-11-01
                                   await removeFrostEntry(_agrId).catch(() => {});
                                   await archiveAgreementSession('aborted-pending').catch(() => {});
                                   await clearAgreementSession().catch(() => {});

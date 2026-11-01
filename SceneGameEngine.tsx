@@ -70,7 +70,7 @@ export default function SceneGameEngine({ game, height = 380, onCommitState, onE
       <WebView
         ref={webRef}
         source={{ html }}
-        originWhitelist={[]}
+        originWhitelist={['*']} /* AUDIT 2026-11-01: blockNav is the only gate */
         onMessage={onMessage}
         onShouldStartLoadWithRequest={blockNav}
         javaScriptEnabled
