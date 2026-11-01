@@ -255,40 +255,40 @@ const TradeFiSection: React.FC<TradeFiSectionProps> = ({ onClose }) => {
 
         {/* Bantu Wisdom */}
         <View style={styles.bantuBox}>
-          <Text style={styles.bantuText}>
+          <Text selectable style={styles.bantuText}>
             "Umkhumbi omkhulu uqondiswa ucingo oluncane."
           </Text>
-          <Text style={[styles.bantuTranslation, { display: "none" }]}>
+          <Text selectable style={[styles.bantuTranslation, { display: "none" }]}>
             Umkhumbi omkhulu ulawulwa ngesikwele esincane (isiZulu)
           </Text>
-          <Text style={styles.bantuAuthor}>— othile obalulekile</Text>
+          <Text selectable style={styles.bantuAuthor}>— othile obalulekile</Text>
           
           <View style={styles.bantuDivider} />
           
-          <Text style={styles.bantuText}>
+          <Text selectable style={styles.bantuText}>
             "Ingabe ukuthenga nokuthengisa izibopho kungcono kunokuvota?"
           </Text>
-          <Text style={[styles.bantuTranslation, { display: "none" }]}>
+          <Text selectable style={[styles.bantuTranslation, { display: "none" }]}>
             Kungenzeka ukuthi ukuthenga nokuthengisa amabhondi kungcono kunokuvota? (isiZulu)
           </Text>
-          <Text style={styles.bantuAuthor}>— othile ofuna ukuba ngumuntu obalulekile</Text>
+          <Text selectable style={styles.bantuAuthor}>— othile ofuna ukuba ngumuntu obalulekile</Text>
 
           <View style={styles.bantuDivider} />
 
           {/* KV_ODE_MALCOLM_X */}
-          <Text style={styles.bantuText}>
+          <Text selectable style={styles.bantuText}>
             "Kuvota mpe luwawanu kati ya nsi mpe bantu na yo."
           </Text>
-          <Text style={styles.bantuTranslation}>
+          <Text selectable style={styles.bantuTranslation}>
             "A ballot and a bond between a country and its citizens." (Kikongo)
           </Text>
-          <Text style={styles.bantuTranslation}>
+          <Text selectable style={styles.bantuTranslation}>
             "Abatoɔ ne apam a ɛda ɔman ne ne manfoɔ ntam." (Twi)
           </Text>
-          <Text style={styles.bantuTranslation}>
+          <Text selectable style={styles.bantuTranslation}>
             "Ìbò àti ìdéhùn láàrin orílẹ̀-èdè àti àwọn aráàlú rẹ̀." (Yorùbá)
           </Text>
-          <Text style={styles.bantuAuthor}>— Wayne Shaw, luzitu kwa Malcolm X</Text>
+          <Text selectable style={styles.bantuAuthor}>— Wayne Shaw, luzitu kwa Malcolm X</Text>
         </View>
 
         {/* Multi-Bond DCA Calculator */}

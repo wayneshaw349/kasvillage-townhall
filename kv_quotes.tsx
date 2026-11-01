@@ -15,7 +15,7 @@ export const FULL_EN = '“A free market isn\u2019t the goal — for that allows
 
 export function KvQuoteFull({ color, size }: { color?: string; size?: number }) {
   return (
-    <Text style={{ color: color || '#8a8a8a', fontSize: size || 11, fontStyle: 'italic', textAlign: 'center', paddingHorizontal: 18, paddingVertical: 10, lineHeight: (size || 11) + 5 }}>
+    <Text selectable style={{ color: color || '#8a8a8a', fontSize: size || 11, fontStyle: 'italic', textAlign: 'center', paddingHorizontal: 18, paddingVertical: 10, lineHeight: (size || 11) + 5 }}>
       {FULL_EN}
     </Text>
   );
@@ -24,7 +24,7 @@ export function KvQuoteFull({ color, size }: { color?: string; size?: number }) 
 export default function KvQuote({ color, size }: { color?: string; size?: number }) {
   const line = LINES[Math.floor(Date.now() / 86400000) % LINES.length]; // rotates daily
   return (
-    <Text style={{ color: color || '#8a8a8a', fontSize: size || 10, fontStyle: 'italic', textAlign: 'center', paddingHorizontal: 18, paddingVertical: 8 }}>
+    <Text selectable style={{ color: color || '#8a8a8a', fontSize: size || 10, fontStyle: 'italic', textAlign: 'center', paddingHorizontal: 18, paddingVertical: 8 }}>
       {line}
     </Text>
   );
