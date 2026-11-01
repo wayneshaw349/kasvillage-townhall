@@ -17,7 +17,7 @@ const onNet = (addr: string, n: string) => !!addr && addr.split(':')[0] === hrpO
 /** Card-vault address for the active network ('' if no vault). */
 export async function kvVaultAddrActive(): Promise<string> {
   const net = kvActiveNet();
-  if ((await SecureStore.getItemAsync('kv_vault_kind')) === 'frost_paper') { // KV_PAPER_VAULT_SLOT
+  if ((await SecureStore.getItemAsync('kv_vault_kind')) === 'cards_paper') { // KV_CARD_PAPER_VAULT
     const fv = await kvFrostVaultActive(); return fv ? String(fv.address) : '';
   }
   const stored = (await SecureStore.getItemAsync('kv_vault_address')) || '';
@@ -43,7 +43,7 @@ export async function kvFrostVaultActive(): Promise<any | null> {
   } catch { return null; }
 }
 
-/** 'frost_paper' when the app's Vault is the phone + paper-key FROST vault, else 'cards'. */
-export async function kvVaultKind(): Promise<'frost_paper' | 'cards'> {
-  try { return (await SecureStore.getItemAsync('kv_vault_kind')) === 'frost_paper' ? 'frost_paper' : 'cards'; } catch { return 'cards'; }
+/** 'cards_paper' when the vault is the card key + paper key (FROST 2-of-2), else 'cards'. */
+export async function kvVaultKind(): Promise<'cards_paper' | 'cards'> {
+  try { return (await SecureStore.getItemAsync('kv_vault_kind')) === 'cards_paper' ? 'cards_paper' : 'cards'; } catch { return 'cards'; }
 }

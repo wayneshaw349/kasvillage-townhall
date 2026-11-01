@@ -44,7 +44,7 @@ export async function loadFrostVault(): Promise<VaultInfo | null> {
 }
 
 type Net = 'mainnet' | 'testnet-10' | 'testnet-11';
-type Step = 'start' | 'exchange' | 'paper' | 'restorePaper' | 'confirm' | 'saving' | 'done' | 'error';
+type Step = 'start' | 'exchange' | 'confirm' | 'saving' | 'done' | 'error';
 
 export interface VaultSetupScreenProps {
   visible: boolean;
@@ -69,13 +69,8 @@ export const VaultSetupScreen: React.FC<VaultSetupScreenProps> = ({
   const [camGranted, setCamGranted] = useState(false);
   const [waitingForCreatorScan, setWaitingForCreatorScan] = useState(false);
   const busyRef = useRef(false);
-  // KV_PAPER_COSIGN: the paper key is shown once, held only in this state, never stored
-  const [paperQR, setPaperQR] = useState('');
-  const [paperHex, setPaperHex] = useState('');
-  const [paperCheck, setPaperCheck] = useState('');
 
   const reset = useCallback(() => {
-    setPaperQR(''); setPaperHex(''); setPaperCheck('');
     setError(null); setMyQR(''); setTheirPubkey(''); setVault(null);
     setPasteBuf(''); setVaultId(''); setWaitingForCreatorScan(false);
   }, []);
@@ -88,7 +83,7 @@ export const VaultSetupScreen: React.FC<VaultSetupScreenProps> = ({
   }, [visible, reset, getMyPubkey]);
 
   useEffect(() => {
-    if ((step !== 'exchange' && step !== 'restorePaper') || !_cam?.Camera?.requestCameraPermissionsAsync) return;
+    if (step !== 'exchange' || !_cam?.Camera?.requestCameraPermissionsAsync) return;
     _cam.Camera.requestCameraPermissionsAsync()
       .then((r: any) => setCamGranted(r?.status === 'granted'))
       .catch(() => setCamGranted(false));
@@ -108,29 +103,6 @@ export const VaultSetupScreen: React.FC<VaultSetupScreenProps> = ({
     // Random vaultId — uniqueness is what matters; counter derives from it
     const rnd = Array.from({ length: 4 }, () => Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0')).join('');
     beginExchange('VLT_' + Date.now() + '_' + rnd);
-  };
-
-  const handlePaper = () => {
-    if (!myPubkey) return;
-    try {
-      const { makePaperCosignKey } = require('./frost_qr_signer');
-      const rnd = Array.from({ length: 4 }, () => Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0')).join('');
-      const vid = 'VLT_' + Date.now() + '_' + rnd;
-      const k = makePaperCosignKey(vid, network);
-      const v = deriveVault({ vaultId: vid, myPubkey, cosignerPubkey: k.pubkey, network });
-      setVaultId(vid);
-      setVault({ ...v, paperCosign: true });
-      setPaperQR(k.qr); setPaperHex(k.privHex); setPaperCheck('');
-      setStep('paper');
-    } catch (e: any) { setError(e?.message || 'Could not create the cosign key'); }
-  };
-
-  const handleRestorePaper = (raw: string) => {
-    const r = require('./frost_qr_signer').restorePaperVault(raw, myPubkey);
-    setPasteBuf('');
-    if ('error' in r) { setError(r.error); return; }
-    if (r.vault.network !== network) { setError('This paper is for ' + r.vault.network + ', the app is on ' + network + '.'); return; }
-    setError(null); setVaultId(r.vault.vaultId); setVault(r.vault); setStep('confirm');
   };
 
   const handleJoin = () => {
@@ -191,19 +163,6 @@ export const VaultSetupScreen: React.FC<VaultSetupScreenProps> = ({
     busyRef.current = true;
     setStep('saving');
     try {
-      if (vault.paperCosign) {
-        // KV_PAPER_VAULT_SLOT: the paper-key vault takes the app's "Vault" slot (Send/Receive/balance).
-        // Never orphan a funded card vault: its coins must be moved out first.
-        const oldAddr = (await SecureStore.getItemAsync('kv_vault_address')) || '';
-        const oldKind = (await SecureStore.getItemAsync('kv_vault_kind')) || 'cards';
-        if (oldAddr && oldKind !== 'frost_paper' && oldAddr !== vault.address) {
-          let bal = 0;
-          try { const base = oldAddr.startsWith('kaspatest:') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org'; bal = Number((await (await fetch(base + '/addresses/' + oldAddr + '/balance')).json()).balance || 0); } catch { bal = -1; }
-          if (bal !== 0) throw new Error(bal < 0 ? 'Could not check your card vault balance - try again online.' : 'Your card vault still holds ' + (bal / 1e8).toFixed(4) + ' KAS. Send it to your hot wallet first, then create the paper vault.');
-        }
-        await SecureStore.setItemAsync('kv_vault_address', vault.address);
-        await SecureStore.setItemAsync('kv_vault_kind', 'frost_paper');
-      }
       await SecureStore.setItemAsync(KV_FROST_VAULT_KEY, JSON.stringify(vault));
       await SecureStore.setItemAsync(KV_FROST_VAULT_ADDR_KEY, vault.address);
       onCreated?.(vault);
@@ -245,61 +204,6 @@ export const VaultSetupScreen: React.FC<VaultSetupScreenProps> = ({
               </TouchableOpacity>
               <TouchableOpacity style={[styles.secondaryBtn, !myPubkey && styles.btnDisabled]} onPress={handleJoin} disabled={!myPubkey}>
                 <Text style={styles.secondaryBtnText}>Join (scan the other device)</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.secondaryBtn, !myPubkey && styles.btnDisabled]} onPress={handlePaper} disabled={!myPubkey}>
-                <Text style={styles.secondaryBtnText}>Paper cosign key (no second phone)</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.secondaryBtn, !myPubkey && styles.btnDisabled]} onPress={() => { setError(null); setStep('restorePaper'); }} disabled={!myPubkey}>
-                <Text style={styles.secondaryBtnText}>Restore paper vault (scan your cosign paper)</Text>
-              </TouchableOpacity>
-              {error && <Text style={styles.errSmall}>{error}</Text>}
-            </ScrollView>
-          )}
-
-          {/* STEP: paper - KV_PAPER_COSIGN */}
-          {step === 'paper' && paperQR ? (
-            <ScrollView contentContainerStyle={styles.center}>
-              <Text style={styles.stepTitle}>Your paper cosign key</Text>
-              <Text style={styles.body}>
-                Every spend from this vault needs this phone AND this key. It is shown ONCE and is not saved anywhere.
-                Write the 64 characters on paper (or print the QR from a computer). Do NOT screenshot or photograph it.
-              </Text>
-              <View style={styles.qrBox}>
-                <QRCode value={paperQR} size={QR_SIZE} backgroundColor="#FFFFFF" color="#000000" />
-              </View>
-              <Text selectable={false} style={[styles.body, { fontFamily: 'Courier', letterSpacing: 1 }]}>
-                {(paperHex.match(/.{1,4}/g) || []).join(' ')}
-              </Text>
-              <Text style={[styles.body, { marginTop: 10 }]}>To prove you saved it, type its LAST 6 characters:</Text>
-              <TextInput value={paperCheck} onChangeText={(t) => setPaperCheck(t.trim().toLowerCase())} autoCapitalize="none" autoCorrect={false}
-                style={[styles.input || {}, { borderWidth: 1, borderColor: '#999', borderRadius: 8, padding: 8, minWidth: 140, textAlign: 'center' }]} />
-              <TouchableOpacity
-                style={[styles.primaryBtn, paperCheck !== paperHex.slice(-6) && styles.btnDisabled]}
-                disabled={paperCheck !== paperHex.slice(-6)}
-                onPress={() => { setPaperQR(''); setPaperHex(''); setPaperCheck(''); setStep('confirm'); }}>
-                <Text style={styles.primaryBtnText}>I saved it on paper → Continue</Text>
-              </TouchableOpacity>
-              <Text style={styles.errSmall}>If you lose this paper AND this phone's key, the vault funds are lost.</Text>
-            </ScrollView>
-          ) : null}
-
-          {/* STEP: restore paper vault - KV_PAPER_COSIGN */}
-          {step === 'restorePaper' && (
-            <ScrollView contentContainerStyle={styles.center}>
-              <Text style={styles.stepTitle}>Restore paper vault</Text>
-              <Text style={styles.body}>
-                First restore your wallet from its seed on this phone. Then scan the cosign QR on your paper. The vault is rebuilt from both - the paper key is NOT saved.
-                Use only this screen, never your phone's camera app.
-              </Text>
-              {_cam?.CameraView && camGranted ? (
-                <View style={{ width: '100%', height: 260, borderRadius: 12, overflow: 'hidden', marginVertical: 10 }}>
-                  <_cam.CameraView style={{ flex: 1 }} barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                    onBarcodeScanned={(e: any) => { const d = String(e?.data || ''); if (d.startsWith('KVCK1|')) handleRestorePaper(d); }} />
-                </View>
-              ) : null}
-              <TextInput value={pasteBuf} onChangeText={setPasteBuf} placeholder="or paste the KVCK1|… text" placeholderTextColor="#78716C" autoCapitalize="none" autoCorrect={false} secureTextEntry style={styles.input} />
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => handleRestorePaper(pasteBuf)}>
-                <Text style={styles.primaryBtnText}>Rebuild vault</Text>
               </TouchableOpacity>
               {error && <Text style={styles.errSmall}>{error}</Text>}
             </ScrollView>

@@ -869,6 +869,23 @@ export async function vaultGoCold(): Promise<{ success: boolean; error?: string 
   return { success: true };
 }
 
+/** KV_CARD_PAPER_VAULT: the card-vault key, for a card + paper vault spend. Face ID first; the
+ *  vault must be warm (restored from cards) exactly like a normal vault send. */
+export async function vaultCardKeyHex(): Promise<string> {
+  biometricAuth.clearCache();
+  const authOk = await biometricAuth.authenticate('Vault: sign with the vault key');
+  if (!authOk) throw new Error('Authentication failed');
+  const mnemonic = await SecureStore.getItemAsync('kv_vault_mnemonic');
+  if (!mnemonic) throw new Error('Vault is COLD: key is not on this device. Use Profile > Restore from Cards to load it, send, then Go Cold again.');
+  const { mnemonicToSeedV2, deriveKaspaHDKeyV2 } = await import('./bip39_v2');
+  const { previewAddressFromMnemonic } = await import('./wallet_registration_v2');
+  const preview = await previewAddressFromMnemonic(mnemonic, require('./kv_vault_active').kvActiveNet());
+  const storedPub = (await SecureStore.getItemAsync('kv_vault_pubkey')) || '';
+  if (!preview || (storedPub && preview.publicKeyHex.toLowerCase() !== storedPub.toLowerCase())) throw new Error('Vault key does not match stored vault. Re-scan cards.');
+  const hd = deriveKaspaHDKeyV2(await mnemonicToSeedV2(mnemonic, ''));
+  return bytesToHex(hd.privateKey);
+}
+
 export async function vaultIsWarm(): Promise<boolean> {
   return !!(await SecureStore.getItemAsync('kv_vault_mnemonic'));
 }

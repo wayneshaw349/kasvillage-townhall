@@ -587,3 +587,14 @@ export function restorePaperVault(raw: string, myPubkey: string): { vault: Vault
   if (pub === myPubkey) return { error: 'That key is this phone\'s own key.' };
   return { vault: { ...deriveVault({ vaultId: vid, myPubkey, cosignerPubkey: pub, network: net as KaspaNetwork }), paperCosign: true } };
 }
+
+/** Public facts from a paper cosign QR (vault id, network, cosign pubkey). The private key in
+ *  it is used only to compute the pubkey and is not returned or stored. */
+export function paperQrPublic(raw: string): { vaultId: string; network: KaspaNetwork; pubkey: string } | { error: string } {
+  const t = String(raw || '').trim();
+  if (!t.startsWith('KVCK1|')) return { error: 'Scan the cosign QR from your paper (it starts with KVCK1).' };
+  const [, vid, net, k] = t.split('|');
+  if (!vid || !/^[0-9a-f]{64}$/i.test(String(k || '')) || !['mainnet', 'testnet-10', 'testnet-11'].includes(String(net))) return { error: 'Not a valid cosign QR.' };
+  try { return { vaultId: vid, network: net as KaspaNetwork, pubkey: bytesToHex(_secp.getPublicKey(hexToBytes(String(k).toLowerCase()), true)) }; }
+  catch { return { error: 'Invalid key.' }; }
+}

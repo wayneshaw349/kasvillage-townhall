@@ -367,13 +367,13 @@ export const SendKAS: React.FC<SendKASProps> = ({
     setIsLoading(false);
   };
   
-  // KV_PAPER_VAULT_SLOT: a phone + paper-key vault signs on the vault screen (scan the paper key)
+  // KV_CARD_PAPER_VAULT: a card + paper vault signs on the vault screen (card key + scan the paper)
   const [paperSign, setPaperSign] = useState<any>(null);
   const handleSend = async () => {
     if (!preview || !resolved?.address) return;
     if (sendSource === 'vault') {
       const _va = require('./kv_vault_active');
-      if ((await _va.kvVaultKind()) === 'frost_paper') {
+      if ((await _va.kvVaultKind()) === 'cards_paper') {
         const fv = await _va.kvFrostVaultActive();
         if (!fv) { setError('Vault not found on this phone - restore it from your paper first.'); setStep('error'); return; }
         setPaperSign({ vault: fv, to: resolved.address, kas: sompiToKas(amountSompi) });
@@ -799,9 +799,10 @@ export const SendKAS: React.FC<SendKASProps> = ({
             vault={paperSign.vault}
             initialRecipient={paperSign.to}
             initialAmountKas={String(paperSign.kas)}
-            getPrivateKeyHex={async () => { const k = await require('./proposal_share')._kvResolvePrivHex(); if (!k) throw new Error('wallet key unavailable'); return k; }}
+            getPrivateKeyHex={() => require('./kasvillage_cold_wallet').vaultCardKeyHex()}
             onClose={() => setPaperSign(null)}
-            onSuccess={(id: string) => { setPaperSign(null); setTxId(id); setStep('success'); if (onSuccess) onSuccess(id); setTimeout(() => { onBalanceRefresh?.(); }, 2000); }}
+            onSuccess={(id: string) => { setPaperSign(null); setTxId(id); setStep('success'); if (onSuccess) onSuccess(id); setTimeout(() => { onBalanceRefresh?.(); }, 2000);
+              setTimeout(() => { Alert.alert('Return vault to cold?', 'Remove the vault key from this phone again. Your cards (and the paper) stay the only keys.', [{ text: 'Stay warm', style: 'cancel' }, { text: 'Go Cold', onPress: async () => { await vaultGoCold(); } }]); }, 800); }}
           />
         );
       })() : null}

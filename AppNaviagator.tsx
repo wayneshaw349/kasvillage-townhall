@@ -1433,7 +1433,7 @@ export const AppNavigator: React.FC = () => {
           network={kaspaAddress.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet'}
           onDone={() => setScreen('dashboard')}
           onCancel={() => setScreen('dashboard')}
-          onPaperVault={() => setScreen('vault_setup')}
+          onRestorePaper={() => setScreen('vault_recovery')}
         />
       );
 
@@ -1468,6 +1468,25 @@ export const AppNavigator: React.FC = () => {
               console.log('[Restore] VAULT-ROUTE preview:', preview?.address?.slice(0, 22) || 'none',
                 'vault:', vaultAddr.slice(0, 22) || 'none');
               // KV_VAULT_ACTIVE: match by key, not address - a testnet-era vault has a kaspatest: address
+              // KV_CARD_PAPER_VAULT: a paper was scanned first -> these cards are that vault's key.
+              const _pendRaw = await SecureStore.getItemAsync('kv_pending_paper_restore');
+              if (preview && _pendRaw) {
+                try {
+                  const pend = JSON.parse(_pendRaw);
+                  const F = require('./frost_qr_signer');
+                  const fv = { ...F.deriveVault({ vaultId: pend.vaultId, myPubkey: preview.publicKeyHex, cosignerPubkey: pend.pubkey, network: pend.network }), paperCosign: true };
+                  await SecureStore.setItemAsync('kv_vault_mnemonic', mnemonic, { keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY });
+                  await SecureStore.setItemAsync('kv_vault_pubkey', preview.publicKeyHex);
+                  await SecureStore.setItemAsync('kv_frost_vault', JSON.stringify(fv));
+                  await SecureStore.setItemAsync('kv_vault_address', fv.address);
+                  await SecureStore.setItemAsync('kv_vault_kind', 'cards_paper');
+                  await SecureStore.deleteItemAsync('kv_pending_paper_restore');
+                  Alert.alert('Vault restored', 'Card + paper vault rebuilt:\n' + fv.address.slice(0, 28) + '…\nCheck this is your vault address. Your main wallet was not changed.');
+                  relockRef.current = false;
+                  setScreen((await kvWalletKeysExist()) ? 'kv_locked' : 'welcome');
+                  return;
+                } catch (e: any) { Alert.alert('Restore failed', String(e?.message || e)); return; }
+              }
               const _isVault = !!preview && ((vaultPub && preview.publicKeyHex.toLowerCase() === vaultPub.toLowerCase())
                 || (vaultAddr && preview.address.split(':')[1] === vaultAddr.split(':')[1]));
               if (preview && _isVault) {

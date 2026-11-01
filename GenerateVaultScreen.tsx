@@ -13,8 +13,9 @@
 
 import React, { useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, ScrollView,
+  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, ScrollView, TextInput, Switch,
 } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import * as SecureStore from 'expo-secure-store';
 import { VaultBackupScreen } from './VaultBackupScreen';
 import { generateBackableWallet, createIdentityBoundBackup } from './vault_generator';
@@ -28,12 +29,32 @@ interface Props {
   network?: Net;                      // default testnet-10
   total?: number;                     // cards to issue (default 4)
   threshold?: number;                 // cards needed to recover (default 2)
-  onPaperVault?: () => void;          // KV_PAPER_VAULT_SLOT: phone + paper-key FROST vault instead
+  onRestorePaper?: () => void;        // KV_CARD_PAPER_VAULT: rebuild a card + paper vault on a new phone
 }
 
 export const GenerateVaultScreen: React.FC<Props> = ({
-  onDone, onCancel, network = require('./kv_net').KV_NET, total = 4, threshold = 2, onPaperVault,
+  onDone, onCancel, network = require('./kv_net').KV_NET, total = 4, threshold = 2, onRestorePaper,
 }) => {
+  // KV_CARD_PAPER_VAULT: optional paper cosign key. The vault key stays on cards exactly as before;
+  // with paper on, every spend ALSO needs the paper key (FROST 2-of-2). Paper key shown once, never stored.
+  const [withPaper, setWithPaper] = useState(false);
+  const [paperQR, setPaperQR] = useState('');
+  const [paperHex, setPaperHex] = useState('');
+  const [paperCheck, setPaperCheck] = useState('');
+  const [restoreMode, setRestoreMode] = useState(false);
+  const [restoreText, setRestoreText] = useState('');
+  const [camOk, setCamOk] = useState(false);
+  const _cam = (() => { try { return require('expo-camera'); } catch { return null; } })();
+  // Restore step 1 of 2: read the paper's PUBLIC facts (vault id, network, cosign pubkey) and keep only
+  // those; step 2 is Restore from Cards, which rebuilds the vault (AppNavigator vault_recovery).
+  const takePaper = async (raw: string) => {
+    const r = require('./frost_qr_signer').paperQrPublic(raw);
+    setRestoreText('');
+    if ('error' in r) { Alert.alert('Not a paper key', r.error); return; }
+    await SecureStore.setItemAsync('kv_pending_paper_restore', JSON.stringify(r));
+    setRestoreMode(false);
+    Alert.alert('Paper read', 'Now scan your vault cards. The vault is rebuilt from both.', [{ text: 'Scan cards', onPress: () => onRestorePaper && onRestorePaper() }]);
+  };
   const [busy, setBusy] = useState(false);
   const [wires, setWires] = useState<string[] | null>(null);
   const [address, setAddress] = useState('');
@@ -52,7 +73,19 @@ export const GenerateVaultScreen: React.FC<Props> = ({
       // 3) VAULT-NAMESPACED: store in vault slots ONLY - never touches the
       //    active (hot) wallet. Spending uses sendKASFromVault, which derives
       //    the key from kv_vault_mnemonic at sign time.
-      const vaultAddr = w.kaspaAddress;
+      let vaultAddr = w.kaspaAddress;
+      if (withPaper) {
+        const F = require('./frost_qr_signer');
+        const vid = 'VLT_' + Date.now() + '_' + Math.floor(Math.random() * 0xffffffff).toString(16);
+        const k = F.makePaperCosignKey(vid, network);
+        const fv = { ...F.deriveVault({ vaultId: vid, myPubkey: w.publicKeyHex, cosignerPubkey: k.pubkey, network }), paperCosign: true };
+        vaultAddr = fv.address;
+        await SecureStore.setItemAsync('kv_frost_vault', JSON.stringify(fv));
+        await SecureStore.setItemAsync('kv_vault_kind', 'cards_paper');
+        setPaperQR(k.qr); setPaperHex(k.privHex); setPaperCheck('');
+      } else {
+        try { await SecureStore.deleteItemAsync('kv_vault_kind'); } catch {}
+      }
       await SecureStore.setItemAsync('kv_vault_mnemonic', w.mnemonic, {
         keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
       });
@@ -74,6 +107,58 @@ export const GenerateVaultScreen: React.FC<Props> = ({
       [{ text: 'Keep warm', style: 'cancel', onPress: onDone },
        { text: 'Go Cold (recommended)', onPress: async () => { try { const { vaultGoCold } = require('./kasvillage_cold_wallet'); const r = await vaultGoCold(); if (!r.success) Alert.alert('Go Cold', r.error || 'Failed'); } catch {} onDone(); } }]);
   };
+
+  if (restoreMode) {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.title}>Restore card + paper vault</Text>
+        <Text style={styles.body}>Step 1: scan the paper key QR (use only this screen, never the camera app). Step 2: scan your vault cards.</Text>
+        {_cam?.CameraView && camOk ? (
+          <View style={{ height: 260, borderRadius: 12, overflow: 'hidden', marginVertical: 10 }}>
+            <_cam.CameraView style={{ flex: 1 }} barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={(e: any) => { const d = String(e?.data || ''); if (d.startsWith('KVCK1|')) takePaper(d); }} />
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.secondary} onPress={async () => { try { const r = await _cam?.Camera?.requestCameraPermissionsAsync?.(); setCamOk(r?.status === 'granted'); } catch {} }}>
+            <Text style={styles.secondaryText}>Turn on camera</Text>
+          </TouchableOpacity>
+        )}
+        <TextInput value={restoreText} onChangeText={setRestoreText} placeholder="or paste the KVCK1|… text" placeholderTextColor="#78716C" secureTextEntry autoCapitalize="none" autoCorrect={false}
+          style={{ borderWidth: 1, borderColor: '#78716C', borderRadius: 8, padding: 10, color: '#F5F5F4', marginTop: 10 }} />
+        <TouchableOpacity style={[styles.primary, { marginTop: 10 }]} onPress={() => takePaper(restoreText)}>
+          <Text style={styles.primaryText}>Use this paper</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.secondary} onPress={() => setRestoreMode(false)}>
+          <Text style={styles.secondaryText}>Back</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
+
+  // KV_CARD_PAPER_VAULT: paper key first (shown once), then the cards as before.
+  if (wires && paperQR) {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.title}>📄 Your paper key</Text>
+        <Text style={styles.body}>
+          Every spend from this vault needs your vault cards AND this paper key. It is shown ONCE and is not saved anywhere.
+          Write the 64 characters on paper (or print the QR from a computer). Do NOT screenshot or photograph it.
+        </Text>
+        <View style={{ alignItems: 'center', backgroundColor: '#fff', padding: 12, borderRadius: 12, marginVertical: 12 }}>
+          <QRCode value={paperQR} size={220} backgroundColor="#FFFFFF" color="#000000" />
+        </View>
+        <Text style={[styles.li, { fontFamily: 'Courier', letterSpacing: 1, textAlign: 'center' }]}>{(paperHex.match(/.{1,4}/g) || []).join(' ')}</Text>
+        <Text style={[styles.body, { marginTop: 10 }]}>To prove you saved it, type its LAST 6 characters:</Text>
+        <TextInput value={paperCheck} onChangeText={(t) => setPaperCheck(t.trim().toLowerCase())} autoCapitalize="none" autoCorrect={false}
+          style={{ borderWidth: 1, borderColor: '#78716C', borderRadius: 8, padding: 10, color: '#F5F5F4', textAlign: 'center', fontFamily: 'Courier' }} />
+        <TouchableOpacity style={[styles.primary, { marginTop: 12 }, paperCheck !== paperHex.slice(-6) && styles.primaryDisabled]}
+          disabled={paperCheck !== paperHex.slice(-6)} onPress={() => { setPaperQR(''); setPaperHex(''); setPaperCheck(''); }}>
+          <Text style={styles.primaryText}>I saved the paper key → Next: vault cards</Text>
+        </TouchableOpacity>
+        <Text style={[styles.li, { marginTop: 10 }]}>Lose the paper OR all your cards and the vault funds are lost. Store them in different places.</Text>
+      </ScrollView>
+    );
+  }
 
   // Once wires exist, hand off to the existing backup UI (QR cards).
   if (wires) {
@@ -97,18 +182,19 @@ export const GenerateVaultScreen: React.FC<Props> = ({
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>🔐 Generate Backable Wallet</Text>
-      {onPaperVault ? (
-        <View style={styles.card}>
-          <Text style={styles.cardHead}>Recommended: phone + paper key vault</Text>
-          <Text style={styles.li}>• Every spend needs THIS phone and a key you keep on paper (scan it to sign).</Text>
-          <Text style={styles.li}>• A stolen or hacked phone alone can't spend it; the paper alone can't either.</Text>
-          <Text style={styles.li}>• Recover on a new phone: your wallet seed + scan the paper.</Text>
-          <TouchableOpacity style={[styles.primary, { marginTop: 10 }]} onPress={onPaperVault} disabled={busy}>
-            <Text style={styles.primaryText}>Create phone + paper vault</Text>
-          </TouchableOpacity>
-          <Text style={[styles.li, { marginTop: 10 }]}>Or the classic card vault below (one key, split into QR cards):</Text>
+      <View style={styles.card}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={[styles.cardHead, { flex: 1 }]}>Also require a paper key (recommended)</Text>
+          <Switch value={withPaper} onValueChange={setWithPaper} disabled={busy} />
         </View>
-      ) : null}
+        <Text style={styles.li}>• Spending then needs your cards AND a paper key you scan (FROST 2-of-2).</Text>
+        <Text style={styles.li}>• Someone with your cards alone, or the paper alone, cannot spend.</Text>
+        {onRestorePaper ? (
+          <TouchableOpacity onPress={() => setRestoreMode(true)} disabled={busy} style={{ marginTop: 8 }}>
+            <Text style={[styles.li, { textDecorationLine: 'underline' }]}>New phone? Restore a card + paper vault</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
       <Text style={styles.body}>
         Creates a brand-new wallet whose recovery is portable across devices and
         platforms. You'll get {total} QR cards; any {threshold} restore the wallet.
