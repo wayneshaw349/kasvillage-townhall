@@ -78,7 +78,7 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
     if (s / BigInt(n) < 101_000_000n) { Alert.alert('Too small', 'Each QR must hold at least about 1.01 KAS.'); return; }
     // Every QR pays the hot wallet: its backup cards must exist and match before the first deposit.
     const bk = await SQ.sqHotBackupCheck();
-    if (bk) { Alert.alert('Back up your hot wallet first', bk); return; }
+    if (bk) { Alert.alert('Back up your hot wallet first', bk, [{ text: 'OK' }, { text: 'Details', onPress: async () => { const d = await SQ.sqHotBackupDiag().catch((e: any) => String(e?.message || e)); console.log('[SavingsQR] backup diag\n' + d); Alert.alert('Backup check details', d); } }]); return; }
     let saved = false; try { saved = (await require('expo-secure-store').getItemAsync('kv_sq_backup_ok')) === '1'; } catch {}
     if (!saved) {
       const yes = await new Promise<boolean>((ok) => Alert.alert('Backup cards saved?', 'Savings QRs always pay your hot wallet. If you lose this phone, only your hot wallet backup cards (Profile → Backup cards) get those coins back. Have you saved them?', [

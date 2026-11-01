@@ -87,6 +87,30 @@ export async function sqHotBackupCheck(): Promise<string> {
   return '';
 }
 
+/** Why the backup check fails - address ENDINGS only, never keys or words. */
+export async function sqHotBackupDiag(): Promise<string> {
+  const net = sqActiveNet(); const hrp = net.startsWith('testnet') ? 'kaspatest' : 'kaspa';
+  const tail = (a: string) => (a ? '…' + a.slice(-6) : '(none)');
+  const { kaspaAddressFromXOnly } = require('./wallet_registration_v2');
+  const { hexToBytes } = require('@noble/hashes/utils');
+  const fromPriv = (h: string) => { try { return kaspaAddressFromXOnly(secp256k1.getPublicKey(hexToBytes(h), true).slice(1), hrp) as string; } catch { return ''; } };
+  const lines: string[] = [];
+  const hot = await sqHotAddress();
+  lines.push('Hot wallet (Savings pays): ' + tail(hot));
+  lines.push('Saved address: ' + tail((await SecureStore.getItemAsync('kv_kaspa_address')) || '') + ' / mainnet: ' + tail((await SecureStore.getItemAsync('kaspa_address_real')) || ''));
+  const pk = (await SecureStore.getItemAsync('kv_private_key')) || '';
+  lines.push('From this phone\'s key: ' + tail(pk ? fromPriv(pk) : ''));
+  const m = (await SecureStore.getItemAsync('kv_mnemonic')) || '';
+  lines.push('Seed words on phone: ' + (m ? m.trim().split(/\s+/).length + ' words' : 'none'));
+  if (m) {
+    try { const { previewAddressFromMnemonic } = require('./wallet_registration_v2'); const pv = await previewAddressFromMnemonic(m, net); lines.push('Cards/seed restore to: ' + tail(pv?.address || '')); } catch { lines.push('Cards/seed restore to: (error)'); }
+    for (const pass of ['', 'kasvillage']) {
+      try { const W = require('./bip39_wallet'); const hd = W.deriveKaspaHDKey(await W.mnemonicToSeed(m, pass)); lines.push('Older app recipe' + (pass ? ' (kasvillage)' : '') + ': ' + tail(fromPriv(require('@noble/hashes/utils').bytesToHex(hd.privateKey)))); } catch { lines.push('Older app recipe' + (pass ? ' (kasvillage)' : '') + ': (error)'); }
+    }
+  }
+  return lines.join('\n');
+}
+
 // --- 1. start: make the throwaway key and pay it from the hot wallet --------------------------
 export async function sqStartDeposit(depositSompi: bigint, n: number): Promise<{ error?: string }> {
   if (sqTutorial()) return { error: 'Savings QR needs Real mode.' };
