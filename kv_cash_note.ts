@@ -6,7 +6,8 @@
 // Unlike Savings QR (pre-signed, pays only your hot wallet), a cash note is spendable by
 // anyone who sees the QR. Until the maker removes it, the key also stays on the maker's
 // phone so a lost or unused note can be reclaimed.
-// QR text:  KVCN1|<net>|<64-hex private key>|<8-hex checksum>
+// QR text:  KVCN1|<net>|<64-hex private key>|<printed sompi>|<8-hex checksum>
+//   (older 4-field notes without the printed amount still redeem)
 // ============================================================================
 
 import * as SecureStore from 'expo-secure-store';
@@ -28,14 +29,15 @@ export interface CnRow { addr: string; net: SqNet; sompi: string; createdAt: num
 const hrp = (net: string) => (net.startsWith('testnet') ? 'kaspatest' : 'kaspa');
 const addrOf = (priv: string, net: string) => require('./wallet_registration_v2').kaspaAddressFromXOnly(secp256k1.getPublicKey(hexToBytes(priv), true).slice(1), hrp(net)) as string;
 const chk = (s: string) => bytesToHex(sha256(new TextEncoder().encode(s))).slice(0, 8);
-export const cnQr = (net: string, priv: string) => { const b = 'KVCN1|' + net + '|' + priv; return b + '|' + chk(b); };
+export const cnQr = (net: string, priv: string, sompi?: bigint) => { const b = 'KVCN1|' + net + '|' + priv + (sompi !== undefined ? '|' + sompi.toString() : ''); return b + '|' + chk(b); };
 
-export function cnParse(raw: string): { error: string } | { net: SqNet; priv: string; addr: string } {
+export function cnParse(raw: string): { error: string } | { net: SqNet; priv: string; addr: string; printedSompi?: bigint } {
   const p = String(raw || '').trim().split('|');
-  if (p.length !== 4 || p[0] !== 'KVCN1') return { error: 'Not a KasVillage cash note.' };
+  if ((p.length !== 4 && p.length !== 5) || p[0] !== 'KVCN1') return { error: 'Not a KasVillage cash note.' };
   if (!['mainnet', 'testnet-10', 'testnet-11'].includes(p[1])) return { error: 'Unknown network on the note.' };
-  if (!/^[0-9a-f]{64}$/.test(p[2]) || chk(p.slice(0, 3).join('|')) !== p[3]) return { error: 'Damaged note (checksum).' };
-  try { return { net: p[1] as SqNet, priv: p[2], addr: addrOf(p[2], p[1]) }; } catch { return { error: 'Invalid key on the note.' }; }
+  if (!/^[0-9a-f]{64}$/.test(p[2]) || chk(p.slice(0, -1).join('|')) !== p[p.length - 1]) return { error: 'Damaged note (checksum).' };
+  if (p.length === 5 && !/^\d{1,19}$/.test(p[3])) return { error: 'Damaged note (amount).' };
+  try { return { net: p[1] as SqNet, priv: p[2], addr: addrOf(p[2], p[1]), printedSompi: p.length === 5 ? BigInt(p[3]) : undefined }; } catch { return { error: 'Invalid key on the note.' }; }
 }
 
 export async function cnLoadSession(): Promise<CnSession | null> { try { const r = await SecureStore.getItemAsync(SESSION_KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
@@ -51,7 +53,7 @@ export async function cnCreate(sompi: bigint): Promise<{ error?: string }> {
   const net = sqActiveNet();
   const b = (secp256k1 as any).utils.randomPrivateKey() as Uint8Array; const priv = bytesToHex(b); b.fill(0);
   const addr = addrOf(priv, net);
-  await saveSession({ v: 1, net, priv, addr, sompi: sompi.toString(), stage: 'created', qr: cnQr(net, priv), createdAt: Date.now() });
+  await saveSession({ v: 1, net, priv, addr, sompi: sompi.toString(), stage: 'created', qr: cnQr(net, priv, sompi), createdAt: Date.now() });
   const r = await require('./kasvillage_cold_wallet').sendKASWithHybridSig(addr, sompi, 'Cash note');
   if (!r?.success) return { error: (r?.error || 'Funding failed.') + ' If it was cancelled, tap "Reclaim" to clear it.' };
   const s = await cnLoadSession(); if (s) { s.stage = 'funded'; await saveSession(s); }
@@ -91,14 +93,15 @@ export async function cnReclaim(): Promise<{ error?: string }> {
   await SecureStore.deleteItemAsync(SESSION_KEY); return {};
 }
 
-/** Check a scanned note: value on chain. */
-export async function cnInspect(raw: string): Promise<{ error?: string; net?: SqNet; sompi?: bigint }> {
+/** Precheck a scanned note against the chain (nothing is moved).
+ *  sompi = real KAS on the note right now; printedSompi = what the slip claims (inside the signed-by-checksum QR). */
+export async function cnInspect(raw: string): Promise<{ error?: string; net?: SqNet; sompi?: bigint; printedSompi?: bigint; matches?: boolean; coins?: number }> {
   const p = cnParse(raw); if ('error' in p) return { error: p.error };
   if (p.net !== sqActiveNet()) return { error: 'This note is for ' + p.net + ' but the app is on ' + sqActiveNet() + '.' };
-  let coins; try { coins = await fetchUtxos(p.net, p.addr); } catch (e: any) { return { error: e?.message || 'Network error' }; }
+  let coins; try { coins = await fetchUtxos(p.net, p.addr); } catch (e: any) { return { error: 'Could not check the note right now (' + (e?.message || 'network error') + '). Do not accept it until it checks out.' }; }
   const sompi = coins.reduce((a, c) => a + c.amount, 0n);
-  if (sompi <= 0n) return { error: 'This note is empty - it was already redeemed (or not funded yet).' };
-  return { net: p.net, sompi };
+  if (sompi <= 0n) return { error: 'EMPTY NOTE - no KAS on it. It was already redeemed, never funded, or is fake. Do not accept it.' };
+  return { net: p.net, sompi, printedSompi: p.printedSompi, matches: p.printedSompi === undefined ? undefined : sompi >= p.printedSompi, coins: coins.length };
 }
 
 /** Redeem: sweep everything on the note to `toAddress` (standard kaspa: address). */
