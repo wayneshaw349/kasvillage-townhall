@@ -106,12 +106,17 @@ export function verifyCanaryAttestation(
 
 export async function scanUrl(url: string): Promise<CanaryScanResult> {
   try {
-    const resp = await fetch(`${TOWNHALL_URL}/api/canary/scan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-    });
-    const data = await resp.json();
+    const ctl = new AbortController(); const _t = setTimeout(() => ctl.abort(), 25000); // relay worst case ~4 hops x 10s
+    let data: any;
+    try {
+      const resp = await fetch(`${TOWNHALL_URL}/api/canary/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+        signal: ctl.signal,
+      });
+      data = await resp.json();
+    } finally { clearTimeout(_t); }
     if (data.error && !data.verdict) {
       return { verdict: null, digest: null, sig: null, attestPubkey: null, verified: false, pinMatch: false, error: data.error };
     }

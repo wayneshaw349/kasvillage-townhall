@@ -223,57 +223,51 @@ fn verdict_label(score: u32) -> &'static str {
 }
 
 pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Responder {
-    let url = match body.get("url").and_then(|v| v.as_str()) {
-        Some(u) if u.starts_with("https://") || u.starts_with("http://") => u.to_string(),
-        _ => return HttpResponse::BadRequest().json(serde_json::json!({"error":"url required (http/https)"})),
+    use crate::node_registry::{parse_web_url, resolve_public_addrs, pinned_client};
+    let raw = body.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // AUDIT pass 3: parse exactly as the HTTP client will (WHATWG); hand-splitting let
+    // "http://169.254.169.254\\@example.com" be checked as example.com but fetched as 169.254.169.254.
+    let Some((pu, host, _)) = parse_web_url(&raw, false) else {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error":"url required (http/https, a domain name - no IP addresses or user@ parts)"}));
     };
-    let host = match extract_host(&url) {
-        Some(h) => h,
-        None => return HttpResponse::BadRequest().json(serde_json::json!({"error":"unparseable host"})),
-    };
+    let url = pu.to_string();
     if is_private_host(&host) {
         return HttpResponse::BadRequest().json(serde_json::json!({"error":"private/IP hosts not scannable"}));
     }
     if let Some(why) = blocklist_hit(&host) {
         return attest_response(url.clone(), host.clone(), 100, vec![CanaryFinding { code: "known_phishing".into(), severity: "high".into(), detail: why }]);
     }
-    // AUDIT 2026-10-31: string checks miss [::1], 0x7f000001, "localhost." and DNS names
-    // pointing inside; resolve and check every address. Redirects are not followed.
-    let port: u16 = if url.starts_with("https://") { 443 } else { 80 };
-    if !crate::node_registry::resolves_public(&host, port).await {
-        return HttpResponse::BadRequest().json(serde_json::json!({"error":"host does not resolve to a public address"}));
-    }
 
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("TownHallCanary/1.0")
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
-    };
-
-    // Follow up to 3 redirects BY HAND, re-checking every hop (auto-follow would reach
-    // internal hosts before any check; not following would scan an empty 3xx as "clean").
+    // Up to 3 redirects followed BY HAND. Every hop: parsed by the client's own parser,
+    // blocklist-checked, resolved once, all addresses public, and the connection PINNED to
+    // those addresses (no second DNS answer / rebinding).
     let mut cur = url.clone();
+    let mut cur_host = host.clone();
     let mut resp_opt: Option<reqwest::Response> = None;
     for _hop in 0..4 {
-        let r = match client.get(&cur).send().await {
+        let Some((cu, ch, cp)) = parse_web_url(&cur, false) else {
+            return HttpResponse::BadRequest().json(serde_json::json!({"error":"redirects to a non-web address", "redirect_to": cur}));
+        };
+        let Some(addrs) = resolve_public_addrs(&ch, cp).await else {
+            return HttpResponse::BadRequest().json(serde_json::json!({"error":"host does not resolve to a public address", "url": cur}));
+        };
+        let r = match pinned_client(&ch, &addrs, FETCH_TIMEOUT_SECS, "TownHallCanary/1.0").get(cu.as_str()).send().await {
             Ok(r) => r,
             Err(e) => return HttpResponse::Ok().json(serde_json::json!({
                 "error": format!("fetch failed: {}", e), "fetchable": false
             })),
         };
+        cur_host = ch;
         if !r.status().is_redirection() { resp_opt = Some(r); break; }
         let loc = r.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-        let next = match reqwest::Url::parse(&cur).and_then(|b| b.join(&loc)) { Ok(u) => u.to_string(), Err(_) => break };
-        let nh = match extract_host(&next) { Some(h) => h, None => break };
-        let np: u16 = if next.starts_with("https://") { 443 } else if next.starts_with("http://") { 80 } else { 0 };
+        let next = match cu.join(&loc) { Ok(u) => u.to_string(), Err(_) => break };
+        let Some((_, nh, _)) = parse_web_url(&next, false) else {
+            return HttpResponse::BadRequest().json(serde_json::json!({"error":"redirects to a private or non-web address", "redirect_to": next}));
+        };
         if let Some(why) = blocklist_hit(&nh) {
             return attest_response(next.clone(), nh.clone(), 100, vec![CanaryFinding { code: "redirects_to_known_phishing".into(), severity: "high".into(), detail: why }]);
         }
-        if np == 0 || is_private_host(&nh) || !crate::node_registry::resolves_public(&nh, np).await {
+        if is_private_host(&nh) {
             return HttpResponse::BadRequest().json(serde_json::json!({"error":"redirects to a private or non-web address", "redirect_to": next}));
         }
         cur = next;
@@ -283,7 +277,7 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
         None => return HttpResponse::Ok().json(serde_json::json!({ "error": "too many redirects", "fetchable": false, "last_url": cur })),
     };
     let final_url = cur.clone();
-    let final_host = extract_host(&final_url).unwrap_or_else(|| host.clone());
+    let final_host = cur_host.clone();
 
     // stream with a cap instead of buffering the whole body
     let mut resp = resp;

@@ -23,10 +23,14 @@ export const ALLOWED_LINK_DOMAINS = [...MEDIA_DOMAINS, ...CONTACT_DOMAINS, ...AC
 
 export function isWhitelistedUrl(url: string): boolean {
   const u = String(url || '').trim();
+  // AUDIT pass 3: browsers treat "\" as "/" and strip tabs/newlines, so "https://evil.com\.youtube.com"
+  // opened evil.com. Refuse backslashes, whitespace, control and non-ASCII characters anywhere.
+  if (/[\\\s\u0000-\u001f\u007f-\uffff]/.test(u)) return false;
   if (/^mailto:[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(u)) return true;
   const m = /^https:\/\/([^\/?#:@]+)(?::\d+)?(?:[\/?#]|$)/i.exec(u);
   if (!m) return false;
   const host = m[1].toLowerCase().replace(/\.$/, '');
+  if (!/^[a-z0-9.-]+$/.test(host)) return false;
   if (host === 'edu' || /\.edu$/.test(host)) return true;
   return ALLOWED_LINK_DOMAINS.some((d) => host === d || host.endsWith('.' + d));
 }

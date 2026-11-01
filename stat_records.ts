@@ -220,8 +220,15 @@ export function verifyBundle(bundleJson: string, ownerPubkey: string): {
   try { const b = JSON.parse(bundleJson); records = b.records || []; if (b.kind !== 'KVSTAT-BUNDLE') errors.push('not a stat bundle'); }
   catch { return { ok: false, total: 0, complete: 0, deadlocks: 0, errors: ['unparseable'] }; }
   let prev = GENESIS; let complete = 0; let deadlocks = 0; let legacy = 0;
+  const _seenAgr = new Set<string>(); const _seenEscrow = new Set<string>(); // AUDIT pass 3
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
+    // One genuine record re-chained N times must not count N times, and nobody can sign their own deal.
+    if (_seenAgr.has(String(r.agrId))) errors.push('#' + i + ' duplicate agreement ' + String(r.agrId).slice(0, 16));
+    _seenAgr.add(String(r.agrId));
+    if (r.escrowTxId && _seenEscrow.has(String(r.escrowTxId))) errors.push('#' + i + ' duplicate escrow tx');
+    if (r.escrowTxId) _seenEscrow.add(String(r.escrowTxId));
+    if (xonly(r.cpPubkey) === xonly(r.myPubkey)) errors.push('#' + i + ' self-attested (counterparty is the owner)');
     if (xonly(r.myPubkey) !== xonly(ownerPubkey)) errors.push('#' + i + ' not owned by claimed identity');
     if (r.v !== 2) legacy++; // KV_STAT_V2: v1 = legacy, cp sig does not cover escrow/timeout/description
     if (r.prevHash !== prev) errors.push('#' + i + ' chain break (gap or reorder)');

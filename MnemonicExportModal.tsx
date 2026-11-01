@@ -148,7 +148,7 @@ const MnemonicExportModal: React.FC<MnemonicExportModalProps> = ({
     try {
       Alert.alert(
         '🖨️ Print Instructions',
-        `1. Screenshot this seed grid (PIN & WiFi off)\n2. Print on secure color printer\n3. Store in waterproof safe\n4. NEVER take digital photos after\n5. Destroy screenshot after printing`,
+        `1. Write the words on paper by hand, in order\n2. Check every word twice\n3. Store the paper in a waterproof safe\n4. NEVER screenshot or photograph them - photos sync to iCloud / Google Photos\n5. Never type them into any website`,
         [{ text: 'Screenshot Now', onPress: () => setSelectedFormat(null) }]
       );
     } finally {

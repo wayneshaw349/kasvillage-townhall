@@ -140,7 +140,7 @@ const ALLOWED_DOMAIN_PATTERNS = [
 /**
  * Validate if URL is from a whitelisted domain
  */
-const isWhitelistedUrl = (url: string): boolean => require('./kv_link_whitelist').isWhitelistedUrl(url); // AUDIT: shared host-exact check
+const isWhitelistedUrl = (url: string): boolean => { const u = String(url || '').trim(); return require('./kv_link_whitelist').isWhitelistedUrl(/^https?:\/\//i.test(u) ? u.replace(/^http:/i, 'https:') : 'https://' + u); }; // shared host-exact check (bare 'instagram.com/x' still works)
 
 /**
  * Get platform name from URL
@@ -273,7 +273,7 @@ const ProductCardSection: React.FC<SectionPreviewProps> = ({ section, theme, sto
   
   const handleViewOnSocial = () => {
     if (section.visualsUrl && isWhitelistedUrl(section.visualsUrl)) {
-      Linking.openURL(section.visualsUrl);
+      require('./kv_link_whitelist').openWhitelisted(section.visualsUrl);
     } else if (section.visualsUrl) {
       Alert.alert('Invalid Link', 'This link is not from an approved platform.');
     }
@@ -350,7 +350,7 @@ const SocialBlockSection: React.FC<SectionPreviewProps> = ({ section, theme, sto
                 sectionStyles.socialIcon,
                 { backgroundColor: hasLink ? (PLATFORM_STYLES[p.label]?.bg || COLORS.stone700) : COLORS.stone200 }
               ]}
-              onPress={() => hasLink && Linking.openURL(url)}
+              onPress={() => hasLink && require('./kv_link_whitelist').openWhitelisted(url)}
               disabled={!hasLink}
             >
               <Text style={[sectionStyles.socialEmoji, !hasLink && { opacity: 0.3 }]}>
@@ -569,7 +569,7 @@ const CouponCard: React.FC<CouponCardProps> = ({ coupon, storefront, onStartAgre
   
   const handleViewOnPlatform = () => {
     if (coupon.visualsUrl && isWhitelistedUrl(coupon.visualsUrl)) {
-      Linking.openURL(coupon.visualsUrl);
+      require('./kv_link_whitelist').openWhitelisted(coupon.visualsUrl);
     }
   };
   
@@ -603,7 +603,7 @@ const CouponCard: React.FC<CouponCardProps> = ({ coupon, storefront, onStartAgre
                 <TouchableOpacity
                   key={key}
                   style={[couponStyles.socialButton, { backgroundColor: bg }]}
-                  onPress={() => Linking.openURL(url as string)}
+                  onPress={() => require('./kv_link_whitelist').openWhitelisted(url as string)}
                 >
                   <Text style={couponStyles.socialButtonText}>{label}</Text>
                 </TouchableOpacity>
@@ -817,7 +817,7 @@ const StashItemCard: React.FC<StashItemCardProps> = ({ item }) => {
       {item.visualsUrl && isWhitelistedUrl(item.visualsUrl) && (
         <TouchableOpacity
           style={[stashStyles.viewButton, { backgroundColor: platformStyle?.bg || COLORS.stone700 }]}
-          onPress={() => Linking.openURL(item.visualsUrl)}
+          onPress={() => require('./kv_link_whitelist').openWhitelisted(item.visualsUrl)}
         >
           <Text style={stashStyles.viewButtonText}>
             {platformStyle?.emoji || '🔗'} View on {platform || 'Social'}

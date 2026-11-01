@@ -618,6 +618,11 @@ export async function sendKaspaViaRest(params: {
       const _mains: string[] = [];
       try { const SS = require('expo-secure-store'); for (const k of ['kaspa_address_real', 'kaspa_address_tutorial', 'kaspa_address', 'kv_kaspa_address']) { const a = await SS.getItemAsync(k); if (a) _mains.push(a); } } catch {}
       let floor = (!_mains.length || _mains.indexOf(senderAddress) >= 0) ? lt.total : 0n;
+      // AUDIT pass 3: paying an IOU spends exactly the value its own lock reserves.
+      if ((params as any).settlingIouId) {
+        try { const L = await import('./utxo_ledger'); const rows: any[] = ((await (L as any).getTaggedUtxos()).iou || []); for (const r of rows) if (r.iouId === (params as any).settlingIouId) floor -= BigInt(r.entry?.amountSompi || 0); } catch {}
+        if (floor < 0n) floor = 0n;
+      }
       if (params.fundingAgrId) {
         const own = await getAgreementCommitments(params.fundingAgrId);
         for (const e of own) { if (e.status === 'collateral-committed') floor -= BigInt(e.amountSompi); }

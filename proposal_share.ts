@@ -332,6 +332,11 @@ export function verifyAcceptance(a: CounterSignedProposal): { valid: boolean; er
   if (!inner.valid) return { valid: false, error: 'Inner proposal invalid: ' + (inner.error || '') };
   try {
     if (!/^[0-9a-f]{32,66}$/.test(String(a.counterPubkey || ''))) return { valid: false, error: 'Acceptor pubkey too short' };
+    // AUDIT pass 3: an IOU names its recipient; an acceptance from anyone else is refused
+    // (a forwarded proposal could otherwise be accepted by a stranger who gets paid).
+    const _to = String(a.proposal.to || '').toLowerCase(), _cp = String(a.counterPubkey || '').toLowerCase();
+    if (_to && !(_cp.startsWith(_to) || _to.startsWith(_cp))) return { valid: false, error: 'Accepted by someone other than the person this IOU was made for - do NOT pay.' };
+    if (!_to && a.proposal.type === 'iou') return { valid: false, error: 'This IOU names no recipient (old format) - cancel it and create a new one with their public key.' };
     const hash = hashCounterSign(a.proposal, String(a.counterAddr || ''));
     const sig = (secp256k1 as any).Signature.fromCompact(hexToBytes(a.counterSig));
     for (const rec of [0, 1]) {
@@ -425,7 +430,8 @@ export async function acceptProposal(
     const amountSompi = BigInt(proposal.amount);
     const proposalId = 'prop_' + proposal.nonce;
     const alreadyCommitted = await isAlreadyCommitted(proposalId);
-    if (!alreadyCommitted.committed) {
+    // AUDIT pass 3: an IOU is owed TO the acceptor - never lock the acceptor's own coins for it.
+    if (!alreadyCommitted.committed && proposal.type !== 'iou') {
       await allocateForIOU(creds.address, amountSompi, proposalId);
       console.log('[Proposal] UTXOs allocated for', proposalId);
     }

@@ -92,3 +92,33 @@ Fixed in this pass:
 10. Age prompt on iOS has a Cancel again (two-step, ≤3 buttons for Android).
 11. Agreements read the network from the agreement/active net, not the stale `kaspa_network` key
     (proposal blue score was testnet, pasted-pubkey counterparty address was `kaspatest:`).
+
+## Third pass — same day (link whitelist, blocklist, IOU / wallet / Phone Proof areas)
+Fixed:
+1. **HIGH — IOU payment could go to a stranger.** IOUs named no recipient, and an acceptance from ANY key
+   verified ("Signed by <unsigned name>"). New IOUs require the recipient's public key; an acceptance from
+   any other key (or an old recipient-less IOU) is refused; the UI shows the signed key, not the name.
+2. **HIGH — backslash whitelist bypass** (`https://evil.com\.youtube.com` read as youtube.com, opened as
+   evil.com). Backslash, whitespace, control and non-ASCII characters are refused; host must be [a-z0-9.-].
+3. **HIGH — relay SSRF / blocklist bypass with the same trick** (`http://169.254.169.254\@example.com`).
+   The link checker and operator audits now parse URLs with the HTTP client's own (WHATWG) parser,
+   refuse IP literals and user@ parts, and **pin each connection to the addresses that were checked**
+   (closes DNS rebinding too).
+4. **MEDIUM — IOU could be paid twice** (double tap, or retry after an ambiguous submit). One shared pay
+   path: in-flight guard, persisted "paying" marker with the txid, closed-IOU check, confirm/simulation.
+5. **MEDIUM — paying an IOU was blocked by its own lock** (needed ~2x the amount). The IOU being settled
+   is excluded from the balance floor.
+6. **MEDIUM — Phone Proof bundles could repeat one real deal** or be self-attested. Duplicate agreement /
+   escrow ids and self-signed records are now errors.
+7. LOW — accepting an IOU locked the recipient's own coins (they are OWED). No longer locked.
+8. LOW — seed export told users to screenshot the words. Now: write by hand, never photograph.
+9. LOW — link check request had no timeout (now 25 s); store buttons opened raw/untrimmed URLs
+   (now normalised through the whitelist; bare `instagram.com/x` still works).
+
+Still open (low / design):
+- Phone Proof: owner can still drop records and re-chain (cp signs each record, not the chain) - fix
+  needs the owner to sign the chain tip and/or an on-chain count anchor; frostAddr not re-derived.
+- IOU / collateral locks are one global store, not per network/wallet (tutorial rows count on mainnet).
+- Whitelisted hosts with redirectors (l.facebook.com, youtube.com/redirect) - both show a warning page.
+- Mnemonic restore doesn't run BIP39 checksum validation (typo restores an empty wallet).
+Relay tests 143/143. App tsc: 97 (all pre-existing).
