@@ -440,7 +440,7 @@ const AvatarLikenessCard: React.FC<{
   );
 };
 
-export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: () => void; onNavigateEntertainment?: () => void; onNavigateTownHall?: () => void; onNavigateBookshelf?: () => void; onNavigateVaultBackup?: () => void; onNavigateVaultRestore?: () => void; onNavigateCreateVault?: () => void; onNavigateSavings?: () => void }> = ({ navigation, onNavigateEntertainment, onNavigateTownHall, onNavigateBookshelf, onNavigateVaultBackup, onNavigateVaultRestore, onNavigateCreateVault, onNavigateSavings }) => {
+export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: () => void; onNavigateEntertainment?: () => void; onNavigateTownHall?: () => void; onNavigateBookshelf?: () => void; onNavigateVaultBackup?: () => void; onNavigateVaultRestore?: () => void; onNavigateCreateVault?: () => void; onNavigateSavings?: () => void; onNavigateCashNote?: () => void }> = ({ navigation, onNavigateEntertainment, onNavigateTownHall, onNavigateBookshelf, onNavigateVaultBackup, onNavigateVaultRestore, onNavigateCreateVault, onNavigateSavings, onNavigateCashNote }) => {
   // KV_SAVINGS_UI: show the old-vault row only when a legacy card vault exists on this phone
   const [hasOldVault, setHasOldVault] = React.useState(false);
   React.useEffect(() => { (async () => { try { setHasOldVault(!!((await SecureStore.getItemAsync('kv_vault_address')) || (await SecureStore.getItemAsync('kv_vault_mnemonic')))); } catch {} })(); }, []);
@@ -828,6 +828,15 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
               <Text style={styles.seedExportText}>🧾 Savings Vault</Text>
               <Text style={styles.seedExportSub}>Move KAS into printed QR slips. No keys are kept: the vault is just a tally of what you have and what is spent. Scan a slip to move it back to your hot wallet.</Text>
               {(() => { const { KvSavingsTally } = require('./SavingsQRScreen'); return <KvSavingsTally style={{ marginTop: rs(6) }} />; })()}
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.seedExportButton}
+            onPress={() => onNavigateCashNote?.()}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.seedExportText}>💵 Cash Note (TRANSFERABLE)</Text>
+              <Text style={styles.seedExportSub}>Paper KAS anyone can spend, like cash - for gifts and paying in person. Also: redeem a note someone gave you.</Text>
             </View>
           </TouchableOpacity>
           <TouchableOpacity

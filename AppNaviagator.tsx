@@ -49,6 +49,7 @@ import { VaultBackupScreen } from './VaultBackupScreen';
 import { VaultRecoveryScreen } from './VaultRecoveryScreen';
 import { GenerateVaultScreen } from './GenerateVaultScreen';
 import { SavingsQRScreen } from './SavingsQRScreen'; // KV_SAVINGS_QR
+import { CashNoteScreen } from './CashNoteScreen'; // KV_CASH_NOTE
 import { VaultSetupScreen, loadFrostVault } from './VaultSetupScreen';
 import { VaultQRSignScreen } from './VaultQRSignScreen';
 import { VaultCosignScreen } from './VaultCosignScreen';
@@ -99,7 +100,8 @@ type AppScreen =
   | 'vault_setup'
   | 'vault_sign'
   | 'vault_cosign'
-  | 'savings_qr'; // KV_SAVINGS_QR
+  | 'savings_qr' // KV_SAVINGS_QR
+  | 'cash_note'; // KV_CASH_NOTE
 
 interface SessionUser {
   apartment: string;
@@ -1309,6 +1311,7 @@ export const AppNavigator: React.FC = () => {
         <SendKAS
           onOpenSavings={(m: 'scan' | 'add', a?: string) => { (globalThis as any).__kvSavingsMode = m; (globalThis as any).__kvSavingsAmount = a || ''; setScreen('savings_qr'); }} // KV_SAVINGS_UI
           onOpenFrostSend={(p: { to: string; kas: string }) => { (globalThis as any).__kvFrostPrefill = p; setScreen('vault_sign'); }} // KV_SEND_FROST
+          onOpenCashNote={(m: 'make' | 'redeem', a?: string) => { (globalThis as any).__kvCashMode = m; (globalThis as any).__kvCashAmount = a || ''; setScreen('cash_note'); }} // KV_CASH_NOTE
           visible={true}
           onClose={() => setScreen('dashboard')}
           onSuccess={(txId: string) => {
@@ -1407,6 +1410,7 @@ export const AppNavigator: React.FC = () => {
         onNavigateVaultRestore={() => setScreen('vault_recovery')}
         onNavigateCreateVault={() => setScreen('generate_vault')}
         onNavigateSavings={() => setScreen('savings_qr')} // KV_SAVINGS_UI
+        onNavigateCashNote={() => setScreen('cash_note')} // KV_CASH_NOTE
       />;
 
     case 'neighbor_agreement':
@@ -1432,6 +1436,9 @@ export const AppNavigator: React.FC = () => {
       );
     case 'pay_nearby':
       return <QRPayNearby onClose={() => setScreen('dashboard')} onNavigateSend={(addr?: string, sompi?: number) => { (globalThis as any).__kvSendPrefill = { addr, sompi }; setScreen('send_kas'); }} />;
+
+    case 'cash_note': // KV_CASH_NOTE
+      return <CashNoteScreen initialMode={(() => { const m = (globalThis as any).__kvCashMode; (globalThis as any).__kvCashMode = undefined; return m; })()} onClose={() => setScreen('dashboard')} />;
 
     case 'savings_qr': // KV_SAVINGS_QR
       return <SavingsQRScreen initialMode={(() => { const m = (globalThis as any).__kvSavingsMode; (globalThis as any).__kvSavingsMode = undefined; return m; })()} onClose={() => setScreen('dashboard')} />;

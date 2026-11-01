@@ -45,7 +45,7 @@ function emblem(cx: number, cy: number, p: NotePalette): string {
 /** One slip as SVG. qrPath is an SVG path of unit modules (size qrN incl. quiet zone). */
 export function noteSvg(o: {
   qrPath: string; qrN: number; kas: number; usd: number; usdPerKas: number; idx: number; total: number;
-  net: string; hotLast6: string; date: string; palette: NotePalette; copy?: 'ORIGINAL' | 'BACKUP COPY';
+  net: string; hotLast6: string; date: string; palette: NotePalette; copy?: 'ORIGINAL' | 'BACKUP COPY'; bearer?: boolean;
 }): string {
   const p = o.palette, W = 1000, H = 430;
   const amt = o.kas >= 1000 ? String(Math.round(o.kas)) : o.kas >= 100 ? o.kas.toFixed(0) : o.kas.toFixed(2);
@@ -67,9 +67,10 @@ export function noteSvg(o: {
       '<text x="60" y="' + (H - 66) + '" font-size="40">' + esc(amt) + '</text>' +
     '</g>' +
     // title + footer banners
-    '<text x="388" y="66" text-anchor="middle" font-family="Georgia, serif" font-size="26" font-weight="700" letter-spacing="4" fill="' + p.ink + '">KASVILLAGE SAVINGS</text>' +
+    '<text x="388" y="66" text-anchor="middle" font-family="Georgia, serif" font-size="26" font-weight="700" letter-spacing="4" fill="' + p.ink + '">' + (o.bearer ? 'KASVILLAGE CASH NOTE' : 'KASVILLAGE SAVINGS') + '</text>' +
     '<line x1="40" y1="' + (H - 58) + '" x2="960" y2="' + (H - 58) + '" stroke="' + p.line + '" stroke-width="1" opacity="0.6"/>' +
-    '<text x="500" y="' + (H - 40) + '" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12.5" letter-spacing="1.5" fill="' + p.ink + '">NOT LEGAL TENDER · PRE-SIGNED KASPA TRANSFER · PAYS ONLY HOT WALLET …' + esc(o.hotLast6) + '</text>' +
+    (o.bearer ? '<text x="500" y="' + (H - 40) + '" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12.5" letter-spacing="1.5" fill="' + p.ink + '">BEARER NOTE · ANYONE HOLDING THIS QR CAN SPEND IT · TREAT LIKE CASH · NOT LEGAL TENDER</text>' :
+    '<text x="500" y="' + (H - 40) + '" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12.5" letter-spacing="1.5" fill="' + p.ink + '">NOT LEGAL TENDER · PRE-SIGNED KASPA TRANSFER · PAYS ONLY HOT WALLET …' + esc(o.hotLast6) + '</text>') +
     emblem(388, 205, p) +
     // value block
     '<g font-family="Helvetica, Arial, sans-serif" fill="' + p.ink + '" text-anchor="middle">' +
@@ -77,13 +78,15 @@ export function noteSvg(o: {
       (o.usd > 0 ? '<text x="388" y="346" font-size="18">≈ $' + esc(f2(o.usd)) + ' USD on ' + esc(o.date) + '</text>' +
         '<text x="388" y="366" font-size="11.5">1 KAS = $' + esc(o.usdPerKas.toFixed(4)) + ' · dollar value changes, KAS amount does not</text>' : '') +
     '</g>' +
-    (o.copy ? '<g transform="rotate(-8 128 ' + (H - 146) + ')"><rect x="54" y="' + (H - 166) + '" width="' + (o.copy === 'ORIGINAL' ? 132 : 162) + '" height="30" rx="4" fill="none" stroke="' + p.accent + '" stroke-width="2.5"/>' +
+    (o.bearer ? '<g transform="rotate(-8 165 ' + (H - 150) + ')"><rect x="44" y="' + (H - 176) + '" width="246" height="44" rx="5" fill="' + p.paper + '" stroke="' + p.ink + '" stroke-width="4"/>' +
+      '<text x="167" y="' + (H - 143) + '" text-anchor="middle" textLength="222" lengthAdjust="spacingAndGlyphs" font-family="Helvetica, Arial, sans-serif" font-size="25" font-weight="900" letter-spacing="2" fill="' + p.ink + '">TRANSFERABLE</text></g>' : '') +
+    (!o.bearer && o.copy ? '<g transform="rotate(-8 128 ' + (H - 146) + ')"><rect x="54" y="' + (H - 166) + '" width="' + (o.copy === 'ORIGINAL' ? 132 : 162) + '" height="30" rx="4" fill="none" stroke="' + p.accent + '" stroke-width="2.5"/>' +
       '<text x="' + (o.copy === 'ORIGINAL' ? 120 : 135) + '" y="' + (H - 145) + '" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" letter-spacing="2" fill="' + p.accent + '">' + o.copy + '</text></g>' : '') +
     '<text x="60" y="' + (H - 104) + '" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="' + p.ink + '">' + esc(o.idx + ' of ' + o.total + ' · ' + o.net) + '</text>' +
     // QR panel
     '<rect x="' + (qx - 12) + '" y="' + (qy - 12) + '" width="' + (qs + 24) + '" height="' + (qs + 24) + '" rx="10" fill="#FFFFFF" stroke="' + p.ink + '" stroke-width="2"/>' +
     '<svg x="' + qx + '" y="' + qy + '" width="' + qs + '" height="' + qs + '" viewBox="0 0 ' + o.qrN + ' ' + o.qrN + '" shape-rendering="crispEdges"><path d="' + o.qrPath + '" fill="#111111"/></svg>' +
-    '<text x="' + (qx + qs / 2) + '" y="' + (qy + qs + 34) + '" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="' + p.ink + '">Scan in KasVillage → Savings QR → Spend</text>' +
+    '<text x="' + (qx + qs / 2) + '" y="' + (qy + qs + 34) + '" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="' + p.ink + '">' + (o.bearer ? 'Scan in KasVillage → Send → Redeem note' : 'Scan in KasVillage → Savings QR → Spend') + '</text>' +
     '</svg>';
 }
 
@@ -112,4 +115,19 @@ export function notePrintHtml(o: { qrs: string[]; outs: string[]; hotLast6: stri
   }
   const notes = o.qrs.map((t, i) => one(t, i, 'ORIGINAL')).join('') + '<div style="page-break-before:always"></div>' + o.qrs.map((t, i) => one(t, i, 'BACKUP COPY')).join('');
   return '<html><head><meta name="viewport" content="width=device-width"/><style>body{margin:0.3in;font-family:Helvetica,Arial,sans-serif}.n{page-break-inside:avoid;margin:0 0 0.25in}.n svg{display:block}.s{font-size:10px;margin:4px 0 0;color:#333}</style></head><body>' + notes + '</body></html>';
+}
+
+
+/** Cash note (bearer): one full-screen page + one print page. The QR holds the note's own key. */
+export function bearerNotePages(o: { qr: string; kas: number; usdPerKas: number; net: string; pick?: () => number }): { screen: string; print: string } {
+  const QR = require('qrcode');
+  const q = QR.create(o.qr, { errorCorrectionLevel: 'M' }); const n = q.modules.size; const d = q.modules.data; const m = 2;
+  let path = ''; for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (d[y * n + x]) path += 'M' + (x + m) + ' ' + (y + m) + 'h1v1h-1z';
+  const palette = NOTE_PALETTES[Math.floor((o.pick || Math.random)() * NOTE_PALETTES.length) % NOTE_PALETTES.length];
+  const svg = noteSvg({ qrPath: path, qrN: n + 2 * m, kas: o.kas, usd: o.usdPerKas > 0 ? o.kas * o.usdPerKas : 0, usdPerKas: o.usdPerKas, idx: 1, total: 1, net: o.net, hotLast6: '', date: new Date().toISOString().slice(0, 10), palette, bearer: true });
+  const screen = '<html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/><style>html,body{margin:0;height:100%;background:#fff;overflow:hidden}' +
+    '.n{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}.n svg{width:94vh;max-width:none;height:auto;transform:rotate(90deg);flex:none}' +
+    '@media (orientation:landscape){.n svg{width:94vw;transform:none}}</style></head><body><div class="n">' + svg + '</div></body></html>';
+  const print = '<html><head><style>body{margin:0.3in;font-family:Helvetica,Arial,sans-serif}.n svg{display:block}</style></head><body><div class="n">' + svg + '</div><p style="font-size:10px">TRANSFERABLE bearer note: anyone holding this QR can spend it. Treat it like cash.</p></body></html>';
+  return { screen, print };
 }

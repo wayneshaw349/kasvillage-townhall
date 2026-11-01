@@ -123,6 +123,7 @@ export interface SendKASProps {
   myAddress: string;
   onOpenSavings?: (mode: 'scan' | 'add', amountKas?: string) => void; // KV_SAVINGS_UI
   onOpenFrostSend?: (prefill: { to: string; kas: string }) => void; // KV_SEND_FROST: opens the two-phone FROST send screen
+  onOpenCashNote?: (mode: 'make' | 'redeem', amountKas?: string) => void; // KV_CASH_NOTE
 }
 
 type SendStep = 'input' | 'preview' | 'sending' | 'success' | 'error';
@@ -201,6 +202,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
   myAddress,
   onOpenSavings,
   onOpenFrostSend,
+  onOpenCashNote,
 }) => {
   const [frostTwoPhone, setFrostTwoPhone] = useState(false); // KV_SEND_FROST
   const [recipientInput, setRecipientInput] = useState(initialAddress || '');
@@ -502,6 +504,12 @@ export const SendKAS: React.FC<SendKASProps> = ({
                       <Text style={styles.sendToChipText}>FROST (2 phones)</Text>
                     </TouchableOpacity>
                   ) : null}
+                  {/* KV_CASH_NOTE: redeem a transferable note (you choose where it goes) */}
+                  {onOpenCashNote ? (
+                    <TouchableOpacity style={styles.sendToChip} onPress={() => onOpenCashNote('redeem')}>
+                      <Text style={styles.sendToChipText}>Redeem note</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   {/* KV_SAVINGS_UI: Savings QRs can only pay the hot wallet -> scan one, then send from Hot Wallet */}
                   {onOpenSavings ? (
                     <TouchableOpacity style={styles.sendToChip} onPress={() => Alert.alert('Spend from Savings', 'A Savings QR can only move its coins into your hot wallet. Scan one now; then send from Hot Wallet as usual.', [
@@ -540,6 +548,12 @@ export const SendKAS: React.FC<SendKASProps> = ({
                     <TouchableOpacity style={styles.sendToChip} onPress={() => Alert.alert('Add to Savings', 'Savings has no address to send to. Add to vault moves KAS from your hot wallet into printed QR slips.', [
                       { text: 'Cancel', style: 'cancel' }, { text: 'Add to vault', onPress: () => onOpenSavings('add', String(amountKas || '').trim()) }])}>
                       <Text style={styles.sendToChipText}>Savings vault</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {onOpenCashNote ? (
+                    <TouchableOpacity style={styles.sendToChip} onPress={() => Alert.alert('Cash note (TRANSFERABLE)', 'Turns this amount into a paper note anyone can spend, like cash. Hand it to the person you are paying; they scan it and choose where it goes.', [
+                      { text: 'Cancel', style: 'cancel' }, { text: 'Make note', onPress: () => onOpenCashNote('make', String(amountKas || '').trim()) }])}>
+                      <Text style={styles.sendToChipText}>Cash note</Text>
                     </TouchableOpacity>
                   ) : null}
                 </View>

@@ -51,18 +51,18 @@ export async function sqList(): Promise<SqRow[]> {
 }
 async function saveList(rows: SqRow[]) { await SecureStore.setItemAsync(LIST_KEY, JSON.stringify(rows.slice(-200))); }
 
-async function fetchUtxos(net: string, addr: string): Promise<SqCoin[]> {
+export async function fetchUtxos(net: string, addr: string): Promise<SqCoin[]> {
   const r = await fetch(API[net] + '/addresses/' + addr + '/utxos');
   if (!r.ok) throw new Error('UTXO lookup failed (' + r.status + ')');
   const j: any[] = await r.json();
   return (Array.isArray(j) ? j : []).map((u: any) => ({ txId: String(u.outpoint?.transactionId || ''), index: Number(u.outpoint?.index ?? 0), amount: BigInt(u.utxoEntry?.amount || '0') }))
     .filter((c) => /^[0-9a-f]{64}$/.test(c.txId) && c.amount > 0n);
 }
-async function txLanded(net: string, txId: string): Promise<boolean> {
+export async function txLanded(net: string, txId: string): Promise<boolean> {
   try { const r = await fetch(API[net] + '/transactions/' + txId + '?inputs=false&outputs=false'); return r.ok; } catch { return false; }
 }
 /** Broadcast a signed tx; an ambiguous failure is resolved by looking the txid up. */
-async function broadcast(net: SqNet, tx: any, txId: string): Promise<{ ok: boolean; maybe?: boolean; error?: string }> {
+export async function broadcast(net: SqNet, tx: any, txId: string): Promise<{ ok: boolean; maybe?: boolean; error?: string }> {
   try {
     const r = await fetch(API[net] + '/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transaction: tx, allowOrphan: false }) });
     if (r.ok) return { ok: true };
