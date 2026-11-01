@@ -1293,6 +1293,7 @@ export const AppNavigator: React.FC = () => {
           onNavigateNeighbor={() => setScreen('neighbor_agreement')}
           onNavigatePhoneProof={() => setScreen('phone_proof')}
           onNavigateBalanceSheet={() => setScreen('balance_sheet')}
+          onNavigateSavings={() => setScreen('savings_qr')} // KV_SAVINGS_UI
         />
         <TouchableOpacity
           onPress={openFrostMenu}
@@ -1306,6 +1307,7 @@ export const AppNavigator: React.FC = () => {
     case 'send_kas':
       return (
         <SendKAS
+          onOpenSavings={(m: 'scan' | 'add') => { (globalThis as any).__kvSavingsMode = m; setScreen('savings_qr'); }} // KV_SAVINGS_UI
           visible={true}
           onClose={() => setScreen('dashboard')}
           onSuccess={(txId: string) => {
@@ -1403,6 +1405,7 @@ export const AppNavigator: React.FC = () => {
         onNavigateVaultBackup={openVaultBackup}
         onNavigateVaultRestore={() => setScreen('vault_recovery')}
         onNavigateCreateVault={() => setScreen('generate_vault')}
+        onNavigateSavings={() => setScreen('savings_qr')} // KV_SAVINGS_UI
       />;
 
     case 'neighbor_agreement':
@@ -1430,7 +1433,7 @@ export const AppNavigator: React.FC = () => {
       return <QRPayNearby onClose={() => setScreen('dashboard')} onNavigateSend={(addr?: string, sompi?: number) => { (globalThis as any).__kvSendPrefill = { addr, sompi }; setScreen('send_kas'); }} />;
 
     case 'savings_qr': // KV_SAVINGS_QR
-      return <SavingsQRScreen onClose={() => setScreen('dashboard')} />;
+      return <SavingsQRScreen initialMode={(() => { const m = (globalThis as any).__kvSavingsMode; (globalThis as any).__kvSavingsMode = undefined; return m; })()} onClose={() => setScreen('dashboard')} />;
 
     case 'generate_vault':
       return (

@@ -440,7 +440,10 @@ const AvatarLikenessCard: React.FC<{
   );
 };
 
-export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: () => void; onNavigateEntertainment?: () => void; onNavigateTownHall?: () => void; onNavigateBookshelf?: () => void; onNavigateVaultBackup?: () => void; onNavigateVaultRestore?: () => void; onNavigateCreateVault?: () => void }> = ({ navigation, onNavigateEntertainment, onNavigateTownHall, onNavigateBookshelf, onNavigateVaultBackup, onNavigateVaultRestore, onNavigateCreateVault }) => {
+export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: () => void; onNavigateEntertainment?: () => void; onNavigateTownHall?: () => void; onNavigateBookshelf?: () => void; onNavigateVaultBackup?: () => void; onNavigateVaultRestore?: () => void; onNavigateCreateVault?: () => void; onNavigateSavings?: () => void }> = ({ navigation, onNavigateEntertainment, onNavigateTownHall, onNavigateBookshelf, onNavigateVaultBackup, onNavigateVaultRestore, onNavigateCreateVault, onNavigateSavings }) => {
+  // KV_SAVINGS_UI: show the old-vault row only when a legacy card vault exists on this phone
+  const [hasOldVault, setHasOldVault] = React.useState(false);
+  React.useEffect(() => { (async () => { try { setHasOldVault(!!((await SecureStore.getItemAsync('kv_vault_address')) || (await SecureStore.getItemAsync('kv_vault_mnemonic')))); } catch {} })(); }, []);
   const [stats, setStats] = useState<UserStats>(mockStats);
   const [serialInput, setSerialInput] = React.useState('');
   const [serialHashed, setSerialHashed] = React.useState(false);
@@ -784,45 +787,15 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
         <View style={styles.securityCard}>
           <Text style={styles.cardTitle}>🔐 Security & Backup</Text>
 
+          {/* KV_SAVINGS_UI: only the current options - hot wallet backup (pick one) + Savings vault */}
+          <Text style={[styles.seedExportSub, { marginTop: rs(4), marginBottom: rs(6), fontWeight: '700' }]}>HOT WALLET BACKUP - pick one (or both)</Text>
           <TouchableOpacity
             style={styles.seedExportButton}
             onPress={() => onNavigateVaultBackup?.()}
           >
             <View style={{ flex: 1 }}>
-              <Text style={styles.seedExportText}>🔐 Backup Cards</Text>
-              <Text style={styles.seedExportSub}>Back up THIS wallet as 2-of-4 recovery cards</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.seedExportButton}
-            onPress={() => onNavigateCreateVault?.()}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.seedExportText}>Create Vault</Text>
-              <Text style={styles.seedExportSub}>New cold-storage wallet, spendable only with cards</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.seedExportButton}
-            onPress={() => onNavigateVaultRestore?.()}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.seedExportText}>Restore from Cards</Text>
-              <Text style={styles.seedExportSub}>Scan 2 backup cards to load a wallet or vault key</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.seedExportButton}
-            onPress={async () => {
-              const r = await vaultGoCold();
-              Alert.alert(r.success ? 'Vault is now cold' : 'Go Cold', r.success
-                ? 'The vault key was removed from this device. Your cards are now the only way to spend from the vault. It can still receive and show its balance.'
-                : (r.error || 'Failed'));
-            }}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.seedExportText}>Go Cold (Vault)</Text>
-              <Text style={styles.seedExportSub}>Remove the vault key from this phone - cards become the only key</Text>
+              <Text style={styles.seedExportText}>🔐 QR Backup Cards (safest)</Text>
+              <Text style={styles.seedExportSub}>4 cards, any 2 restore THIS wallet. Store them in different places.</Text>
             </View>
           </TouchableOpacity>
           <TouchableOpacity
@@ -831,11 +804,46 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
           >
             <Text style={styles.seedExportIcon}>🗝️</Text>
             <View style={{ flex: 1 }}>
-              <Text style={styles.seedExportText}>Export Seed Phrase</Text>
-              <Text style={styles.seedExportSub}>View, copy, or backup your 12-word mnemonic</Text>
+              <Text style={styles.seedExportText}>Seed Words (mnemonic)</Text>
+              <Text style={styles.seedExportSub}>Your 12 words. Write them by hand - never photograph them.</Text>
             </View>
             <Text style={styles.seedExportArrow}>›</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.seedExportButton}
+            onPress={() => onNavigateVaultRestore?.()}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.seedExportText}>Restore from Cards</Text>
+              <Text style={styles.seedExportSub}>Scan 2 backup cards to bring a wallet back</Text>
+            </View>
+          </TouchableOpacity>
+
+          <Text style={[styles.seedExportSub, { marginTop: rs(12), marginBottom: rs(6), fontWeight: '700' }]}>SAVINGS</Text>
+          <TouchableOpacity
+            style={styles.seedExportButton}
+            onPress={() => onNavigateSavings?.()}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.seedExportText}>🧾 Savings Vault</Text>
+              <Text style={styles.seedExportSub}>Move KAS into printed QR slips. No keys are kept: the vault is just a tally of what you have and what is spent. Scan a slip to move it back to your hot wallet.</Text>
+              {(() => { const { KvSavingsTally } = require('./SavingsQRScreen'); return <KvSavingsTally style={{ marginTop: rs(6) }} />; })()}
+            </View>
+          </TouchableOpacity>
+          {hasOldVault ? (
+            <TouchableOpacity
+              style={styles.seedExportButton}
+              onPress={() => Alert.alert('Old vault', 'Card vaults are retired. Your old vault still works: send from it on the Send screen (Send From: Vault), or open Savings Vault to move a card + paper vault to your hot wallet.', [
+                { text: 'Close', style: 'cancel' },
+                { text: 'Go Cold (remove its key)', onPress: async () => { const r = await vaultGoCold(); Alert.alert(r.success ? 'Vault is now cold' : 'Go Cold', r.success ? 'The old vault key was removed from this phone. Its cards are now the only way to spend it.' : (r.error || 'Failed')); } },
+              ])}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.seedExportText}>Old vault (cards)</Text>
+                <Text style={styles.seedExportSub}>Retired vault type - tools to empty it or keep it cold</Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
 
           {/* Hardware Attestation — Serial Bind */}
           <View style={{ marginTop: rs(12), backgroundColor: '#1A2A3A', borderRadius: rs(12), padding: rs(14), borderWidth: 1, borderColor: '#4A90D9' }}>

@@ -45,7 +45,7 @@ function emblem(cx: number, cy: number, p: NotePalette): string {
 /** One slip as SVG. qrPath is an SVG path of unit modules (size qrN incl. quiet zone). */
 export function noteSvg(o: {
   qrPath: string; qrN: number; kas: number; usd: number; usdPerKas: number; idx: number; total: number;
-  net: string; hotLast6: string; date: string; palette: NotePalette;
+  net: string; hotLast6: string; date: string; palette: NotePalette; copy?: 'ORIGINAL' | 'BACKUP COPY';
 }): string {
   const p = o.palette, W = 1000, H = 430;
   const amt = o.kas >= 1000 ? String(Math.round(o.kas)) : o.kas >= 100 ? o.kas.toFixed(0) : o.kas.toFixed(2);
@@ -77,6 +77,8 @@ export function noteSvg(o: {
       (o.usd > 0 ? '<text x="388" y="346" font-size="18">≈ $' + esc(f2(o.usd)) + ' USD on ' + esc(o.date) + '</text>' +
         '<text x="388" y="366" font-size="11.5">1 KAS = $' + esc(o.usdPerKas.toFixed(4)) + ' · dollar value changes, KAS amount does not</text>' : '') +
     '</g>' +
+    (o.copy ? '<g transform="rotate(-8 128 ' + (H - 146) + ')"><rect x="54" y="' + (H - 166) + '" width="' + (o.copy === 'ORIGINAL' ? 132 : 162) + '" height="30" rx="4" fill="none" stroke="' + p.accent + '" stroke-width="2.5"/>' +
+      '<text x="' + (o.copy === 'ORIGINAL' ? 120 : 135) + '" y="' + (H - 145) + '" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" letter-spacing="2" fill="' + p.accent + '">' + o.copy + '</text></g>' : '') +
     '<text x="60" y="' + (H - 104) + '" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="' + p.ink + '">' + esc(o.idx + ' of ' + o.total + ' · ' + o.net) + '</text>' +
     // QR panel
     '<rect x="' + (qx - 12) + '" y="' + (qy - 12) + '" width="' + (qs + 24) + '" height="' + (qs + 24) + '" rx="10" fill="#FFFFFF" stroke="' + p.ink + '" stroke-width="2"/>' +
@@ -90,13 +92,17 @@ export function notePrintHtml(o: { qrs: string[]; outs: string[]; hotLast6: stri
   const QR = require('qrcode');
   const date = new Date().toISOString().slice(0, 10);
   const pick = o.pick || Math.random;
-  const notes = o.qrs.map((t, i) => {
+  // Each QR is printed twice: the ORIGINAL and a BACKUP COPY (same coins). Count originals only.
+  const palettes = o.qrs.map(() => NOTE_PALETTES[Math.floor(pick() * NOTE_PALETTES.length) % NOTE_PALETTES.length]);
+  const one = (t: string, i: number, copy: 'ORIGINAL' | 'BACKUP COPY') => {
     const q = QR.create(t, { errorCorrectionLevel: 'M' }); const n = q.modules.size; const d = q.modules.data; const m = 2;
     let path = ''; for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (d[y * n + x]) path += 'M' + (x + m) + ' ' + (y + m) + 'h1v1h-1z';
     const kas = Number(o.outs[i]) / 1e8;
-    const palette = NOTE_PALETTES[Math.floor(pick() * NOTE_PALETTES.length) % NOTE_PALETTES.length];
-    return '<div class="n">' + noteSvg({ qrPath: path, qrN: n + 2 * m, kas, usd: o.usdPerKas > 0 ? kas * o.usdPerKas : 0, usdPerKas: o.usdPerKas, idx: i + 1, total: o.qrs.length, net: o.net, hotLast6: o.hotLast6, date, palette }) +
-      '<p class="s">Whoever scans this can only move these coins into wallet …' + esc(o.hotLast6) + '. Losing every copy loses these coins: keep two copies in different places.</p></div>';
-  }).join('');
+    const palette = palettes[i];
+    return '<div class="n">' + noteSvg({ qrPath: path, qrN: n + 2 * m, kas, usd: o.usdPerKas > 0 ? kas * o.usdPerKas : 0, usdPerKas: o.usdPerKas, idx: i + 1, total: o.qrs.length, net: o.net, hotLast6: o.hotLast6, date, palette, copy }) +
+      '<p class="s">' + (copy === 'BACKUP COPY' ? '<b>BACKUP COPY of slip ' + (i + 1) + ' of ' + o.qrs.length + ': the SAME coins as its ORIGINAL - do not count it twice.</b> Store it apart from the original. ' : '') +
+      'Whoever scans this can only move these coins into wallet …' + esc(o.hotLast6) + '. Losing every copy loses these coins.</p></div>';
+  };
+  const notes = o.qrs.map((t, i) => one(t, i, 'ORIGINAL')).join('') + '<div style="page-break-before:always"></div>' + o.qrs.map((t, i) => one(t, i, 'BACKUP COPY')).join('');
   return '<html><head><meta name="viewport" content="width=device-width"/><style>body{margin:0.3in;font-family:Helvetica,Arial,sans-serif}.n{page-break-inside:avoid;margin:0 0 0.25in}.n svg{display:block}.s{font-size:10px;margin:4px 0 0;color:#333}</style></head><body>' + notes + '</body></html>';
 }

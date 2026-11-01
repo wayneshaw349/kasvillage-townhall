@@ -1072,10 +1072,11 @@ const WalletOverview: React.FC<{
   onSwitchMode?: (mode: 'tutorial' | 'real') => void;
   activeMode?: 'tutorial' | 'real';
   balanceSompi?: bigint;
+  onNavigateSavings?: () => void; // KV_SAVINGS_UI
   // Stats from hook
   ds: ReturnType<typeof useDashboardStats>;
 }> = ({ balance, xp, onDeposit, onWithdraw, onSend, onPayNearby, onNavigateProfile, onNavigateNeighbor, onNavigateTxHistory, onNavigatePOBox,
-  onNavigatePhoneProof, onNavigateBalanceSheet, activeMode, onSwitchMode, balanceSompi = 0n, ds }) => {
+  onNavigatePhoneProof, onNavigateBalanceSheet, activeMode, onSwitchMode, balanceSompi = 0n, ds, onNavigateSavings }) => {
   const [collatOpen, setCollatOpen] = React.useState(false);
   const [collatRows, setCollatRows] = React.useState<{ agreementId: string; sompi: bigint; role: string; count: number }[]>([]);
   const loadCollat = React.useCallback(async () => {
@@ -1133,6 +1134,8 @@ const WalletOverview: React.FC<{
         {usdPerKas > 0 && (
           <Text style={walletStyles.usdValue}>{__sm ? STREAMER_USD : '≈ $' + usdValue.toFixed(2) + ' USD'}</Text>
         )}
+        {/* KV_SAVINGS_UI: Savings vault tally (printed QRs not yet spent) */}
+        {!__kvTut ? (() => { const { KvSavingsTally } = require('./SavingsQRScreen'); return <KvSavingsTally style={{ marginTop: 6 }} hidden={!!__sm} onPress={onNavigateSavings} />; })() : null}
         <View style={walletStyles.xpRow}>
           {/* KV_PINK sweep: violet XP */}
           <Zap size={rs.s(14)} color={'#a78bfa'} />
@@ -1568,6 +1571,7 @@ interface DashboardProps {
   activeMode?: 'tutorial' | 'real';
   onSwitchMode?: (mode: 'tutorial' | 'real') => void;
   balanceSompi?: bigint;
+  onNavigateSavings?: () => void; // KV_SAVINGS_UI
 }
 
 
@@ -1595,6 +1599,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   activeMode = 'tutorial',
   onSwitchMode,
   balanceSompi = 0n,
+  onNavigateSavings,
 }) => {
 
   const [activeTab, setActiveTab] = useState<'wallet' | 'mailbox' | 'workspace' | 'bathroom'>('wallet');
@@ -1678,6 +1683,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               onNavigateNeighbor={onNavigateNeighbor}
               onNavigateTxHistory={onNavigateTxHistory}
               onNavigatePOBox={onNavigatePOBox}
+              onNavigateSavings={onNavigateSavings}
               onNavigatePhoneProof={onNavigatePhoneProof}
               onNavigateBalanceSheet={onNavigateBalanceSheet}
               onPayNearby={() => onNavigatePayNearby?.()}

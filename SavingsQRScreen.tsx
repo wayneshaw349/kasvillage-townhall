@@ -22,8 +22,8 @@ function kasToSompi(t: string): bigint | null {
 }
 const fmt = (sompi: string | bigint) => (Number(BigInt(sompi)) / 1e8).toFixed(4);
 
-export const SavingsQRScreen: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const [mode, setMode] = useState<Mode>('home');
+export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'home' | 'add' | 'scan' }> = ({ onClose, initialMode }) => {
+  const [mode, setMode] = useState<Mode>(initialMode === 'scan' ? 'scan' : initialMode === 'add' && !SQ.sqTutorial() ? 'add' : 'home');
   const [rows, setRows] = useState<SQ.SqRow[]>([]);
   const [session, setSession] = useState<SQ.SqSession | null>(null);
   const [amount, setAmount] = useState('');
@@ -164,9 +164,9 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void }> = ({ onClose }) 
   if (mode === 'print') return (
     <ScrollView contentContainerStyle={st.c}>
       <Text style={st.t}>Print your Savings QRs</Text>
-      <Text style={st.b}>{(session?.qrs?.length || 0)} QR{(session?.qrs?.length || 0) > 1 ? 's' : ''} ready. Print TWO copies and store them in different places. Losing every copy of a QR loses its coins.</Text>
+      <Text style={st.b}>{(session?.qrs?.length || 0)} QR{(session?.qrs?.length || 0) > 1 ? 's' : ''} ready. Print once: every QR comes out twice, stamped ORIGINAL and BACKUP COPY (same coins - count originals only). Store the two sets in different places. Losing every copy of a QR loses its coins.</Text>
       <TouchableOpacity style={st.pri} onPress={printSheet}><Text style={st.priT}>Print sheet</Text></TouchableOpacity>
-      <TouchableOpacity style={st.sec} onPress={() => setMode('verify')}><Text style={st.secT}>I printed two copies → Verify</Text></TouchableOpacity>
+      <TouchableOpacity style={st.sec} onPress={() => setMode('verify')}><Text style={st.secT}>Printed originals + backup copies → Verify</Text></TouchableOpacity>
       <TouchableOpacity style={st.sec} onPress={returnDeposit}><Text style={st.secT}>Cancel: return deposit</Text></TouchableOpacity>
     </ScrollView>
   );
@@ -185,7 +185,8 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void }> = ({ onClose }) 
     <ScrollView contentContainerStyle={st.c}>
       <Text style={st.t}>Savings QR vault</Text>
       <Text style={st.big}>{fmt(total)} KAS</Text>
-      <Text style={st.s}>{unspent.length} unspent QR{unspent.length === 1 ? '' : 's'} · no keys stored</Text>
+      <Text style={st.s}>{unspent.length} unspent QR{unspent.length === 1 ? '' : 's'} · spent so far: {fmt(rows.filter((r) => r.status === 'spent').reduce((a, r) => a + BigInt(r.outSompi), 0n))} KAS ({rows.filter((r) => r.status === 'spent').length})</Text>
+      <Text style={st.b}>This vault holds no keys. It is just a tally of the QRs you printed: what you have and what is spent. Your printed ORIGINALS are the money - backup copies are the same coins, so never count them twice.</Text>
       {session ? (
         <View style={st.card}>
           <Text style={st.cardH}>Deposit in progress ({session.stage})</Text>
@@ -237,5 +238,23 @@ const st = StyleSheet.create({
   rowT: { color: '#F5F5F4', fontWeight: '600' },
   cam: { height: 280, borderRadius: 12, overflow: 'hidden', marginVertical: 10 },
 });
+
+/** Compact tally line for Dashboard / Send: "Savings vault 123.4500 KAS · 3 QRs". No keys, no network on first paint. */
+export const KvSavingsTally: React.FC<{ onPress?: () => void; hidden?: boolean; style?: any }> = ({ onPress, hidden, style }) => {
+  const [t, setT] = useState<{ haveSompi: bigint; haveCount: number } | null>(null);
+  useEffect(() => {
+    let live = true;
+    (async () => { try { const a = await SQ.sqTally(); if (live) setT(a); await SQ.sqRefresh(); const b = await SQ.sqTally(); if (live) setT(b); } catch {} })();
+    return () => { live = false; };
+  }, []);
+  if (!t || t.haveCount === 0) return onPress ? (
+    <TouchableOpacity onPress={onPress} style={style}><Text style={{ color: '#A8A29E', fontSize: 12 }}>Savings vault: none yet · tap to start</Text></TouchableOpacity>
+  ) : null;
+  return (
+    <TouchableOpacity onPress={onPress} disabled={!onPress} style={style}>
+      <Text style={{ color: '#D4AF37', fontSize: 13, fontWeight: '700' }}>Savings vault {hidden ? '••••' : fmt(t.haveSompi) + ' KAS'} · {t.haveCount} QR{t.haveCount === 1 ? '' : 's'}</Text>
+    </TouchableOpacity>
+  );
+};
 
 export default SavingsQRScreen;

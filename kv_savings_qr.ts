@@ -195,6 +195,13 @@ export async function sqSpend(info: { net: SqNet; txId: string; tx: any }): Prom
   return { txId: info.txId };
 }
 
+/** Vault tally from the phone's tracker (no network): unspent = what you have, spent = what is used. */
+export async function sqTally(): Promise<{ haveSompi: bigint; haveCount: number; spentSompi: bigint; spentCount: number }> {
+  const rows = await sqList(); let haveSompi = 0n, spentSompi = 0n, haveCount = 0, spentCount = 0;
+  for (const r of rows) { if (r.status === 'spent') { spentSompi += BigInt(r.outSompi); spentCount++; } else { haveSompi += BigInt(r.outSompi); haveCount++; } }
+  return { haveSompi, haveCount, spentSompi, spentCount };
+}
+
 /** Refresh tracker status from the chain (public data only). */
 export async function sqRefresh(): Promise<SqRow[]> {
   const rows = await sqList(); const byAddr: Record<string, SqCoin[] | null> = {};

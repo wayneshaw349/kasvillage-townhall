@@ -121,6 +121,7 @@ export interface SendKASProps {
   initialAddress?: string;
   initialAmount?: number;
   myAddress: string;
+  onOpenSavings?: (mode: 'scan' | 'add') => void; // KV_SAVINGS_UI
 }
 
 type SendStep = 'input' | 'preview' | 'sending' | 'success' | 'error';
@@ -197,6 +198,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
   initialAddress,
   initialAmount,
   myAddress,
+  onOpenSavings,
 }) => {
   const [recipientInput, setRecipientInput] = useState(initialAddress || '');
   const [vaultAddr, setVaultAddr] = useState<string | null>(null);
@@ -486,7 +488,15 @@ export const SendKAS: React.FC<SendKASProps> = ({
                     </TouchableOpacity>
                     ) : null
                   ))}
+                  {/* KV_SAVINGS_UI: Savings QRs can only pay the hot wallet -> scan one, then send from Hot Wallet */}
+                  {onOpenSavings ? (
+                    <TouchableOpacity style={styles.sendToChip} onPress={() => Alert.alert('Spend from Savings', 'A Savings QR can only move its coins into your hot wallet. Scan one now; then send from Hot Wallet as usual.', [
+                      { text: 'Cancel', style: 'cancel' }, { text: 'Scan a Savings QR', onPress: () => onOpenSavings('scan') }])}>
+                      <Text style={styles.sendToChipText}>Savings</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
+                {onOpenSavings ? (() => { const { KvSavingsTally } = require('./SavingsQRScreen'); return <KvSavingsTally style={{ marginTop: 2, marginBottom: 8 }} onPress={() => onOpenSavings('scan')} />; })() : null}
                 <Text style={styles.inputLabel}>Send To</Text>
                 <View style={styles.sendToChips}>
                   {[
@@ -512,6 +522,12 @@ export const SendKAS: React.FC<SendKASProps> = ({
                       </TouchableOpacity>
                     );
                   })}
+                  {onOpenSavings ? (
+                    <TouchableOpacity style={styles.sendToChip} onPress={() => Alert.alert('Add to Savings', 'Savings has no address to send to. Add to vault moves KAS from your hot wallet into printed QR slips.', [
+                      { text: 'Cancel', style: 'cancel' }, { text: 'Add to vault', onPress: () => onOpenSavings('add') }])}>
+                      <Text style={styles.sendToChipText}>Savings vault</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
                 <View style={styles.addressInputRow}>
                   <TextInput
