@@ -11,7 +11,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert,
 import * as SQ from './kv_savings_qr';
 import { VaultQRSignScreen } from './VaultQRSignScreen';
 
-type Mode = 'home' | 'add' | 'progress' | 'print' | 'verify' | 'scan';
+type Mode = 'home' | 'add' | 'progress' | 'print' | 'verify' | 'scan' | 'slips';
 
 /** "12.5" / "12,5" -> sompi, exact (no floating point). */
 function kasToSompi(t: string): bigint | null {
@@ -93,6 +93,17 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
     setMode('progress');
   };
 
+  // No printer module needed: show the slips in a WebView, screenshot them, print from the Photos app.
+  const [slipsHtml, setSlipsHtml] = useState('');
+  const showSlips = async () => {
+    if (!session?.qrs || !session.exits) return;
+    const hot = await SQ.sqHotAddress();
+    let usd = 0; try { const PF = require('./kas_price_feed'); await PF.refreshPrice().catch(() => {}); const p = PF.getKasPrice(); usd = p && !p.isStale ? Number(p.usdPerKas) || 0 : 0; } catch {}
+    const html = SQ.sqPrintHtml(session.qrs, session.exits.map((e) => e.outSompi), hot.slice(-6), session.net, usd)
+      .replace('<style>', '<style>html,body{background:#fff;margin:8px}.n svg{width:100%;height:auto}');
+    setSlipsHtml(html); setMode('slips');
+  };
+
   const printSheet = async () => {
     if (!session?.qrs || !session.exits) return;
     // check the native module quietly first: requiring expo-print in a build without it throws a red dev error
@@ -167,10 +178,27 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
       <Text style={st.t}>Print your Savings QRs</Text>
       <Text style={st.b}>{(session?.qrs?.length || 0)} QR{(session?.qrs?.length || 0) > 1 ? 's' : ''} ready. Print once: every QR comes out twice, stamped ORIGINAL and BACKUP COPY (same coins - count originals only). Store the two sets in different places. Losing every copy of a QR loses its coins.</Text>
       <TouchableOpacity style={st.pri} onPress={printSheet}><Text style={st.priT}>Print sheet</Text></TouchableOpacity>
+      <TouchableOpacity style={st.sec} onPress={showSlips}><Text style={st.secT}>No printer app? Show slips to screenshot</Text></TouchableOpacity>
       <TouchableOpacity style={st.sec} onPress={() => setMode('verify')}><Text style={st.secT}>Printed originals + backup copies → Verify</Text></TouchableOpacity>
       <TouchableOpacity style={st.sec} onPress={returnDeposit}><Text style={st.secT}>Cancel: return deposit</Text></TouchableOpacity>
     </ScrollView>
   );
+
+  if (mode === 'slips') {
+    const WV = (() => { try { return require('react-native-webview').WebView; } catch { return null; } })();
+    return (
+      <View style={{ flex: 1, backgroundColor: '#1C1917', paddingTop: 50 }}>
+        <Text style={[st.b, { paddingHorizontal: 16 }]}>Screenshot each slip (zoom so one fills the screen), then print the screenshots from the Photos app (Share → Print). Print the ORIGINALS and the BACKUP COPIES. Afterwards delete the screenshots, including from Recently Deleted.</Text>
+        {WV ? <WV source={{ html: slipsHtml }} originWhitelist={['about:blank']} javaScriptEnabled={false} scalesPageToFit style={{ flex: 1, backgroundColor: '#fff' }}
+            onShouldStartLoadWithRequest={(r: any) => r.url === 'about:blank' || r.url.startsWith('data:')} />
+          : <Text style={[st.b, { padding: 16 }]}>This build cannot show the slips.</Text>}
+        <View style={{ padding: 16 }}>
+          <TouchableOpacity style={st.pri} onPress={() => setMode('verify')}><Text style={st.priT}>Printed them → Verify</Text></TouchableOpacity>
+          <TouchableOpacity style={st.sec} onPress={() => setMode('print')}><Text style={st.secT}>Back</Text></TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   if (mode === 'verify' || mode === 'scan') return (
     <ScrollView contentContainerStyle={st.c}>
