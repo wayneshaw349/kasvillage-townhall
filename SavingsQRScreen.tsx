@@ -93,15 +93,16 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
     setMode('progress');
   };
 
-  // No printer module needed: show the slips in a WebView, screenshot them, print from the Photos app.
-  const [slipsHtml, setSlipsHtml] = useState('');
+  // No printer module needed: one slip per screen on plain white -> screenshot -> print from Photos.
+  const [slips, setSlips] = useState<string[]>([]);
+  const [slipIdx, setSlipIdx] = useState(0);
+  const [slipUi, setSlipUi] = useState(true);
   const showSlips = async () => {
     if (!session?.qrs || !session.exits) return;
     const hot = await SQ.sqHotAddress();
     let usd = 0; try { const PF = require('./kas_price_feed'); await PF.refreshPrice().catch(() => {}); const p = PF.getKasPrice(); usd = p && !p.isStale ? Number(p.usdPerKas) || 0 : 0; } catch {}
-    const html = SQ.sqPrintHtml(session.qrs, session.exits.map((e) => e.outSompi), hot.slice(-6), session.net, usd)
-      .replace('<style>', '<style>html,body{background:#fff;margin:8px}.n svg{width:100%;height:auto}');
-    setSlipsHtml(html); setMode('slips');
+    const pages: string[] = JSON.parse(require('./kv_savings_note').notePrintHtml({ qrs: session.qrs, outs: session.exits.map((e) => e.outSompi), hotLast6: hot.slice(-6), net: session.net, usdPerKas: usd, single: true }));
+    setSlips(pages); setSlipIdx(0); setSlipUi(true); setMode('slips');
   };
 
   const printSheet = async () => {
@@ -186,16 +187,31 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
 
   if (mode === 'slips') {
     const WV = (() => { try { return require('react-native-webview').WebView; } catch { return null; } })();
+    const SB = (() => { try { return require('react-native').StatusBar; } catch { return null; } })();
+    const n = slips.length; const half = n / 2;
+    const label = slipIdx < half ? 'ORIGINAL ' + (slipIdx + 1) + ' of ' + half : 'BACKUP COPY ' + (slipIdx - half + 1) + ' of ' + half;
     return (
-      <View style={{ flex: 1, backgroundColor: '#1C1917', paddingTop: 50 }}>
-        <Text style={[st.b, { paddingHorizontal: 16 }]}>Screenshot each slip (zoom so one fills the screen), then print the screenshots from the Photos app (Share → Print). Print the ORIGINALS and the BACKUP COPIES. Afterwards delete the screenshots, including from Recently Deleted.</Text>
-        {WV ? <WV source={{ html: slipsHtml }} originWhitelist={['about:blank']} javaScriptEnabled={false} scalesPageToFit style={{ flex: 1, backgroundColor: '#fff' }}
-            onShouldStartLoadWithRequest={(r: any) => r.url === 'about:blank' || r.url.startsWith('data:')} />
-          : <Text style={[st.b, { padding: 16 }]}>This build cannot show the slips.</Text>}
-        <View style={{ padding: 16 }}>
-          <TouchableOpacity style={st.pri} onPress={() => setMode('verify')}><Text style={st.priT}>Printed them → Verify</Text></TouchableOpacity>
-          <TouchableOpacity style={st.sec} onPress={() => setMode('print')}><Text style={st.secT}>Back</Text></TouchableOpacity>
-        </View>
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        {SB ? <SB hidden={!slipUi} /> : null}
+        {WV && slips[slipIdx] ? <WV key={slipIdx} source={{ html: slips[slipIdx] }} originWhitelist={['about:blank']} javaScriptEnabled={false} scrollEnabled={false}
+            onShouldStartLoadWithRequest={(r: any) => r.url === 'about:blank'} style={{ flex: 1, backgroundColor: '#FFFFFF' }} />
+          : <Text style={[st.b, { padding: 16, color: '#000' }]}>This build cannot show the slips.</Text>}
+        {slipUi ? (
+          <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(28,25,23,0.94)', padding: 16, paddingBottom: 30 }}>
+            <Text style={[st.b, { marginBottom: 6 }]}>{label} · tap "Hide buttons", screenshot, then tap the screen to come back. Print the screenshots from Photos (Share → Print), then delete them.</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={[st.sec, { flex: 1 }]} disabled={slipIdx === 0} onPress={() => setSlipIdx(slipIdx - 1)}><Text style={st.secT}>‹ Prev</Text></TouchableOpacity>
+              <TouchableOpacity style={[st.pri, { flex: 2 }]} onPress={() => setSlipUi(false)}><Text style={st.priT}>Hide buttons</Text></TouchableOpacity>
+              <TouchableOpacity style={[st.sec, { flex: 1 }]} disabled={slipIdx >= n - 1} onPress={() => setSlipIdx(slipIdx + 1)}><Text style={st.secT}>Next ›</Text></TouchableOpacity>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={[st.sec, { flex: 1 }]} onPress={() => setMode('print')}><Text style={st.secT}>Back</Text></TouchableOpacity>
+              <TouchableOpacity style={[st.sec, { flex: 2 }]} onPress={() => setMode('verify')}><Text style={st.secT}>Printed all → Verify</Text></TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <TouchableOpacity activeOpacity={1} style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} onPress={() => setSlipUi(true)} />
+        )}
       </View>
     );
   }

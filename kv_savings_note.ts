@@ -88,7 +88,7 @@ export function noteSvg(o: {
 }
 
 /** Full print page: one note per QR, random palette each, plus the safety line under each. */
-export function notePrintHtml(o: { qrs: string[]; outs: string[]; hotLast6: string; net: string; usdPerKas: number; pick?: () => number }): string {
+export function notePrintHtml(o: { qrs: string[]; outs: string[]; hotLast6: string; net: string; usdPerKas: number; pick?: () => number; single?: boolean }): string {
   const QR = require('qrcode');
   const date = new Date().toISOString().slice(0, 10);
   const pick = o.pick || Math.random;
@@ -103,6 +103,13 @@ export function notePrintHtml(o: { qrs: string[]; outs: string[]; hotLast6: stri
       '<p class="s">' + (copy === 'BACKUP COPY' ? '<b>BACKUP COPY of slip ' + (i + 1) + ' of ' + o.qrs.length + ': the SAME coins as its ORIGINAL - do not count it twice.</b> Store it apart from the original. ' : '') +
       'Whoever scans this can only move these coins into wallet …' + esc(o.hotLast6) + '. Losing every copy loses these coins.</p></div>';
   };
+  if (o.single) {
+    // One page per slip for screenshots: white screen, slip rotated to fill a portrait phone, no caption.
+    const page = (div: string) => '<html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/><style>html,body{margin:0;height:100%;background:#fff;overflow:hidden}' +
+      '.n{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}.n svg{width:94vh;max-width:none;height:auto;transform:rotate(90deg);flex:none}.s{display:none}' +
+      '@media (orientation:landscape){.n svg{width:94vw;transform:none}}</style></head><body>' + div + '</body></html>';
+    return JSON.stringify([...o.qrs.map((t, i) => page(one(t, i, 'ORIGINAL'))), ...o.qrs.map((t, i) => page(one(t, i, 'BACKUP COPY')))]);
+  }
   const notes = o.qrs.map((t, i) => one(t, i, 'ORIGINAL')).join('') + '<div style="page-break-before:always"></div>' + o.qrs.map((t, i) => one(t, i, 'BACKUP COPY')).join('');
   return '<html><head><meta name="viewport" content="width=device-width"/><style>body{margin:0.3in;font-family:Helvetica,Arial,sans-serif}.n{page-break-inside:avoid;margin:0 0 0.25in}.n svg{display:block}.s{font-size:10px;margin:4px 0 0;color:#333}</style></head><body>' + notes + '</body></html>';
 }
