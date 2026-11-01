@@ -368,10 +368,10 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       let url = '';
       if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(to)) url = 'mailto:' + to + '?subject=' + encodeURIComponent('KasCity offer') + '&body=' + encodeURIComponent(text);
       else if (/^@?[A-Za-z0-9_]{3,}$/.test(to)) url = 'https://t.me/' + to.replace(/^@/, '');
-      else if (/^(https:\/\/)?(t\.me|wa\.me|ig\.me|discord\.gg|x\.com)\//i.test(to)) url = /^https:/i.test(to) ? to : 'https://' + to;
+      else if (/^(https:\/\/)?(t\.me|wa\.me|ig\.me|m\.me|signal\.me|discord\.gg)\//i.test(to)) url = /^https:/i.test(to) ? to : 'https://' + to;
       (async () => { try { await require('expo-clipboard').setStringAsync(text); } catch {} })();
       const RN = require('react-native');
-      RN.Alert.alert('Contact player', 'Your message is copied - paste it in the chat.\n\nAgree on the deal there, then settle wallet-to-wallet in KasVillage (direct send or a FROST agreement). Never pay an address you did not verify. The owner presses TRANSFER in the game after being paid.' + (url ? '' : '\n\nContact: ' + ((globalThis as any).__kvStreamer === true ? to.slice(0, 2) + '•••' + to.slice(-2) : to)), url ? [{ text: 'Cancel', style: 'cancel' }, { text: 'Open chat', onPress: () => { RN.Linking.openURL(url).catch(() => RN.Alert.alert('Could not open', to)); } }] : [{ text: 'OK' }]);
+      RN.Alert.alert('Contact player', 'Your message is copied - paste it in the chat.\n\nAgree on the deal there, then settle wallet-to-wallet in KasVillage (direct send or a FROST agreement). Never pay an address you did not verify. The owner presses TRANSFER in the game after being paid.' + (url ? '' : '\n\nContact: ' + ((globalThis as any).__kvStreamer === true ? to.slice(0, 2) + '•••' + to.slice(-2) : to)), url ? [{ text: 'Cancel', style: 'cancel' }, { text: 'Open chat', onPress: () => { require('./kv_link_whitelist').openWhitelisted(url).catch(() => RN.Alert.alert('Could not open', to)); } }] : [{ text: 'OK' }]);
       return; } } catch {}
     if (handleKvNetMessage(event.nativeEvent.data, (js) => webRef.current?.injectJavaScript(js), {
       sign: !!props.game,

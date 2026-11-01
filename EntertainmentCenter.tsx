@@ -391,11 +391,11 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
         // record carries an attested hash, and its validate() gates the rest.
         setPlayingGame({ dapp, descriptor: text });
       } else {
-        Linking.openURL(dapp.url);
+        require('./kv_link_whitelist').openWhitelisted(dapp.url);
       }
     } catch (e) {
       // Unreachable content: fall back to the browser rather than a dead tap.
-      Linking.openURL(dapp.url);
+      require('./kv_link_whitelist').openWhitelisted(dapp.url);
     }
     setLaunching(false);
   };

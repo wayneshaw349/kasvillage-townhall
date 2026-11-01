@@ -3050,11 +3050,11 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
                           
                           <TouchableOpacity onPress={() => {
                             const { Linking } = require('react-native');
-                            if (/^https:\/\//i.test(String(selectedAbstract.repositoryUrl || ''))) Linking.openURL(selectedAbstract.repositoryUrl); // AUDIT: https only
+                            if (/^https:\/\//i.test(String(selectedAbstract.repositoryUrl || ''))) require('./kv_link_whitelist').openWhitelisted(selectedAbstract.repositoryUrl); // AUDIT: https only
                           }} style={{ marginTop: 10 }}>
                             <Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>📂 View Repository</Text>
                           </TouchableOpacity>
-                          {selectedAbstract.videoUrl ? <TouchableOpacity onPress={() => Linking.openURL(selectedAbstract.videoUrl!)} style={{ marginTop: 6 }}><Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>🎬 Watch Video Explainer</Text></TouchableOpacity> : null}
+                          {selectedAbstract.videoUrl ? <TouchableOpacity onPress={() => require('./kv_link_whitelist').openWhitelisted(selectedAbstract.videoUrl!)} style={{ marginTop: 6 }}><Text style={{ color: COLORS.blue600, fontSize: 13, textDecorationLine: 'underline' }}>🎬 Watch Video Explainer</Text></TouchableOpacity> : null}
                           {selectedAbstract.qaChannel && selectedAbstract.qaHandle ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, backgroundColor: '#fef3c7', borderRadius: 8, padding: 8 }}><Text style={{ fontSize: 11, color: '#92400e' }}>💬 Questions via {selectedAbstract.qaChannel}: <Text style={{ fontWeight: 'bold' }}>{selectedAbstract.qaHandle}</Text></Text></View> : null}
                         </View>
                         
@@ -4560,7 +4560,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         <View style={{ flexDirection: 'row', gap: rs.s(10), marginBottom: rs.s(16) }}>
           <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: rs.s(6), backgroundColor: '#166534', borderRadius: rs.s(10), paddingVertical: rs.s(10) }} onPress={() => {
             const primaryLink = socialLinks.instagram || socialLinks.pinterest || socialLinks.etsy || socialLinks.tiktok || socialLinks.facebook || '';
-            if (primaryLink) { Linking.openURL(primaryLink.startsWith('http') ? primaryLink : 'https://' + primaryLink); }
+            if (primaryLink) { require('./kv_link_whitelist').openWhitelisted(primaryLink.startsWith('http') ? primaryLink : 'https://' + primaryLink); }
             else { Alert.alert('No Social Link', 'Add your Instagram, Pinterest, or Etsy link in the Brand tab first.'); }
           }}>
             <Eye size={rs.s(14)} color="#fff" />
@@ -4973,7 +4973,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               
               {stash.length > 0 ? (
                 stash.map(item => (
-                  <TouchableOpacity key={item.id} onPress={() => { if (item.socialUrl) Linking.openURL(item.socialUrl); }}
+                  <TouchableOpacity key={item.id} onPress={() => { if (item.socialUrl) require('./kv_link_whitelist').openWhitelisted(item.socialUrl); }}
                     style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardBg, borderRadius: rs.s(12), padding: rs.s(12), marginBottom: rs.s(8), borderWidth: 1, borderColor: COLORS.amber200 }} activeOpacity={0.7}>
                     <Text style={{ fontSize: rs.font(28), marginRight: rs.s(10) }}>{getPlatformIcon(item.socialUrl)}</Text>
                     <View style={{ flex: 1 }}>

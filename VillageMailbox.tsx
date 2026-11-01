@@ -573,7 +573,7 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
             else if (!/^https?:\/\//i.test(c)) url = 'https://' + c;
             RN.Alert.alert('Contact developer', 'Your message with your pubkey is copied - paste it in the chat.\n\nPay ONLY the address on this game card' + (item.quad.tip_addr ? ' (' + String(item.quad.tip_addr).slice(0, 20) + '\u2026)' : '') + '. Never pay an address sent to you in a DM.', [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Open chat', onPress: () => { RN.Linking.openURL(url).catch(() => {}); } },
+              { text: 'Open chat', onPress: () => { require('./kv_link_whitelist').openWhitelisted(url).catch(() => {}); } },
             ]);
           } catch {}
         }} style={{ marginTop: 6, borderColor: '#0891b2', borderWidth: 1, borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}>
@@ -1346,14 +1346,14 @@ export default function VillageMailbox() {
       else if (ch.indexOf('insta') >= 0) url = 'https://ig.me/m/' + hd;
       else if (ch.indexOf('telegram') >= 0) url = 'https://t.me/' + hd;
       else if (ch.indexOf('whatsapp') >= 0) url = 'https://wa.me/' + hd.replace(/\D/g, '') + '?text=' + encodeURIComponent(msg);
-      else if (ch.indexOf('twitter') >= 0 || ch === 'x' || ch.indexOf('x ') === 0) url = 'https://x.com/' + hd;
+      // X/Twitter is not an allowed contact channel (link whitelist)
       if (!url && !rawHandle && cfg && cfg.repositoryUrl) url = String(cfg.repositoryUrl); // KV_QA_ALWAYS: no DM listed -> repo page
       if (url && !/^(https:\/\/|mailto:)/i.test(url)) url = ''; // AUDIT: listing data must not open tel:/sms:/kaspa:/app deep links
       try { Clipboard.setStringAsync(msg); } catch {}
       setQaText('');
       console.log('[QA] question #' + n, 'ref', h.slice(0, 16), '->', url || '(copy only)');
       Alert.alert(n === 1 ? 'Question ready (free)' : 'Follow-up #' + n + ' ready', 'Message copied. ' + (url ? 'Opening ' + (cfg.qaChannel || 'their channel') + ' - paste it into the DM.' : (rawHandle ? 'Paste it into ' + (cfg.qaChannel || 'their channel') + ': ' + rawHandle : 'This researcher has not listed a DM channel yet - keep the copied message for when they do.')), [
-        { text: 'OK', onPress: () => { if (url) { try { Linking.openURL(url); } catch {} } } },
+        { text: 'OK', onPress: () => { if (url) { try { require('./kv_link_whitelist').openWhitelisted(url); } catch {} } } },
       ]);
     } catch (e: any) { Alert.alert('Question failed', String((e && e.message) || e)); }
     setQaBusy(false);
@@ -1695,15 +1695,15 @@ export default function VillageMailbox() {
           Alert.alert(item.name || 'App', 'Watch the demo or open the app?', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Manage Listing', onPress: _openManage },
-            { text: '🎬 Watch Demo', onPress: () => Linking.openURL(videoLink.startsWith('http') ? videoLink : 'https://' + videoLink) },
-            { text: '🚀 Open App', onPress: () => Linking.openURL(appLink.startsWith('http') ? appLink : 'https://' + appLink) },
+            { text: '🎬 Watch Demo', onPress: () => require('./kv_link_whitelist').openWhitelisted(videoLink.startsWith('http') ? videoLink : 'https://' + videoLink) },
+            { text: '🚀 Open App', onPress: () => require('./kv_link_whitelist').openWhitelisted(appLink.startsWith('http') ? appLink : 'https://' + appLink) },
           ]);
         } else {
           const link = videoLink || appLink;
           Alert.alert(item.name || 'App', link ? 'Open the app or manage the listing?' : 'No demo or app URL set.', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Manage Listing', onPress: _openManage },
-            ...(link ? [{ text: 'Open App', onPress: () => Linking.openURL(link.startsWith('http') ? link : 'https://' + link) }] : []),
+            ...(link ? [{ text: 'Open App', onPress: () => require('./kv_link_whitelist').openWhitelisted(link.startsWith('http') ? link : 'https://' + link) }] : []),
           ]);
         }
       } else if (section === 'academics') {
@@ -1712,12 +1712,12 @@ export default function VillageMailbox() {
         if (videoLink && repoLink) {
           Alert.alert(item.title || 'Research', 'Watch the explainer or view the paper?', [
             { text: 'Cancel', style: 'cancel' },
-            { text: '🎬 Video Explainer', onPress: () => Linking.openURL(videoLink.startsWith('http') ? videoLink : 'https://' + videoLink) },
-            { text: '📄 View Paper', onPress: () => Linking.openURL(repoLink.startsWith('http') ? repoLink : 'https://' + repoLink) },
+            { text: '🎬 Video Explainer', onPress: () => require('./kv_link_whitelist').openWhitelisted(videoLink.startsWith('http') ? videoLink : 'https://' + videoLink) },
+            { text: '📄 View Paper', onPress: () => require('./kv_link_whitelist').openWhitelisted(repoLink.startsWith('http') ? repoLink : 'https://' + repoLink) },
           ]);
         } else {
           const link = videoLink || repoLink;
-          if (link) Linking.openURL(link.startsWith('http') ? link : 'https://' + link);
+          if (link) require('./kv_link_whitelist').openWhitelisted(link.startsWith('http') ? link : 'https://' + link);
           else Alert.alert('Research', item.title || 'No link available');
         }
       } else if (section === 'coupons') {
@@ -1725,7 +1725,7 @@ export default function VillageMailbox() {
         try { Clipboard.setStringAsync(item.code || item.title || ''); Alert.alert('Coupon Copied!', (item.code || item.title) + ' — use at checkout in a Neighbor Agreement'); } catch { Alert.alert('Coupon', item.title || item.code || 'No code'); }
       } else if (section === 'services') {
         const svcLink = item.contactChannel || item.primaryLink || '';
-        if (svcLink) Linking.openURL(svcLink.startsWith('http') ? svcLink : 'https://' + svcLink);
+        if (svcLink) require('./kv_link_whitelist').openWhitelisted(svcLink.startsWith('http') ? svcLink : 'https://' + svcLink);
         else Alert.alert('Service', item.title || 'No contact info');
       } else {
         Alert.alert('Details', item.name || item.storeName || item.title || 'No details');
@@ -2063,7 +2063,7 @@ export default function VillageMailbox() {
                     <Text style={{ fontSize: rs.font(10), color: '#4f46e5', marginTop: rs.s(2) }}>{String(cfg.institutionDomain || '') + (cfg.researcherId ? '  \u00b7  ' + cfg.researcherId : '')}</Text>
                     <Text style={{ fontSize: rs.font(12), color: '#44403c', marginTop: rs.s(12), lineHeight: rs.font(18) }}>{cfg.text || cfg.abstractText}</Text>
                     {Array.isArray(cfg.keywords) && cfg.keywords.length > 0 ? <Text style={{ fontSize: rs.font(10), color: '#78716c', marginTop: rs.s(10) }}>{cfg.keywords.join(' \u00b7 ')}</Text> : null}
-                    {cfg.repositoryUrl ? <TouchableOpacity onPress={() => { try { require('react-native').Linking.openURL(String(cfg.repositoryUrl)); } catch {} }} style={{ marginTop: rs.s(12) }}><Text style={{ fontSize: rs.font(11), color: '#4f46e5' }}>{cfg.repositoryUrl}</Text></TouchableOpacity> : null}
+                    {cfg.repositoryUrl ? <TouchableOpacity onPress={() => { try { require('./kv_link_whitelist').openWhitelisted(String(cfg.repositoryUrl)); } catch {} }} style={{ marginTop: rs.s(12) }}><Text style={{ fontSize: rs.font(11), color: '#4f46e5' }}>{cfg.repositoryUrl}</Text></TouchableOpacity> : null}
                     {_qa ? <Text style={{ fontSize: rs.font(10), color: '#57534e', marginTop: rs.s(10) }}>Questions: {_qa}</Text> : null}
                     {true ? ( /* KV_QA_DM KV_QA_ALWAYS */
                       <View style={{ marginTop: rs.s(10), borderWidth: 1, borderColor: '#e7e5e4', borderRadius: rs.s(10), padding: rs.s(10) }}>
