@@ -21,6 +21,7 @@
 // ============================================================================
 
 import { sha256 } from '@noble/hashes/sha256';
+import { secp256k1 as _secp } from '@noble/curves/secp256k1';
 import {
   deriveAggregateKey,
   deriveAddress,
@@ -83,6 +84,7 @@ export interface VaultInfo {
   escrowScript: string;    // p2pkScript(aggXOnly)
   verificationCode: string; // both devices display; humans compare
   createdAt: number;
+  paperCosign?: boolean;    // KV_PAPER_COSIGN: cosigner is a paper/QR key, not a second phone
 }
 
 /**
@@ -531,3 +533,57 @@ export function parseAssembledResponse(payloadB64: string): SellerResponse | nul
 // QR transport   : chunkForQR, QrAssembler, templateToQRFrames, responseToQRFrames,
 //                  parseAssembledTemplate, parseAssembledResponse
 // ============================================================================
+
+
+// ============================================================================
+// SECTION 6: PAPER COSIGN KEY (KV_PAPER_COSIGN)
+// ============================================================================
+// The cosigner can be a key that lives only on paper: shown ONCE as a QR + 64 hex at setup,
+// never stored. At spend time it is scanned (or typed), signs with fresh two-nonce values,
+// and is dropped. Format: KVCK1|<vaultId>|<network>|<64-hex private key>
+// ============================================================================
+
+export function makePaperCosignKey(vaultId: string, network: KaspaNetwork): { privHex: string; pubkey: string; qr: string } {
+  const privHex = bytesToHex((_secp as any).utils.randomPrivateKey());
+  const pubkey = bytesToHex(_secp.getPublicKey(hexToBytes(privHex), true));
+  return { privHex, pubkey, qr: 'KVCK1|' + vaultId + '|' + network + '|' + privHex };
+}
+
+/** Accepts the full KVCK1 QR text, or just the 64 hex characters (typed from paper). */
+export function parsePaperCosignKey(raw: string, vault: VaultInfo): { privHex: string } | { error: string } {
+  const t = String(raw || '').trim();
+  let privHex = '';
+  if (t.startsWith('KVCK1|')) {
+    const [, vid, net, k] = t.split('|');
+    if (vid !== vault.vaultId) return { error: 'This cosign key belongs to a different vault.' };
+    if (net !== vault.network) return { error: 'This cosign key is for ' + net + ', the vault is on ' + vault.network + '.' };
+    privHex = String(k || '').toLowerCase();
+  } else {
+    privHex = t.replace(/[^0-9a-fA-F]/g, '').toLowerCase();
+  }
+  if (!/^[0-9a-f]{64}$/.test(privHex)) return { error: 'Not a cosign key (expected the QR or 64 hex characters).' };
+  let pub = '';
+  try { pub = bytesToHex(_secp.getPublicKey(hexToBytes(privHex), true)); } catch { return { error: 'Invalid key.' }; }
+  if (pub !== vault.cosignerPubkey) return { error: 'This key does not match this vault\'s cosigner - check the paper.' };
+  return { privHex };
+}
+
+/** Cosign a spend template with the scanned paper key (verify -> two-nonce sign). */
+export function paperCosignTemplate(vault: VaultInfo, privHex: string, template: TxTemplate): { response: SellerResponse; responseB64: string } | { error: string } {
+  const cosignerView: VaultInfo = { ...vault, myPubkey: vault.cosignerPubkey, cosignerPubkey: vault.myPubkey };
+  return vaultCosignTemplate({ privateKeyHex: privHex, vault: cosignerView, template });
+}
+
+/** Recovery: rebuild a paper-cosign vault on a (new) phone from the restored wallet key
+ *  plus the paper QR (which carries the vault id and network). Nothing secret is stored. */
+export function restorePaperVault(raw: string, myPubkey: string): { vault: VaultInfo } | { error: string } {
+  const t = String(raw || '').trim();
+  if (!t.startsWith('KVCK1|')) return { error: 'Scan the cosign QR from your paper (it starts with KVCK1).' };
+  const [, vid, net, k] = t.split('|');
+  const privHex = String(k || '').toLowerCase();
+  if (!vid || !/^[0-9a-f]{64}$/.test(privHex) || !['mainnet', 'testnet-10', 'testnet-11'].includes(String(net))) return { error: 'Not a valid cosign QR.' };
+  let pub = '';
+  try { pub = bytesToHex(_secp.getPublicKey(hexToBytes(privHex), true)); } catch { return { error: 'Invalid key.' }; }
+  if (pub === myPubkey) return { error: 'That key is this phone\'s own key.' };
+  return { vault: { ...deriveVault({ vaultId: vid, myPubkey, cosignerPubkey: pub, network: net as KaspaNetwork }), paperCosign: true } };
+}

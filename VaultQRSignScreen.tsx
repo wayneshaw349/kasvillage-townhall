@@ -73,7 +73,7 @@ function isValidKaspaAddr(a: string): boolean {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-type Step = 'input' | 'building' | 'show' | 'scan' | 'broadcast' | 'success' | 'error';
+type Step = 'input' | 'building' | 'show' | 'scan' | 'paper' | 'broadcast' | 'success' | 'error';
 
 export interface VaultQRSignScreenProps {
   visible: boolean;
@@ -96,6 +96,7 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
   const [balance, setBalance] = useState<bigint>(0n);
   const [error, setError] = useState<string | null>(null);
   const [txId, setTxId] = useState<string | null>(null);
+  const [paperInput, setPaperInput] = useState(''); // KV_PAPER_COSIGN (typed fallback; cleared after use)
 
   // Ceremony state — template is display-safe; nonces are SECRET (ref only)
   const [frames, setFrames] = useState<string[]>([]);
@@ -153,7 +154,7 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
 
   // Camera permission when entering scan step
   useEffect(() => {
-    if (step !== 'scan' || !_cam?.Camera?.requestCameraPermissionsAsync) return;
+    if ((step !== 'scan' && step !== 'paper') || !_cam?.Camera?.requestCameraPermissionsAsync) return;
     _cam.Camera.requestCameraPermissionsAsync()
       .then((r: any) => setCamGranted(r?.status === 'granted'))
       .catch(() => setCamGranted(false));
@@ -198,6 +199,7 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
 
       noncesRef.current = built.nonces;          // SECRET — ref only
       templateRef.current = built.template;
+      if (vault.paperCosign) { setPaperInput(''); setStep('paper'); return; } // KV_PAPER_COSIGN
       const fs = templateToQRFrames(built.templateB64);
       setFrames(fs.frames);
       setFrameIdx(0);
@@ -233,6 +235,26 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
       if (piece.startsWith('KVQ1|')) feedFrame(piece);
     }
     setPasteBuf('');
+  };
+
+  // KV_PAPER_COSIGN: the paper key signs on THIS phone, then is dropped. It is never stored.
+  const paperBusy = useRef(false);
+  const handlePaperKey = (raw: string) => {
+    if (paperBusy.current) return;
+    paperBusy.current = true;
+    try {
+      const { parsePaperCosignKey, paperCosignTemplate } = require('./frost_qr_signer');
+      const tpl = templateRef.current;
+      if (!tpl) throw new Error('Ceremony state lost - start again');
+      const k = parsePaperCosignKey(raw, vault);
+      if ('error' in k) { setError(k.error); return; }
+      const co = paperCosignTemplate(vault, k.privHex, tpl);
+      (k as any).privHex = '';                       // drop the key reference immediately
+      setPaperInput('');
+      if ('error' in co) { setError(co.error); return; }
+      completeCeremony(co.responseB64);
+    } catch (e: any) { setError(e?.message || 'Paper key signing failed'); }
+    finally { paperBusy.current = false; }
   };
 
   const completeCeremony = async (responseB64: string) => {
@@ -430,6 +452,32 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
           )}
 
           {/* STEP: broadcast */}
+          {step === 'paper' && (
+            <ScrollView contentContainerStyle={{ padding: 16 }}>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#F5F5F4', marginBottom: 6 }}>Scan your paper cosign key</Text>
+              <Text style={{ fontSize: 12, color: '#D6D3D1', marginBottom: 10 }}>
+                Point the camera at the cosign QR on your paper, or type the 64 characters. The key signs on this phone and is dropped right after - it is never saved.
+                Use only this screen, never your phone's camera app.
+              </Text>
+              {CameraView && camGranted ? (
+                <View style={{ height: 260, borderRadius: 12, overflow: 'hidden', marginBottom: 10 }}>
+                  <CameraView style={{ flex: 1 }} barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                    onBarcodeScanned={(e: any) => { const d = String(e?.data || ''); if (d.startsWith('KVCK1|')) handlePaperKey(d); }} />
+                </View>
+              ) : null}
+              <TextInput value={paperInput} onChangeText={setPaperInput} placeholder="or type the 64 characters" placeholderTextColor="#78716C"
+                autoCapitalize="none" autoCorrect={false} secureTextEntry
+                style={{ borderWidth: 1, borderColor: '#44403C', borderRadius: 10, padding: 10, color: '#F5F5F4', fontFamily: 'Courier' }} />
+              <TouchableOpacity style={{ marginTop: 10, backgroundColor: '#D97706', borderRadius: 10, padding: 12, alignItems: 'center' }} onPress={() => handlePaperKey(paperInput)}>
+                <Text style={{ color: '#fff', fontWeight: '800' }}>Sign with paper key</Text>
+              </TouchableOpacity>
+              {error ? <Text style={{ color: '#F87171', marginTop: 8, fontSize: 12 }}>{error}</Text> : null}
+              <TouchableOpacity style={{ marginTop: 12, alignItems: 'center' }} onPress={handleAbort}>
+                <Text style={{ color: '#A8A29E' }}>Cancel</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          )}
+
           {step === 'broadcast' && (
             <View style={styles.center}>
               <ActivityIndicator size="large" color="#F5C542" />
