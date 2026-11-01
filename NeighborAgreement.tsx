@@ -1613,10 +1613,10 @@ function parseClipboard(raw: string): {
             if (alreadySent) { console.log('[Crash-Recovery] Already sent for', entry.agrId.slice(0,12)); continue; }
             // AUDIT 2026-10-31: share the poll's in-flight guard so the two paths can't both fund.
             if (_sendInFlight.current.has(entry.agrId)) continue;
+            _sendInFlight.current.add(entry.agrId); // claim BEFORE any await (closes the has()/add() race with the poll)
             // Auto-send buyer collateral
             const rWallet = await loadMainWallet();
-            if (!rWallet?.privKeyHex) continue;
-            _sendInFlight.current.add(entry.agrId);
+            if (!rWallet?.privKeyHex) { _sendInFlight.current.delete(entry.agrId); continue; }
             console.log('[Crash-Recovery] Seller funded', entry.agrId.slice(0,12), '- auto-sending', expectedBuyer / 1e8, 'KAS');
             const { sendKaspaViaRest: sendRecover } = require('./kaspa_rest_tx');
             const rResult = await sendRecover({
@@ -1632,9 +1632,11 @@ function parseClipboard(raw: string): {
               console.log('[Crash-Recovery] Buyer collateral TX:', rResult.txId);
               entry.step = 4; // mark as fully funded
             } else {
+              // keep the claim only if the tx may still land; otherwise let the poll retry
+              if (!/may still land/.test(String(rResult.error || ''))) _sendInFlight.current.delete(entry.agrId);
               console.warn('[Crash-Recovery] Send failed:', rResult.error);
             }
-          } catch (e) { console.warn('[Crash-Recovery] Error for', entry.agrId.slice(0,12), ':', e); }
+          } catch (e) { _sendInFlight.current.delete(entry.agrId); console.warn('[Crash-Recovery] Error for', entry.agrId.slice(0,12), ':', e); }
         }
 
         setFrostActiveList(updatedList);
@@ -1774,10 +1776,11 @@ function parseClipboard(raw: string): {
             // AUDIT 2026-10-31: the persisted marker survives a remount; the in-memory set does not.
             if (alreadySent) { console.log('[FROST-Poll] already funded (persisted marker) - not sending again'); return; }
             if (!_sendInFlight.current.has(contract.agreementId || '') && !cancelled) {
+              _sendInFlight.current.add(contract.agreementId || ''); // claim BEFORE any await
               try {
                 const wallet = await loadMainWallet();
-                if (!wallet || cancelled) return;
-                _sendInFlight.current.add(contract.agreementId || ''); console.log('[FROST-Poll] Counterparty sent! Auto-sending', myExpected / 1e8, 'KASPA');
+                if (!wallet || cancelled) { _sendInFlight.current.delete(contract.agreementId || ''); return; }
+                console.log('[FROST-Poll] Counterparty sent! Auto-sending', myExpected / 1e8, 'KASPA');
                 const sendResult = await sendKaspaViaRest({
                   senderAddress: wallet.address,
                   recipientAddress: contract.multisigAddress || '',
@@ -1796,7 +1799,7 @@ function parseClipboard(raw: string): {
                   // Merkle proof
                   uploadPerTxProof({ txId: sendResult.txId || '', txIndex: 0, amountSompi: BigInt(myExpected), scriptPubKey: '', daaScore: 0, txType: 'collateral', balanceAfter: 0, agreementId: contract.agreementId, uploadFn: async (data, tags) => { const r = await uploadToIrys(data, tags); return r.txId || ''; }, network: 'testnet' }).catch(() => {});
                 } else {
-                  _sendInFlight.current.delete(contract.agreementId || ''); console.warn('[FROST-Poll] Auto-send failed:', sendResult.error);
+                  if (!/may still land/.test(String(sendResult.error || ''))) _sendInFlight.current.delete(contract.agreementId || ''); console.warn('[FROST-Poll] Auto-send failed:', sendResult.error);
                 }
               } catch (e) { _sendInFlight.current.delete(contract.agreementId || ''); console.warn('[FROST-Poll] Auto-send error:', e); }
             }
@@ -4878,6 +4881,8 @@ nonces: _killNonces,
                                 console.log('[KV_NONCE_ONCE] Refund+kill nonces consumed for', _agrId);
                               } catch (_ne) {
                                 console.warn('[KV_NONCE_ONCE] Could not persist nonce consumption:', _ne);
+                                // match the buyer path: drop the nonces outright so they can never sign again
+                                try { await SecureStore.deleteItemAsync('kv_refund_pending_' + _agrId); } catch {}
                                 Alert.alert('Storage Failed', 'Could not record that your signing nonces were used. Nothing was sent. Tap Abort Pending Agreement, then accept again to build fresh templates.');
                                 setIsLoading(false); return;
                               }

@@ -61,10 +61,15 @@ export async function buildTrackRecord(includeBundle = false): Promise<{ tr: Tra
   const rows: string[] = [];
   const perCp = new Map<string, number>();
   const months = new Map<string, { n: number; kas: number; usd: number; cps: Set<string> }>();
+  let unsignedDates = 0;
   let completed = 0, cancelled = 0, deadlocked = 0, volKas = 0, volUsd = 0, priced = 0, first = 0, last = 0;
   for (const r of chain) {
     // Date from the SIGNED escrowDaaScore (anchor/ts are not covered by the signatures).
-    const t = nowDaa && Number(r.escrowDaaScore) > 0 ? Date.now() - Math.max(0, nowDaa - Number(r.escrowDaaScore)) * 100 : 0;
+    // Prefer the SIGNED escrowDaaScore; current callers sign 0, so fall back to the release
+    // anchor (public chain data, checkable via its txid link), then the local time (marked).
+    let t = nowDaa && Number(r.escrowDaaScore) > 0 ? Date.now() - Math.max(0, nowDaa - Number(r.escrowDaaScore)) * 100 : 0;
+    if (!t && r.anchor && Number(r.anchor.blockTime) > 0) t = Number(r.anchor.blockTime);
+    if (!t && Number(r.ts) > 0) { t = Number(r.ts); unsignedDates++; }
     const v = kas(r.buyerAmountSompi);
     if (r.outcome === 'complete') {
       completed++; volKas += v;
@@ -132,7 +137,7 @@ export async function buildTrackRecord(includeBundle = false): Promise<{ tr: Tra
     + (boardSales ? '<div class="c"><div class="k">' + boardSales + '</div>game boards to ' + boardBuyers + ' distinct buyers</div>' : '')
     + '</div><h2>Monthly revenue</h2><p>' + activeMonths + ' active month' + (activeMonths === 1 ? '' : 's') + (activeMonths ? ' · average $' + Math.round(volUsd / activeMonths).toLocaleString('en-US') + '/month' : '') + '</p><table><tr><th>Month</th><th>Deals</th><th>KAS</th><th>USD then</th><th>Partners</th></tr>' + monthRows + '</table>'
     + '<h2>Deals</h2><table><tr><th>Date</th><th>Outcome</th><th>KAS</th><th>USD then</th><th>Partner</th><th>Proof tx</th></tr>' + rows.join('') + '</table>'
-    + '<h2>How to verify</h2><p>Every deal below is signed by the other party (schnorr over the deal terms) and bound to its escrow address and transaction. Deal dates come from the signed escrow DAA score. Paste the signed bundle (if included) into KasVillage → Phone Proof → verify, or check each proof tx on the explorer. USD uses the CoinGecko daily KAS price on each deal date. Partner counts are honest signals, not guarantees: one person can control several wallets; "established" partners raise the cost of faking demand.</p>'
+    + '<h2>How to verify</h2><p>Every deal below is signed by the other party (schnorr over the deal terms) and bound to its escrow address and transaction. Deal dates come from the release transaction on chain (follow each proof link)' + (unsignedDates ? '; ' + unsignedDates + ' deal(s) without an on-chain anchor use the phone\'s own clock' : '') + '. Paste the signed bundle (if included) into KasVillage → Phone Proof → verify, or check each proof tx on the explorer. USD uses the CoinGecko daily KAS price on each deal date. Partner counts are honest signals, not guarantees: one person can control several wallets; "established" partners raise the cost of faking demand.</p>'
     + (ownSig ? '<h2>Wallet ownership</h2><p>The holder of this wallet signed this statement (BIP340 schnorr, sha256 of the message). To prove it is you, sign any phrase the lender picks in the app while they watch.</p><pre>pubkey: ' + esc(owner) + '\nmessage: ' + esc(ownMsg) + '\nsignature: ' + esc(ownSig) + '</pre>' : '')
     + (bundle ? '<h2>Signed bundle</h2><p>Contains every deal on this phone (all networks), with partners\' full public keys and escrow addresses.</p><pre>' + esc(bundle) + '</pre>' : '<p>Signed bundle not included. Ask the owner for it to verify each deal\'s counterparty signature.</p>')
     + '</body></html>';

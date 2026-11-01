@@ -41,8 +41,10 @@ export async function ensureUserAge(): Promise<number | null> {
   const have = await readBand(); if (have) return have;
   const pick: number | null = await new Promise((res) => Alert.alert('How old are you?',
     'Community games carry age ratings. This stays on your phone and is only used to filter downloads.',
-    // 3 buttons max on Android; tapping outside the dialog cancels.
-    [{ text: 'Under 13', onPress: () => res(9) }, { text: '13 - 16', onPress: () => res(13) }, { text: '17 or older', onPress: () => res(17) }],
+    // 3 buttons max on Android, so two steps; each has a way out.
+    [{ text: 'Under 13', onPress: () => res(9) },
+     { text: '13 or older', onPress: () => Alert.alert('One more', 'Are you 17 or older?', [{ text: '13 - 16', onPress: () => res(13) }, { text: '17 or older', onPress: () => res(17) }, { text: 'Cancel', style: 'cancel', onPress: () => res(null) }], { cancelable: true, onDismiss: () => res(null) }) },
+     { text: 'Cancel', style: 'cancel', onPress: () => res(null) }],
     { cancelable: true, onDismiss: () => res(null) }));
   if (pick) { try { await AsyncStorage.setItem(KEY, String(pick)); } catch {} }
   return pick;

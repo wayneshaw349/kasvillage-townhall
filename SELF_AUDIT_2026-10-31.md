@@ -43,7 +43,7 @@ App:
     (including across several agreements with the same key). Same pastes, same escrow address, standard BIP340
     signature on chain. Old one-nonce templates/answers are refused with an "update KasVillage" message.
     Tested: 311/311 checks (25 random wallet pairs, 1-4 inputs, refund + kill, independent BIP340 verify,
-    old-format refusal). Vault 2-device signing (frost_qr_signer.ts) left single-nonce: both devices are the owner's.
+    old-format refusal). Vault 2-device signing converted too (see second pass).
 
 ## NEEDS A DECISION (not changed)
 - **Dev relay host + `'unsafe-eval'` (HIGH):** a publisher's `relay` host joins the game's network allowlist, giving a game a data exit (e.g. a fake seed prompt). Options: per-host user consent, or moderator-approved hosts; drop `'unsafe-eval'` if games don't need it.
@@ -63,3 +63,32 @@ App:
 - Relay: schnorr canon matches JS canonJson; rest_tx_id matches consensus; game_rooms body caps and sig skew; RSA key bounds; no secret logging.
 - `wordSafeChunks` splits words inside BASE64 chunks to avoid false positives at the relay; the real content gate runs on the HTML before chunking — not evasion.
 - Relay tests: 142/142 pass after fixes. App tsc: 97 errors, all pre-existing (none in touched code).
+
+## Second pass — same day (after mainnet tests)
+Mainnet proof with real coins, two-nonce signing: release `a0c38078…`, timeout refund `2a8518b9…`,
+kill (both deals), cancel `206c9757…` (2.00 + 2.99832 in → 1.998004 buyer + 2.997006 seller, fee 0.00331).
+
+Independent crypto review of KV_MUSIG2: correct vs MuSig2/BIP327 (nonce coefficient over the
+aggregated nonces + x-only key + message; parity for P and R; order inside the MuSig2 model;
+downgrade refused everywhere; no double-sign path). 780/780 randomized checks.
+
+Fixed in this pass:
+1. **Vault 2-device signing → two-nonce** (a 2-of-2 vault exists to survive one compromised device;
+   a hijacked cosigner + dust could run the ROS forgery). Old-format templates/answers refused;
+   k2 wiped with k. 150/150 vault checks.
+2. Stored nonces must equal the template's R/R2 before signing (crash between two writes).
+3. Cancelling counterparty nonce (point at infinity) → clear refusal instead of a raw throw.
+4. Seller refund/kill nonces deleted outright if marking them used fails (matches the buyer path).
+5. Regression in my double-fund fix: the shared in-flight guard was claimed after an `await`, so the
+   poll and crash-recovery could still both fund; now claimed before any await, released on every
+   failure (kept only when the tx "may still land"). Crash-recovery failures no longer stall the poll.
+6. Regression: track-record dates read the signed escrowDaaScore, which callers sign as 0 → every
+   date blank. Now: signed DAA → on-chain release anchor → phone clock (counted and labelled).
+7. Regression: academic nonce counter restarted after reinstall (address reuse). Now clock-seeded from
+   13,000,000 (above old academics and games), never goes backwards.
+8. Regression: canary scanner stopped following redirects (3xx scored "clean"). Now follows up to 3 by
+   hand, re-checking each hop for private/non-web targets.
+9. SSRF guard DNS lookup capped at 3 s.
+10. Age prompt on iOS has a Cancel again (two-step, ≤3 buttons for Android).
+11. Agreements read the network from the agreement/active net, not the stale `kaspa_network` key
+    (proposal blue score was testnet, pasted-pubkey counterparty address was `kaspatest:`).

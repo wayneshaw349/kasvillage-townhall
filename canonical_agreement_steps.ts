@@ -711,6 +711,8 @@ export function partialSign2(
   if (nonce.k2 === undefined || !nonce.R2_hex) throw new Error('two-nonce signing needs k2');
   const R1agg: any = (G.multiply(nonce.k) as any).add(secp256k1.ProjectivePoint.fromHex(counterpartyR1_hex)); // type-only cast; runtime proven
   const R2agg: any = (G.multiply(nonce.k2) as any).add(secp256k1.ProjectivePoint.fromHex(counterpartyR2_hex));
+  const _Z = (secp256k1.ProjectivePoint as any).ZERO;
+  if (R1agg.equals(_Z) || R2agg.equals(_Z)) throw new Error('counterparty nonce cancels ours - refusing; build a fresh template');
   const b = musig2NonceCoef(R1agg.toRawBytes(true), R2agg.toRawBytes(true), aggXOnly, sighash_hex);
   let R: any = R1agg.add(R2agg.multiply(b));
   if (R.equals((secp256k1.ProjectivePoint as any).ZERO)) throw new Error('degenerate aggregate nonce - rebuild');
@@ -1314,6 +1316,11 @@ export function buyerAggregate(params: {
       return { error: 'Counterparty answered with the old one-nonce signing. Do NOT broadcast - ask them to update KasVillage and sign again.' };
     }
     if (nonces.some((n) => n.k2 === undefined)) return { error: 'Stored nonces are missing the second nonce - tap Build TX Template again.' };
+    // The stored nonces must be exactly the ones published in this template (a crash between
+    // the two writes could pair fresh nonces with an older template).
+    for (let i = 0; i < nonces.length; i++) {
+      if (nonces[i].R_hex !== template.R[i] || nonces[i].R2_hex !== template.R2![i]) return { error: 'Stored nonces do not match this template - tap Build TX Template again.' };
+    }
   }
 
   const agg = deriveAggregateKey(buyerPubkey, sellerPubkey, counter);

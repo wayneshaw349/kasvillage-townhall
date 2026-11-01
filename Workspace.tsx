@@ -2749,9 +2749,11 @@ const AcademicPanel: React.FC<AcademicPanelProps> = ({ visible, onClose }) => {
       const _pub2 = bytesToHex(secp256k1.getPublicKey(hexToBytes(_priv), true));
       const _owner = { privateKeyHex: _priv, pubkeyHex: _pub2, address: _addr, network: require('./kv_net').KV_NET as any };
       // AUDIT 2026-10-31: the old 7000+(seconds % 1e6) repeated every ~11.6 days and overlapped the
-      // hardcoded game nonce bases (9414/10214). Monotonic counter from 20000 instead.
-      let _nonce = 20000;
-      try { const _AS = require('@react-native-async-storage/async-storage').default; _nonce = Math.max(20000, parseInt((await _AS.getItem('kv_abs_nonce_next')) || '20000', 10) || 20000); await _AS.setItem('kv_abs_nonce_next', String(_nonce + 1)); } catch {}
+      // hardcoded game nonce bases (9414/10214).
+      // Range starts at 13,000,000 (above old academics 7000-1,007,000 and games 2M-12M) and is seeded
+      // from the clock, so a reinstall / new phone can never re-issue an old nonce.
+      let _nonce = 13000000 + Math.max(0, Math.floor(Date.now() / 1000) - 1793000000);
+      try { const _AS = require('@react-native-async-storage/async-storage').default; _nonce = Math.max(_nonce, parseInt((await _AS.getItem('kv_abs_nonce_next')) || '0', 10) || 0); await _AS.setItem('kv_abs_nonce_next', String(_nonce + 1)); } catch {}
       const _pubRes: any = await publishContent(_owner, 'store', { name: newAbstract.title, category: 'Academic', abstractId: newAbstract.id }, _nonce, 100_000_000n);
       if (!_pubRes || _pubRes.success === false) throw new Error('abstract publish failed: ' + (_pubRes && _pubRes.error));
       try { const AS = require('@react-native-async-storage/async-storage').default; AS.setItem('kv_abs_nonce_' + newAbstract.id, String(_nonce)); } catch {}

@@ -188,17 +188,33 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
         Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
     };
 
-    let resp = match client.get(&url).send().await {
-        Ok(r) => r,
-        Err(e) => return HttpResponse::Ok().json(serde_json::json!({
-            "error": format!("fetch failed: {}", e), "fetchable": false
-        })),
-    };
-    let final_url = resp.url().to_string();
-    let final_host = extract_host(&final_url).unwrap_or_else(|| host.clone());
-    if is_private_host(&final_host) {
-        return HttpResponse::BadRequest().json(serde_json::json!({"error":"redirected to private host"}));
+    // Follow up to 3 redirects BY HAND, re-checking every hop (auto-follow would reach
+    // internal hosts before any check; not following would scan an empty 3xx as "clean").
+    let mut cur = url.clone();
+    let mut resp_opt: Option<reqwest::Response> = None;
+    for _hop in 0..4 {
+        let r = match client.get(&cur).send().await {
+            Ok(r) => r,
+            Err(e) => return HttpResponse::Ok().json(serde_json::json!({
+                "error": format!("fetch failed: {}", e), "fetchable": false
+            })),
+        };
+        if !r.status().is_redirection() { resp_opt = Some(r); break; }
+        let loc = r.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        let next = match reqwest::Url::parse(&cur).and_then(|b| b.join(&loc)) { Ok(u) => u.to_string(), Err(_) => break };
+        let nh = match extract_host(&next) { Some(h) => h, None => break };
+        let np: u16 = if next.starts_with("https://") { 443 } else if next.starts_with("http://") { 80 } else { 0 };
+        if np == 0 || is_private_host(&nh) || !crate::node_registry::resolves_public(&nh, np).await {
+            return HttpResponse::BadRequest().json(serde_json::json!({"error":"redirects to a private or non-web address", "redirect_to": next}));
+        }
+        cur = next;
     }
+    let resp = match resp_opt {
+        Some(r) => r,
+        None => return HttpResponse::Ok().json(serde_json::json!({ "error": "too many redirects", "fetchable": false, "last_url": cur })),
+    };
+    let final_url = cur.clone();
+    let final_host = extract_host(&final_url).unwrap_or_else(|| host.clone());
 
     // stream with a cap instead of buffering the whole body
     let mut resp = resp;

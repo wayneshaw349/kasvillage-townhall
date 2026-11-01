@@ -113,7 +113,7 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
   const wipeCeremony = useCallback(() => {
     // Overwrite secrets before dropping the reference
     if (noncesRef.current) {
-      for (const n of noncesRef.current) { n.k = 0n; n.d_tweaked = 0n; }
+      for (const n of noncesRef.current) { n.k = 0n; n.k2 = 0n; n.d_tweaked = 0n; }
     }
     noncesRef.current = null;
     templateRef.current = null;

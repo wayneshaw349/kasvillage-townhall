@@ -30,7 +30,7 @@ import {
   verificationCode,
   computeSighash,
   generateNonce,
-  partialSign,
+  partialSign2,
   aggregateSigs,
   verifySig,
   buildTxBody,
@@ -211,6 +211,7 @@ export function vaultBuildSpendTemplate(params: {
     o: outputs,
     f: declaredFee.toString(),
     R: nonces.map((n) => n.R_hex),
+    R2: nonces.map((n) => n.R2_hex as string), // KV_MUSIG2: a hijacked cosigner can't run the dust/ROS forgery
     agr: 'VAULT_' + vault.vaultId,
     lt: '0',
   };
@@ -362,6 +363,9 @@ export function vaultCosignTemplate(params: {
 
   const v = vaultVerifySpendTemplate(template, vault);
   if (!v.valid) return { error: v.error || 'Vault template verification failed' };
+  if (!Array.isArray(template.R2) || template.R2.length !== template.u.length) {
+    return { error: 'This vault template uses the old one-nonce signing - update KasVillage on both devices and build a fresh one.' };
+  }
 
   const agg = deriveAggregateKey(vault.myPubkey, vault.cosignerPubkey, vault.counter);
   assertLMatch(agg, template.u, 'vaultCosignTemplate', vault.counter); // [L-GUARD]
@@ -375,14 +379,15 @@ export function vaultCosignTemplate(params: {
 
   const partials: string[] = [];
   const myR: string[] = [];
+  const myR2: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
-    const nonce = generateNonce(privateKeyHex, vault.myPubkey, vault.cosignerPubkey, vault.counter); // fresh k per input
-    myR.push(nonce.R_hex);
+    const nonce = generateNonce(privateKeyHex, vault.myPubkey, vault.cosignerPubkey, vault.counter); // fresh (k, k2) per input
+    myR.push(nonce.R_hex); myR2.push(nonce.R2_hex as string);
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, 0n));
-    partials.push(partialSign(nonce, template.R[i], agg.aggXOnly, shHex).s_hex);
+    partials.push(partialSign2(nonce, template.R[i], (template.R2 as string[])[i], agg.aggXOnly, shHex).s_hex);
   }
 
-  const response: SellerResponse = { R: myR, s: partials };
+  const response: SellerResponse = { R: myR, R2: myR2, s: partials };
   return { response, responseB64: encodeResponse(response) };
 }
 
@@ -411,6 +416,12 @@ export function vaultAggregate(params: {
   if (cosignerResponse.s.length !== template.u.length) {
     return { error: 'Cosigner sent ' + cosignerResponse.s.length + ' partial(s) for ' + template.u.length + ' input(s).' };
   }
+  // KV_MUSIG2: two-nonce only, and the stored nonces must be the ones in the template.
+  if (!Array.isArray(template.R2) || template.R2.length !== template.u.length) return { error: 'Vault template is one-nonce - build a fresh one.' };
+  if (!Array.isArray(cosignerResponse.R2) || cosignerResponse.R2.length !== template.u.length) return { error: 'Cosigner answered with the old one-nonce signing. Do NOT broadcast - update KasVillage on the cosigner.' };
+  for (let i = 0; i < nonces.length; i++) {
+    if (nonces[i].k2 === undefined || nonces[i].R_hex !== template.R[i] || nonces[i].R2_hex !== template.R2[i]) return { error: 'Stored nonces do not match this template - build a fresh one.' };
+  }
 
   const agg = deriveAggregateKey(vault.myPubkey, vault.cosignerPubkey, vault.counter);
   assertLMatch(agg, template.u, 'vaultAggregate', vault.counter); // [L-GUARD]
@@ -425,7 +436,7 @@ export function vaultAggregate(params: {
   const signatures: string[] = [];
   for (let i = 0; i < inputs.length; i++) {
     const shHex = bytesToHex(computeSighash(inputs, outputs, i, 0n));
-    const myPartial = partialSign(nonces[i], cosignerResponse.R[i], agg.aggXOnly, shHex);
+    const myPartial = partialSign2(nonces[i], cosignerResponse.R[i], (cosignerResponse.R2 as string[])[i], agg.aggXOnly, shHex);
     const sigHex = aggregateSigs(myPartial.R_agg_x_hex, myPartial.s_hex, cosignerResponse.s[i]);
     if (!verifySig(sigHex, shHex, agg.aggXOnly)) {
       return { error: 'Input ' + i + ' failed BIP340 verification. Aborting.' };
