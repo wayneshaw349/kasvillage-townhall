@@ -1433,6 +1433,7 @@ export const AppNavigator: React.FC = () => {
           network={kaspaAddress.startsWith('kaspatest:') ? 'testnet-10' : 'mainnet'}
           onDone={() => setScreen('dashboard')}
           onCancel={() => setScreen('dashboard')}
+          onPaperVault={() => setScreen('vault_setup')}
         />
       );
 

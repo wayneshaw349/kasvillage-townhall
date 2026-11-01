@@ -367,8 +367,19 @@ export const SendKAS: React.FC<SendKASProps> = ({
     setIsLoading(false);
   };
   
+  // KV_PAPER_VAULT_SLOT: a phone + paper-key vault signs on the vault screen (scan the paper key)
+  const [paperSign, setPaperSign] = useState<any>(null);
   const handleSend = async () => {
     if (!preview || !resolved?.address) return;
+    if (sendSource === 'vault') {
+      const _va = require('./kv_vault_active');
+      if ((await _va.kvVaultKind()) === 'frost_paper') {
+        const fv = await _va.kvFrostVaultActive();
+        if (!fv) { setError('Vault not found on this phone - restore it from your paper first.'); setStep('error'); return; }
+        setPaperSign({ vault: fv, to: resolved.address, kas: sompiToKas(amountSompi) });
+        return;
+      }
+    }
     if (resolved.type === 'stealth' || preview.isStealthPayment || isStealthInput(recipientInput)) {
       setError('Stealth sends are disabled'); setStep('error'); return;
     }
@@ -427,6 +438,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
   };
   
   return (
+    <>
     <Modal visible={visible} animationType="slide" transparent>
       <View style={styles.overlay} onStartShouldSetResponder={() => { Keyboard.dismiss(); return false; }}>
         <View style={styles.modal}>
@@ -779,6 +791,21 @@ export const SendKAS: React.FC<SendKASProps> = ({
         </View>
       </View>
     </Modal>
+      {paperSign ? (() => {
+        const { VaultQRSignScreen } = require('./VaultQRSignScreen');
+        return (
+          <VaultQRSignScreen
+            visible={true}
+            vault={paperSign.vault}
+            initialRecipient={paperSign.to}
+            initialAmountKas={String(paperSign.kas)}
+            getPrivateKeyHex={async () => { const k = await require('./proposal_share')._kvResolvePrivHex(); if (!k) throw new Error('wallet key unavailable'); return k; }}
+            onClose={() => setPaperSign(null)}
+            onSuccess={(id: string) => { setPaperSign(null); setTxId(id); setStep('success'); if (onSuccess) onSuccess(id); setTimeout(() => { onBalanceRefresh?.(); }, 2000); }}
+          />
+        );
+      })() : null}
+    </>
   );
 };
 

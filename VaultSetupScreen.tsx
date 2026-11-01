@@ -191,6 +191,19 @@ export const VaultSetupScreen: React.FC<VaultSetupScreenProps> = ({
     busyRef.current = true;
     setStep('saving');
     try {
+      if (vault.paperCosign) {
+        // KV_PAPER_VAULT_SLOT: the paper-key vault takes the app's "Vault" slot (Send/Receive/balance).
+        // Never orphan a funded card vault: its coins must be moved out first.
+        const oldAddr = (await SecureStore.getItemAsync('kv_vault_address')) || '';
+        const oldKind = (await SecureStore.getItemAsync('kv_vault_kind')) || 'cards';
+        if (oldAddr && oldKind !== 'frost_paper' && oldAddr !== vault.address) {
+          let bal = 0;
+          try { const base = oldAddr.startsWith('kaspatest:') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org'; bal = Number((await (await fetch(base + '/addresses/' + oldAddr + '/balance')).json()).balance || 0); } catch { bal = -1; }
+          if (bal !== 0) throw new Error(bal < 0 ? 'Could not check your card vault balance - try again online.' : 'Your card vault still holds ' + (bal / 1e8).toFixed(4) + ' KAS. Send it to your hot wallet first, then create the paper vault.');
+        }
+        await SecureStore.setItemAsync('kv_vault_address', vault.address);
+        await SecureStore.setItemAsync('kv_vault_kind', 'frost_paper');
+      }
       await SecureStore.setItemAsync(KV_FROST_VAULT_KEY, JSON.stringify(vault));
       await SecureStore.setItemAsync(KV_FROST_VAULT_ADDR_KEY, vault.address);
       onCreated?.(vault);

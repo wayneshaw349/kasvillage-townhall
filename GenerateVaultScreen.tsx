@@ -28,10 +28,11 @@ interface Props {
   network?: Net;                      // default testnet-10
   total?: number;                     // cards to issue (default 4)
   threshold?: number;                 // cards needed to recover (default 2)
+  onPaperVault?: () => void;          // KV_PAPER_VAULT_SLOT: phone + paper-key FROST vault instead
 }
 
 export const GenerateVaultScreen: React.FC<Props> = ({
-  onDone, onCancel, network = require('./kv_net').KV_NET, total = 4, threshold = 2,
+  onDone, onCancel, network = require('./kv_net').KV_NET, total = 4, threshold = 2, onPaperVault,
 }) => {
   const [busy, setBusy] = useState(false);
   const [wires, setWires] = useState<string[] | null>(null);
@@ -96,6 +97,18 @@ export const GenerateVaultScreen: React.FC<Props> = ({
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>🔐 Generate Backable Wallet</Text>
+      {onPaperVault ? (
+        <View style={styles.card}>
+          <Text style={styles.cardHead}>Recommended: phone + paper key vault</Text>
+          <Text style={styles.li}>• Every spend needs THIS phone and a key you keep on paper (scan it to sign).</Text>
+          <Text style={styles.li}>• A stolen or hacked phone alone can't spend it; the paper alone can't either.</Text>
+          <Text style={styles.li}>• Recover on a new phone: your wallet seed + scan the paper.</Text>
+          <TouchableOpacity style={[styles.primary, { marginTop: 10 }]} onPress={onPaperVault} disabled={busy}>
+            <Text style={styles.primaryText}>Create phone + paper vault</Text>
+          </TouchableOpacity>
+          <Text style={[styles.li, { marginTop: 10 }]}>Or the classic card vault below (one key, split into QR cards):</Text>
+        </View>
+      ) : null}
       <Text style={styles.body}>
         Creates a brand-new wallet whose recovery is portable across devices and
         platforms. You'll get {total} QR cards; any {threshold} restore the wallet.

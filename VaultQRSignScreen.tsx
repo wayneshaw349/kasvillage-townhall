@@ -82,13 +82,15 @@ export interface VaultQRSignScreenProps {
   /** Returns the PHONE's private key hex (from SecureStore). */
   getPrivateKeyHex: () => Promise<string>;
   onSuccess?: (txId: string) => void;
+  initialRecipient?: string;   // KV_PAPER_VAULT_SLOT: opened from Send with these filled in
+  initialAmountKas?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
-  visible, onClose, vault, getPrivateKeyHex, onSuccess,
+  visible, onClose, vault, getPrivateKeyHex, onSuccess, initialRecipient, initialAmountKas,
 }) => {
   const [step, setStep] = useState<Step>('input');
   const [recipient, setRecipient] = useState('');
@@ -125,7 +127,7 @@ export const VaultQRSignScreen: React.FC<VaultQRSignScreenProps> = ({
   // Reset on open/close; wipe secrets on close/unmount
   useEffect(() => {
     if (visible) {
-      setStep('input'); setRecipient(''); setAmountKas('');
+      setStep('input'); setRecipient(initialRecipient || ''); setAmountKas(initialAmountKas || '');
       setError(null); setTxId(null);
       wipeCeremony();
     } else {
