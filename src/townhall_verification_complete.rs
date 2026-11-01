@@ -2354,18 +2354,40 @@ pub struct DAppVerifyResponse {
 /// the proof are about the REAL file. Before this, the empty string was scanned and proven.
 const DAPP_CODE_HOSTS: &[&str] = &["raw.githubusercontent.com", "gist.githubusercontent.com", "arweave.net"];
 
+// AUDIT 2026-11-01: host matched on the WHATWG-parsed URL (same parser reqwest uses), exact
+// or dot-boundary subdomain only. Hand-splitting let "https://10.0.0.5:6443\\.arweave.net/x"
+// pass as *.arweave.net while reqwest fetched 10.0.0.5.
+fn dapp_code_host_ok(host: &str) -> bool {
+    let h = host.trim_end_matches('.');
+    DAPP_CODE_HOSTS.iter().any(|a| h == *a || (h.len() > a.len() + 1 && h.ends_with(a) && h.as_bytes()[h.len() - a.len() - 1] == b'.'))
+}
+
+/// AUDIT 2026-11-01: parse (https only, no IP literals, no userinfo) + allowlist check.
+fn dapp_code_target(url: &str) -> Result<(reqwest::Url, String, u16), String> {
+    let (u, host, port) = crate::node_registry::parse_web_url(url, true)
+        .ok_or("code URL must be https with a host name (no IP addresses or user@ parts)")?;
+    if !dapp_code_host_ok(&host) { return Err(format!("code host {} not allowed (use {})", host, DAPP_CODE_HOSTS.join(", "))); }
+    Ok((u, host, port))
+}
+
 async fn fetch_dapp_code(url: &str) -> Result<String, String> {
-    let rest = url.strip_prefix("https://").ok_or("code URL must be https")?;
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("").to_ascii_lowercase();
-    let host_ok = DAPP_CODE_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{}", h)));
-    if !host_ok { return Err(format!("code host {} not allowed (use {})", host, DAPP_CODE_HOSTS.join(", "))); }
-    let resp = reqwest::Client::new().get(url).timeout(std::time::Duration::from_secs(20)).send().await
+    // AUDIT 2026-11-01: resolve once, require all-public addresses, pin the connection to them
+    // (no rebinding), redirects off, no env proxy, body streamed with a hard cap.
+    let (u, host, port) = dapp_code_target(url)?;
+    let addrs = crate::node_registry::resolve_public_addrs(&host, port).await
+        .ok_or("code host does not resolve to a public address")?;
+    let mut resp = crate::node_registry::pinned_client(&host, &addrs, 20, "TownHallDAppFetch/1.0")
+        .get(u.as_str()).send().await
         .map_err(|e| format!("fetch failed: {}", e))?;
+    if resp.status().is_redirection() { return Err("code URL redirects; give the final URL".into()); }
     if !resp.status().is_success() { return Err(format!("fetch returned {}", resp.status())); }
     if let Some(len) = resp.content_length() { if len as usize > MAX_CODE_SIZE_BYTES { return Err("code exceeds size limit".into()); } }
-    let bytes = resp.bytes().await.map_err(|e| format!("read failed: {}", e))?;
-    if bytes.len() > MAX_CODE_SIZE_BYTES { return Err("code exceeds size limit".into()); }
-    String::from_utf8(bytes.to_vec()).map_err(|_| "code is not UTF-8 text".into())
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(c) = resp.chunk().await.map_err(|e| format!("read failed: {}", e))? {
+        bytes.extend_from_slice(&c);
+        if bytes.len() > MAX_CODE_SIZE_BYTES { return Err("code exceeds size limit".into()); }
+    }
+    String::from_utf8(bytes).map_err(|_| "code is not UTF-8 text".into())
 }
 
 pub async fn api_verify_dapp(
@@ -2598,7 +2620,7 @@ pub async fn api_get_stats_vk() -> HttpResponse {
     let fp = |dbg: String| { let mut h = Sha256::new(); h.update(dbg.as_bytes()); hex::encode(h.finalize()) };
     HttpResponse::Ok().json(serde_json::json!({
         "ok": true,
-        "relay_version": "v83",
+        "relay_version": "v84", // AUDIT 2026-11-01
         "vk_fingerprint": fp(format!("{:?}", *STATS_VK)),
         "proof_type": "Halo2-IPA-Stats-V2",
         "k": HALO2_K, "advice_columns": 20, "instance_columns": 1,
@@ -4212,6 +4234,20 @@ mod kv_dapp_fetch_tests {
         assert!(fetch_dapp_code("https://localhost/x").await.is_err(), "localhost refused");
         assert!(fetch_dapp_code("https://evil.example.com/x").await.is_err(), "unlisted host refused");
         assert!(fetch_dapp_code("https://raw.githubusercontent.com.evil.com/x").await.is_err(), "suffix trick refused");
+    }
+    // AUDIT 2026-11-01: backslash bypass + subdomain confusion, checked offline (no network).
+    #[test]
+    fn dapp_target_parses_like_the_client() {
+        assert!(dapp_code_target("https://10.0.0.5:6443\\.arweave.net/x").is_err(), "backslash -> IP host refused");
+        assert!(dapp_code_target("https://evil.com\\@arweave.net/x").is_err(), "backslash/userinfo refused");
+        assert!(dapp_code_target("https://user@arweave.net/x").is_err(), "userinfo refused");
+        assert!(dapp_code_target("https://evilarweave.net/x").is_err(), "no dot boundary refused");
+        assert!(dapp_code_target("https://arweave.net.evil.com/x").is_err(), "suffix trick refused");
+        assert!(dapp_code_target("https://[::1]/x").is_err(), "v6 literal refused");
+        assert!(dapp_code_target("http://arweave.net/x").is_err(), "http refused");
+        assert!(dapp_code_target("https://arweave.net/abc").is_ok());
+        assert!(dapp_code_target("https://abc.arweave.net/x").is_ok());
+        assert!(dapp_code_target("https://RAW.githubusercontent.com/o/r/main/f.js").is_ok());
     }
 }
 

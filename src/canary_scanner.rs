@@ -51,14 +51,19 @@ async fn refresh_blocklist() -> Result<usize, String> {
 }
 
 /// Load at startup, then every 6h. A failed refresh keeps the previous list.
+/// AUDIT 2026-11-01: until the FIRST load succeeds, retry after 1, 2, then every 5 min
+/// (was: a failed first load left the MetaMask list empty for 6h).
 pub fn spawn_blocklist_refresh() {
     tokio::spawn(async {
+        let mut loaded = false;
+        let mut fails: usize = 0;
         loop {
             match refresh_blocklist().await {
-                Ok(n) => println!("[Canary] phishing blocklist loaded: {} domains", n),
-                Err(e) => eprintln!("[Canary] blocklist refresh failed (keeping previous): {}", e),
+                Ok(n) => { loaded = true; fails = 0; println!("[Canary] phishing blocklist loaded: {} domains", n) }
+                Err(e) => { fails += 1; eprintln!("[Canary] blocklist refresh failed (keeping previous): {}", e) }
             }
-            tokio::time::sleep(std::time::Duration::from_secs(BLOCKLIST_REFRESH_SECS)).await;
+            let wait = if loaded { BLOCKLIST_REFRESH_SECS } else { [60u64, 120, 300][(fails.max(1) - 1).min(2)] };
+            tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
         }
     });
 }
@@ -69,12 +74,72 @@ fn blocklist_hit(host: &str) -> Option<String> {
     let labels: Vec<&str> = h.split('.').collect();
     let cands: Vec<String> = (0..labels.len().saturating_sub(1)).map(|i| labels[i..].join(".")).collect();
     let b = BLOCK.read().ok()?;
-    if cands.iter().any(|c| b.white.contains(c)) { return None; }
+    // AUDIT 2026-11-01: our own list wins over MetaMask's whitelist
     if let Some(c) = cands.iter().find(|c| b.kv.contains(*c)) { return Some(format!("{} is on the KasVillage scam list", c)); }
+    if cands.iter().any(|c| b.white.contains(c)) { return None; }
     if let Some(c) = cands.iter().find(|c| b.black.contains(*c)) { return Some(format!("{} is on the MetaMask phishing list", c)); }
     None
 }
 const FETCH_TIMEOUT_SECS: u64 = 10;
+
+// AUDIT 2026-11-01: fetch as a phone browser (scam kits cloak for bot UAs; most victims are on mobile).
+const SCAN_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1";
+
+// AUDIT 2026-11-01: scans are outbound fetches on the relay's dime - cap them.
+const MAX_CONCURRENT_SCANS: usize = 4;
+const SCANS_PER_IP_PER_MIN: u32 = 10;
+const MAX_TRACKED_IPS: usize = 4096;
+static SCAN_SLOTS: once_cell::sync::Lazy<tokio::sync::Semaphore> = once_cell::sync::Lazy::new(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_SCANS));
+static SCAN_RATE: once_cell::sync::Lazy<std::sync::Mutex<std::collections::HashMap<String, (u64, u32)>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Fixed 60s window per IP; bounded map (stale windows pruned, then cleared if still full).
+fn scan_rate_ok(ip: &str, now: u64) -> bool {
+    let mut m = SCAN_RATE.lock().unwrap_or_else(|e| e.into_inner());
+    if m.len() >= MAX_TRACKED_IPS && !m.contains_key(ip) {
+        m.retain(|_, (start, _)| now.saturating_sub(*start) < 60);
+        if m.len() >= MAX_TRACKED_IPS { m.clear(); }
+    }
+    let e = m.entry(ip.to_string()).or_insert((now, 0));
+    if now.saturating_sub(e.0) >= 60 { *e = (now, 0); }
+    if e.1 >= SCANS_PER_IP_PER_MIN { return false; }
+    e.1 += 1;
+    true
+}
+
+/// AUDIT 2026-11-01: only the web ports (an explicit :80/:443 or the scheme default).
+fn web_port_ok(port: u16) -> bool { port == 80 || port == 443 }
+
+/// AUDIT 2026-11-01: a link that serves a file (APK, exe, zip...) is not a web page.
+fn download_finding(content_type: Option<&str>) -> Option<CanaryFinding> {
+    let ct = content_type.unwrap_or("").split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    if ct.is_empty() || ct == "text/html" || ct == "application/xhtml+xml" { return None; }
+    let risky = ["application/vnd.android.package-archive", "application/octet-stream", "application/zip", "application/x-zip-compressed",
+        "application/x-msdownload", "application/x-msdos-program", "application/x-executable", "application/x-apple-diskimage",
+        "application/x-rar-compressed", "application/vnd.rar", "application/x-7z-compressed", "application/java-archive", "application/x-sh"];
+    let high = risky.contains(&ct.as_str());
+    Some(CanaryFinding {
+        code: "download_not_page".into(),
+        severity: if high { "high" } else { "medium" }.into(),
+        detail: format!("download, not a web page ({})", ct),
+    })
+}
+
+static CONTENT_CHECKS: once_cell::sync::Lazy<Vec<(Regex, &'static str, &'static str, u32)>> = once_cell::sync::Lazy::new(|| {
+    let checks: &[(&str, &'static str, &'static str, u32)] = &[
+        (r"(?i)(seed|recovery|secret)\s*phrase", "seed_phrase_prompt", "high", 40),
+        (r"(?i)\b(mnemonic|12\s*[- ]?words?|24\s*[- ]?words?)\b", "mnemonic_prompt", "high", 35),
+        (r"(?i)(walletdrainer|drainer|inferno|angel[_-]?drainer|seaport[_-]?drain)", "drainer_kit", "high", 60),
+        (r"(?i)setApprovalForAll|approve\s*\([^)]{0,60}(MaxUint|2\*\*256|0xf{10,})", "unlimited_approval", "high", 45),
+        (r#"(?i)<iframe[^>]{0,200}(display\s*:\s*none|visibility\s*:\s*hidden|width\s*=\s*["']?0|height\s*=\s*["']?0)"#, "hidden_iframe", "medium", 25),
+        (r"(?i)eval\s*\(\s*(atob|unescape|String\.fromCharCode)", "obfuscated_eval", "medium", 25),
+        (r"(?i)Function\s*\(\s*atob", "obfuscated_function", "medium", 25),
+        (r"(?i)document\.write\s*\(\s*(atob|unescape)", "obfuscated_write", "medium", 20),
+        (r"(?i)onbeforeunload[^>]{0,80}(prevent|confirm|stay)", "exit_trap", "low", 8),
+        (r"(?i)clipboard(Data)?\.(setData|writeText)\s*\([^)]{0,80}(kaspa|addr|0x)", "clipboard_hijack", "high", 45),
+    ];
+    checks.iter().filter_map(|(p, c, s, n)| Regex::new(p).ok().map(|re| (re, *c, *s, *n))).collect()
+});
 
 #[derive(Serialize, Clone)]
 pub struct CanaryFinding {
@@ -189,25 +254,11 @@ fn scan_content(body: &str, host: &str) -> (Vec<CanaryFinding>, u32) {
         *s += pts;
     };
 
-    let checks: &[(&str, &str, &str, u32)] = &[
-        (r"(?i)(seed|recovery|secret)\s*phrase", "seed_phrase_prompt", "high", 40),
-        (r"(?i)\b(mnemonic|12\s*[- ]?words?|24\s*[- ]?words?)\b", "mnemonic_prompt", "high", 35),
-        (r"(?i)(walletdrainer|drainer|inferno|angel[_-]?drainer|seaport[_-]?drain)", "drainer_kit", "high", 60),
-        (r"(?i)setApprovalForAll|approve\s*\([^)]{0,60}(MaxUint|2\*\*256|0xf{10,})", "unlimited_approval", "high", 45),
-        (r#"(?i)<iframe[^>]{0,200}(display\s*:\s*none|visibility\s*:\s*hidden|width\s*=\s*["']?0|height\s*=\s*["']?0)"#, "hidden_iframe", "medium", 25),
-        (r"(?i)eval\s*\(\s*(atob|unescape|String\.fromCharCode)", "obfuscated_eval", "medium", 25),
-        (r"(?i)Function\s*\(\s*atob", "obfuscated_function", "medium", 25),
-        (r"(?i)document\.write\s*\(\s*(atob|unescape)", "obfuscated_write", "medium", 20),
-        (r"(?i)onbeforeunload[^>]{0,80}(prevent|confirm|stay)", "exit_trap", "low", 8),
-        (r"(?i)clipboard(Data)?\.(setData|writeText)\s*\([^)]{0,80}(kaspa|addr|0x)", "clipboard_hijack", "high", 45),
-    ];
-
-    for (pat, code, sev, pts) in checks {
-        if let Ok(re) = Regex::new(pat) {
-            if let Some(m) = re.find(body) {
-                let snippet: String = m.as_str().chars().take(60).collect();
-                push(code, sev, snippet, *pts, &mut findings, &mut score);
-            }
+    // AUDIT 2026-11-01: regexes compiled once (CONTENT_CHECKS), not per request
+    for (re, code, sev, pts) in CONTENT_CHECKS.iter() {
+        if let Some(m) = re.find(body) {
+            let snippet: String = m.as_str().chars().take(60).collect();
+            push(code, sev, snippet, *pts, &mut findings, &mut score);
         }
     }
 
@@ -222,14 +273,25 @@ fn verdict_label(score: u32) -> &'static str {
     if score >= 45 { "dangerous" } else if score >= 15 { "suspicious" } else { "clean" }
 }
 
-pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Responder {
+pub async fn api_canary_scan(req: actix_web::HttpRequest, body: web::Json<serde_json::Value>) -> impl Responder {
     use crate::node_registry::{parse_web_url, resolve_public_addrs, pinned_client};
+    // AUDIT 2026-11-01: per-IP rate limit + global concurrency cap before any outbound work.
+    let ip = req.connection_info().realip_remote_addr().unwrap_or("unknown").to_string();
+    if !scan_rate_ok(&ip, now_s()) {
+        return HttpResponse::TooManyRequests().json(serde_json::json!({"error":"rate limited: max 10 scans per minute"}));
+    }
+    let Ok(_slot) = SCAN_SLOTS.try_acquire() else {
+        return HttpResponse::TooManyRequests().json(serde_json::json!({"error":"scanner busy, retry shortly"}));
+    };
     let raw = body.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
     // AUDIT pass 3: parse exactly as the HTTP client will (WHATWG); hand-splitting let
     // "http://169.254.169.254\\@example.com" be checked as example.com but fetched as 169.254.169.254.
-    let Some((pu, host, _)) = parse_web_url(&raw, false) else {
+    let Some((pu, host, port)) = parse_web_url(&raw, false) else {
         return HttpResponse::BadRequest().json(serde_json::json!({"error":"url required (http/https, a domain name - no IP addresses or user@ parts)"}));
     };
+    if !web_port_ok(port) { // AUDIT 2026-11-01
+        return HttpResponse::BadRequest().json(serde_json::json!({"error":"only ports 80/443 are scannable"}));
+    }
     let url = pu.to_string();
     if is_private_host(&host) {
         return HttpResponse::BadRequest().json(serde_json::json!({"error":"private/IP hosts not scannable"}));
@@ -248,10 +310,13 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
         let Some((cu, ch, cp)) = parse_web_url(&cur, false) else {
             return HttpResponse::BadRequest().json(serde_json::json!({"error":"redirects to a non-web address", "redirect_to": cur}));
         };
+        if !web_port_ok(cp) { // AUDIT 2026-11-01: every hop
+            return HttpResponse::BadRequest().json(serde_json::json!({"error":"redirects to a non-web port", "redirect_to": cur}));
+        }
         let Some(addrs) = resolve_public_addrs(&ch, cp).await else {
             return HttpResponse::BadRequest().json(serde_json::json!({"error":"host does not resolve to a public address", "url": cur}));
         };
-        let r = match pinned_client(&ch, &addrs, FETCH_TIMEOUT_SECS, "TownHallCanary/1.0").get(cu.as_str()).send().await {
+        let r = match pinned_client(&ch, &addrs, FETCH_TIMEOUT_SECS, SCAN_UA /* AUDIT 2026-11-01 */).get(cu.as_str()).send().await {
             Ok(r) => r,
             Err(e) => return HttpResponse::Ok().json(serde_json::json!({
                 "error": format!("fetch failed: {}", e), "fetchable": false
@@ -279,6 +344,8 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
     let final_url = cur.clone();
     let final_host = cur_host.clone();
 
+    // AUDIT 2026-11-01: a file download is at least suspicious, whatever its bytes say
+    let dl = download_finding(resp.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()));
     // stream with a cap instead of buffering the whole body
     let mut resp = resp;
     let mut bytes: Vec<u8> = Vec::new();
@@ -295,6 +362,7 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
     let text = String::from_utf8_lossy(slice);
 
     let (mut findings, mut score) = scan_content(&text, &final_host);
+    if let Some(f) = dl { score += if f.severity == "high" { 45 } else { 15 }; findings.push(f); } // AUDIT 2026-11-01
     if final_host != host {
         if let Some(reason) = brand_lookalike(&host) {
             findings.push(CanaryFinding {
@@ -375,8 +443,34 @@ mod blocklist_tests {
         assert!(blocklist_hit("login.evil-phish.xyz").is_some());
         assert!(blocklist_hit("EVIL-PHISH.XYZ.").is_some());
         assert!(blocklist_hit("notevil-phish.xyz").is_none());
-        assert!(blocklist_hit("trusted.io").is_none());           // whitelist wins
+        assert!(blocklist_hit("trusted.io").is_none());           // whitelist wins over MetaMask's own blacklist
         assert!(blocklist_hit("claim.kaspa-airdrop.example").unwrap().contains("KasVillage"));
         assert!(blocklist_hit("kaspa.org").is_none());
+    }
+    // AUDIT 2026-11-01
+    #[test]
+    fn kv_list_beats_metamask_whitelist() {
+        { let mut w = BLOCK.write().unwrap(); w.white.insert("kv-wins.example".into()); w.kv.insert("kv-wins.example".into()); }
+        assert!(blocklist_hit("kv-wins.example").unwrap().contains("KasVillage"));
+    }
+    #[test]
+    fn download_content_types_flagged() {
+        assert!(download_finding(Some("text/html; charset=utf-8")).is_none());
+        assert!(download_finding(None).is_none());
+        let apk = download_finding(Some("application/vnd.android.package-archive")).unwrap();
+        assert_eq!(apk.severity, "high");
+        assert!(apk.detail.contains("download, not a web page"));
+        assert_eq!(download_finding(Some("Application/Octet-Stream")).unwrap().severity, "high");
+        assert_eq!(download_finding(Some("application/pdf")).unwrap().severity, "medium");
+        assert!(verdict_label(15) != "clean");
+    }
+    #[test]
+    fn per_ip_rate_limit_and_ports() {
+        let ip = "203.0.113.77-test";
+        for _ in 0..SCANS_PER_IP_PER_MIN { assert!(scan_rate_ok(ip, 1000)); }
+        assert!(!scan_rate_ok(ip, 1030), "11th within a minute refused");
+        assert!(scan_rate_ok(ip, 1061), "new window");
+        assert!(web_port_ok(443) && web_port_ok(80) && !web_port_ok(8080) && !web_port_ok(6443));
+        assert_eq!(CONTENT_CHECKS.len(), 10, "all content regexes compile");
     }
 }

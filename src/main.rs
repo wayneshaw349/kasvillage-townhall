@@ -8144,7 +8144,8 @@ pub fn validate_reentry_code(encoded: &str) -> Result<ReentryCode, String> {
         return Err("Signature too short".into());
     }
     
-    if &expected_sig[..32] != &code.signature[..32] {
+    // AUDIT 2026-11-01: compare bytes; a str slice at 32 panics on a multi-byte char boundary
+    if expected_sig.as_bytes().get(..32) != code.signature.as_bytes().get(..32) {
         return Err("Invalid signature".into());
     }
     

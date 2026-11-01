@@ -48,6 +48,21 @@ static AUDIT_CACHE: Lazy<RwLock<HashMap<String, (u64, serde_json::Value)>>> =
 
 const AUDIT_INTERVAL_SECS: u64 = 600;
 
+// AUDIT 2026-11-01: one sweep in flight per network; concurrent ?fresh=1 callers get the cache.
+static AUDIT_IN_FLIGHT: Lazy<std::sync::Mutex<std::collections::HashSet<String>>> =
+    Lazy::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+/// Claim the per-network sweep slot; the slot is released when the guard drops.
+struct SweepGuard(String);
+impl SweepGuard {
+    fn try_claim(net: &str) -> Option<SweepGuard> {
+        let mut g = AUDIT_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+        if g.insert(net.to_string()) { Some(SweepGuard(net.to_string())) } else { None }
+    }
+}
+impl Drop for SweepGuard {
+    fn drop(&mut self) { AUDIT_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0); }
+}
+
 // 60s response cache for the chain-rebuilt read endpoints, so a request flood can't
 // turn into a flood of upstream api.kaspa.org calls (and get the relay rate-limited).
 static RESP_CACHE: Lazy<RwLock<HashMap<String, (u64, serde_json::Value)>>> =
@@ -104,6 +119,7 @@ pub fn pinned_client(host: &str, addrs: &[std::net::SocketAddr], timeout_secs: u
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .redirect(reqwest::redirect::Policy::none())
         .resolve_to_addrs(host, addrs)
+        .no_proxy() // AUDIT 2026-11-01: env HTTP(S)_PROXY would bypass the pin
         .user_agent(ua)
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
@@ -111,8 +127,21 @@ pub fn pinned_client(host: &str, addrs: &[std::net::SocketAddr], timeout_secs: u
 
 fn is_public_ip(ip: std::net::IpAddr) -> bool {
     match ip {
-        std::net::IpAddr::V4(v) => { let o = v.octets(); !(v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_broadcast() || v.is_multicast() || o[0] == 0 || (o[0] == 100 && (o[1] & 0xc0) == 64)) }
-        std::net::IpAddr::V6(v) => !(v.is_loopback() || v.is_unspecified() || v.is_multicast() || (v.segments()[0] & 0xfe00) == 0xfc00 || (v.segments()[0] & 0xffc0) == 0xfe80 || v.to_ipv4_mapped().is_some()),
+        // AUDIT 2026-11-01: + 192.0.0.0/24, 198.18.0.0/15 (benchmark), 240.0.0.0/4 (reserved)
+        std::net::IpAddr::V4(v) => { let o = v.octets(); !(v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_broadcast() || v.is_multicast() || o[0] == 0 || (o[0] == 100 && (o[1] & 0xc0) == 64)
+            || (o[0] == 192 && o[1] == 0 && o[2] == 0) || (o[0] == 198 && (o[1] & 0xfe) == 18) || o[0] >= 240) }
+        std::net::IpAddr::V6(v) => {
+            let s = v.segments();
+            // AUDIT 2026-11-01: NAT64 64:ff9b::/96 (refused, embedded v4 also checked), 6to4 2002::/16,
+            // Teredo 2001::/32, IPv4-compatible ::a.b.c.d - all can tunnel to internal v4.
+            let o = v.octets();
+            let tail_v4 = std::net::Ipv4Addr::new(o[12], o[13], o[14], o[15]);
+            let nat64 = s[0] == 0x64 && s[1] == 0xff9b && s[2..6].iter().all(|x| *x == 0);
+            let v4_compat = s[..6].iter().all(|x| *x == 0);
+            if nat64 && !is_public_ip(std::net::IpAddr::V4(tail_v4)) { return false; }
+            !(v.is_loopback() || v.is_unspecified() || v.is_multicast() || (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80 || v.to_ipv4_mapped().is_some()
+                || nat64 || v4_compat || s[0] == 0x2002 || (s[0] == 0x2001 && s[1] == 0))
+        }
     }
 }
 
@@ -426,6 +455,7 @@ pub fn spawn_audit_loop() {
     tokio::spawn(async {
         loop {
             for net in NETS {
+                let Some(_g) = SweepGuard::try_claim(net) else { continue }; // AUDIT 2026-11-01
                 let body = audit_once(net).await;
                 if let Ok(mut w) = AUDIT_CACHE.write() { w.insert(net.to_string(), (now_secs(), body)); }
             }
@@ -445,7 +475,9 @@ pub async fn run_audit(q: web::Query<AuditQuery>) -> impl Responder {
     let cached_age = AUDIT_CACHE.read().ok().and_then(|r| r.get(net).map(|(at, _)| now_secs().saturating_sub(*at)));
     // ?fresh=1 is honoured at most once a minute per network (a full sweep is expensive).
     let want_fresh = q.fresh.as_deref().map(|v| v == "1" || v == "true").unwrap_or(false) && cached_age.map(|a| a >= 60).unwrap_or(true);
-    if !want_fresh {
+    // AUDIT 2026-11-01: claim the per-network slot; if a sweep is already running, serve the cache.
+    let guard = if want_fresh || cached_age.is_none() { SweepGuard::try_claim(net) } else { None };
+    if guard.is_none() {
         if let Ok(r) = AUDIT_CACHE.read() {
             if let Some((at, body)) = r.get(net) {
                 let mut out = body.clone();
@@ -456,7 +488,10 @@ pub async fn run_audit(q: web::Query<AuditQuery>) -> impl Responder {
                 return HttpResponse::Ok().json(out);
             }
         }
+        // AUDIT 2026-11-01: no cache yet and a sweep is already running
+        return HttpResponse::Ok().json(json!({ "network": net, "nodes": [], "cached": true, "note": "audit sweep in progress - retry shortly" }));
     }
+    let _guard = guard;
     let mut body = audit_once(net).await;
     if let Some(o) = body.as_object_mut() { o.insert("cached".into(), json!(false)); }
     if let Ok(mut w) = AUDIT_CACHE.write() { w.insert(net.to_string(), (now_secs(), body.clone())); }
@@ -550,6 +585,26 @@ mod tests {
         assert_eq!(registry_address("store", "testnet-10"),
             "kaspatest:qzuwzvff0hn629auv0hk067wfxnwx5t2zw6dayz84ktknklm7s3sjm67xzh87");
         assert!(registry_address("node", "mainnet").starts_with("kaspa:"));
+    }
+    // AUDIT 2026-11-01
+    #[test]
+    fn is_public_ip_rejects_tunnels_and_reserved() {
+        let p = |s: &str| is_public_ip(s.parse().unwrap());
+        for bad in ["64:ff9b::a00:1", "64:ff9b::808:808", "2002:a00:1::1", "2001:0:4136:e378::1", "::10.0.0.1", "::ffff:10.0.0.1",
+                    "198.18.0.1", "198.19.255.255", "192.0.0.8", "240.0.0.1", "255.255.255.254", "10.0.0.1", "fe80::1", "fd00::1"] {
+            assert!(!p(bad), "{} must not be public", bad);
+        }
+        for good in ["8.8.8.8", "1.1.1.1", "198.20.0.1", "2606:4700::1111", "2001:4860:4860::8888"] {
+            assert!(p(good), "{} should be public", good);
+        }
+    }
+    #[test]
+    fn sweep_guard_is_exclusive_per_network() {
+        let a = SweepGuard::try_claim("test-net-x").expect("first claim");
+        assert!(SweepGuard::try_claim("test-net-x").is_none(), "second concurrent claim refused");
+        assert!(SweepGuard::try_claim("test-net-y").is_some(), "other network independent");
+        drop(a);
+        assert!(SweepGuard::try_claim("test-net-x").is_some(), "released on drop");
     }
     #[test]
     fn canon_sorts_keys() {
