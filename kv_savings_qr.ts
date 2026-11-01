@@ -210,19 +210,8 @@ export async function sqRefresh(): Promise<SqRow[]> {
 
 /** Printable HTML: one QR per coin, two copies reminder. QR drawn as SVG (pure JS, no network). */
 export function sqPrintHtml(qrs: string[], outs: string[], hotLast6: string, net: string, usdPerKas = 0): string {
-  const QR = require('qrcode');
-  const svg = (t: string) => {
-    const q = QR.create(t, { errorCorrectionLevel: 'M' }); const n = q.modules.size; const d = q.modules.data; const m = 4; const sz = n + 2 * m;
-    let p = ''; for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (d[y * n + x]) p += 'M' + (x + m) + ' ' + (y + m) + 'h1v1h-1z';
-    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + sz + ' ' + sz + '" width="260" height="260" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="' + p + '" fill="#000"/></svg>';
-  };
-  const date = new Date().toISOString().slice(0, 10);
-  const cards = qrs.map((q, i) => '<div class="c"><h2>KasVillage Savings QR · ' + (i + 1) + ' of ' + qrs.length + '</h2>' + svg(q) +
-    '<p class="k"><b>' + (Number(outs[i]) / 1e8).toFixed(4) + ' KAS</b></p>' +
-    (usdPerKas > 0 ? '<p class="u">≈ $' + ((Number(outs[i]) / 1e8) * usdPerKas).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + ' USD on ' + date + ' (1 KAS = $' + usdPerKas.toFixed(4) + ')</p><p class="s">Dollar value changes with the KAS price; the KAS amount does not.</p>' : '') +
-    '<p>To hot wallet …' + hotLast6 + '</p><p>' + net + ' · ' + date + '</p>' +
-    '<p class="s">Whoever scans this can only move these coins into that wallet. Losing this paper loses these coins: keep two copies in different places.</p></div>').join('');
-  return '<html><head><meta name="viewport" content="width=device-width"/><style>body{font-family:sans-serif}.c{page-break-inside:avoid;border:1px solid #000;padding:12px;margin:12px 0;text-align:center}.s{font-size:11px}.k{font-size:22px;margin:6px 0}.u{font-size:16px;margin:2px 0}</style></head><body>' + cards + '</body></html>';
+  // Banknote-style slips in random earth-tone palettes (kv_savings_note.ts)
+  return require('./kv_savings_note').notePrintHtml({ qrs, outs, hotLast6, net, usdPerKas });
 }
 
 // --- old card + paper vaults (no longer created): balance, sweep amount, replace guard ---------
