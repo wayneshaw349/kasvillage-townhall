@@ -26,7 +26,7 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
   const [mode, setMode] = useState<Mode>(initialMode === 'scan' ? 'scan' : initialMode === 'add' && !SQ.sqTutorial() ? 'add' : 'home');
   const [rows, setRows] = useState<SQ.SqRow[]>([]);
   const [session, setSession] = useState<SQ.SqSession | null>(null);
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(() => { const a = String((globalThis as any).__kvSavingsAmount || ''); (globalThis as any).__kvSavingsAmount = ''; return a; }); // KV_SAVINGS_UI: amount carried from Send
   const [count, setCount] = useState('1');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');

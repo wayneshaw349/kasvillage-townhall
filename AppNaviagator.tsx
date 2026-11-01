@@ -1307,7 +1307,7 @@ export const AppNavigator: React.FC = () => {
     case 'send_kas':
       return (
         <SendKAS
-          onOpenSavings={(m: 'scan' | 'add') => { (globalThis as any).__kvSavingsMode = m; setScreen('savings_qr'); }} // KV_SAVINGS_UI
+          onOpenSavings={(m: 'scan' | 'add', a?: string) => { (globalThis as any).__kvSavingsMode = m; (globalThis as any).__kvSavingsAmount = a || ''; setScreen('savings_qr'); }} // KV_SAVINGS_UI
           onOpenFrostSend={(p: { to: string; kas: string }) => { (globalThis as any).__kvFrostPrefill = p; setScreen('vault_sign'); }} // KV_SEND_FROST
           visible={true}
           onClose={() => setScreen('dashboard')}

@@ -121,7 +121,7 @@ export interface SendKASProps {
   initialAddress?: string;
   initialAmount?: number;
   myAddress: string;
-  onOpenSavings?: (mode: 'scan' | 'add') => void; // KV_SAVINGS_UI
+  onOpenSavings?: (mode: 'scan' | 'add', amountKas?: string) => void; // KV_SAVINGS_UI
   onOpenFrostSend?: (prefill: { to: string; kas: string }) => void; // KV_SEND_FROST: opens the two-phone FROST send screen
 }
 
@@ -538,7 +538,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
                   })}
                   {onOpenSavings ? (
                     <TouchableOpacity style={styles.sendToChip} onPress={() => Alert.alert('Add to Savings', 'Savings has no address to send to. Add to vault moves KAS from your hot wallet into printed QR slips.', [
-                      { text: 'Cancel', style: 'cancel' }, { text: 'Add to vault', onPress: () => onOpenSavings('add') }])}>
+                      { text: 'Cancel', style: 'cancel' }, { text: 'Add to vault', onPress: () => onOpenSavings('add', String(amountKas || '').trim()) }])}>
                       <Text style={styles.sendToChipText}>Savings vault</Text>
                     </TouchableOpacity>
                   ) : null}
