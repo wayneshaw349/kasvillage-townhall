@@ -1510,8 +1510,7 @@ function parseClipboard(raw: string): {
         if (!session || session.step < 3 || !session.contract?.multisigAddress) return;
         if (session.contract?.buyerPubkey === session.contract?.sellerPubkey) return;
         const frostAddr = session.contract.multisigAddress;
-        const networkStr = await SecureStore.getItemAsync('kaspa_network');
-        const apiBase = networkStr?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+        const apiBase = String(frostAddr || '').startsWith('kaspatest:') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org'; // AUDIT: from the address, not a stale setting
         const resp = await fetch(apiBase + '/addresses/' + frostAddr + '/balance');
         if (!resp.ok) return;
         const data = await resp.json();
@@ -2091,8 +2090,9 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
             const myAmount = role === 'buyer' ? Math.floor(contract.itemPriceKas * 1e8) : Math.floor(contract.sellerCommitmentKas * 1e8);
             // Fetch current L1 DAA score for deterministic ordering
             try {
-              const nw = await SecureStore.getItemAsync('kaspa_network');
-              const daaBase = nw?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+              // AUDIT 2026-10-31: 'kaspa_network' is stale on mainnet (read testnet, ~2M behind).
+              const nw = String(frostData?.network || require('./kv_vault_active').kvActiveNet());
+              const daaBase = nw.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
               const daaResp = await fetch(daaBase + '/info/virtual-chain-blue-score');
               if (daaResp.ok) { const daaData = await daaResp.json(); currentDaa = daaData.blueScore || 0; }
             } catch (e) { console.warn('[Neighbor] DAA fetch failed:', e); }
@@ -2122,7 +2122,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
               description: (contract.itemDescription || '') + (contract.shippingCenter ? ' - Ship to: ' + contract.shippingCenter : ''), createdAt: Date.now(),
               timeoutN: Math.floor((contract.timeoutMinutes || 5) * DAA_PER_MIN),
             });
-            console.log('[Neighbor] Proposing to TownHall:', agreementId, 'frost:', frostData.address, 'DAA:', currentDaa);
+            console.log('[Neighbor] Proposing to TownHall:', agreementId, 'frost:', frostData.address, 'blue score:', currentDaa);
             const proposeResult = await proposeAgreement({
               agreementId: agreementId,
               pubkey: myPubkey || '',
@@ -2223,7 +2223,7 @@ Alert.alert('Funds Released!', 'TX: ' + (result.txId || '').slice(0, 16) + '...\
     const _pk = (addr || '').trim().toLowerCase();
     if (/^0[23][0-9a-f]{64}$/.test(_pk)) {
       try {
-        const _net = (contract.frostData?.network || 'testnet-10');
+        const _net = (contract.frostData?.network || require('./kv_vault_active').kvActiveNet()); // AUDIT: was 'testnet-10'
         const _xonly = _pk.slice(2);
         let _derivedAddr = '';
         try { _derivedAddr = deriveAddress(_xonly, _net as any); } catch (e) { console.warn('[OptionB] deriveAddress failed:', e); }
@@ -3545,8 +3545,7 @@ killNonces: _kill.nonces.map((n: any) => ({ k: n.k.toString(16), d_tweaked: n.d_
 
       // Safety: check if counterparty has sent to FROST before allowing manual lock
       try {
-        const nStr = await SecureStore.getItemAsync('kaspa_network');
-        const aBase = nStr?.includes('testnet') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org';
+        const aBase = String(contract.multisigAddress || '').startsWith('kaspatest:') ? 'https://api-tn10.kaspa.org' : 'https://api.kaspa.org'; // AUDIT: from the address
         const fResp = await fetch(aBase + '/addresses/' + contract.multisigAddress + '/balance');
         if (fResp.ok) {
           const fBal = await fResp.json();
