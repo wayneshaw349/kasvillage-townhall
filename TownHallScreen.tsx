@@ -277,7 +277,7 @@ const LinkCheck: React.FC = () => {
     setBusy(true); setRes(null);
     try {
       const r: any = await require('./canary_verify').scanUrl(u);
-      setRes(r && r.verdict ? { v: r.verdict } : { err: String((r && r.error) || 'TownHall unreachable - try again') });
+      setRes(r && r.verdict ? { v: r.verdict, checked: u } : { err: String((r && r.error) || 'TownHall unreachable - try again') });
     } catch (e: any) { setRes({ err: String(e?.message || e) }); }
     finally { setBusy(false); }
   };
@@ -306,6 +306,25 @@ const LinkCheck: React.FC = () => {
           <Text style={{ fontSize: rs.font(9), color: '#78716c', marginTop: rs.s(6) }}>
             Advisory only - not 100% proof that a link is safe. A clean result means no known scam signs were found, nothing more. Always proceed with caution, and never type your seed words or keys into any website.
           </Text>
+          {/* KV_LINK_OPEN: clean -> open in the phone's own browser (never inside KasVillage) after a confirm;
+              suspicious/dangerous -> copy only. Opens exactly the link that was checked. */}
+          <View style={{ flexDirection: 'row', gap: rs.s(8), marginTop: rs.s(8) }}>
+            {res.v.verdict === 'clean' && /^https?:\/\//i.test(String(res.checked || '')) ? (
+              <TouchableOpacity
+                onPress={() => Alert.alert('Open in your browser?',
+                  'Advisory only - not proof it is safe. This opens in your phone\'s browser, outside KasVillage. Never type your seed words or keys into a website.\n\n' + String(res.checked),
+                  [{ text: 'Cancel', style: 'cancel' },
+                   { text: 'Open', onPress: () => { Linking.openURL(String(res.checked)).catch(() => Alert.alert('Could not open', 'No browser accepted this link.')); } }])}
+                style={{ backgroundColor: '#059669', borderRadius: rs.s(8), paddingHorizontal: rs.s(14), paddingVertical: rs.s(7) }}>
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: rs.font(12) }}>Open in browser</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              onPress={async () => { try { await Clipboard.setStringAsync(String(res.checked || res.v.url || '')); Alert.alert('Copied', 'Link copied.'); } catch {} }}
+              style={{ borderWidth: 1, borderColor: '#d6d3d1', borderRadius: rs.s(8), paddingHorizontal: rs.s(14), paddingVertical: rs.s(7) }}>
+              <Text style={{ color: '#1c1917', fontWeight: '700', fontSize: rs.font(12) }}>Copy link</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       ) : null}
     </View>
