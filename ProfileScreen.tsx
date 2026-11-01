@@ -830,6 +830,18 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
               {(() => { const { KvSavingsTally } = require('./SavingsQRScreen'); return <KvSavingsTally style={{ marginTop: rs(6) }} />; })()}
             </View>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.seedExportButton}
+            onPress={() => Alert.alert('2-of-2 Cold Wallet (FROST)', 'Two phones, one wallet: every send needs BOTH phones (FROST 2-of-2), passing QR codes between them. It has its own receive address and can send to anyone. Keep the second phone offline in airplane mode to make it truly cold.\n\nTo set it up or use it: go to the Dashboard home screen and press the FROST button in the lower right corner.', [
+              { text: 'Close', style: 'cancel' },
+              { text: 'Go to Dashboard', onPress: () => navigation?.goBack?.() },
+            ])}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.seedExportText}>🧊 2-of-2 Cold Wallet (two phones)</Text>
+              <Text style={styles.seedExportSub}>Cold storage you can still send from. Set up on the Dashboard: press FROST (lower right corner).</Text>
+            </View>
+          </TouchableOpacity>
           {hasOldVault ? (
             <TouchableOpacity
               style={styles.seedExportButton}
