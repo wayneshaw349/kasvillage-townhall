@@ -1308,6 +1308,7 @@ export const AppNavigator: React.FC = () => {
       return (
         <SendKAS
           onOpenSavings={(m: 'scan' | 'add') => { (globalThis as any).__kvSavingsMode = m; setScreen('savings_qr'); }} // KV_SAVINGS_UI
+          onOpenFrostSend={(p: { to: string; kas: string }) => { (globalThis as any).__kvFrostPrefill = p; setScreen('vault_sign'); }} // KV_SEND_FROST
           visible={true}
           onClose={() => setScreen('dashboard')}
           onSuccess={(txId: string) => {
@@ -1564,10 +1565,12 @@ export const AppNavigator: React.FC = () => {
       return frostVault ? (
         <VaultQRSignScreen
           visible={true}
-          onClose={() => setScreen('dashboard')}
+          onClose={() => { (globalThis as any).__kvFrostPrefill = undefined; setScreen('dashboard'); }}
           vault={frostVault}
           getPrivateKeyHex={getPrivKeyHex}
           onSuccess={() => setTimeout(() => refreshBalance(), 2000)}
+          initialRecipient={(globalThis as any).__kvFrostPrefill?.to || undefined} // KV_SEND_FROST: prefill from Send
+          initialAmountKas={(globalThis as any).__kvFrostPrefill?.kas || undefined}
         />
       ) : <LoadingScreen />;
 

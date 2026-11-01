@@ -122,6 +122,7 @@ export interface SendKASProps {
   initialAmount?: number;
   myAddress: string;
   onOpenSavings?: (mode: 'scan' | 'add') => void; // KV_SAVINGS_UI
+  onOpenFrostSend?: (prefill: { to: string; kas: string }) => void; // KV_SEND_FROST: opens the two-phone FROST send screen
 }
 
 type SendStep = 'input' | 'preview' | 'sending' | 'success' | 'error';
@@ -199,7 +200,9 @@ export const SendKAS: React.FC<SendKASProps> = ({
   initialAmount,
   myAddress,
   onOpenSavings,
+  onOpenFrostSend,
 }) => {
+  const [frostTwoPhone, setFrostTwoPhone] = useState(false); // KV_SEND_FROST
   const [recipientInput, setRecipientInput] = useState(initialAddress || '');
   const [vaultAddr, setVaultAddr] = useState<string | null>(null);
   const [sendSource, setSendSource] = useState<'hot' | 'vault'>('hot');
@@ -329,6 +332,7 @@ export const SendKAS: React.FC<SendKASProps> = ({
         setVaultAddr(v || null);
         setHotAddr(_va.kvActiveNet() === 'mainnet' ? ((await SecureStore.getItemAsync('kaspa_address_real')) || h) : h);
         setFrostAddr(frv ? frv.address : null);
+        setFrostTwoPhone(!!frv && !frv.paperCosign); // card + paper vaults are not the two-phone FROST vault
       } catch {}
     })();
   }, [visible]);
@@ -488,6 +492,16 @@ export const SendKAS: React.FC<SendKASProps> = ({
                     </TouchableOpacity>
                     ) : null
                   ))}
+                  {/* KV_SEND_FROST: spend from the two-phone FROST vault on its own screen (second phone cosigns) */}
+                  {onOpenFrostSend && frostTwoPhone ? (
+                    <TouchableOpacity style={styles.sendToChip} onPress={() => {
+                      const to = /^kaspa(test)?:/.test(recipientInput.trim()) ? recipientInput.trim() : (resolved?.address || '');
+                      Alert.alert('Send from FROST (two phones)', 'This opens the FROST send screen' + (to ? ' with your recipient' + (amountKas ? ' and amount' : '') + ' filled in' : '') + '. Your second phone must cosign by scanning QR codes.', [
+                        { text: 'Cancel', style: 'cancel' }, { text: 'Open FROST send', onPress: () => onOpenFrostSend({ to, kas: String(amountKas || '').trim().replace(',', '.') }) }]);
+                    }}>
+                      <Text style={styles.sendToChipText}>FROST (2 phones)</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   {/* KV_SAVINGS_UI: Savings QRs can only pay the hot wallet -> scan one, then send from Hot Wallet */}
                   {onOpenSavings ? (
                     <TouchableOpacity style={styles.sendToChip} onPress={() => Alert.alert('Spend from Savings', 'A Savings QR can only move its coins into your hot wallet. Scan one now; then send from Hot Wallet as usual.', [
