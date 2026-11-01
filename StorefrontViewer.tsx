@@ -140,11 +140,7 @@ const ALLOWED_DOMAIN_PATTERNS = [
 /**
  * Validate if URL is from a whitelisted domain
  */
-const isWhitelistedUrl = (url: string): boolean => {
-  if (!url) return false;
-  const lowerUrl = url.toLowerCase();
-  return ALLOWED_DOMAIN_PATTERNS.some(domain => lowerUrl.includes(domain));
-};
+const isWhitelistedUrl = (url: string): boolean => require('./kv_link_whitelist').isWhitelistedUrl(url); // AUDIT: shared host-exact check
 
 /**
  * Get platform name from URL

@@ -2289,7 +2289,7 @@ export default function VillageMailbox() {
                         {items.length > 0 ? (
                           <View style={{ flexDirection: cols > 1 ? 'row' : 'column', flexWrap: 'wrap', gap: rs.s(8) }}>
                             {items.map((it: any) => (
-                              <TouchableOpacity key={it.id} onPress={() => { if (it.socialUrl) Linking.openURL(it.socialUrl.startsWith('http') ? it.socialUrl : 'https://' + it.socialUrl); }}
+                              <TouchableOpacity key={it.id} onPress={() => { if (it.socialUrl) require('./kv_link_whitelist').openWhitelisted(it.socialUrl); }}
                                 style={{ width: cols === 3 ? '31%' : cols === 2 ? '48%' : '100%', flexDirection: cols > 1 ? 'column' : 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: rs.s(12), padding: rs.s(10), borderWidth: 1, borderColor: COLORS.stone200 }} activeOpacity={0.7}>
                                 <View style={{ width: cols > 1 ? '100%' : rs.s(44), height: cols > 1 ? rs.s(64) : rs.s(44), borderRadius: rs.s(10), backgroundColor: swatch(it.name), justifyContent: 'center', alignItems: 'center', marginRight: cols > 1 ? 0 : rs.s(10), marginBottom: cols > 1 ? rs.s(6) : 0 }}>
                                   <Text style={{ fontSize: rs.font(cols > 1 ? 22 : 16), fontWeight: '900', color: '#fff' }}>{(it.name || '?').charAt(0).toUpperCase()}</Text>
@@ -2312,7 +2312,7 @@ export default function VillageMailbox() {
                           <View style={{ marginTop: rs.s(12) }}>
                             <Text style={{ fontSize: rs.font(10), fontWeight: 'bold', color: COLORS.stone500, textTransform: 'uppercase', marginBottom: rs.s(6) }}>Visit</Text>
                             {links.map(([k, v]) => (
-                              <TouchableOpacity key={k} onPress={() => Linking.openURL(String(v).startsWith('http') ? String(v) : 'https://' + v)}
+                              <TouchableOpacity key={k} onPress={() => require('./kv_link_whitelist').openWhitelisted(String(v))}
                                 style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.amber50, borderRadius: rs.s(10), padding: rs.s(10), marginBottom: rs.s(6) }}>
                                 <Text style={{ flex: 1, fontSize: rs.font(12), fontWeight: 'bold', color: COLORS.amber900, textTransform: 'capitalize' }}>{k}</Text>
                                 <ArrowRight size={rs.s(14)} color={COLORS.amber700} />
