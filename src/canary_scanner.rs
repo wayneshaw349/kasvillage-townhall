@@ -11,6 +11,69 @@ use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_BODY_BYTES: usize = 512 * 1024;
+
+// ---------------------------------------------------------------------------
+// Blocklist: MetaMask eth-phishing-detect (~114k domains, refreshed every 6h, held in
+// memory - the relay is ephemeral) + KasVillage's own list compiled into the binary.
+// A hit is "dangerous" WITHOUT fetching the page, so cloaking can't hide a known scam.
+// ---------------------------------------------------------------------------
+const MM_LIST_URL: &str = "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/main/src/config.json";
+const KV_LIST: &str = include_str!("phishing_kaspa.txt");
+const BLOCKLIST_REFRESH_SECS: u64 = 6 * 3600;
+
+struct BlockList { black: std::collections::HashSet<String>, white: std::collections::HashSet<String>, kv: std::collections::HashSet<String>, at: u64 }
+static BLOCK: once_cell::sync::Lazy<std::sync::RwLock<BlockList>> = once_cell::sync::Lazy::new(|| {
+    let kv = KV_LIST.lines().map(|l| l.trim().to_ascii_lowercase()).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+    std::sync::RwLock::new(BlockList { black: Default::default(), white: Default::default(), kv, at: 0 })
+});
+
+fn now_s() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
+
+async fn refresh_blocklist() -> Result<usize, String> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(40)).build().map_err(|e| e.to_string())?;
+    let mut r = client.get(MM_LIST_URL).send().await.map_err(|e| e.to_string())?;
+    if !r.status().is_success() { return Err(format!("http {}", r.status())); }
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(c) = r.chunk().await.map_err(|e| e.to_string())? {
+        buf.extend_from_slice(&c);
+        if buf.len() > 20 * 1024 * 1024 { return Err("list too large".into()); }
+    }
+    let v: serde_json::Value = serde_json::from_slice(&buf).map_err(|e| e.to_string())?;
+    let set = |k: &str| -> std::collections::HashSet<String> {
+        v.get(k).and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).map(|x| x.trim().to_ascii_lowercase()).filter(|x| !x.is_empty()).collect()).unwrap_or_default()
+    };
+    let black = set("blacklist");
+    let white = set("whitelist");
+    if black.len() < 1000 { return Err(format!("list looks wrong ({} entries)", black.len())); }
+    let n = black.len();
+    if let Ok(mut w) = BLOCK.write() { w.black = black; w.white = white; w.at = now_s(); }
+    Ok(n)
+}
+
+/// Load at startup, then every 6h. A failed refresh keeps the previous list.
+pub fn spawn_blocklist_refresh() {
+    tokio::spawn(async {
+        loop {
+            match refresh_blocklist().await {
+                Ok(n) => println!("[Canary] phishing blocklist loaded: {} domains", n),
+                Err(e) => eprintln!("[Canary] blocklist refresh failed (keeping previous): {}", e),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(BLOCKLIST_REFRESH_SECS)).await;
+        }
+    });
+}
+
+/// The host or any parent domain on a blocklist (and not on MetaMask's whitelist).
+fn blocklist_hit(host: &str) -> Option<String> {
+    let h = host.trim_end_matches('.').to_ascii_lowercase();
+    let labels: Vec<&str> = h.split('.').collect();
+    let cands: Vec<String> = (0..labels.len().saturating_sub(1)).map(|i| labels[i..].join(".")).collect();
+    let b = BLOCK.read().ok()?;
+    if cands.iter().any(|c| b.white.contains(c)) { return None; }
+    if let Some(c) = cands.iter().find(|c| b.kv.contains(*c)) { return Some(format!("{} is on the KasVillage scam list", c)); }
+    if let Some(c) = cands.iter().find(|c| b.black.contains(*c)) { return Some(format!("{} is on the MetaMask phishing list", c)); }
+    None
+}
 const FETCH_TIMEOUT_SECS: u64 = 10;
 
 #[derive(Serialize, Clone)]
@@ -171,6 +234,9 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
     if is_private_host(&host) {
         return HttpResponse::BadRequest().json(serde_json::json!({"error":"private/IP hosts not scannable"}));
     }
+    if let Some(why) = blocklist_hit(&host) {
+        return attest_response(url.clone(), host.clone(), 100, vec![CanaryFinding { code: "known_phishing".into(), severity: "high".into(), detail: why }]);
+    }
     // AUDIT 2026-10-31: string checks miss [::1], 0x7f000001, "localhost." and DNS names
     // pointing inside; resolve and check every address. Redirects are not followed.
     let port: u16 = if url.starts_with("https://") { 443 } else { 80 };
@@ -204,6 +270,9 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
         let next = match reqwest::Url::parse(&cur).and_then(|b| b.join(&loc)) { Ok(u) => u.to_string(), Err(_) => break };
         let nh = match extract_host(&next) { Some(h) => h, None => break };
         let np: u16 = if next.starts_with("https://") { 443 } else if next.starts_with("http://") { 80 } else { 0 };
+        if let Some(why) = blocklist_hit(&nh) {
+            return attest_response(next.clone(), nh.clone(), 100, vec![CanaryFinding { code: "redirects_to_known_phishing".into(), severity: "high".into(), detail: why }]);
+        }
         if np == 0 || is_private_host(&nh) || !crate::node_registry::resolves_public(&nh, np).await {
             return HttpResponse::BadRequest().json(serde_json::json!({"error":"redirects to a private or non-web address", "redirect_to": next}));
         }
@@ -243,6 +312,10 @@ pub async fn api_canary_scan(body: web::Json<serde_json::Value>) -> impl Respond
         }
     }
 
+    attest_response(final_url, final_host, score, findings)
+}
+
+fn attest_response(final_url: String, final_host: String, score: u32, findings: Vec<CanaryFinding>) -> HttpResponse {
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let verdict = CanaryVerdict {
         v: 1,
@@ -289,5 +362,27 @@ pub async fn api_canary_pubkey() -> impl Responder {
             HttpResponse::Ok().json(serde_json::json!({"attest_pubkey": hex::encode(xonly.serialize())}))
         }
         Err(e) => HttpResponse::ServiceUnavailable().json(serde_json::json!({"error": e})),
+    }
+}
+
+#[cfg(test)]
+mod blocklist_tests {
+    use super::*;
+    #[test]
+    fn blocklist_matches_host_and_parents_but_respects_whitelist() {
+        {
+            let mut w = BLOCK.write().unwrap();
+            w.black.insert("evil-phish.xyz".into());
+            w.black.insert("trusted.io".into());
+            w.white.insert("trusted.io".into());
+            w.kv.insert("kaspa-airdrop.example".into());
+        }
+        assert!(blocklist_hit("evil-phish.xyz").is_some());
+        assert!(blocklist_hit("login.evil-phish.xyz").is_some());
+        assert!(blocklist_hit("EVIL-PHISH.XYZ.").is_some());
+        assert!(blocklist_hit("notevil-phish.xyz").is_none());
+        assert!(blocklist_hit("trusted.io").is_none());           // whitelist wins
+        assert!(blocklist_hit("claim.kaspa-airdrop.example").unwrap().contains("KasVillage"));
+        assert!(blocklist_hit("kaspa.org").is_none());
     }
 }

@@ -1,0 +1,4 @@
+# KasVillage blocklist - known Kaspa / KasVillage scam domains, one per line.
+# Compiled into the relay (include_str!) on top of MetaMask's eth-phishing-detect list.
+# A domain here also blocks every subdomain of it. Lines starting with # are comments.
+# Add entries as scams are reported, then bump the relay version.
