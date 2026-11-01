@@ -1506,6 +1506,28 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           <Text style={styles.title}>Town Hall</Text>
         </View>
         
+        {/* KV_LINK_CHECK */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🔎 Check a link</Text>
+          <Text style={styles.cardSubtitle}>
+            Drop a link before you open it. TownHall visits the page for you (following redirects) and checks it against 100,000+ known phishing sites (MetaMask's list plus KasVillage's own) and looks for scam signs: look-alike domains, seed-phrase prompts, wallet drainers, clipboard hijacks, hidden code.
+            {'\n\n'}Advisory only: this check cannot prove a site is safe. Always proceed with caution.
+          </Text>
+          <LinkCheck />
+        </View>
+
+        {/* KV_IC3: report fraud - permanent home for the disclaimer's ic3.gov link */}
+        <TouchableOpacity
+          onPress={() => { try { Linking.openURL('https://www.ic3.gov'); } catch {} }}
+          style={{ backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: rs.s(10), padding: rs.s(12), marginBottom: rs.s(12) }}
+        >
+          <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#991b1b' }}>🚨 Report fraud</Text>
+          <Text style={{ fontSize: rs.font(10), color: '#7f1d1d', marginTop: 2 }}>
+            Scammed or targeted in a scam? KasVillage has no company behind it to call. Report internet crime
+            to the FBI at ic3.gov (tap here) and flag the listing in the Mailbox so the mod can delist it.
+          </Text>
+        </TouchableOpacity>
+
         {/* Search Section */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🔍 Verification Search</Text>
@@ -1836,28 +1858,6 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           />
         </View>
         
-        {/* KV_LINK_CHECK */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>🔎 Check a link</Text>
-          <Text style={styles.cardSubtitle}>
-            Drop a link before you open it. TownHall visits the page for you (following redirects) and checks it against 100,000+ known phishing sites (MetaMask's list plus KasVillage's own) and looks for scam signs: look-alike domains, seed-phrase prompts, wallet drainers, clipboard hijacks, hidden code.
-            {'\n\n'}Advisory only: this check cannot prove a site is safe. Always proceed with caution.
-          </Text>
-          <LinkCheck />
-        </View>
-
-        {/* KV_IC3: report fraud - permanent home for the disclaimer's ic3.gov link */}
-        <TouchableOpacity
-          onPress={() => { try { Linking.openURL('https://www.ic3.gov'); } catch {} }}
-          style={{ backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: rs.s(10), padding: rs.s(12), marginBottom: rs.s(12) }}
-        >
-          <Text style={{ fontSize: rs.font(12), fontWeight: '700', color: '#991b1b' }}>🚨 Report fraud</Text>
-          <Text style={{ fontSize: rs.font(10), color: '#7f1d1d', marginTop: 2 }}>
-            Scammed or targeted in a scam? KasVillage has no company behind it to call. Report internet crime
-            to the FBI at ic3.gov (tap here) and flag the listing in the Mailbox so the mod can delist it.
-          </Text>
-        </TouchableOpacity>
-
         {/* Info Section */}
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>How Verification Works</Text>
