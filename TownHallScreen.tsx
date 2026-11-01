@@ -1016,86 +1016,86 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
   }, []);
   
   // Search for verification (APT, address, DApp, stats)
+  // KV_SEARCH_CHAIN: the old search read Arweave (retired - its gateway answers non-JSON, hence
+  // "Parse: error decoding response body"). Now chain-only:
+  //  - kaspa: address / pubkey -> resolved from its own bytes
+  //  - APT number -> an APT is a one-way hash of a pubkey, so it can only be matched against keys
+  //    we already know: you, plus every signed publisher/operator on the Kaspa registries
+  //  - "Verified" = has a signed, on-chain KasVillage listing (game/DApp) or operator announce
   const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
-    
+    const query = searchQuery.trim();
+    if (!query) return;
     setIsSearching(true);
     setSearchResult(null);
-    
     try {
-      const query = searchQuery.trim();
-      
-      // Determine search type
-      let searchType: 'apt' | 'address' | 'dapp' | 'store' | 'stats' = 'apt';
-      if (query.toLowerCase().startsWith('kaspa:')) {
-        searchType = 'address';
-      } else if (query.toLowerCase().startsWith('dapp-') || query.toLowerCase().startsWith('game-')) {
-        searchType = 'dapp';
-      } else if (query.toLowerCase().startsWith('store-')) {
-        searchType = 'store';
-      } else if (query.toLowerCase().startsWith('stats-') || query.toLowerCase().includes('stats')) {
-        searchType = 'stats';
-      }
-      
-      // Route to correct endpoint based on search type
-      const BASE = 'https://kasvillage.app.runonflux.io';
-      let url = '';
-      let method = 'GET';
-      let body = undefined;
-      
-      const isApt = query.toUpperCase().startsWith('APT-') || /^\d{5,}$/.test(query);
-      const isPubkey = /^[0-9a-fA-F]{64,66}$/.test(query);
-      
-      if (searchType === 'dapp') {
-        url = isApt ? `${BASE}/api/dapp/apt/${query}` : `${BASE}/api/dapp/${query}`;
-      } else if (searchType === 'store') {
-        url = isApt ? `${BASE}/api/storefront/apt/${query}` : `${BASE}/api/storefront/${query}`;
-      } else if (searchType === 'stats') {
-        const id = query.replace(/^stats-/i, '');
-        url = isApt ? `${BASE}/api/counterparty/apt/${id}` : `${BASE}/api/counterparty/${id}`;
+      const net: string = require('./kv_vault_active').kvActiveNet();
+      const low = query.toLowerCase();
+      const getJson = async (u: string) => {
+        const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 15000);
+        try { const r = await fetch(u, { signal: ctl.signal }); return r.ok ? await r.json() : null; } catch { return null; } finally { clearTimeout(t); }
+      };
+      const [idx, reg] = await Promise.all([
+        getJson(`${TOWNHALL_BASE}/api/games/index?network=${net}`),
+        getJson(`${TOWNHALL_BASE}/api/nodes/registry?network=${net}`),
+      ]);
+      const listings: any[] = [...((idx && idx.games) || []), ...((idx && idx.dapps) || [])];
+      const operators: any[] = (reg && reg.nodes) || [];
+      const xOf = (pk: string) => { const h = String(pk || '').toLowerCase(); return h.length === 66 ? h.slice(2) : h; };
+      const known = new Set<string>();
+      if (myPubkey) known.add(xOf(myPubkey));
+      listings.forEach(g => g.publisher && known.add(xOf(g.publisher)));
+      operators.forEach(o => o.owner && known.add(xOf(o.owner)));
+
+      let x: string | null = null;
+      let byName: any = null;
+      if (low.startsWith('kaspa:') || low.startsWith('kaspatest:')) {
+        const pk = require('./kv_proposal').addressToPubkey(low);
+        if (pk) x = xOf(pk);
+      } else if (/^(0[23])?[0-9a-f]{64}$/.test(low)) {
+        x = xOf(low);
+      } else if (/^(apt-)?\d{5,}$/.test(low)) {
+        const n = low.replace(/^apt-/, '');
+        for (const k of known) {
+          if ([k, '02' + k, '03' + k].some(f => verifyApt(f, n).valid)) { x = k; break; }
+        }
+        if (!x) {
+          setSearchResult({ found: false, error: `APT-${n} isn't a publisher or operator on ${net}. An APT number is a one-way fingerprint of a key, so other people can only be found by their kaspa: address or public key (ask them to copy it from Town Hall).` });
+          return;
+        }
       } else {
-        // Default: APT or pubkey lookup
-        url = isApt ? `${BASE}/api/counterparty/apt/${query}` : isPubkey ? `${BASE}/api/counterparty/${query}` : `${BASE}/api/counterparty/apt/APT-${query}`;
+        const q = low.replace(/^(dapp|game|store)-/, '');
+        byName = listings.find(g => String(g.name || '').toLowerCase() === q || String(g.head || '').toLowerCase().startsWith(q))
+          || listings.find(g => String(g.name || '').toLowerCase().includes(q));
+        if (byName) x = xOf(byName.publisher);
       }
-      
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      if (data.ok !== false && !data.error) {
-        // Map response to search result format
-        const stats = data.stats || data;
-        setSearchResult({
-          found: true,
-          type: searchType,
-          verified: stats.citadel_tier !== 'guest',
-          aptNumber: stats.apt_alias || query,
-          address: stats.pubkey,
-          name: stats.brand_name || stats.pubkey?.slice(0, 12),
-          traits: 0,
-          arweaveTx: stats.arweave_tx,
-          isOwner: false,
-          xp: stats.xp || 0,
-          pComplete: stats.p_complete || 0.5,
-          successes: stats.successes || 0,
-          deadlocks: stats.deadlocks || 0,
-          statsProofTx: undefined,
-          rulesFollowed: true,
-          violations: [],
-        });
-      } else {
-        setSearchResult({
-          found: false,
-          error: data.error || 'Not found',
-        });
+      if (!x || !/^[0-9a-f]{64}$/.test(x)) {
+        setSearchResult({ found: false, error: 'Not found. Search an APT number, a kaspa: address, a public key, or a game/DApp name.' });
+        return;
       }
-    } catch (error) {
+      const mine = listings.filter(g => xOf(g.publisher) === x);
+      const op = operators.find(o => xOf(o.owner) === x);
+      const isMe = !!myPubkey && xOf(myPubkey) === x;
+      const fullPk = (isMe && myPubkey) ? myPubkey : '02' + x;
+      let addr = '';
+      try { addr = require('./wallet_registration_v2').kaspaAddressFromXOnly(require('@noble/hashes/utils').hexToBytes(x), net === 'mainnet' ? 'kaspa' : 'kaspatest'); } catch {}
+      const apt = isMe && myApt ? myApt : 'APT-' + deriveApt(fullPk);
+      const what = byName ? byName.name
+        : mine.length ? `${mine.length} listing${mine.length > 1 ? 's' : ''}: ${mine.slice(0, 3).map((g: any) => g.name).join(', ')}`
+        : op ? `${op.svc} operator${op.bond_unspent ? ' (10 KAS bond held)' : ''}` : (isMe ? 'You' : 'No listings yet');
       setSearchResult({
-        found: false,
-        error: 'Search failed. Try again.',
-      });
+        found: true,
+        type: (byName || mine.length) ? 'dapp' : op ? 'operator' as any : 'address' as any,
+        verified: mine.length > 0 || !!op,
+        aptNumber: apt,
+        address: addr || fullPk,
+        name: what,
+        isOwner: isMe,
+      } as any);
+    } catch (e: any) {
+      setSearchResult({ found: false, error: 'Search failed: ' + String(e?.message || e) });
+    } finally {
+      setIsSearching(false);
     }
-    
-    setIsSearching(false);
   };
   
   // SEND: Submit content for verification
@@ -1582,7 +1582,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                   )}
                   
                   {/* DApp owner-only verify button */}
-                  {searchResult.type === 'dapp' && searchResult.isOwner && !searchResult.verified && (
+                  {false && (
                     <TouchableOpacity style={styles.resultVerifyBtn}>
                       <Shield size={rs.s(16)} color={COLORS.white} />
                       <Text style={styles.resultVerifyText}>Verify This DApp</Text>
@@ -1594,7 +1594,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
                     <View style={styles.pendingNote}>
                       <AlertTriangle size={rs.s(14)} color={COLORS.amber600} />
                       <Text style={styles.pendingText}>
-                        Pending verification by developer
+                        No signed on-chain listing yet
                       </Text>
                     </View>
                   )}
