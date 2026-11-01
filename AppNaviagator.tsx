@@ -48,6 +48,7 @@ import { NeighborAgreement } from './NeighborAgreement';
 import { VaultBackupScreen } from './VaultBackupScreen';
 import { VaultRecoveryScreen } from './VaultRecoveryScreen';
 import { GenerateVaultScreen } from './GenerateVaultScreen';
+import { SavingsQRScreen } from './SavingsQRScreen'; // KV_SAVINGS_QR
 import { VaultSetupScreen, loadFrostVault } from './VaultSetupScreen';
 import { VaultQRSignScreen } from './VaultQRSignScreen';
 import { VaultCosignScreen } from './VaultCosignScreen';
@@ -97,7 +98,8 @@ type AppScreen =
   | 'generate_vault'
   | 'vault_setup'
   | 'vault_sign'
-  | 'vault_cosign';
+  | 'vault_cosign'
+  | 'savings_qr'; // KV_SAVINGS_QR
 
 interface SessionUser {
   apartment: string;
@@ -1427,6 +1429,9 @@ export const AppNavigator: React.FC = () => {
     case 'pay_nearby':
       return <QRPayNearby onClose={() => setScreen('dashboard')} onNavigateSend={(addr?: string, sompi?: number) => { (globalThis as any).__kvSendPrefill = { addr, sompi }; setScreen('send_kas'); }} />;
 
+    case 'savings_qr': // KV_SAVINGS_QR
+      return <SavingsQRScreen onClose={() => setScreen('dashboard')} />;
+
     case 'generate_vault':
       return (
         <GenerateVaultScreen
@@ -1434,6 +1439,7 @@ export const AppNavigator: React.FC = () => {
           onDone={() => setScreen('dashboard')}
           onCancel={() => setScreen('dashboard')}
           onRestorePaper={() => setScreen('vault_recovery')}
+          onSavingsQR={() => setScreen('savings_qr')} // KV_SAVINGS_QR
         />
       );
 

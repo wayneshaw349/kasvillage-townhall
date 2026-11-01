@@ -30,10 +30,11 @@ interface Props {
   total?: number;                     // cards to issue (default 4)
   threshold?: number;                 // cards needed to recover (default 2)
   onRestorePaper?: () => void;        // KV_CARD_PAPER_VAULT: rebuild a card + paper vault on a new phone
+  onSavingsQR?: () => void;           // KV_SAVINGS_QR: printed pre-signed QRs, no keys kept
 }
 
 export const GenerateVaultScreen: React.FC<Props> = ({
-  onDone, onCancel, network = require('./kv_net').KV_NET, total = 4, threshold = 2, onRestorePaper,
+  onDone, onCancel, network = require('./kv_net').KV_NET, total = 4, threshold = 2, onRestorePaper, onSavingsQR,
 }) => {
   // KV_CARD_PAPER_VAULT: optional paper cosign key. The vault key stays on cards exactly as before;
   // with paper on, every spend ALSO needs the paper key (FROST 2-of-2). Paper key shown once, never stored.
@@ -63,6 +64,9 @@ export const GenerateVaultScreen: React.FC<Props> = ({
   const handleGenerate = async () => {
     setBusy(true);
     try {
+      // KV_SAVINGS_QR replace guard: never overwrite a vault that still holds coins
+      const _g = await require('./kv_savings_qr').sqVaultReplaceGuard();
+      if (_g) { Alert.alert('Vault not replaced', _g); return; }
       // 1) mint from CSPRNG (key derived FROM the mnemonic)
       const w = await generateBackableWallet(network);
 
@@ -183,12 +187,15 @@ export const GenerateVaultScreen: React.FC<Props> = ({
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>🔐 Generate Backable Wallet</Text>
       <View style={styles.card}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text style={[styles.cardHead, { flex: 1 }]}>Also require a paper key (recommended)</Text>
-          <Switch value={withPaper} onValueChange={setWithPaper} disabled={busy} />
-        </View>
-        <Text style={styles.li}>• Spending then needs your cards AND a paper key you scan (FROST 2-of-2).</Text>
-        <Text style={styles.li}>• Someone with your cards alone, or the paper alone, cannot spend.</Text>
+        {/* KV_SAVINGS_QR: replaces creating new card + paper vaults (existing ones still restore and spend) */}
+        <Text style={styles.cardHead}>Recommended: Savings QR vault</Text>
+        <Text style={styles.li}>• Move KAS into QR codes you print. No key is kept anywhere.</Text>
+        <Text style={styles.li}>• Scan a QR to move its coins into your hot wallet - that is all it can do.</Text>
+        {onSavingsQR ? (
+          <TouchableOpacity style={[styles.primary, { marginTop: 10 }]} onPress={onSavingsQR} disabled={busy}>
+            <Text style={styles.primaryText}>Open Savings QR vault</Text>
+          </TouchableOpacity>
+        ) : null}
         {onRestorePaper ? (
           <TouchableOpacity onPress={() => setRestoreMode(true)} disabled={busy} style={{ marginTop: 8 }}>
             <Text style={[styles.li, { textDecorationLine: 'underline' }]}>New phone? Restore a card + paper vault</Text>
