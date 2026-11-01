@@ -304,7 +304,7 @@ const LinkCheck: React.FC = () => {
             <Text key={i} style={{ fontSize: rs.font(11), color: '#44403c', marginTop: 2 }}>• {String(f.detail || f.code)}</Text>
           ))}
           <Text style={{ fontSize: rs.font(9), color: '#78716c', marginTop: rs.s(6) }}>
-            A clean result is not a guarantee. Never type your seed words or keys into any website.
+            Advisory only - not 100% proof that a link is safe. A clean result means no known scam signs were found, nothing more. Always proceed with caution, and never type your seed words or keys into any website.
           </Text>
         </View>
       ) : null}
@@ -1822,6 +1822,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
           <Text style={styles.cardTitle}>🔎 Check a link</Text>
           <Text style={styles.cardSubtitle}>
             Drop a link before you open it. TownHall visits the page for you (following redirects) and looks for scam signs: look-alike domains, seed-phrase prompts, wallet drainers, clipboard hijacks, hidden code.
+            {'\n\n'}Advisory only: this check cannot prove a site is safe. Always proceed with caution.
           </Text>
           <LinkCheck />
         </View>
