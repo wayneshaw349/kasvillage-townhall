@@ -108,7 +108,7 @@ fn op_http() -> reqwest::Client {
 /// link-local, CGNAT, unspecified or v4-mapped). Shared SSRF guard.
 pub async fn resolves_public(host: &str, port: u16) -> bool {
     if host.is_empty() || host.starts_with('[') || host.contains('@') { return false; }
-    let Ok(addrs) = tokio::net::lookup_host((host, port)).await else { return false };
+    let Ok(Ok(addrs)) = tokio::time::timeout(std::time::Duration::from_secs(3), tokio::net::lookup_host((host, port))).await else { return false };
     let addrs: Vec<_> = addrs.collect();
     !addrs.is_empty() && addrs.iter().all(|a| match a.ip() {
         std::net::IpAddr::V4(v) => { let o = v.octets(); !(v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_broadcast() || o[0] == 0 || (o[0] == 100 && (o[1] & 0xc0) == 64)) }
