@@ -110,6 +110,16 @@ export function sqPlan(funded: SqCoin[], n: number): { error?: string; split?: {
   return { split: { coinValues: vals, fee }, coins: vals };
 }
 
+/** KV_SAVINGS_QR pre-check before any coin moves: plan the typed deposit as ONE funded coin
+ *  (how the hot wallet pays it) + every exit must clear the same minimum sqSignAll enforces. '' = ok. */
+export function sqPrecheck(depositSompi: bigint, n: number): string {
+  if (depositSompi <= 0n) return 'Enter an amount.';
+  const plan = sqPlan([{ txId: '0'.repeat(64), index: 0, amount: depositSompi }], n);
+  if (plan.error || !plan.coins) return plan.error || 'Plan failed';
+  for (const c of plan.coins) { if (c < SQ_MIN_COIN) return 'Each QR must hold at least 1 KAS.'; if (c - sqExitFee(c) < SQ_MIN_COIN / 2n) return 'Coin too small after fee.'; }
+  return '';
+}
+
 /** Sign the split (if any) and one exit per coin. Pure: returns everything to broadcast/print. */
 export function sqSignAll(p: { privHex: string; net: SqNet; funded: SqCoin[]; n: number; hotXonly: string }):
   { error: string } | { splitTx: any | null; splitTxId: string | null; qrs: string[]; exits: { txId: string; outSompi: bigint; coin: SqCoin }[]; coinXonly: string } {
@@ -164,10 +174,13 @@ export function sqParse(raw: string): { error: string } | { qr: SqQr; tx: any; t
 
 /** Sweep everything at the throwaway address back to the hot wallet (used to cancel before the key is forgotten). */
 export function sqSignSweepBack(privHex: string, funded: SqCoin[], hotXonly: string): { error: string } | { tx: any; txId: string } {
+  if (!isHex(hotXonly, 64)) return { error: 'Destination is not a standard (Schnorr P2PK) address.' }; // KV_SAVINGS_QR: never sign to a bad script
   if (!funded.length) return { error: 'Nothing to return.' };
   const total = funded.reduce((a, c) => a + c.amount, 0n);
-  let fee = sqFee(funded.map((c) => c.amount), [total - 1_000_000n]).fee;
-  fee = sqFee(funded.map((c) => c.amount), [total - fee]).fee;
+  let f = sqFee(funded.map((c) => c.amount), [total - 1_000_000n]);
+  f = sqFee(funded.map((c) => c.amount), [total - f.fee]);
+  const fee = f.fee;
+  if (f.mass > SQ_MAX_MASS) return { error: 'Too many coins to move in one transaction.' };
   if (total - fee <= 0n) return { error: 'Too small to return.' };
   const s = signP2pkTx(privHex, funded, [{ amount: total - fee, xonly: hotXonly }]);
   return { tx: s.tx, txId: s.txId };
@@ -183,4 +196,20 @@ export function sqXonlyFromAddress(address: string): string {
   for (const v of p5) { acc = (acc << 5) | v; bits += 5; while (bits >= 8) { bits -= 8; p8.push((acc >> bits) & 0xff); acc &= (1 << bits) - 1; } }
   if (p8.length !== 33 || p8[0] !== 0x00) return '';
   return bytesToHex(new Uint8Array(p8.slice(1)));
+}
+
+// --- KV_SAVINGS_QR verify helpers (pure) ----------------------------------------
+/** Track which printed ORIGINALS were scanned back. Backup copies are the same string, so any copy counts for its QR. */
+export function sqScanProgress(qrs: string[], scanned: number[] | undefined, raw: string): { error?: string; scanned: number[]; have: number; total: number; added: boolean } {
+  const set = Array.from(new Set((scanned || []).filter((i) => Number.isInteger(i) && i >= 0 && i < qrs.length)));
+  const idx = qrs.indexOf(String(raw || '').trim());
+  if (idx < 0) return { error: 'That QR is not from this deposit. Scan the sheets you just printed.', scanned: set, have: set.length, total: qrs.length, added: false };
+  const added = !set.includes(idx); if (added) set.push(idx);
+  set.sort((a, b) => a - b);
+  return { scanned: set, have: set.length, total: qrs.length, added };
+}
+/** Coins on chain at the throwaway address vs the coins the QRs cover: missing = not confirmed yet, extra = not covered. */
+export function sqCoverage(on: SqCoin[], covered: { txId: string; index: number; amount: string }[]): { missing: number; extra: SqCoin[] } {
+  const hit = (u: SqCoin, c: { txId: string; index: number; amount: string }) => u.txId === c.txId && u.index === c.index && u.amount.toString() === c.amount;
+  return { missing: covered.filter((c) => !on.some((u) => hit(u, c))).length, extra: on.filter((u) => !covered.some((c) => hit(u, c))) };
 }

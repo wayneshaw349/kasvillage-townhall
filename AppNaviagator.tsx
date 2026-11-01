@@ -1572,12 +1572,11 @@ export const AppNavigator: React.FC = () => {
       return frostVault ? (
         <VaultQRSignScreen
           visible={true}
-          onClose={() => { (globalThis as any).__kvFrostPrefill = undefined; setScreen('dashboard'); }}
+          onClose={() => { (globalThis as any).__kvFrostPrefill = undefined; (globalThis as any).__kvFrostPrefillOpen = undefined; setScreen('dashboard'); }}
           vault={frostVault}
           getPrivateKeyHex={getPrivKeyHex}
           onSuccess={() => setTimeout(() => refreshBalance(), 2000)}
-          initialRecipient={(globalThis as any).__kvFrostPrefill?.to || undefined} // KV_SEND_FROST: prefill from Send
-          initialAmountKas={(globalThis as any).__kvFrostPrefill?.kas || undefined}
+          {...(() => { const g = globalThis as any; if (g.__kvFrostPrefill !== undefined) { g.__kvFrostPrefillOpen = { ...g.__kvFrostPrefill, at: Date.now() }; g.__kvFrostPrefill = undefined; } const p = g.__kvFrostPrefillOpen && Date.now() - g.__kvFrostPrefillOpen.at < 5000 ? g.__kvFrostPrefillOpen : undefined; return { initialRecipient: p?.to || undefined, initialAmountKas: p?.kas || undefined }; })()} // KV_SEND_FROST: prefill read-and-cleared once on open
         />
       ) : <LoadingScreen />;
 

@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
 import * as SQ from './kv_savings_qr';
+import { sqPrecheck } from './kv_savings_core';
 import { VaultQRSignScreen } from './VaultQRSignScreen';
 
 type Mode = 'home' | 'add' | 'progress' | 'print' | 'verify' | 'scan' | 'slips';
@@ -32,6 +33,8 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
   const [msg, setMsg] = useState('');
   const [camOk, setCamOk] = useState(false);
   const scanLock = useRef(false);
+  const depLock = useRef(false); // KV_SAVINGS_QR: double-tap guard (React state is too late)
+  const [scanInfo, setScanInfo] = useState('');
   const [oldVault, setOldVault] = useState<{ vault: any; sompi: bigint; sweepKas: string } | null>(null);
   const [oldSweep, setOldSweep] = useState<{ to: string; kas: string } | null>(null);
   const _cam = (() => { try { return require('expo-camera'); } catch { return null; } })();
@@ -47,9 +50,9 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
   // Block screenshots while QRs exist on this phone (print + verify steps).
   useEffect(() => {
     if (mode !== 'print' && mode !== 'verify') return;
-    let undo: any = null;
-    (async () => { try { const SC = await import('expo-screen-capture'); await SC.preventScreenCaptureAsync('kv-savings-qr'); undo = () => SC.allowScreenCaptureAsync('kv-savings-qr').catch(() => {}); } catch {} })();
-    return () => { if (undo) undo(); };
+    let cancelled = false; let SCm: any = null; // KV_SAVINGS_QR: cleanup may run before the async block finishes
+    (async () => { try { const SC = await import('expo-screen-capture'); SCm = SC; await SC.preventScreenCaptureAsync('kv-savings-qr'); if (cancelled) SC.allowScreenCaptureAsync('kv-savings-qr').catch(() => {}); } catch {} })();
+    return () => { cancelled = true; if (SCm) SCm.allowScreenCaptureAsync('kv-savings-qr').catch(() => {}); };
   }, [mode]);
 
   // Progress: wait for the deposit, then sign.
@@ -72,10 +75,16 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
   const askCamera = async () => { try { const r = await _cam?.Camera?.requestCameraPermissionsAsync?.(); setCamOk(r?.status === 'granted'); } catch {} };
 
   const startDeposit = async () => {
+    if (depLock.current) return; depLock.current = true;
+    try { await startDepositInner(); } finally { depLock.current = false; setBusy(false); }
+  };
+  const startDepositInner = async () => {
     const s = kasToSompi(amount); const n = Number(count);
     if (s === null || s <= 0n) { Alert.alert('Amount', 'Enter an amount in KAS, e.g. 250 or 12.5'); return; }
     if (!Number.isInteger(n) || n < 1 || n > 10) { Alert.alert('QRs', 'Choose 1 to 10 QRs.'); return; }
-    if (s / BigInt(n) < 101_000_000n) { Alert.alert('Too small', 'Each QR must hold at least about 1.01 KAS.'); return; }
+    const pre = sqPrecheck(s, n); // same plan + minimum the signer uses, before any coin moves
+    if (pre) { Alert.alert('Cannot make these QRs', pre); return; }
+    setBusy(true);
     // Every QR pays the hot wallet: its backup cards must exist and match before the first deposit.
     const bk = await SQ.sqHotBackupCheck();
     if (bk) { Alert.alert('Back up your hot wallet first', bk, [{ text: 'OK' }, { text: 'Details', onPress: async () => { const d = await SQ.sqHotBackupDiag().catch((e: any) => String(e?.message || e)); console.log('[SavingsQR] backup diag\n' + d); Alert.alert('Backup check details', d); } }]); return; }
@@ -86,8 +95,8 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
       if (!yes) return;
       try { await require('expo-secure-store').setItemAsync('kv_sq_backup_ok', '1'); } catch {}
     }
-    setBusy(true); setMsg('');
-    const r = await SQ.sqStartDeposit(s, n);
+    setMsg('');
+    const r = await SQ.sqStartDeposit(s, n).catch((e: any) => ({ error: String(e?.message || e) }));
     setBusy(false);
     if (r.error) { Alert.alert('Deposit', r.error); await reload(); return; }
     setMode('progress');
@@ -99,7 +108,7 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
   const [slipUi, setSlipUi] = useState(true);
   const showSlips = async () => {
     if (!session?.qrs || !session.exits) return;
-    const hot = await SQ.sqHotAddress();
+    const hot = session.hot || (await SQ.sqHotAddress()); // KV_SAVINGS_QR: the wallet the QRs were signed for
     let usd = 0; try { const PF = require('./kas_price_feed'); await PF.refreshPrice().catch(() => {}); const p = PF.getKasPrice(); usd = p && !p.isStale ? Number(p.usdPerKas) || 0 : 0; } catch {}
     const pages: string[] = JSON.parse(require('./kv_savings_note').notePrintHtml({ qrs: session.qrs, outs: session.exits.map((e) => e.outSompi), hotLast6: hot.slice(-6), net: session.net, usdPerKas: usd, single: true }));
     setSlips(pages); setSlipIdx(0); setSlipUi(true); setMode('slips');
@@ -110,7 +119,7 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
     // check the native module quietly first: requiring expo-print in a build without it throws a red dev error
     let Print: any = null; try { if (require('expo-modules-core').requireOptionalNativeModule('ExpoPrint')) Print = require('expo-print'); } catch {}
     if (!Print?.printAsync) { Alert.alert('Printing not available', 'This build of KasVillage cannot print yet. Update the app, then come back: your deposit is safe and waiting.'); return; }
-    const hot = await SQ.sqHotAddress();
+    const hot = session.hot || (await SQ.sqHotAddress()); // KV_SAVINGS_QR: the wallet the QRs were signed for
     let usd = 0; try { const PF = require('./kas_price_feed'); await PF.refreshPrice().catch(() => {}); const p = PF.getKasPrice(); usd = p && !p.isStale ? Number(p.usdPerKas) || 0 : 0; } catch {}
     try { await Print.printAsync({ html: SQ.sqPrintHtml(session.qrs, session.exits.map((e) => e.outSompi), hot.slice(-6), session.net, usd) }); }
     catch (e: any) { Alert.alert('Print', String(e?.message || e)); }
@@ -118,15 +127,35 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
 
   const returnDeposit = () => Alert.alert('Return deposit?', 'Sends this deposit back to your hot wallet (minus a small fee). No QRs will be valid.', [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Return', style: 'destructive', onPress: async () => { setBusy(true); const r = await SQ.sqReturnToHot(); setBusy(false); if (r.error) Alert.alert('Return', r.error); else { Alert.alert('Returned', 'The deposit is going back to your hot wallet.'); setMode('home'); } await reload(); } },
+    { text: 'Return', style: 'destructive', onPress: checkReturn },
   ]);
+  // KV_SAVINGS_QR: while 'returning', taps re-check (the key is kept until the return is confirmed)
+  const checkReturn = async () => {
+    if (depLock.current) return; depLock.current = true; setBusy(true);
+    try {
+      const r = await SQ.sqReturnToHot().catch((e: any) => ({ error: String(e?.message || e) } as any));
+      if (r.error) Alert.alert('Return', r.error);
+      else if (r.pending) { Alert.alert('Returning…', 'The deposit is on its way back to your hot wallet. Tap "Returning… check again" in a minute to confirm.'); setMode('home'); }
+      else { Alert.alert('Returned', 'The deposit is back in your hot wallet.'); setMode('home'); }
+    } finally { depLock.current = false; setBusy(false); await reload(); }
+  };
+  const checkOld = async () => {
+    if (depLock.current) return; depLock.current = true; setBusy(true);
+    try {
+      const r = await SQ.sweepArchive();
+      Alert.alert('Old deposits', r.checked === 0 && !r.errors.length ? 'No old deposit keys on this network.' : 'Checked ' + r.checked + ' · sent home ' + r.swept + (r.pending ? ' · in progress ' + r.pending : '') + (r.skipped ? ' · other network ' + r.skipped : '') + (r.errors.length ? '\n' + r.errors.join('\n') : ''));
+    } catch (e: any) { Alert.alert('Old deposits', String(e?.message || e)); }
+    finally { depLock.current = false; setBusy(false); }
+  };
 
   const onScanned = async (data: string) => {
     if (scanLock.current) return; scanLock.current = true;
     try {
       if (mode === 'verify') {
         const r = await SQ.sqVerifyAndForget(data);
+        if (r.total) setScanInfo('Scanned ' + (r.have || 0) + ' of ' + r.total);
         if (r.error) { Alert.alert('Not yet', r.error); return; }
+        if (!r.done) { setSession(await SQ.sqLoadSession()); return; } // keep scanning the next ORIGINAL
         Alert.alert('Saved to the vault', 'The key is deleted. Your printed QRs are now the only way to move these coins, and they can only pay your hot wallet. Keep the two copies in different places.');
         setMode('home'); await reload(); return;
       }
@@ -218,8 +247,9 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
 
   if (mode === 'verify' || mode === 'scan') return (
     <ScrollView contentContainerStyle={st.c}>
-      <Text style={st.t}>{mode === 'verify' ? 'Scan one printed QR' : 'Scan a Savings QR'}</Text>
-      <Text style={st.b}>{mode === 'verify' ? 'Scan any QR from the PAPER (not a screen). This proves the print is readable; then the key is deleted.' : 'The coins move to your hot wallet. Nothing else is possible with a Savings QR.'}</Text>
+      <Text style={st.t}>{mode === 'verify' ? 'Scan every printed QR' : 'Scan a Savings QR'}</Text>
+      <Text style={st.b}>{mode === 'verify' ? 'Scan EACH QR from the PAPER (not a screen) - the original or its backup copy. This proves every print is readable; after the last one the key is deleted.' : 'The coins move to your hot wallet. Nothing else is possible with a Savings QR.'}</Text>
+      {mode === 'verify' ? <Text style={st.cardH}>{scanInfo || ('Scanned ' + (session?.scanned?.length || 0) + ' of ' + (session?.qrs?.length || 0))}</Text> : null}
       {camera}
       {busy ? <ActivityIndicator color="#D4AF37" /> : null}
       <TouchableOpacity style={st.sec} onPress={() => setMode(mode === 'verify' ? 'print' : 'home')}><Text style={st.secT}>Back</Text></TouchableOpacity>
@@ -235,13 +265,18 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
       {session ? (
         <View style={st.card}>
           <Text style={st.cardH}>Deposit in progress ({session.stage})</Text>
-          <TouchableOpacity style={st.pri} onPress={() => setMode(session.stage === 'signed' ? 'print' : 'progress')}><Text style={st.priT}>Continue</Text></TouchableOpacity>
-          <TouchableOpacity style={st.sec} onPress={returnDeposit}><Text style={st.secT}>Return deposit to hot wallet</Text></TouchableOpacity>
+          {session.stage === 'returning' ? (
+            <TouchableOpacity style={[st.pri, busy && { opacity: 0.5 }]} disabled={busy} onPress={checkReturn}>{busy ? <ActivityIndicator color="#000" /> : <Text style={st.priT}>Returning… check again</Text>}</TouchableOpacity>
+          ) : (<>
+            <TouchableOpacity style={st.pri} onPress={() => { setScanInfo(''); setMode(session.stage === 'signed' ? 'print' : 'progress'); }}><Text style={st.priT}>Continue</Text></TouchableOpacity>
+            <TouchableOpacity style={st.sec} onPress={returnDeposit}><Text style={st.secT}>Return deposit to hot wallet</Text></TouchableOpacity>
+          </>)}
         </View>
       ) : (
         <TouchableOpacity style={st.pri} onPress={() => { if (SQ.sqTutorial()) { Alert.alert('Real mode only', 'Savings QR needs Real mode.'); return; } setMode('add'); }}><Text style={st.priT}>Add to vault</Text></TouchableOpacity>
       )}
       <TouchableOpacity style={st.pri} onPress={() => setMode('scan')}><Text style={st.priT}>Spend: scan a QR</Text></TouchableOpacity>
+      <TouchableOpacity style={[st.sec, busy && { opacity: 0.5 }]} disabled={busy} onPress={checkOld}><Text style={st.secT}>Check old deposits</Text></TouchableOpacity>
       {oldVault && oldVault.sompi > 0n ? (
         <View style={st.card}>
           <Text style={st.cardH}>Old card + paper vault: {fmt(oldVault.sompi)} KAS</Text>

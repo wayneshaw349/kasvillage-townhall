@@ -25,9 +25,10 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
   const [camOk, setCamOk] = useState(false);
   const [slipHtml, setSlipHtml] = useState<{ screen: string; print: string } | null>(null);
   const [slipUi, setSlipUi] = useState(true);
-  const [note, setNote] = useState<{ raw: string; sompi: bigint; printedSompi?: bigint; matches?: boolean } | null>(null);
+  const [note, setNote] = useState<{ raw: string; sompi: bigint; printedSompi?: bigint; matches?: boolean; checkedAt?: number } | null>(null);
   const [toAddr, setToAddr] = useState('');
   const scanLock = useRef(false);
+  const opLock = useRef(false); // KV_CASH_NOTE: double-tap guard (React state is too late)
   const _cam = (() => { try { return require('expo-camera'); } catch { return null; } })();
 
   const reload = useCallback(async () => { setSession(await CN.cnLoadSession()); setRows(await CN.cnList()); try { setRows(await CN.cnRefresh()); } catch {} }, []);
@@ -54,20 +55,42 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
   const askCamera = async () => { try { const r = await _cam?.Camera?.requestCameraPermissionsAsync?.(); setCamOk(r?.status === 'granted'); } catch {} };
 
   const make = async () => {
+    if (opLock.current) return; opLock.current = true;
+    try { await makeInner(); } finally { opLock.current = false; setBusy(false); }
+  };
+  const makeInner = async () => {
     const s = kasToSompi(amount);
     if (s === null || s < CN.CN_MIN_SOMPI) { Alert.alert('Amount', 'Enter at least 0.1 KAS.'); return; }
     const ok = await new Promise<boolean>((r) => Alert.alert('Make a TRANSFERABLE note?', 'Anyone who holds or photographs this QR can take the money, like cash. Only hand it to the person you are paying.', [
       { text: 'Cancel', style: 'cancel', onPress: () => r(false) }, { text: 'Make note', onPress: () => r(true) }]));
     if (!ok) return;
-    setBusy(true); const r = await CN.cnCreate(s); setBusy(false);
+    setBusy(true); const r = await CN.cnCreate(s).catch((e: any) => ({ error: String(e?.message || e) })); setBusy(false);
     if (r.error) { Alert.alert('Cash note', r.error); await reload(); return; }
     setMode('wait');
   };
 
   const reclaim = () => Alert.alert('Reclaim note?', 'Sends the note\'s coins back to your hot wallet. Any printed copy becomes empty.', [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Reclaim', style: 'destructive', onPress: async () => { setBusy(true); const r = await CN.cnReclaim(); setBusy(false); if (r.error) Alert.alert('Reclaim', r.error); else { Alert.alert('Reclaimed', 'The coins are going back to your hot wallet.'); setMode('home'); } await reload(); } },
+    { text: 'Reclaim', style: 'destructive', onPress: checkReclaim },
   ]);
+  // KV_CASH_NOTE: while 'returning', taps re-check (the key is kept until the reclaim is confirmed)
+  const checkReclaim = async () => {
+    if (opLock.current) return; opLock.current = true; setBusy(true);
+    try {
+      const r = await CN.cnReclaim().catch((e: any) => ({ error: String(e?.message || e) } as any));
+      if (r.error) Alert.alert('Reclaim', r.error);
+      else if (r.pending) { Alert.alert('Reclaiming…', 'The coins are on their way back to your hot wallet. Tap "Reclaiming… check again" in a minute to confirm.'); setSlipHtml(null); setMode('home'); }
+      else { Alert.alert('Reclaimed', 'The coins are back in your hot wallet.'); setSlipHtml(null); setMode('home'); }
+    } finally { opLock.current = false; setBusy(false); await reload(); }
+  };
+  const checkOld = async () => {
+    if (opLock.current) return; opLock.current = true; setBusy(true);
+    try {
+      const r = await CN.sweepArchive();
+      Alert.alert('Old notes', r.checked === 0 && !r.errors.length ? 'No old note keys on this network.' : 'Checked ' + r.checked + ' · sent home ' + r.swept + (r.pending ? ' · in progress ' + r.pending : '') + (r.skipped ? ' · other network ' + r.skipped : '') + (r.errors.length ? '\n' + r.errors.join('\n') : ''));
+    } catch (e: any) { Alert.alert('Old notes', String(e?.message || e)); }
+    finally { opLock.current = false; setBusy(false); }
+  };
 
   const printNote = async () => {
     if (!slipHtml) return;
@@ -87,11 +110,15 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
       }
       const i = await CN.cnInspect(data);
       if (i.error || i.sompi === undefined) { Alert.alert('Cash note', i.error || 'Not valid'); return; }
-      setNote({ raw: data, sompi: i.sompi, printedSompi: i.printedSompi, matches: i.matches }); setToAddr(await require('./kv_savings_qr').sqHotAddress()); setMode('redeemTo');
+      setNote({ raw: data, sompi: i.sompi, printedSompi: i.printedSompi, matches: i.matches, checkedAt: i.checkedAt }); setToAddr(await require('./kv_savings_qr').sqHotAddress()); setMode('redeemTo');
     } finally { setTimeout(() => { scanLock.current = false; }, 1500); }
   };
 
   const redeem = async () => {
+    if (!note || opLock.current) return; opLock.current = true;
+    try { await redeemInner(); } finally { opLock.current = false; setBusy(false); }
+  };
+  const redeemInner = async () => {
     if (!note) return;
     const mine = await require('./kv_savings_qr').sqHotAddress();
     const go = await new Promise<boolean>((r) => Alert.alert('Redeem note?', fmt(note.sompi) + ' KAS (minus a small fee) goes to ' + (toAddr.trim() === mine ? 'your hot wallet' : '…' + toAddr.trim().slice(-8)) + '.', [
@@ -167,6 +194,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
   if (mode === 'redeemTo' && note) return (
     <ScrollView contentContainerStyle={st.c}>
       <Text style={st.t}>Note check</Text>
+      <Text style={st.s}>Advisory: checked against api.kaspa.org just now{note.checkedAt ? ' (' + new Date(note.checkedAt).toLocaleTimeString() + ')' : ''}, two lookups agreeing. It can change the moment another copy is spent.</Text>
       {/* KV_CASH_NOTE precheck: the chain decides what the note is worth, not the printed number */}
       <View style={[st.card, { borderColor: note.matches === false ? '#EF4444' : '#86EFAC' }]}>
         <Text style={[st.cardH, { color: '#86EFAC' }]}>✓ Real KAS on chain: {fmt(note.sompi)} KAS</Text>
@@ -174,7 +202,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
           note.matches ? <Text style={[st.cardH, { color: '#86EFAC', marginTop: 4 }]}>✓ Matches the printed amount ({fmt(note.printedSompi)} KAS)</Text>
             : <Text style={[st.cardH, { color: '#EF4444', marginTop: 4 }]}>✗ Printed {fmt(note.printedSompi)} KAS but only {fmt(note.sompi)} KAS is on it - do not accept it at face value</Text>
         ) : <Text style={[st.s, { marginTop: 4 }]}>Older note: no printed amount inside the QR. Go by the on-chain value above.</Text>}
-        <Text style={[st.cardH, { color: '#86EFAC', marginTop: 4 }]}>✓ Not redeemed yet</Text>
+        <Text style={[st.cardH, { color: '#86EFAC', marginTop: 4 }]}>✓ Not redeemed as of this check</Text>
         <Text style={[st.s, { marginTop: 6 }]}>Until YOU redeem it, anyone else holding a copy (including whoever gave it to you) could still spend it first. Accepting a note? Redeem it now.</Text>
       </View>
       <Text style={st.l}>Send it to</Text>
@@ -192,12 +220,17 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
       <Text style={st.b}>TRANSFERABLE paper KAS: whoever holds the note can spend it to any address. For gifts and paying people in person - not for your own savings.</Text>
       {session ? (
         <View style={st.card}>
-          <Text style={st.cardH}>Note in progress ({fmt(session.sompi)} KAS)</Text>
-          <TouchableOpacity style={st.pri} onPress={() => setMode('wait')}><Text style={st.priT}>Continue</Text></TouchableOpacity>
-          <TouchableOpacity style={st.sec} onPress={reclaim}><Text style={st.secT}>Reclaim to hot wallet</Text></TouchableOpacity>
+          <Text style={st.cardH}>Note in progress ({fmt(session.sompi)} KAS){session.stage === 'returning' ? ' - reclaiming' : ''}</Text>
+          {session.stage === 'returning' ? (
+            <TouchableOpacity style={[st.pri, busy && { opacity: 0.5 }]} disabled={busy} onPress={checkReclaim}>{busy ? <ActivityIndicator color="#000" /> : <Text style={st.priT}>Reclaiming… check again</Text>}</TouchableOpacity>
+          ) : (<>
+            <TouchableOpacity style={st.pri} onPress={() => setMode('wait')}><Text style={st.priT}>Continue</Text></TouchableOpacity>
+            <TouchableOpacity style={st.sec} onPress={reclaim}><Text style={st.secT}>Reclaim to hot wallet</Text></TouchableOpacity>
+          </>)}
         </View>
       ) : <TouchableOpacity style={st.pri} onPress={() => setMode('make')}><Text style={st.priT}>Make a cash note</Text></TouchableOpacity>}
       <TouchableOpacity style={st.pri} onPress={() => setMode('redeem')}><Text style={st.priT}>Check / redeem a note</Text></TouchableOpacity>
+      <TouchableOpacity style={[st.sec, busy && { opacity: 0.5 }]} disabled={busy} onPress={checkOld}><Text style={st.secT}>Check old deposits</Text></TouchableOpacity>
       {rows.length ? <Text style={[st.s, { marginTop: 14 }]}>Notes you made: {out.length} not yet redeemed</Text> : null}
       {rows.slice().reverse().map((r) => (
         <View key={r.addr} style={st.row}>
