@@ -2293,7 +2293,7 @@ export default function VillageMailbox() {
                                     {it.kaspaPrice > 0 ? it.kaspaPrice + ' KAS' : it.dollarPrice > 0 ? '$' + Number(it.dollarPrice).toFixed(2) : 'Price TBD'}
                                   </Text>
                                   {it.name ? (
-                                    <TouchableOpacity onPress={() => require('./kv_compare').kvComparePrices(it.name)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                                    <TouchableOpacity onPress={() => require('./kv_compare').kvComparePrices(it.name, Number(it.kaspaPrice || 0))} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
                                       <Text style={{ fontSize: rs.font(10), fontWeight: '700', color: '#2563eb', marginTop: 3 }}>🔎 Compare prices</Text>
                                     </TouchableOpacity>
                                   ) : null}
@@ -2329,6 +2329,7 @@ export default function VillageMailbox() {
           </View>
         </View>
       </Modal>
+      {(() => { const { KvCompareHost } = require('./kv_compare'); return <KvCompareHost />; })()}{/* KV_COMPARE_PP */}
     </PixelStoreBackground>
   );
 }

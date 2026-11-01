@@ -815,7 +815,7 @@ const StashItemCard: React.FC<StashItemCardProps> = ({ item }) => {
         <Text style={stashStyles.price}>{item.kaspaPrice.toLocaleString()} KAS</Text>
       )}
       {(item.name || item.title) ? (
-        <TouchableOpacity onPress={() => require('./kv_compare').kvComparePrices(item.name || item.title)} style={{ marginBottom: rs.s(8) }}>
+        <TouchableOpacity onPress={() => require('./kv_compare').kvComparePrices(item.name || item.title, Number(item.kaspaPrice || 0))} style={{ marginBottom: rs.s(8) }}>
           <Text style={{ fontSize: rs.font(11), fontWeight: '700', color: '#2563eb' }}>🔎 Compare prices</Text>
         </TouchableOpacity>
       ) : null}
@@ -1282,6 +1282,7 @@ export const StorefrontViewer: React.FC<StorefrontViewerProps> = ({
             )}
           </ScrollView>
         </View>
+        {(() => { const { KvCompareHost } = require('./kv_compare'); return <KvCompareHost />; })()}{/* KV_COMPARE_PP */}
       </View>
     </Modal>
   );
