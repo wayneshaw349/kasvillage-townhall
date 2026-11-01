@@ -1696,14 +1696,14 @@ export default function VillageMailbox() {
             { text: 'Cancel', style: 'cancel' },
             { text: 'Manage Listing', onPress: _openManage },
             { text: '🎬 Watch Demo', onPress: () => require('./kv_link_whitelist').openWhitelisted(videoLink.startsWith('http') ? videoLink : 'https://' + videoLink) },
-            { text: '🚀 Open App', onPress: () => require('./kv_link_whitelist').openWhitelisted(appLink.startsWith('http') ? appLink : 'https://' + appLink) },
+            { text: '🚀 Open App', onPress: () => require('./kv_link_whitelist').openDappLink(appLink) },
           ]);
         } else {
           const link = videoLink || appLink;
           Alert.alert(item.name || 'App', link ? 'Open the app or manage the listing?' : 'No demo or app URL set.', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Manage Listing', onPress: _openManage },
-            ...(link ? [{ text: 'Open App', onPress: () => require('./kv_link_whitelist').openWhitelisted(link.startsWith('http') ? link : 'https://' + link) }] : []),
+            ...(link ? [{ text: 'Open App', onPress: () => (link === appLink ? require('./kv_link_whitelist').openDappLink(link) : require('./kv_link_whitelist').openWhitelisted(link)) }] : []),
           ]);
         }
       } else if (section === 'academics') {

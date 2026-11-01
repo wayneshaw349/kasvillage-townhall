@@ -41,3 +41,20 @@ export function openWhitelisted(raw: string): Promise<void> {  // returns a prom
   }
   return Linking.openURL(url).catch(() => {});
 }
+
+/** DApp "Open App": a DApp's own website is allowed even off the whitelist, but only plain
+ *  public https (no IP addresses, localhost or deep links), after a "leaving KasVillage" note. */
+export function openDappLink(raw: string): Promise<void> {
+  const { Alert, Linking } = require('react-native');
+  const u = String(raw || '').trim();
+  const url = /^https?:\/\//i.test(u) ? u.replace(/^http:/i, 'https:') : 'https://' + u.replace(/^\/+/, '');
+  const m = /^https:\/\/([^\/?#:@]+)(?::\d+)?(?:[\/?#]|$)/i.exec(url);
+  const host = m ? m[1].toLowerCase() : '';
+  if (!host || !host.includes('.') || /^[\d.]+$/.test(host) || host.startsWith('[') || /(^|\.)localhost$|\.local$|\.internal$/.test(host)) {
+    return Promise.resolve(Alert.alert('Link not opened', 'DApp links must be a normal https website.\n\n' + u));
+  }
+  if (isWhitelistedUrl(url)) return Linking.openURL(url).catch(() => {});
+  return new Promise((done) => Alert.alert('Leaving KasVillage', 'This opens the DApp\'s own website in your browser:\n\n' + host + '\n\nKasVillage does not check outside sites. Never enter your seed words or keys there.',
+    [{ text: 'Cancel', style: 'cancel', onPress: () => done() }, { text: 'Open', onPress: () => { Linking.openURL(url).catch(() => {}).finally(() => done()); } }],
+    { cancelable: true, onDismiss: () => done() }));
+}
