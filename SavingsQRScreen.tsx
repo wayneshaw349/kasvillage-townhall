@@ -95,7 +95,8 @@ export const SavingsQRScreen: React.FC<{ onClose: () => void; initialMode?: 'hom
 
   const printSheet = async () => {
     if (!session?.qrs || !session.exits) return;
-    let Print: any = null; try { Print = require('expo-print'); } catch {}
+    // check the native module quietly first: requiring expo-print in a build without it throws a red dev error
+    let Print: any = null; try { if (require('expo-modules-core').requireOptionalNativeModule('ExpoPrint')) Print = require('expo-print'); } catch {}
     if (!Print?.printAsync) { Alert.alert('Printing not available', 'This build of KasVillage cannot print yet. Update the app, then come back: your deposit is safe and waiting.'); return; }
     const hot = await SQ.sqHotAddress();
     let usd = 0; try { const PF = require('./kas_price_feed'); await PF.refreshPrice().catch(() => {}); const p = PF.getKasPrice(); usd = p && !p.isStale ? Number(p.usdPerKas) || 0 : 0; } catch {}
