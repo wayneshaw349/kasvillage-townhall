@@ -612,7 +612,7 @@ export async function sendKaspaViaRest(params: {
        (fundingAgrId), whose own commitment is excluded from the floor. */
     try {
       const { getLockedTotals, getAgreementCommitments } = await import('./utxo_ledger');
-      const lt = await getLockedTotals();
+      const lt = await getLockedTotals(senderAddress); // KV_LOCK_SCOPE: only this wallet's locks
       // AUDIT 2026-10-31: the floor protects the MAIN wallet's collateral/IOU backing. Pledge
       // and vault addresses hold none of it, so applying it there blocked reclaims and vault sends.
       const _mains: string[] = [];

@@ -118,7 +118,10 @@ Fixed:
 Still open (low / design):
 - Phone Proof: owner can still drop records and re-chain (cp signs each record, not the chain) - fix
   needs the owner to sign the chain tip and/or an on-chain count anchor; frostAddr not re-derived.
-- IOU / collateral locks are one global store, not per network/wallet (tutorial rows count on mainnet).
 - Whitelisted hosts with redirectors (l.facebook.com, youtube.com/redirect) - both show a warning page.
 - Mnemonic restore doesn't run BIP39 checksum validation (typo restores an empty wallet).
 Relay tests 143/143. App tsc: 97 (all pre-existing).
+
+10. (follow-up) IOU / collateral locks are tagged with the wallet address that made them and only
+    count against that wallet (KV_LOCK_SCOPE): tutorial locks no longer block mainnet sends. Rows from
+    before this change carry no address and still count everywhere until they are settled or expire.

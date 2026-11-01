@@ -98,12 +98,14 @@ interface CollateralRow {
   locked: boolean;            // true after funds actually sent to FROST — value
                               // left the wallet, so row no longer reduces spendable
   commitHash: string;
+  addr?: string;              // KV_LOCK_SCOPE: wallet address that owns this lock (absent = legacy, counts everywhere)
 }
 
 interface IouRow {
   iouId: string;
   sompi: string;
   at: number;
+  addr?: string;              // KV_LOCK_SCOPE
 }
 
 interface VStore {
@@ -177,11 +179,15 @@ async function computeCommitHash(id: string, role: string, pubkey: string): Prom
   } catch { return ''; }
 }
 
-function sumCollateralUnlocked(s: VStore): bigint {
-  return s.collateral.filter(r => !r.locked).reduce((a, r) => a + BigInt(r.sompi), 0n);
+// KV_LOCK_SCOPE: a lock only reserves value in the wallet that made it. Tutorial (kaspatest:)
+// locks never block the mainnet wallet, nor an old restored-away wallet's locks the new one.
+// Rows written before this change have no addr and still count everywhere (safe default).
+const _mine = (rowAddr: string | undefined, addr?: string) => !addr || !rowAddr || rowAddr === addr;
+function sumCollateralUnlocked(s: VStore, addr?: string): bigint {
+  return s.collateral.filter(r => !r.locked && _mine(r.addr, addr)).reduce((a, r) => a + BigInt(r.sompi), 0n);
 }
-function sumIous(s: VStore): bigint {
-  return s.ious.reduce((a, r) => a + BigInt(r.sompi), 0n);
+function sumIous(s: VStore, addr?: string): bigint {
+  return s.ious.filter(r => _mine(r.addr, addr)).reduce((a, r) => a + BigInt(r.sompi), 0n);
 }
 
 // ============================================================================
@@ -259,8 +265,8 @@ export async function syncLedger(address: string): Promise<SpendableResult> {
     spendCoins.push(entry);
   }
 
-  const committedBalance = sumCollateralUnlocked(store);
-  const iouAllocated = sumIous(store);
+  const committedBalance = sumCollateralUnlocked(store, address);
+  const iouAllocated = sumIous(store, address);
   let spendableBalance = totalBalance - committedBalance - iouAllocated;
   if (spendableBalance < 0n) spendableBalance = 0n;
 
@@ -311,10 +317,10 @@ export async function reanchorAllocations(
 ): Promise<void> { /* no-op by design */ }
 
 /** New: total value that must remain in the wallet (unlocked collateral + IOU backing). */
-export async function getLockedTotals(): Promise<{ collateral: bigint; iou: bigint; total: bigint }> {
+export async function getLockedTotals(address?: string): Promise<{ collateral: bigint; iou: bigint; total: bigint }> {
   const s = await loadStore();
-  const collateral = sumCollateralUnlocked(s);
-  const iou = sumIous(s);
+  const collateral = sumCollateralUnlocked(s, address);
+  const iou = sumIous(s, address);
   return { collateral, iou, total: collateral + iou };
 }
 
@@ -378,7 +384,7 @@ export async function canonicalCommit(
 
   const hash = await computeCommitHash(agreementId, role, pubkey);
   s.collateral = s.collateral.filter(r => r.agrId !== agreementId);
-  s.collateral.push({ agrId: agreementId, sompi: amountSompi.toString(), role, pubkey, at: Date.now(), locked: false, commitHash: hash });
+  s.collateral.push({ agrId: agreementId, sompi: amountSompi.toString(), role, pubkey, at: Date.now(), locked: false, commitHash: hash, ...((address as any) ? { addr: String(address) } : {}) });
   await saveStore(s);
 
   console.log(`[UTXO-Tag] Committed ${Number(amountSompi) / 1e8} KAS (virtual) to ${agreementId} as ${role.toUpperCase()}`);
@@ -431,7 +437,7 @@ export async function allocateForIOU(
   }
   const s = await loadStore();
   s.ious = s.ious.filter(r => r.iouId !== iouId);
-  s.ious.push({ iouId, sompi: amountSompi.toString(), at: Date.now() });
+  s.ious.push({ iouId, sompi: amountSompi.toString(), at: Date.now(), addr: address });
   await saveStore(s);
   console.log(`[UTXO-Ledger] IOU ${iouId}: locked ${Number(amountSompi) / 1e8} KAS (virtual)`);
   return { success: true, allocations: [{ tag: 'virtual:' + iouId, amountSompi: amountSompi.toString() }] };

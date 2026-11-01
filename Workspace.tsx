@@ -1282,7 +1282,7 @@ const KvChainGamePublish: React.FC = () => {
       const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: require('./kv_net').KV_NET as any };
       try {
         const led = require('./utxo_ledger');
-        const lt = await led.getLockedTotals();
+        const lt = await led.getLockedTotals(myAddr);
         gadd('owner ' + myAddr);
         const ur = await fetch((String(myAddr).startsWith('kaspa:') ? 'https://api.kaspa.org' : 'https://api-tn10.kaspa.org') + '/addresses/' + encodeURIComponent(myAddr) + '/utxos');
         const uj = await ur.json();
