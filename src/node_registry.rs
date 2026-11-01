@@ -96,32 +96,47 @@ pub struct NodeRecord {
 }
 
 /// Client for operator-supplied URLs: no redirects, short timeout.
-fn op_http() -> reqwest::Client {
+/// Client for an operator/user-supplied URL: no redirects, short timeout, and the host
+/// PINNED to addresses that were already checked as public, so a second DNS answer
+/// (rebinding) can't steer the connection inside.
+pub fn pinned_client(host: &str, addrs: &[std::net::SocketAddr], timeout_secs: u64, ua: &str) -> reqwest::Client {
     reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
         .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(host, addrs)
+        .user_agent(ua)
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-/// True only if `host` resolves, and every address is public (no loopback, private,
-/// link-local, CGNAT, unspecified or v4-mapped). Shared SSRF guard.
-pub async fn resolves_public(host: &str, port: u16) -> bool {
-    if host.is_empty() || host.starts_with('[') || host.contains('@') { return false; }
-    let Ok(Ok(addrs)) = tokio::time::timeout(std::time::Duration::from_secs(3), tokio::net::lookup_host((host, port))).await else { return false };
-    let addrs: Vec<_> = addrs.collect();
-    !addrs.is_empty() && addrs.iter().all(|a| match a.ip() {
-        std::net::IpAddr::V4(v) => { let o = v.octets(); !(v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_broadcast() || o[0] == 0 || (o[0] == 100 && (o[1] & 0xc0) == 64)) }
-        std::net::IpAddr::V6(v) => !(v.is_loopback() || v.is_unspecified() || (v.segments()[0] & 0xfe00) == 0xfc00 || (v.segments()[0] & 0xffc0) == 0xfe80 || v.to_ipv4_mapped().is_some()),
-    })
+fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v) => { let o = v.octets(); !(v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_broadcast() || v.is_multicast() || o[0] == 0 || (o[0] == 100 && (o[1] & 0xc0) == 64)) }
+        std::net::IpAddr::V6(v) => !(v.is_loopback() || v.is_unspecified() || v.is_multicast() || (v.segments()[0] & 0xfe00) == 0xfc00 || (v.segments()[0] & 0xffc0) == 0xfe80 || v.to_ipv4_mapped().is_some()),
+    }
 }
 
-async fn public_https(api: &str) -> bool {
-    let Some(rest) = api.strip_prefix("https://") else { return false };
-    let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host = host_port.split(':').next().unwrap_or("");
-    let port: u16 = host_port.split(':').nth(1).and_then(|p| p.parse().ok()).unwrap_or(443);
-    resolves_public(host, port).await
+/// Resolve once (3 s cap); Some(addrs) only if there is at least one and ALL are public.
+pub async fn resolve_public_addrs(host: &str, port: u16) -> Option<Vec<std::net::SocketAddr>> {
+    if host.is_empty() || !host.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-') { return None; }
+    let Ok(Ok(it)) = tokio::time::timeout(std::time::Duration::from_secs(3), tokio::net::lookup_host((host, port))).await else { return None };
+    let addrs: Vec<_> = it.collect();
+    if addrs.is_empty() || !addrs.iter().all(|a| is_public_ip(a.ip())) { return None; }
+    Some(addrs)
+}
+
+pub async fn resolves_public(host: &str, port: u16) -> bool { resolve_public_addrs(host, port).await.is_some() }
+
+/// Parse like the HTTP client does (WHATWG), never by hand: backslash and userinfo tricks
+/// can't make the checked host differ from the fetched one.
+pub fn parse_web_url(raw: &str, https_only: bool) -> Option<(reqwest::Url, String, u16)> {
+    let u = reqwest::Url::parse(raw.trim()).ok()?;
+    match u.scheme() { "https" => {}, "http" if !https_only => {}, _ => return None }
+    if !u.username().is_empty() || u.password().is_some() { return None; }
+    let host = u.host_str()?.to_ascii_lowercase();
+    if host.starts_with('[') || host.parse::<std::net::IpAddr>().is_ok() { return None; } // no IP literals
+    let port = u.port_or_known_default()?;
+    Some((u, host, port))
 }
 
 /// Read at most `cap` bytes of a response body.
@@ -381,9 +396,10 @@ pub fn rest_tx_id(j: &serde_json::Value) -> Option<String> {
 /// Ask an operator for the challenge tx; pass only if its txid recomputes, the
 /// surviving coin is in it, and it carries a non-empty payload.
 async fn operator_answers(_client: &reqwest::Client, api: &str, c: &Challenge) -> (bool, &'static str) {
-    if !public_https(api).await { return (false, "api must be a public https host"); }
     let url = format!("{}/transactions/{}?inputs=true&outputs=true&resolve_previous_outpoints=no", api.trim_end_matches('/'), c.txid);
-    let j: serde_json::Value = match op_http().get(&url).send().await {
+    let Some((pu, host, port)) = parse_web_url(&url, true) else { return (false, "api must be a public https host"); };
+    let Some(addrs) = resolve_public_addrs(&host, port).await else { return (false, "api must be a public https host"); };
+    let j: serde_json::Value = match pinned_client(&host, &addrs, 8, "TownHallAudit/1.0").get(pu.as_str()).send().await {
         Ok(r) if r.status().is_success() => match capped_json(r, 256 * 1024).await { Some(j) => j, None => return (false, "bad or oversized json") },
         Ok(_) => return (false, "http error"),
         Err(_) => return (false, "unreachable"),
