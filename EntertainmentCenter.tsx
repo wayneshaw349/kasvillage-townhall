@@ -391,11 +391,12 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
         // record carries an attested hash, and its validate() gates the rest.
         setPlayingGame({ dapp, descriptor: text });
       } else {
-        require('./kv_link_whitelist').openDappLink(dapp.url);
+        // KV_CHAIN_ONLY_DAPPS: not a KasVillage scene -> not opened in a browser either
+        require('react-native').Alert.alert('Not available', 'This DApp is not published on chain, so KasVillage cannot run it.');
       }
     } catch (e) {
-      // Unreachable content: fall back to the browser rather than a dead tap.
-      require('./kv_link_whitelist').openDappLink(dapp.url);
+      // KV_CHAIN_ONLY_DAPPS: no browser fallback
+      require('react-native').Alert.alert('Not available', 'This DApp could not be loaded.');
     }
     setLaunching(false);
   };

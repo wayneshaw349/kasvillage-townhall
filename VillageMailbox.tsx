@@ -1688,24 +1688,16 @@ export default function VillageMailbox() {
         }
         // DApps, games, websites — video demo + live URL
         const videoLink = item.videoUrl || '';
-        const appLink = item.gameUrl || item.primaryLink || '';
+        // (appLink removed: KV_CHAIN_ONLY_DAPPS)
         // KV_MANAGE_TABS: dapp listings manageable from the same modal
         const _openManage = () => setStoreView({ entry: { ...item, _kvKind: 'dapp' } as any, config: null, loading: false });
-        if (videoLink && appLink) {
-          Alert.alert(item.name || 'App', 'Watch the demo or open the app?', [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Manage Listing', onPress: _openManage },
-            { text: '🎬 Watch Demo', onPress: () => require('./kv_link_whitelist').openWhitelisted(videoLink.startsWith('http') ? videoLink : 'https://' + videoLink) },
-            { text: '🚀 Open App', onPress: () => require('./kv_link_whitelist').openDappLink(appLink) },
-          ]);
-        } else {
-          const link = videoLink || appLink;
-          Alert.alert(item.name || 'App', link ? 'Open the app or manage the listing?' : 'No demo or app URL set.', [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Manage Listing', onPress: _openManage },
-            ...(link ? [{ text: 'Open App', onPress: () => (link === appLink ? require('./kv_link_whitelist').openDappLink(link) : require('./kv_link_whitelist').openWhitelisted(link)) }] : []),
-          ]);
-        }
+        // KV_CHAIN_ONLY_DAPPS: no "Open App" to outside websites - DApps run from chain (gameHash
+        // above) or not at all. Publishers post their HTML on chain via Workspace.
+        Alert.alert(item.name || 'App', videoLink ? 'Watch the demo or manage the listing?' : 'This DApp has no on-chain app yet. Publishers post their app on chain from Workspace.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Manage Listing', onPress: _openManage },
+          ...(videoLink ? [{ text: '🎬 Watch Demo', onPress: () => require('./kv_link_whitelist').openWhitelisted(videoLink) }] : []),
+        ]);
       } else if (section === 'academics') {
         const videoLink = item.videoUrl || '';
         const repoLink = item.repositoryUrl || '';
