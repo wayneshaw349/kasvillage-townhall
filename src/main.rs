@@ -8599,6 +8599,7 @@ async fn api_verify_stats_check(body: web::Json<serde_json::Value>) -> HttpRespo
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     node_registry::spawn_audit_loop();
+    canary_scanner::spawn_blocklist_refresh(); // MetaMask phishing list + KasVillage list, refreshed every 6h
     env_logger::init();
     
     let mode = std::env::var("KV_MODE").unwrap_or_else(|_| "townhall".into());

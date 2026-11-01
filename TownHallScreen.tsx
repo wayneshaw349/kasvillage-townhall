@@ -1821,7 +1821,7 @@ export const TownHallScreen: React.FC<TownHallScreenProps> = ({ onClose, onNavig
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🔎 Check a link</Text>
           <Text style={styles.cardSubtitle}>
-            Drop a link before you open it. TownHall visits the page for you (following redirects) and looks for scam signs: look-alike domains, seed-phrase prompts, wallet drainers, clipboard hijacks, hidden code.
+            Drop a link before you open it. TownHall visits the page for you (following redirects) and checks it against 100,000+ known phishing sites (MetaMask's list plus KasVillage's own) and looks for scam signs: look-alike domains, seed-phrase prompts, wallet drainers, clipboard hijacks, hidden code.
             {'\n\n'}Advisory only: this check cannot prove a site is safe. Always proceed with caution.
           </Text>
           <LinkCheck />
