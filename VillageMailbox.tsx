@@ -502,7 +502,7 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
     <>
     <KvBizEnvelope name={item.name} cat={(item.category || 'Game') + ' \u00B7 on-chain'} stamp={'\u{1F3AE}'} colors={kvEnvColors(item, item.name || (item.quad && item.quad.head) || '')}
       postedAt={Math.max(Number(item.t || 0), Number(item.keptAt || 0))}
-      lines={[((item.quad && item.quad.game) || item.name) + ' \u00B7 ' + (require('./kv_age').normAge(item.quad && item.quad.age) || 'unrated 17+'), 'verified by hash \u00B7 sandboxed', item.quad && item.quad.price ? item.quad.price + ' KAS / board' : 'first board free']}
+      lines={[((item.quad && item.quad.game) || item.name) + ' \u00B7 ' + (require('./kv_age').normAge(item.quad && item.quad.age) || 'unrated 17+'), 'verified by hash \u00B7 sandboxed', item.quad && item.quad.price ? 'more boards: contact the developer' : 'first board free']}
       info={[pledge != null ? '\u26D3 ' + pledge + ' KAS pledged' : '', 'dev XP ' + (xp != null ? xp : '\u2026'), Array.isArray(item.keepers) && item.keepers.length ? '\u{1F465} kept by ' + item.keepers.length : '']}
       action={{ label: installing ? 'DOWNLOADING\u2026' : 'DOWNLOAD', onPress: () => onInstall(item), disabled: !!installing, ...(item.warn ? { bg: '#b91c1c', fg: '#fff' } : {}) }}
       onPress={() => setInfoOpen(true)} />
