@@ -814,6 +814,11 @@ const StashItemCard: React.FC<StashItemCardProps> = ({ item }) => {
       {item.kaspaPrice > 0 && (
         <Text style={stashStyles.price}>{item.kaspaPrice.toLocaleString()} KAS</Text>
       )}
+      {(item.name || item.title) ? (
+        <TouchableOpacity onPress={() => require('./kv_compare').kvComparePrices(item.name || item.title)} style={{ marginBottom: rs.s(8) }}>
+          <Text style={{ fontSize: rs.font(11), fontWeight: '700', color: '#2563eb' }}>🔎 Compare prices</Text>
+        </TouchableOpacity>
+      ) : null}
       {item.visualsUrl && isWhitelistedUrl(item.visualsUrl) && (
         <TouchableOpacity
           style={[stashStyles.viewButton, { backgroundColor: platformStyle?.bg || COLORS.stone700 }]}
