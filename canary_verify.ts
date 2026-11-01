@@ -13,9 +13,8 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 declare const __DEV__: boolean;
-const TOWNHALL_URL = __DEV__
-  ? 'http://localhost:8080'
-  : 'https://kasvillage.app.runonflux.io';
+// Always the live relay: dev builds run on a phone, where "localhost" is the phone itself.
+const TOWNHALL_URL = 'https://kasvillage.app.runonflux.io';
 
 // ---- KV_ATTEST_RETIRED: the attest key was exposed in the public Flux spec, so TOWNHALL_ATTEST_SK
 // was removed from the deployment and the canary now returns UNSIGNED verdicts (advisory only).
