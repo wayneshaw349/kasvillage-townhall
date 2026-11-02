@@ -2660,6 +2660,7 @@ dependencies = [
  "group",
  "halo2_proofs",
  "hex",
+ "idna",
  "kaspa-consensus-core",
  "kaspa-rpc-core",
  "kaspa-wrpc-client",

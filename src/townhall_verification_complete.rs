@@ -2620,7 +2620,7 @@ pub async fn api_get_stats_vk() -> HttpResponse {
     let fp = |dbg: String| { let mut h = Sha256::new(); h.update(dbg.as_bytes()); hex::encode(h.finalize()) };
     HttpResponse::Ok().json(serde_json::json!({
         "ok": true,
-        "relay_version": "v84", // AUDIT 2026-11-01
+        "relay_version": "v85", // AUDIT 2026-11-01
         "vk_fingerprint": fp(format!("{:?}", *STATS_VK)),
         "proof_type": "Halo2-IPA-Stats-V2",
         "k": HALO2_K, "advice_columns": 20, "instance_columns": 1,

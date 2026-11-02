@@ -137,6 +137,27 @@ static CONTENT_CHECKS: once_cell::sync::Lazy<Vec<(Regex, &'static str, &'static 
         (r"(?i)document\.write\s*\(\s*(atob|unescape)", "obfuscated_write", "medium", 20),
         (r"(?i)onbeforeunload[^>]{0,80}(prevent|confirm|stay)", "exit_trap", "low", 8),
         (r"(?i)clipboard(Data)?\.(setData|writeText)\s*\([^)]{0,80}(kaspa|addr|0x)", "clipboard_hijack", "high", 45),
+        // INTL 2026-11-02: seed / recovery phrase and private-key prompts in other languages.
+        // Russian and Persian are deliberately not included (sanctioned-country languages, by owner decision).
+        (concat!(
+            r"(?i)",
+            r"frase (semilla|de recuperaci[oó]n|secreta|semente|de recupera[cç][aã]o|di recupero|segreta|seme)|clave privada|chave privada|chiave privata|(12|24)\s*(palabras|palavras|parole)|",
+            r"phrase (de r[ée]cup[ée]ration|secr[eè]te|mn[ée]monique)|cl[ée] priv[ée]e|(12|24)\s*mots|",
+            r"wiederherstellungs(phrase|satz)|geheime phrase|privater schl[üu]ssel|(12|24)\s*w[öo]rter|",
+            r"herstel(zin|frase)|geheime zin|priv[ée]sleutel|(12|24)\s*woorden|",
+            r"fraz[aęy] (odzyskiwania|seed)|klucz prywatny|(12|24)\s*s[łl][óo]w|",
+            r"kurtarma (ifadesi|c[üu]mlesi)|gizli ifade|tohum ifadesi|[öo]zel anahtar|(12|24)\s*kelime|",
+            r"frasa (pemulihan|rahasia|benih)|kunci (pribadi|peribadi)|(12|24)\s*kata|",
+            r"c[ụu]m t[ừu] (kh[ôo]i ph[ụu]c|b[íi] m[ậa]t)|kh[óo]a ri[êe]ng|",
+            r"maneno ya (kurejesha|siri)|ufunguo (binafsi|wa siri)|",
+            r"фраз[аиу] відновлення|секретн[аоу]\s*фраз|приватн(ий|ого)\s*ключ|мнемонічн|",
+            r"助记词|助記詞|私钥|私鑰|恢复短语|恢復短語|种子短语|種子短語|",
+            r"シードフレーズ|秘密鍵|リカバリーフレーズ|復元フレーズ|ニーモニック|",
+            r"시드\s*구문|복구\s*구문|니모닉|개인\s*키|비밀\s*구문|",
+            r"सीड\s*फ्रे|रिकवरी\s*फ्रे|निजी\s*कुंजी|गुप्त\s*वाक्यांश|",
+            r"عبارة\s*(الاسترداد|الاستعادة|البذرة|السر)|العبارة\s*السرية|المفتاح\s*الخاص|",
+            r"วลีกู้คืน|วลีลับ|คีย์ส่วนตัว|กุญแจส่วนตัว"
+        ), "seed_phrase_prompt_intl", "high", 40),
     ];
     checks.iter().filter_map(|(p, c, s, n)| Regex::new(p).ok().map(|re| (re, *c, *s, *n))).collect()
 });
@@ -221,27 +242,66 @@ const PROTECTED_BRANDS: &[&str] = &[
     "coinbase", "binance", "kraken", "ledger", "trezor", "trustwallet",
 ];
 
-fn brand_lookalike(host: &str) -> Option<String> {
-    let core = host.trim_end_matches(".com").trim_end_matches(".io")
-        .trim_end_matches(".org").trim_end_matches(".net").trim_end_matches(".app");
-    let label = core.rsplit('.').next().unwrap_or(core);
-    if host.contains("xn--") {
-        return Some("punycode host".to_string());
-    }
-    let normalized: String = label.chars().map(|c| match c {
-        '0' => 'o', '1' => 'l', '3' => 'e', '4' => 'a', '5' => 's', '7' => 't',
+// INTL 2026-11-02: the registrable name of a host, country domains included
+// ("secure.blnance.com.br" -> "blnance", "kaspa.co.uk" -> "kaspa", "x.binance-login.com" -> "binance-login").
+fn registrable_parts(host: &str) -> (String, Vec<String>) {
+    let h = host.trim_end_matches('.').to_ascii_lowercase();
+    let labels: Vec<&str> = h.split('.').filter(|l| !l.is_empty()).collect();
+    let n = labels.len();
+    if n == 0 { return (String::new(), vec![]); }
+    if n == 1 { return (labels[0].to_string(), vec![]); }
+    const SLD: &[&str] = &["co", "com", "net", "org", "gov", "edu", "ac", "or", "ne", "go", "gob", "gouv", "nic", "mil", "biz", "info", "ltd", "plc", "sch", "nom"];
+    let cc = labels[n - 1].len() == 2;
+    let reg_idx = if cc && n >= 3 && SLD.contains(&labels[n - 2]) { n - 3 } else { n - 2 };
+    (labels[reg_idx].to_string(), labels[..reg_idx].iter().map(|l| l.to_string()).collect())
+}
+
+fn is_cyr_or_greek(c: char) -> bool { matches!(c as u32, 0x0370..=0x03FF | 0x0400..=0x052F | 0x1F00..=0x1FFF) }
+
+// Letters that look like Latin letters (Cyrillic, Greek) and common accents, folded to plain Latin.
+fn latin_skeleton(label: &str) -> String {
+    label.chars().map(|c| match c {
+        'а' | 'α' | 'à' | 'á' | 'â' | 'ä' | 'ã' | 'å' | 'ā' => 'a',
+        'е' | 'ε' | 'è' | 'é' | 'ê' | 'ë' | 'ē' => 'e',
+        'о' | 'ο' | 'ò' | 'ó' | 'ô' | 'ö' | 'õ' | 'ø' | 'ō' | '0' => 'o',
+        'і' | 'ι' | 'ì' | 'í' | 'î' | 'ï' | 'ı' => 'i', '1' => 'l',
+        'р' | 'ρ' => 'p', 'с' | 'ç' => 'c', 'х' | 'χ' => 'x', 'у' | 'ý' | 'ÿ' => 'y',
+        'ј' => 'j', 'ѕ' | '5' => 's', 'ԁ' => 'd', 'ν' => 'v', 'κ' | 'к' => 'k', 'τ' | 'т' | '7' => 't',
+        'ń' | 'ñ' | 'η' => 'n', 'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'υ' => 'u', 'һ' => 'h', 'м' => 'm', 'в' | 'β' => 'b',
+        'ԝ' | 'ω' => 'w', '3' => 'e', '4' => 'a',
         other => other,
-    }).collect();
+    }).collect()
+}
+
+/// Returns (reason, severity, points). Non-Latin domains (Chinese, Arabic, Hindi, Thai, accented Latin…)
+/// are no longer flagged just for being non-Latin: only when they imitate a protected brand.
+fn brand_lookalike(host: &str) -> Option<(String, &'static str, u32)> {
+    let (reg, subs) = registrable_parts(host);
+    let label = if reg.starts_with("xn--") { idna::domain_to_unicode(&reg).0 } else { reg.clone() };
+    let has_cg = label.chars().any(is_cyr_or_greek);
+    let has_latin = label.chars().any(|c| c.is_ascii_alphabetic());
+    if has_cg && has_latin { return Some(("mixes Latin with Cyrillic/Greek letters (look-alike trick)".into(), "high", 50)); }
+    // brand check on the folded name; skeleton also folds 'l'/'1'/'i'
+    let skel = latin_skeleton(&label);
     for brand in PROTECTED_BRANDS {
-        if label == *brand { return None; } // exact brand label = fine
-        let d = levenshtein(&normalized, brand);
-        if d > 0 && d <= 2 && normalized.len() + 2 >= brand.len() {
-            return Some(format!("resembles '{}'", brand));
+        if label == *brand { return None; } // the exact brand name itself
+        let b = latin_skeleton(brand);
+        let d = levenshtein(&skel, &b);
+        if skel == b || (d <= 2 && skel.len() + 2 >= b.len() && d > 0) {
+            return Some((format!("resembles '{}'", brand), "high", 50));
         }
-        if normalized != *brand && normalized.contains(brand) && label != *brand {
-            return Some(format!("embeds brand '{}'", brand));
+        if skel.contains(&b) { return Some((format!("embeds brand '{}'", brand), "high", 50)); }
+    }
+    // brand used as a sub-domain of someone else's site: "binance.com.secure-login.xyz"
+    for sub in &subs {
+        let s2 = latin_skeleton(sub);
+        for brand in PROTECTED_BRANDS {
+            if s2 == latin_skeleton(brand) || s2.contains(&latin_skeleton(brand)) {
+                return Some((format!("'{}' used as a sub-domain of another site", brand), "medium", 25));
+            }
         }
     }
+    if has_cg { return Some(("Cyrillic/Greek domain name - check the address carefully".into(), "medium", 15)); }
     None
 }
 
@@ -262,8 +322,8 @@ fn scan_content(body: &str, host: &str) -> (Vec<CanaryFinding>, u32) {
         }
     }
 
-    if let Some(reason) = brand_lookalike(host) {
-        push("lookalike_domain", "high", reason, 50, &mut findings, &mut score);
+    if let Some((reason, sev, pts)) = brand_lookalike(host) {
+        push("lookalike_domain", sev, reason, pts, &mut findings, &mut score);
     }
 
     (findings, score)
@@ -364,10 +424,10 @@ pub async fn api_canary_scan(req: actix_web::HttpRequest, body: web::Json<serde_
     let (mut findings, mut score) = scan_content(&text, &final_host);
     if let Some(f) = dl { score += if f.severity == "high" { 45 } else { 15 }; findings.push(f); } // AUDIT 2026-11-01
     if final_host != host {
-        if let Some(reason) = brand_lookalike(&host) {
+        if let Some((reason, sev, _)) = brand_lookalike(&host) {
             findings.push(CanaryFinding {
                 code: "redirect_from_lookalike".into(),
-                severity: "high".into(),
+                severity: sev.into(),
                 detail: reason,
             });
             score += 30;
@@ -471,6 +531,34 @@ mod blocklist_tests {
         assert!(!scan_rate_ok(ip, 1030), "11th within a minute refused");
         assert!(scan_rate_ok(ip, 1061), "new window");
         assert!(web_port_ok(443) && web_port_ok(80) && !web_port_ok(8080) && !web_port_ok(6443));
-        assert_eq!(CONTENT_CHECKS.len(), 10, "all content regexes compile");
+        assert_eq!(CONTENT_CHECKS.len(), 11, "all content regexes compile");
+    }
+    #[test]
+    fn intl_seed_prompts_and_domains() {
+        let hit = |t: &str| CONTENT_CHECKS.iter().any(|(re, c, _, _)| *c == "seed_phrase_prompt_intl" && re.is_match(t));
+        for t in ["Introduce tu frase semilla", "Digite sua frase de recuperação", "Entrez votre phrase de récupération",
+                  "Geben Sie Ihre Wiederherstellungsphrase ein", "Inserisci la frase di recupero", "Masukkan frasa pemulihan Anda",
+                  "Kurtarma ifadesi girin", "Nhập cụm từ khôi phục", "请输入助记词", "シードフレーズを入力", "시드 구문을 입력하세요",
+                  "अपना सीड फ्रेज़ दर्ज करें", "أدخل عبارة الاسترداد", "กรอกวลีกู้คืน", "Введіть фразу відновлення", "Weka maneno ya kurejesha"] {
+            assert!(hit(t), "should flag: {}", t);
+        }
+        assert!(!hit("Bienvenido a nuestra tienda"), "normal text");
+        assert!(!hit("Введите сид-фразу"), "Russian intentionally not included");
+        // country domains are now checked
+        assert!(brand_lookalike("secure.blnance.com.br").is_some());
+        assert!(brand_lookalike("kaspa-wallet.co.uk").is_some());
+        assert!(brand_lookalike("kaspa.co.uk").is_none());
+        // non-Latin domains are not flagged just for being non-Latin
+        assert!(brand_lookalike(&idna::domain_to_ascii("中国银行.cn").unwrap()).is_none());
+        assert!(brand_lookalike(&idna::domain_to_ascii("müller.de").unwrap()).is_none());
+        assert!(brand_lookalike(&idna::domain_to_ascii("مثال.com").unwrap()).is_none());
+        // homographs still caught
+        let h = brand_lookalike(&idna::domain_to_ascii("kаspa.com").unwrap()).unwrap(); // Cyrillic а
+        assert_eq!(h.1, "high");
+        assert_eq!(brand_lookalike(&idna::domain_to_ascii("каѕра.com").unwrap()).unwrap().1, "high"); // all-Cyrillic look-alike
+        assert_eq!(brand_lookalike(&idna::domain_to_ascii("kàspa.io").unwrap()).unwrap().1, "high");
+        assert_eq!(brand_lookalike(&idna::domain_to_ascii("пример.укр").unwrap()).unwrap().1, "medium");
+        assert_eq!(brand_lookalike("binance.com.secure-login.xyz").unwrap().1, "medium");
+        assert!(brand_lookalike("google.com").is_none());
     }
 }
