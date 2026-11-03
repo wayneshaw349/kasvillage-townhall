@@ -4461,6 +4461,8 @@ var DICE = [];
 function rollDice(count, faces, wx, wz, cb) {
   var vals = [];
   for (var di = 0; di < count; di++) vals.push(1 + Math.floor(rnd() * faces));
+  /* __KV_V419_GREENFIT: dice land on the green, not over the houses */
+  (function(){ var m=Math.max(Math.abs(wx||0),Math.abs(wz||0)); if(m>5.4){ var k=5.4/m; wx*=k; wz*=k; } })();
   DICE.push({ wx: wx, wz: wz, faces: faces, vals: vals, t0: world.time, cb: cb, fired: false });
   playSound("__step");
   return vals;
@@ -8754,7 +8756,7 @@ if(lastLap[seat] && now-lastLap[seat]<3000) return;   // one rent roll per lap
   (function(){
     var COL={1:"#d94f4f",2:"#4f7fd9",3:"#4fd98a",4:"#d9c14f"};
     var stack=document.createElement("div");
-    stack.style.cssText="position:fixed;left:50%;top:46%;transform:translate(-50%,-50%);z-index:73;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;width:640px;";
+    stack.id="kvshoutstack"; stack.style.cssText="position:fixed;left:50%;top:46%;transform:translate(-50%,-50%);z-index:73;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;width:640px;";
     document.body.appendChild(stack);
 
     function shout(text, sub, col, big){
@@ -8984,7 +8986,7 @@ var lastRev=0; setInterval(function(){ var f=(window.KV_FLAGS&&window.KV_FLAGS()
   ov.style.cssText="position:fixed;inset:0;z-index:90;background:rgba(10,8,6,.18);display:flex;align-items:center;justify-content:center;"; ov.setAttribute("data-kvmodal","1");
   var box=document.createElement("div");
   box.style.cssText="background:#14100c;border:2px solid #caa64c;border-radius:12px;padding:20px 28px;min-width:380px;font:13px/1.8 monospace;color:#f4e4c1;text-align:center;";
-  ov.appendChild(box); document.body.appendChild(ov);
+  ov.appendChild(box); document.body.appendChild(ov); if(window.KV_FIT_GREEN){ try{ window.KV_FIT_GREEN(box); }catch(e){} }
   ["pointerdown","pointerup","keydown","click"].forEach(function(t){ ov.addEventListener(t,function(e){ e.stopPropagation(); }); });
   var rolls={}, pool=[1,2,3,4], round=0;
   // __KV_V186: relay games derive every throw from the revealed seed
@@ -9266,7 +9268,7 @@ var key=[f.turn, (window.KV_MOVES||[]).length, f.phase, f.asked].join("/");
   // ================= DEAL BANNER =================
   (function(){
     var bn=document.createElement("div");
-    bn.style.cssText="position:fixed;left:50%;top:44%;transform:translate(-50%,-50%) scale(.9);z-index:74;display:none;padding:14px 34px;border-radius:12px;text-align:center;font:900 30px Impact,'Arial Black',sans-serif;letter-spacing:3px;color:#12100e;box-shadow:0 10px 40px rgba(0,0,0,.75);transition:transform .18s,opacity .18s;opacity:0;";
+    bn.id="kvdealbn"; bn.style.cssText="position:fixed;left:50%;top:44%;transform:translate(-50%,-50%) scale(.9);z-index:74;display:none;padding:14px 34px;border-radius:12px;text-align:center;font:900 30px Impact,'Arial Black',sans-serif;letter-spacing:3px;color:#12100e;box-shadow:0 10px 40px rgba(0,0,0,.75);transition:transform .18s,opacity .18s;opacity:0;";
     document.body.appendChild(bn);
     var hideT=null;
     window.KV_DEAL=function(ok, headline, detail){
@@ -12868,7 +12870,7 @@ if(window.KV_MOVE){ var __fxB=null;
       var __sw=document.createElement("button"); __sw.textContent="\u21c4 Offer a swap instead"; // KV_SMART_BOTS
       __sw.style.cssText="width:100%;margin-top:8px;padding:7px;background:#1d2a1c;color:#bfe6a8;border:1px solid #4a6a34;border-radius:5px;font:12px monospace;cursor:pointer;";
       __sw.onclick=function(){ ov.remove(); if(window.KV_SWAP_DIALOG) window.KV_SWAP_DIALOG(tile); }; box.appendChild(__sw);
-      ov.appendChild(box); document.body.appendChild(ov);
+      ov.appendChild(box); document.body.appendChild(ov); if(window.KV_FIT_GREEN){ try{ window.KV_FIT_GREEN(box); }catch(e){} }
       refresh();
     };
 
@@ -12896,7 +12898,7 @@ function askHuman(tile,buyer,seller,amt,nm){
         };
         box.appendChild(b);
       });
-      ov.appendChild(box); document.body.appendChild(ov);
+      ov.appendChild(box); document.body.appendChild(ov); if(window.KV_FIT_GREEN){ try{ window.KV_FIT_GREEN(box); }catch(e){} }
 // v129: auto-expire after 20s
 (function(){ var left=20; var btns=box.querySelectorAll("button"); var ref=btns[1]; var iv=setInterval(function(){ if(!document.body.contains(ov)){ clearInterval(iv); return; } left--; if(ref) ref.textContent="Refuse ("+left+")"; if(left<=0){ clearInterval(iv); ov.remove(); window.KV_LOG("P"+seller+"  let the offer lapse  "+amt, COL[seller]); if(window.KV_MOVE) window.KV_MOVE(seller,"lapse:"+tile,amt); } },1000); })();
     }
@@ -13260,7 +13262,7 @@ window.KV_DIST_MULT=function(tile,buyer,seller){
     };
     row.appendChild(send); row.appendChild(cancel);
     box.appendChild(sel); box.appendChild(lab); box.appendChild(sl); box.appendChild(hint); box.appendChild(row);
-    ov.appendChild(box); document.body.appendChild(ov); refresh();
+    ov.appendChild(box); document.body.appendChild(ov); if(window.KV_FIT_GREEN){ try{ window.KV_FIT_GREEN(box); }catch(e){} } refresh();
   };
 })();
 
@@ -13834,7 +13836,7 @@ function resolve(sc, oi, seat, isHuman){
         b.onclick=function(){ ov.remove(); resolve(sc,i,seat,true); };
         col.appendChild(b);
       });
-      ov.appendChild(box); document.body.appendChild(ov);
+      ov.appendChild(box); document.body.appendChild(ov); if(window.KV_FIT_GREEN){ try{ window.KV_FIT_GREEN(box); }catch(e){} }
     }
 
     window.KV_SCN_DEBUG=false;
@@ -14098,14 +14100,14 @@ window.KV_SCN_BUSY=function(){ return !!busy; };
       if(window.KV_DIRECT_PANEL) window.KV_DIRECT_PANEL();
       else if(window.KV_LOG) window.KV_LOG("direct link unavailable in this build","#ff6a4a");
     });
-    ov.appendChild(box); document.body.appendChild(ov);
+    ov.appendChild(box); document.body.appendChild(ov); if(window.KV_FIT_GREEN){ try{ window.KV_FIT_GREEN(box); }catch(e){} }
   })();
 
   // ---- turn banner ----
   (function(){
     var COL2={1:"#d94f4f",2:"#4f7fd9",3:"#4fd98a",4:"#d9c14f"};
     var tb=document.createElement("div");
-    tb.style.cssText="position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:59;padding:5px 22px;border-radius:5px;font:900 15px monospace;letter-spacing:2px;color:#12100e;box-shadow:0 2px 10px rgba(0,0,0,.5);";
+    tb.id="kvturnbn"; tb.style.cssText="position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:59;padding:5px 22px;border-radius:5px;font:900 15px monospace;letter-spacing:2px;color:#12100e;box-shadow:0 2px 10px rgba(0,0,0,.5);";
     document.body.appendChild(tb);
     var last=null;
     setInterval(function(){
@@ -16662,4 +16664,53 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
   try{ S("seat_t",0); }catch(e){}
   var W=function(k,v){ var r=S.apply(this,arguments); if(k==="seat"){ try{ var w=window.KV_WORLD; S("seat_t", (w&&w.time)||0); }catch(e){} } return r; };
   W.__kvPace=1; window.KV_SETSTATE=W; },200); })();
+</script>
+<script>
+// ---- __KV_V419_GREENFIT_ENGINE: pop-ups, banners, dice and the ROLL button live on the green ----
+// centre of the board, so the houses around the ring stay visible. Cosmetic only. If the board
+// cannot be projected (menus, odd camera), everything keeps its original screen position.
+(function(){
+  function rect(){
+    try{
+      var cv=document.querySelector("canvas"); if(!cv||!window.KV_PROJECT) return null;
+      var r=cv.getBoundingClientRect(); if(!r.width||!cv.width) return null;
+      var sx=r.width/cv.width, sy=r.height/cv.height, xs=[], ys=[];
+      var pts=[[-6.2,-6.2],[6.2,-6.2],[-6.2,6.2],[6.2,6.2],[0,0]];
+      for(var i=0;i<pts.length;i++){ var q=window.KV_PROJECT({x:pts[i][0],y:0,z:pts[i][1]}); if(!q) return null;
+        xs.push(r.left+q.x*sx); ys.push(r.top+q.y*sy); }
+      var L=Math.max(6,Math.min.apply(0,xs)), R=Math.min(innerWidth-6,Math.max.apply(0,xs));
+      var T=Math.max(6,Math.min.apply(0,ys)), B=Math.min(innerHeight-6,Math.max.apply(0,ys));
+      if(R-L<150||B-T<110) return null;                        // too small to be useful - keep old placement
+      return { l:L, t:T, w:R-L, h:B-T, cx:(L+R)/2, cy:(T+B)/2 };
+    }catch(e){ return null; }
+  }
+  window.KV_GREEN_RECT=rect;
+  function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+  window.KV_FIT_GREEN=function(box){
+    var g=rect(); if(!g||!box) return;
+    box.style.position="fixed"; box.style.left=g.cx+"px"; box.style.top=g.cy+"px"; box.style.margin="0";
+    box.style.maxWidth=Math.round(g.w*0.94)+"px"; box.style.maxHeight=Math.round(g.h*0.96)+"px"; box.style.overflowY="auto";
+    var k=1; try{ var bw=box.offsetWidth||0, bh=box.offsetHeight||0; k=clamp(Math.min(g.w*0.94/(bw||1), g.h*0.96/(bh||1)),0.55,1); }catch(e){}
+    box.style.transform="translate(-50%,-50%)"+(k<1?" scale("+k+")":"");
+  };
+  setInterval(function(){
+    var g=rect(); if(!g) return;
+    var st=document.getElementById("kvshoutstack");
+    if(st){ st.style.left=g.cx+"px"; st.style.top=g.cy+"px"; st.style.width=Math.min(640,Math.round(g.w*0.94))+"px";
+      st.style.zoom=clamp(g.w*0.94/640,0.5,1); }
+    var bn=document.getElementById("kvdealbn");
+    if(bn){ bn.style.left=g.cx+"px"; bn.style.top=g.cy+"px"; bn.style.maxWidth=Math.round(g.w*0.92)+"px";
+      bn.style.zoom=clamp(g.w/560,0.55,1); }
+    var tb=document.getElementById("kvturnbn");
+    if(tb){ tb.style.left=g.cx+"px"; tb.style.top=Math.round(g.t+4)+"px"; tb.style.zoom=clamp(g.w/430,0.6,1); }
+    var big=document.getElementById("kvbigroll");
+    if(big && big.style.display!=="none"){
+      var saved=null; try{ saved=JSON.parse(localStorage.getItem("kv_roll_pos")||"null"); }catch(e){}
+      if(!saved){ var w=big.offsetWidth||120, h=big.offsetHeight||58;       // dragged -> their spot wins
+        big.style.setProperty("left",Math.round(g.l+g.w-w-8)+"px","important");
+        big.style.setProperty("top",Math.round(g.t+g.h-h-8)+"px","important");
+        big.style.setProperty("right","auto","important"); big.style.setProperty("bottom","auto","important"); }
+    }
+  },300);
+})();
 </script>
