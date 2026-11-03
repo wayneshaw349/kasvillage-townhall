@@ -18,7 +18,7 @@ const DRAG = `<script>
   function el(){ return document.getElementById("kvbigroll"); }
   function put(b,x,y){ var w=b.offsetWidth||120, h=b.offsetHeight||58; x=Math.max(4,Math.min(innerWidth-w-4,x)); y=Math.max(4,Math.min(innerHeight-h-4,y));
     b.style.setProperty("left",x+"px","important"); b.style.setProperty("top",y+"px","important"); b.style.setProperty("right","auto","important"); b.style.setProperty("bottom","auto","important"); return [x,y]; }
-  function restore(){ var b=el(); if(!b) return false; b.style.touchAction="none";
+  function restore(){ var b=el(); if(!b) return false; b.style.setProperty("touch-action","none");
     try{ var p=JSON.parse(localStorage.getItem(KEY)||"null"); if(p&&isFinite(p[0])&&isFinite(p[1])) put(b,p[0],p[1]); }catch(e){}
     if(!document.getElementById("kvroll_grip")){ var g=document.createElement("span"); g.id="kvroll_grip"; g.textContent=" \\u2807"; g.style.opacity=".6"; g.title="drag to move"; b.appendChild(g); }
     return true; }
