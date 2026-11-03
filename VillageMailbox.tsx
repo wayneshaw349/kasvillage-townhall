@@ -661,6 +661,13 @@ const badgeStyles = StyleSheet.create({
 // DApp Card
 function DAppCard({ item, onPress }: { item: DAppEntry; onPress: () => void }) {
   const boardColors: Record<Board, string> = { Elite: COLORS.purple100, Main: COLORS.green100, Incubator: COLORS.amber100 };
+  // KV_DAPP_STAGES: CHECKING (cannot open) -> VERIFIED (shown ~1.5 s) -> DOWNLOAD
+  const _chk = !!(item as any).checking; const _ver = !!(item.townhall && item.townhall.verified);
+  const [_flash, _setFlash] = useState(false); const _was = React.useRef(_chk);
+  useEffect(() => { if (_was.current && !_chk && _ver) { _setFlash(true); const t = setTimeout(() => _setFlash(false), 1500); _was.current = _chk; return () => clearTimeout(t); } _was.current = _chk; }, [_chk, _ver]);
+  const _act = _chk ? { label: '\u23F3 CHECKING\u2026', onPress: () => {}, disabled: true }
+    : _flash ? { label: '\u2713 VERIFIED', onPress: () => {}, disabled: true, bg: '#15803d', fg: '#ffffff' }
+    : { label: _ver ? '\u2B07 DOWNLOAD' : '\u26A0 DOWNLOAD (UNVERIFIED)', onPress };
   
   const col = kvEnvColors(item, item.name || item.id);
   return (
@@ -668,7 +675,7 @@ function DAppCard({ item, onPress }: { item: DAppEntry; onPress: () => void }) {
       verified={!!(item.townhall && item.townhall.verified)} checking={!!(item as any).checking} postedAt={item.createdAt}
       lines={[(item.description || item.name) + ' \u00B7 ' + (require('./kv_age').normAge((item as any).record && (item as any).record.d && (item as any).record.d.age) || 'unrated 17+'), (item.templateVerified ? 'SDK ✓ · ' : '') + 'sandboxed', item.board + ' board']}
       info={[((item as any).publisherXp != null ? '⭐ ' + (item as any).publisherXp + ' XP' : ''), (item.xpCommitment ? '⛓ pledge in place' : ''), '\u{1F552} ' + (kvAgo(item.createdAt) || 'new').toLowerCase()]}
-      action={{ label: 'OPEN', onPress }} onPress={onPress} />
+      action={_act} onPress={_chk || _flash ? undefined : onPress} />
   );
 }
 

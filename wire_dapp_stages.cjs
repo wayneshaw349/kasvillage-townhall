@@ -1,0 +1,9 @@
+// wire_dapp_stages.cjs — KV_DAPP_STAGES: dapp card button goes CHECKING (locked) -> VERIFIED -> DOWNLOAD
+const fs = require('fs'); const F = 'VillageMailbox.tsx'; let s = fs.readFileSync(F, 'utf8');
+if (s.includes('KV_DAPP_STAGES')) { console.log('already wired'); process.exit(0); }
+const one = (a, b) => { const c = s.split(a).length - 1; if (c !== 1) throw new Error('anchor x' + c + ': ' + a.slice(0, 70)); s = s.replace(a, b); };
+one("function DAppCard({ item, onPress }: { item: DAppEntry; onPress: () => void }) {\n  const boardColors: Record<Board, string> = { Elite: COLORS.purple100, Main: COLORS.green100, Incubator: COLORS.amber100 };\n  ",
+"function DAppCard({ item, onPress }: { item: DAppEntry; onPress: () => void }) {\n  const boardColors: Record<Board, string> = { Elite: COLORS.purple100, Main: COLORS.green100, Incubator: COLORS.amber100 };\n  // KV_DAPP_STAGES: CHECKING (cannot open) -> VERIFIED (shown ~1.5 s) -> DOWNLOAD\n  const _chk = !!(item as any).checking; const _ver = !!(item.townhall && item.townhall.verified);\n  const [_flash, _setFlash] = useState(false); const _was = React.useRef(_chk);\n  useEffect(() => { if (_was.current && !_chk && _ver) { _setFlash(true); const t = setTimeout(() => _setFlash(false), 1500); _was.current = _chk; return () => clearTimeout(t); } _was.current = _chk; }, [_chk, _ver]);\n  const _act = _chk ? { label: '\\u23F3 CHECKING\\u2026', onPress: () => {}, disabled: true }\n    : _flash ? { label: '\\u2713 VERIFIED', onPress: () => {}, disabled: true, bg: '#15803d', fg: '#ffffff' }\n    : { label: _ver ? '\\u2B07 DOWNLOAD' : '\\u26A0 DOWNLOAD (UNVERIFIED)', onPress };\n  ");
+one("      action={{ label: 'OPEN', onPress }} onPress={onPress} />\n  );\n}\n\n// KV_STORE_TIP_SHEET",
+"      action={_act} onPress={_chk || _flash ? undefined : onPress} />\n  );\n}\n\n// KV_STORE_TIP_SHEET");
+fs.writeFileSync(F, s); console.log('wired KV_DAPP_STAGES');
