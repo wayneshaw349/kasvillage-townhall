@@ -156,3 +156,29 @@ export async function tipOperators(params: {
     return { success: false, error: String(e?.message || e) };
   }
 }
+
+// KV_TIP_CREW 2026-11-02: operators who PASS the phone re-check right now, one per payout address.
+// Every archive operator keeps all KasVillage registry history, so this list is "who archives this store/dapp".
+// Cached 10 min per network so storefronts and game cards share one check.
+export async function verifiedOperatorPayouts(net: string = NET()): Promise<string[]> {
+  const g: any = globalThis as any; g.__kvOpsCache = g.__kvOpsCache || {};
+  const c = g.__kvOpsCache[net]; if (c && Date.now() - c.at < 10 * 60 * 1000) return c.list;
+  if (c && c.pending) return c.pending;
+  const pending = (async () => {
+    try {
+      const audit = await fetchAudit(net);
+      const byPay = new Map<string, NodeAuditEntry[]>();
+      for (const n of audit) { if (!n.audited || !n.pass || !n.payout) continue; const k = String(n.payout); const l = byPay.get(k); if (l) l.push(n); else byPay.set(k, [n]); }
+      if (!byPay.size) return [];
+      const ctx = await tipContext(net);
+      const out: string[] = [];
+      for (const [pay, l] of byPay) { for (const e of l) { let ok = false; try { ok = await phoneRecheck(ctx, e); } catch {} if (ok) { out.push(pay); break; } } }
+      return out;
+    } catch { return []; }
+  })();
+  g.__kvOpsCache[net] = { at: 0, list: [], pending };
+  const list = await pending;
+  g.__kvOpsCache[net] = { at: Date.now(), list };
+  return list;
+}
+export const TIP_FLOOR_SOMPI = MIN_TIP_SOMPI;

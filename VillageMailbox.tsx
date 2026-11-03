@@ -14,6 +14,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { KvTipCrew } from './kv_tip_crew'; // KV_TIP_CREW
 import OnChainPageView from './OnChainPageView';
 import SceneGameEngine from './SceneGameEngine';
 import {
@@ -545,6 +546,7 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
                 ))}
               </View>
             ) : null}
+            {item.quad ? <KvTipCrew /* KV_TIP_CREW */ id={'game:' + String(item.quad.head || '')} name={String(item.name || item.quad.game || 'game')} owner={item.quad.tip_addr || null} keepers={Array.isArray(item.keepers) ? item.keepers : []} compact /> : null}
           </View>
         );
       })() : null}
@@ -2089,6 +2091,7 @@ export default function VillageMailbox() {
                         ))}
                       </View>
                     ) : null}
+                    <KvTipCrew /* KV_TIP_CREW */ id={'store:' + String((storeView.entry as any).arweaveTx || (storeView.entry as any).id || '')} name={String((storeView.entry as any).name || (storeView.entry as any).storeName || 'store')} owner={(storeView.entry as any)?.coords?.tip_addr || null} keepers={((storeView.entry as any).keepers || []) as string[]} />
                     {(storeView.entry as any)?.coords?.tip_addr ? ( /* KV_STORE_TIP_SHEET: tip moved off the envelope */
                       <TouchableOpacity onPress={() => kvTipStore(storeView.entry)} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#7c3aed', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
                         <Text style={{ color: '#7c3aed', fontSize: rs.font(11), fontWeight: 'bold' }}>{'\u{1F49C} Tip this store (1 KAS)'}</Text>
@@ -2154,6 +2157,7 @@ export default function VillageMailbox() {
                         ))}
                       </View>
                     ) : null}
+                    <KvTipCrew /* KV_TIP_CREW */ id={'store:' + String((storeView.entry as any).arweaveTx || (storeView.entry as any).id || '')} name={String((storeView.entry as any).name || (storeView.entry as any).storeName || 'store')} owner={(storeView.entry as any)?.coords?.tip_addr || null} keepers={((storeView.entry as any).keepers || []) as string[]} compact />
                     {(storeView.entry as any)?.coords?.tip_addr ? ( /* KV_STORE_TIP_SHEET: tip moved off the envelope */
                       <TouchableOpacity onPress={() => kvTipStore(storeView.entry)} style={{ marginTop: rs.s(8), borderWidth: 1, borderColor: '#7c3aed', borderRadius: rs.s(10), paddingVertical: rs.s(8), alignItems: 'center' }}>
                         <Text style={{ color: '#7c3aed', fontSize: rs.font(11), fontWeight: 'bold' }}>{'\u{1F49C} Tip this store (1 KAS)'}</Text>
