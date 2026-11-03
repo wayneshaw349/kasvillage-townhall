@@ -5,7 +5,9 @@
 // record on chain. The record carries ONLY { currency, discount (basis points),
 // category, time } - never the item name, store, amounts, wallet balance or place.
 //
-//   record : { k:'pp', v:1, o:<pubkey>, t, d:{ ccy:'GBP', bp:1800, cat:'food' } }
+//   record : { k:'pp', v:1, o:<pubkey>, t, d:{ ccy:'GBP', bp:1800, cat:'food', ik:'<16 hex>', u:<USD cents> } }
+//   ik = hashed code of the village listing (same listing = same code in every country),
+//   u  = the best OUTSIDE price found, in US cents - used for the cross-country (Big-Mac style) view
 //   where  : registryAddress('pp-index')  (same rendezvous trick as the registries)
 //   cost   : REPOST_SOMPI (0.2 KAS) dust + fee - spam has a price
 //
@@ -31,6 +33,8 @@ export interface PpIndex {
   avg: number;          // mean of currency medians (discount, -0.9..0.9)
   perCcy: { ccy: string; n: number; med: number }[];
   perCat: { cat: string; n: number; med: number }[];
+  cross: { ccy: string; level: number; items: number }[]; // KV_PP_CROSS: price level vs other countries, same items, in USD (1 = average)
+  crossItems: number;
   posters: number;      // qualified posters counted
   unverified: number;   // records skipped because the gate could not be checked in budget
   at: number;
@@ -56,8 +60,36 @@ export async function ppSharePref(): Promise<'ask' | 'always' | 'never'> {
 }
 export async function ppSetSharePref(v: 'always' | 'never'): Promise<void> { try { await AsyncStorage.setItem(SHARE_PREF, v === 'always' ? '1' : '0'); } catch {} }
 
-/** Post one check to the index. d = discount (-0.9..0.9), cat from PP_CATS. */
-export async function ppShare(ccy: string, d: number, cat: PpCat): Promise<{ error?: string; txId?: string }> {
+/** Same listing -> same code everywhere (name + village KAS price). A hash, not the name. */
+export function ppItemKey(name: string, kas: number): string {
+  const { sha256 } = require('@noble/hashes/sha256'); const { utf8ToBytes } = require('@noble/hashes/utils');
+  const norm = String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return bytesToHex(sha256(utf8ToBytes('KV_ITEM|' + norm + '|' + String(Number(kas) || 0)))).slice(0, 16);
+}
+
+/** KV_PP_CROSS: Big-Mac style. For items checked in 2+ currencies, each currency's USD price vs the item's
+ *  cross-country median; averaged over items. level 0.7 = the same goods cost 30% less there (in USD). */
+export function crossLevels(rows: { ccy: string; ik: string; usd: number }[]): { cross: { ccy: string; level: number; items: number }[]; crossItems: number } {
+  const byItem: Record<string, Record<string, number[]>> = {};
+  for (const r of rows) {
+    if (!r.ik || !(r.usd > 0)) continue;
+    const m = (byItem[r.ik] = byItem[r.ik] || {});
+    (m[r.ccy] = m[r.ccy] || []).push(r.usd);
+  }
+  const acc: Record<string, number[]> = {}; let items = 0;
+  for (const ik of Object.keys(byItem)) {
+    const per = Object.keys(byItem[ik]).map((c) => ({ c, v: median(byItem[ik][c]) }));
+    if (per.length < 2) continue;
+    items++;
+    const base = median(per.map((p) => p.v)); if (!(base > 0)) continue;
+    for (const p of per) (acc[p.c] = acc[p.c] || []).push(p.v / base);
+  }
+  const cross = Object.keys(acc).map((c) => ({ ccy: c, level: acc[c].reduce((a, b) => a + b, 0) / acc[c].length, items: acc[c].length })).sort((a, b) => a.level - b.level);
+  return { cross, crossItems: items };
+}
+
+/** Post one check to the index. d = discount (-0.9..0.9), cat from PP_CATS; ik/usd feed the cross-country view. */
+export async function ppShare(ccy: string, d: number, cat: PpCat, ik?: string, usd?: number): Promise<{ error?: string; txId?: string }> {
   try { if (require('./kv_tutorial').kvIsTutorial()) return { error: 'Sharing needs Real mode.' }; } catch {}
   const bp = Math.round(Math.max(-0.9, Math.min(0.9, Number(d))) * 10000);
   if (!isFinite(bp)) return { error: 'Bad value.' };
@@ -67,7 +99,10 @@ export async function ppShare(ccy: string, d: number, cat: PpCat): Promise<{ err
   const { signRecord, buildPayloadHex } = require('./kaspa_payload');
   const { registryAddress, REPOST_SOMPI } = require('./payload_publish');
   const cat2: PpCat = (PP_CATS as readonly string[]).includes(cat) ? cat : 'other';
-  const rec = signRecord({ v: 1, k: 'pp', t: Date.now(), o: owner.pubkeyHex, d: { ccy: c, bp, cat: cat2 } } as any, owner.privateKeyHex);
+  const dd: any = { ccy: c, bp, cat: cat2 };
+  const cents = Math.round(Number(usd || 0) * 100);
+  if (/^[0-9a-f]{16}$/.test(String(ik || '')) && cents > 0 && cents < 1e11) { dd.ik = ik; dd.u = cents; } // KV_PP_CROSS
+  const rec = signRecord({ v: 1, k: 'pp', t: Date.now(), o: owner.pubkeyHex, d: dd } as any, owner.privateKeyHex);
   const res = await require('./kaspa_rest_tx').sendKaspaViaRest({
     senderAddress: owner.address,
     recipientAddress: registryAddress('pp-index', owner.network),
@@ -133,11 +168,13 @@ export async function ppFetchIndex(budgetMs = 15000): Promise<PpIndex> {
   }
   const perCcy = Object.keys(byCcy).map((c) => ({ ccy: c, n: byCcy[c].length, med: median(byCcy[c]) })).sort((a, b) => b.n - a.n);
   const perCat = Object.keys(byCat).map((c) => ({ cat: c, n: byCat[c].length, med: median(byCat[c]) })).sort((a, b) => b.n - a.n);
+  const cx = crossLevels(counted.filter((r) => /^[0-9a-f]{16}$/.test(String(r.d.ik || '')) && Number(r.d.u) > 0 && Number(r.d.u) < 1e11)
+    .map((r) => ({ ccy: String(r.d.ccy).toUpperCase(), ik: String(r.d.ik), usd: Number(r.d.u) / 100 })));
   const idx: PpIndex = {
     n: counted.length,
     countries: perCcy.length,
     avg: perCcy.length ? perCcy.reduce((p, c) => p + c.med, 0) / perCcy.length : 0,
-    perCcy, perCat, posters: posters.size, unverified, at: Date.now(),
+    perCcy, perCat, posters: posters.size, unverified, at: Date.now(), cross: cx.cross, crossItems: cx.crossItems,
   };
   g.__kvPpIdx = idx;
   return idx;

@@ -81,6 +81,8 @@ export function comparePP(all: PriceCompare[], ccy: string) {
   return {
     national: { ccy, n: nat.length, avg: avg(nat), top: nat.slice(0, 3) },
     global: { n: fresh.length, countries: codes.length, avg: global },
+    // KV_PP_CROSS: your own checks of the SAME listing in 2+ currencies (Big-Mac style, USD terms)
+    cross: (() => { try { const PP = require('./kv_pp_index'); return PP.crossLevels(fresh.filter((c) => Number(c.dUsd) > 0).map((c) => ({ ccy: compareCcy(c), ik: PP.ppItemKey(c.name, c.kas), usd: Number(c.dUsd) }))); } catch { return { cross: [], crossItems: 0 }; } })(),
     perCcy: codes.map((k) => ({ ccy: k, n: byCcy[k].length, avg: avg(byCcy[k]) })).sort((a, b) => b.n - a.n),
   };
 }
@@ -113,11 +115,11 @@ export function KvCompareHost() {
     try {
       const PP = require('./kv_pp_index');
       const pref = await PP.ppSharePref();
-      const fire = () => PP.ppShare(ccy.code, dc, cat).then((r: any) => { if (r?.error) console.warn('[PP] share failed:', r.error); else console.log('[PP] shared', r.txId); }).catch(() => {});
+      const fire = () => PP.ppShare(ccy.code, dc, cat, PP.ppItemKey(ask.name, ask.kas), rate ? D * rate : 0).then((r: any) => { if (r?.error) console.warn('[PP] share failed:', r.error); else console.log('[PP] shared', r.txId); }).catch(() => {});
       if (pref === 'always') { fire(); Alert.alert('Saved', 'Added to your Stats and shared with the village index (' + ccy.code + ', ' + cat + ').'); return; }
       if (pref === 'ask') {
         Alert.alert('Share with the village index?',
-          'Helps everyone see Kaspa\'s real purchasing power. Shares ONLY: currency (' + ccy.code + '), the % difference, and the category (' + cat + ') - never the item, store or your balance. Costs ~0.2 KAS. Counts if you have a 10+ KAS pledge or a settled trade.',
+          'Helps everyone see Kaspa\'s real purchasing power. Shares ONLY: currency (' + ccy.code + '), the % difference, the category (' + cat + '), the best outside price in USD, and a hashed code of this village listing (so the same item can be compared between countries) - never the item name, store or your balance. Costs ~0.2 KAS. Counts if you have a 10+ KAS pledge or a settled trade.',
           [{ text: 'Never', onPress: () => PP.ppSetSharePref('never') },
            { text: 'Not now', style: 'cancel' },
            { text: 'Always share', onPress: () => { PP.ppSetSharePref('always'); fire(); } }]);

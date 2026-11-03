@@ -110,7 +110,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
         const all: any[] = await CM.loadCompares();
         const c = await FX.getCcy();
         const pp = CM.comparePP(all, c.code);
-        setCmp({ n: pp.national.n, avg: pp.national.avg, top: pp.national.top, ccy: c.code, sym: c.sym, gN: pp.global.n, gAvg: pp.global.avg, gCountries: pp.global.countries, per: pp.perCcy });
+        setCmp({ n: pp.national.n, avg: pp.national.avg, top: pp.national.top, ccy: c.code, sym: c.sym, gN: pp.global.n, gAvg: pp.global.avg, gCountries: pp.global.countries, per: pp.perCcy, cross: pp.cross } as any);
       } catch { setCmp({ n: 0, avg: 0, top: [], ccy: 'USD', sym: '$', gN: 0, gAvg: 0, gCountries: 0, per: [] }); }
       try { require('./kv_pp_index').ppFetchIndex().then((v: any) => setVidx(v)).catch(() => {}); } catch {} // KV_PP_INDEX: network-wide, budgeted + cached
       // KV_KPP: measure the village's live Kaspa discounts (coupons = dual pricing in the wild)
@@ -356,6 +356,21 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                     <Text style={{ color: '#6366f1', fontSize: 9, marginTop: 3 }}>Signed records on chain, median per currency, counted only from posters with a 10+ KAS pledge or a settled trade. Computed on this phone.</Text>
                   </View>
                 ) : null}
+                {(() => { // KV_PP_CROSS: Big-Mac style - the same village items priced outside in different countries (USD terms)
+                  const net = vidx && vidx.crossItems > 0 ? { c: vidx.cross, n: vidx.crossItems, src: 'village index' } : null;
+                  const mine = cmp && (cmp as any).cross && (cmp as any).cross.crossItems > 0 ? { c: (cmp as any).cross.cross, n: (cmp as any).cross.crossItems, src: 'your checks' } : null;
+                  const x = net || mine;
+                  if (!x) return <Text style={{ color: C.mut, fontSize: 10, marginTop: 6 }}>🍔 Cross-country view appears once the same village item is price-checked in two or more currencies.</Text>;
+                  return (
+                    <View style={{ backgroundColor: '#fef3c7', borderRadius: 6, padding: 8, marginTop: 8 }}>
+                      <Text style={{ color: '#78350f', fontSize: 11, fontWeight: 'bold' }}>🍔 CROSS-COUNTRY (Big-Mac style · {x.src} · {x.n} shared item{x.n === 1 ? '' : 's'})</Text>
+                      <Text style={{ color: '#78350f', fontSize: 11, marginTop: 3, fontFamily: 'monospace' }}>
+                        {x.c.slice(0, 8).map((r: any) => r.ccy.padEnd(4) + ' ' + (r.level <= 1 ? Math.round((1 - r.level) * 100) + '% cheaper' : Math.round((r.level - 1) * 100) + '% dearer') + ' than the average country (' + r.items + ')').join('\n')}
+                      </Text>
+                      <Text style={{ color: '#92400e', fontSize: 9, marginTop: 3 }}>Same item, best outside price converted to USD through the KAS price in each currency. Cheaper = that currency buys more there (it looks undervalued, Big-Mac style).</Text>
+                    </View>
+                  );
+                })()}
                 {cn === 0 ? <Text style={{ color: C.mut, fontSize: 10, marginTop: 4 }}>Tip: tap 🔎 Compare prices on any village item, then enter the best price you found - your checks replace the estimate (and can be shared with the village index).</Text> : null}
 
               </View>
