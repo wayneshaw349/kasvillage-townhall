@@ -167,6 +167,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
       <Text style={st.b}>A TRANSFERABLE paper note, like cash: whoever scans it chooses where the KAS goes. Paid from your hot wallet. Until you tap Finish you can reclaim it.</Text>
       <Text style={st.l}>Amount (KAS)</Text>
       <TextInput style={st.in} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="e.g. 20" placeholderTextColor="#78716C" />
+      <KvCapLine />
       <TouchableOpacity style={[st.pri, busy && { opacity: 0.5 }]} disabled={busy} onPress={make}>{busy ? <ActivityIndicator color="#000" /> : <Text style={st.priT}>Make note</Text>}</TouchableOpacity>
       <TouchableOpacity style={st.sec} onPress={() => setMode('home')}><Text style={st.secT}>Back</Text></TouchableOpacity>
     </ScrollView>
@@ -262,3 +263,15 @@ const st = StyleSheet.create({
 });
 
 export default CashNoteScreen;
+
+// KV_CASH_CAP: shows the per-note limit under the amount box
+function KvCapLine() {
+  const [t, setT] = React.useState('');
+  React.useEffect(() => { let live = true; require('./kv_cash_note').cnMaxSompi().then((c: any) => {
+    if (!live) return;
+    const cap = require('./kv_cash_note').CN_CAP_USD;
+    if (c.max !== null) setT('Limit: $' + cap + ' per note (about ' + (Number(c.max) / 1e8).toFixed(2) + ' KAS' + (c.stale ? ', last known price' : '') + ')');
+    else if (require('./kv_savings_qr').sqActiveNet() === 'mainnet') setT('Limit: $' + cap + ' per note (price unavailable - connect to the internet to make a note)');
+  }).catch(() => {}); return () => { live = false; }; }, []);
+  return t ? <Text style={{ color: '#a8a29e', fontSize: 12, marginTop: 4, marginBottom: 8 }}>{t}</Text> : null;
+}

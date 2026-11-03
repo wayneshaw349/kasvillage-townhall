@@ -65,6 +65,21 @@ export function cnArchiveList() { return kvArchiveList(ARCHIVE_KEY); }
 /** Sweep any coins sitting on archived (reclaimed / never funded) note keys back to the hot wallet. */
 export function sweepArchive() { return withOp({ checked: 0, swept: 0, pending: 0, skipped: 0, errors: ['Busy - try again in a moment.'] }, () => kvArchiveSweep(ARCHIVE_KEY)); }
 
+// KV_CASH_CAP: at most US$100 worth of KAS per note, checked on this phone only.
+export const CN_CAP_USD = 100;
+const PX_KEY = 'kv_cn_last_usd_px';
+/** Largest note allowed right now, in sompi. null = no price available (then notes are refused on mainnet). */
+export async function cnMaxSompi(): Promise<{ max: bigint | null; usdPerKas: number; stale?: boolean }> {
+  if (sqActiveNet() !== 'mainnet') return { max: null, usdPerKas: 0 }; // test coins: no cap
+  const AS = require('@react-native-async-storage/async-storage').default;
+  let px = 0; try { px = Number(await require('./kv_fx').kasPriceIn('USD')) || 0; } catch {}
+  let stale = false;
+  if (px > 0) { try { await AS.setItem(PX_KEY, JSON.stringify({ v: px, at: Date.now() })); } catch {} }
+  else { try { const o = JSON.parse((await AS.getItem(PX_KEY)) || 'null'); if (o && o.v > 0 && Date.now() - o.at < 7 * 86400000) { px = o.v; stale = true; } } catch {} }
+  if (!(px > 0)) return { max: null, usdPerKas: 0 };
+  return { max: BigInt(Math.floor((CN_CAP_USD / px) * 1e8)), usdPerKas: px, stale };
+}
+
 /** Make a note: key saved first, then the hot wallet pays it (Face ID + preview). */
 export function cnCreate(sompi: bigint): Promise<{ error?: string }> {
   return withOp({ error: 'A note is already being made - wait a moment.' }, () => createOnce(sompi));
@@ -72,6 +87,11 @@ export function cnCreate(sompi: bigint): Promise<{ error?: string }> {
 async function createOnce(sompi: bigint): Promise<{ error?: string }> {
   if (sqTutorial()) return { error: 'Cash notes need Real mode.' };
   if (sompi < CN_MIN_SOMPI) return { error: 'A cash note must hold at least 0.1 KAS.' };
+  if (sqActiveNet() === 'mainnet') { // KV_CASH_CAP
+    const cap = await cnMaxSompi();
+    if (cap.max === null) return { error: 'Could not get the KAS price to check the $' + CN_CAP_USD + ' note limit. Connect to the internet and try again. Nothing was sent.' };
+    if (sompi > cap.max) return { error: 'A cash note can hold at most $' + CN_CAP_USD + ' worth of KAS (about ' + (Number(cap.max) / 1e8).toFixed(2) + ' KAS right now). Nothing was sent.' };
+  }
   if (await cnLoadSession()) return { error: 'Finish (or reclaim) the note already in progress first.' };
   const net = sqActiveNet();
   const hot = await sqHotAddress(); const hotXonly = sqXonlyFromAddress(hot);
