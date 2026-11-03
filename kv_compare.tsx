@@ -2,100 +2,142 @@
 // sorted lowest price first, in the phone's OWN browser (never inside KasVillage). No key, no relay,
 // nothing sent to any server of ours. Google picks and rates the stores, not KasVillage.
 //
-// KV_COMPARE_PP: when the person comes back to the app, it asks (optional) for the best dollar price
-// they found. That pair - village Kaspa price vs best outside dollar price for the SAME item - is a
-// real, first-hand measurement of Kaspa purchasing power. Kept only on this phone
-// (AsyncStorage 'kv_price_compares'); the Stats panel averages it.
+// KV_COMPARE_PP: when the person comes back to the app, it asks (optional) for the best price they
+// found, in THEIR currency (KV_FX: phone's region by default, changeable). That pair - village Kaspa
+// price vs best outside price for the SAME item, same currency - is a first-hand measurement of Kaspa
+// purchasing power. National = checks in your currency; global = all checks (a ratio, so currencies mix).
+// Kept only on this phone (AsyncStorage 'kv_price_compares'); the Stats panel averages it.
 import React, { useEffect, useState } from 'react';
-import { Alert, AppState, Linking, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, Linking, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CURRENCIES, Ccy, ccyOf, getCcy, setCcy, kasPriceIn, parseMoney, fmtMoney } from './kv_fx';
 
 export const COMPARE_KEY = 'kv_price_compares';
-export interface PriceCompare { name: string; kas: number; usdPerKas: number; kUsd: number; dUsd: number; d: number; ts: number; }
+// ccy/pxPerKas/kLocal/dLocal are new (KV_FX). Old rows have only the usd fields and count as USD.
+export interface PriceCompare {
+  name: string; kas: number; usdPerKas: number; kUsd: number; dUsd: number; d: number; ts: number;
+  ccy?: string; pxPerKas?: number; kLocal?: number; dLocal?: number;
+}
+export const compareCcy = (c: PriceCompare): string => (c.ccy ? String(c.ccy) : 'USD');
 
 type Ask = { name: string; kas: number };
-let _listener: ((a: Ask) => void) | null = null;
+const _listeners = new Set<(a: Ask) => void>(); // AUDIT 2026-11-01: one per mounted host, not a single global
 
 export function kvComparePrices(itemName: string, kaspaPrice?: number): void {
   const q = Array.from(String(itemName || '').replace(/[\u0000-\u001f]/g, ' ').trim()).slice(0, 100).join('').trim(); // AUDIT 2026-11-01: code points, never split a surrogate pair
   if (!q) return;
   const _k = Number(kaspaPrice || 0); const kas = isFinite(_k) && _k > 0 ? _k : 0; // AUDIT 2026-11-01
-  let url = '';
-  try { url = 'https://www.google.com/search?tbm=shop&tbs=p_ord:p&q=' + encodeURIComponent(q); } catch { return; } // AUDIT 2026-11-01: lone surrogate throws URIError
-  Alert.alert('Compare prices',
-    `Search Google Shopping for "${q}", lowest price first?\n\nOpens in your phone's browser. Google chooses and rates the stores - check store ratings, and paste any unfamiliar store into TownHall > Check a link first.`,
-    [{ text: 'Cancel', style: 'cancel' },
-     { text: 'Open', onPress: () => {
-        Linking.openURL(url).then(() => {
-          if (!(kas > 0)) return;
-          // ask once, when the person comes back to the app
-          let left = false;
-          const sub = AppState.addEventListener('change', (st) => {
-            if (st !== 'active') { left = true; return; }
-            if (!left) return;
-            sub.remove();
-            if (_listener) _listener({ name: q, kas });
-          });
-          setTimeout(() => { try { sub.remove(); } catch {} }, 30 * 60 * 1000);
-        }).catch(() => Alert.alert('Could not open', 'No browser accepted this link.'));
-     } }]);
+  (async () => {
+    const c = await getCcy();
+    let shop = '', web = '';
+    try {
+      const e = encodeURIComponent(q); // AUDIT 2026-11-01: lone surrogate throws URIError
+      shop = 'https://www.google.com/search?tbm=shop&tbs=p_ord:p&gl=' + c.gl + '&q=' + e;
+      web = 'https://www.google.com/search?gl=' + c.gl + '&q=' + e + '+' + encodeURIComponent('price');
+    } catch { return; }
+    const open = (url: string) => Linking.openURL(url).then(() => {
+      if (!(kas > 0)) return;
+      let left = false; // ask once, when the person comes back to the app
+      const sub = AppState.addEventListener('change', (st) => {
+        if (st !== 'active') { left = true; return; }
+        if (!left) return;
+        sub.remove();
+        _listeners.forEach((fn) => fn({ name: q, kas }));
+      });
+      setTimeout(() => { try { sub.remove(); } catch {} }, 30 * 60 * 1000);
+    }).catch(() => Alert.alert('Could not open', 'No browser accepted this link.'));
+    Alert.alert('Compare prices',
+      `Search for "${q}" in ${c.name} prices (${c.code}), lowest first?\n\nOpens in your phone's browser. Google chooses and rates the stores - check store ratings, and paste any unfamiliar store into TownHall > Check a link first.\n\nGoogle Shopping is not offered in every country; use "Google search" if it shows nothing.`,
+      [{ text: 'Cancel', style: 'cancel' },
+       { text: 'Google search', onPress: () => open(web) },
+       { text: 'Google Shopping', onPress: () => open(shop) }]);
+  })();
 }
 
-// AUDIT 2026-11-01: "$1,299.50" / "1299" / "49,99" (one comma, no dot = decimal comma). Non-finite -> NaN.
-export function kvParseUsd(text: string): number {
-  let t = String(text || '').replace(/[$\s]/g, '');
-  if (t.indexOf('.') < 0 && (t.match(/,/g) || []).length === 1) t = t.replace(',', '.');
-  else t = t.replace(/,/g, '');
-  if (!/^\d*\.?\d*$/.test(t) || t === '' || t === '.') return NaN;
-  const n = parseFloat(t);
-  return isFinite(n) ? n : NaN;
-}
+/** Kept for older callers: parse a typed price (any common format). */
+export function kvParseUsd(text: string): number { return parseMoney(text, 2); }
 
 export async function loadCompares(): Promise<PriceCompare[]> {
   try { const r = await AsyncStorage.getItem(COMPARE_KEY); const a = r ? JSON.parse(r) : []; return Array.isArray(a) ? a : []; } catch { return []; }
 }
 
 async function saveCompare(c: PriceCompare): Promise<void> {
-  const all = (await loadCompares()).filter((x) => x.name.toLowerCase() !== c.name.toLowerCase()); // latest per item
+  // latest per item AND currency (the same item checked in two countries is two data points)
+  const all = (await loadCompares()).filter((x) => !(x.name.toLowerCase() === c.name.toLowerCase() && compareCcy(x) === compareCcy(c)));
   all.unshift(c);
   try { await AsyncStorage.setItem(COMPARE_KEY, JSON.stringify(all.slice(0, 200))); } catch {}
+}
+
+/** Purchasing power from your checks: national (your currency) and global (all currencies). Last 90 days. */
+export function comparePP(all: PriceCompare[], ccy: string) {
+  const fresh = all.filter((c) => Number(c.ts || 0) > Date.now() - 90 * 86400000 && Number.isFinite(Number(c.d)));
+  const avg = (xs: PriceCompare[]) => (xs.length ? xs.reduce((p, c) => p + Number(c.d), 0) / xs.length : 0);
+  const nat = fresh.filter((c) => compareCcy(c) === ccy);
+  const byCcy: Record<string, PriceCompare[]> = {};
+  fresh.forEach((c) => { (byCcy[compareCcy(c)] = byCcy[compareCcy(c)] || []).push(c); });
+  // global = average of each currency's average, so one busy country does not drown the rest
+  const codes = Object.keys(byCcy);
+  const global = codes.length ? codes.reduce((p, k) => p + avg(byCcy[k]), 0) / codes.length : 0;
+  return {
+    national: { ccy, n: nat.length, avg: avg(nat), top: nat.slice(0, 3) },
+    global: { n: fresh.length, countries: codes.length, avg: global },
+    perCcy: codes.map((k) => ({ ccy: k, n: byCcy[k].length, avg: avg(byCcy[k]) })).sort((a, b) => b.n - a.n),
+  };
 }
 
 /** Mount once per screen that shows Compare buttons. Overlay (not a Modal) so it works inside modals. */
 export function KvCompareHost() {
   const [ask, setAsk] = useState<Ask | null>(null);
-  const [usd, setUsd] = useState('');
-  useEffect(() => { _listener = (a) => { setUsd(''); setAsk(a); }; return () => { _listener = null; }; }, []);
+  const [val, setVal] = useState('');
+  const [ccy, setC] = useState<Ccy>(ccyOf('USD'));
+  const [px, setPx] = useState(0);
+  const [pick, setPick] = useState(false);
+  useEffect(() => { const fn = (a: Ask) => { setVal(''); setPick(false); setAsk(a); }; _listeners.add(fn); return () => { _listeners.delete(fn); }; }, []);
+  useEffect(() => { if (!ask) return; (async () => { const c = await getCcy(); setC(c); setPx(0); setPx(await kasPriceIn(c.code)); })(); }, [ask]);
   if (!ask) return null;
-  let usdPerKas = 0;
-  try { const p: any = require('./kas_price_feed').getKasPrice(); usdPerKas = (p && !p.isStale) ? Number(p.usdPerKas || 0) : 0; if (!isFinite(usdPerKas)) usdPerKas = 0; } catch {} // AUDIT 2026-11-01: refuse a stale price
-  const kUsd = ask.kas * usdPerKas;
-  const D = kvParseUsd(usd); // AUDIT 2026-11-01
-  const valid = isFinite(D) && isFinite(kUsd) && D > 0 && kUsd > 0;
-  const d = valid ? (D - kUsd) / D : 0;
+  const kLocal = ask.kas * px;
+  const D = parseMoney(val, ccy.dec);
+  const valid = isFinite(D) && isFinite(kLocal) && D > 0 && kLocal > 0;
+  const d = valid ? (D - kLocal) / D : 0;
+  const choose = async (c: Ccy) => { setPick(false); setC(c); await setCcy(c.code); setPx(0); setPx(await kasPriceIn(c.code)); };
   const save = async () => {
     if (!valid) return;
-    await saveCompare({ name: ask.name, kas: ask.kas, usdPerKas, kUsd, dUsd: D, d: Math.max(-0.9, Math.min(0.9, d)), ts: Date.now() });
+    let usd = 0; try { usd = await kasPriceIn('USD'); } catch {}
+    const rate = usd > 0 && px > 0 ? usd / px : 0; // local -> USD, from the two KAS prices (display only)
+    await saveCompare({ name: ask.name, kas: ask.kas, usdPerKas: usd, kUsd: ask.kas * usd, dUsd: rate ? D * rate : 0,
+      d: Math.max(-0.9, Math.min(0.9, d)), ts: Date.now(), ccy: ccy.code, pxPerKas: px, kLocal, dLocal: D });
     setAsk(null);
-    Alert.alert('Saved', 'Added to Kaspa purchasing power in Stats.');
+    Alert.alert('Saved', 'Added to Kaspa purchasing power in Stats (' + ccy.code + ' and global).');
   };
   return (
     <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 20, zIndex: 9999, elevation: 50 }}>
-      <View style={{ backgroundColor: '#fff', borderRadius: 14, padding: 16 }}>
+      <View style={{ backgroundColor: '#fff', borderRadius: 14, padding: 16, maxHeight: '85%' }}>
         <Text style={{ fontSize: 15, fontWeight: '800', color: '#1c1917' }}>Best price you found?</Text>
         <Text style={{ fontSize: 12, color: '#57534e', marginTop: 4 }} numberOfLines={2}>{ask.name}</Text>
+        <TouchableOpacity onPress={() => setPick(!pick)} style={{ marginTop: 8, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#d6d3d1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+          <Text style={{ fontSize: 12, color: '#1c1917', fontWeight: '700' }}>{ccy.sym} {ccy.code} · {ccy.name} ▾</Text>
+        </TouchableOpacity>
+        {pick ? (
+          <ScrollView style={{ maxHeight: 220, marginTop: 6, borderWidth: 1, borderColor: '#e7e5e4', borderRadius: 8 }}>
+            {CURRENCIES.map((c) => (
+              <TouchableOpacity key={c.code} onPress={() => choose(c)} style={{ paddingHorizontal: 10, paddingVertical: 8, backgroundColor: c.code === ccy.code ? '#f5f5f4' : '#fff' }}>
+                <Text style={{ fontSize: 12, color: '#1c1917' }}>{c.sym} {c.code} · {c.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        ) : null}
         <Text style={{ fontSize: 12, color: '#57534e', marginTop: 6 }}>
-          Village: {ask.kas} KAS{usdPerKas ? ` ≈ $${kUsd.toFixed(2)}` : ' (KAS price not loaded yet)'}
+          Village: {ask.kas} KAS{px ? ' ≈ ' + fmtMoney(kLocal, ccy) : ' (KAS price in ' + ccy.code + ' loading…)'}
         </Text>
-        <TextInput value={usd} onChangeText={setUsd} placeholder="Lowest dollar price, e.g. 49.99" placeholderTextColor="#9ca3af"
+        <TextInput value={val} onChangeText={setVal} placeholder={'Lowest price in ' + ccy.code + ', e.g. ' + (ccy.dec === 0 ? '12000' : '49.99')} placeholderTextColor="#9ca3af"
           keyboardType="decimal-pad" autoFocus
           style={{ borderWidth: 1, borderColor: '#d6d3d1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10, fontSize: 14, color: '#1c1917' }} />
         {valid ? (
           <Text style={{ fontSize: 12, marginTop: 8, fontWeight: '700', color: d >= 0 ? '#059669' : '#dc2626' }}>
-            {d >= 0 ? `Kaspa price is ${Math.round(d * 100)}% cheaper` : `Kaspa price is ${Math.round(-d * 100)}% more expensive`} · PP ×{(1 / (1 - Math.max(-0.9, Math.min(0.9, d)))).toFixed(2)}
+            {(d >= 0 ? `Kaspa price is ${Math.round(d * 100)}% cheaper` : `Kaspa price is ${Math.round(-d * 100)}% more expensive`) + ' than ' + fmtMoney(D, ccy)} · PP ×{(1 / (1 - Math.max(-0.9, Math.min(0.9, d)))).toFixed(2)}
           </Text>
         ) : null}
-        <Text style={{ fontSize: 10, color: '#78716c', marginTop: 6 }}>Kept only on this phone. Used for the purchasing-power estimate in Stats.</Text>
+        <Text style={{ fontSize: 10, color: '#78716c', marginTop: 6 }}>Kept only on this phone. Counts toward your {ccy.code} (national) and global purchasing power in Stats.</Text>
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
           <TouchableOpacity onPress={() => setAsk(null)} style={{ paddingHorizontal: 14, paddingVertical: 8 }}>
             <Text style={{ color: '#57534e', fontWeight: '700' }}>Skip</Text>

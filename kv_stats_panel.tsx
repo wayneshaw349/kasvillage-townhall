@@ -46,7 +46,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
   const [err, setErr] = useState('');
   const [lastDerive, setLastDerive] = useState(''); // KV_KEY_FEEDBACK
   const [kpp, setKpp] = useState<{ n: number; avg: number; store: number; svc: number } | null>(null); // KV_KPP
-  const [cmp, setCmp] = useState<{ n: number; avg: number; top: any[] } | null>(null); // KV_COMPARE_PP: your own price checks
+  const [cmp, setCmp] = useState<{ n: number; avg: number; top: any[]; ccy: string; sym: string; gN: number; gAvg: number; gCountries: number; per: { ccy: string; n: number; avg: number }[] } | null>(null); // KV_COMPARE_PP + KV_FX: national + global
   const [circ, setCirc] = useState<{ pct: number; inKas: number; outKas: number; n: number } | null>(null); // KV_CIRC
   const [costs, setCosts] = useState<Costs>(NO_COSTS); // KV_PNL
   const [rev30, setRev30] = useState(0);
@@ -104,11 +104,13 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
       }
       setSales({ deals, kasIn, buyers: buyers.size, top: Object.values(items).sort((a, b) => b.kas - a.kas).slice(0, 5) });
       setRev30(kas30);
-      try { // KV_COMPARE_PP: village KAS price vs best outside $ price, same item (last 90 days)
-        const all: any[] = await require('./kv_compare').loadCompares();
-        const fresh = all.filter((c) => Number(c.ts || 0) > Date.now() - 90 * 86400000 && Number.isFinite(c.d));
-        setCmp({ n: fresh.length, avg: fresh.length ? fresh.reduce((p, c) => p + Number(c.d), 0) / fresh.length : 0, top: fresh.slice(0, 3) });
-      } catch { setCmp({ n: 0, avg: 0, top: [] }); }
+      try { // KV_COMPARE_PP + KV_FX: village KAS price vs best outside price, same item + currency (last 90 days)
+        const CM = require('./kv_compare'); const FX = require('./kv_fx');
+        const all: any[] = await CM.loadCompares();
+        const c = await FX.getCcy();
+        const pp = CM.comparePP(all, c.code);
+        setCmp({ n: pp.national.n, avg: pp.national.avg, top: pp.national.top, ccy: c.code, sym: c.sym, gN: pp.global.n, gAvg: pp.global.avg, gCountries: pp.global.countries, per: pp.perCcy });
+      } catch { setCmp({ n: 0, avg: 0, top: [], ccy: 'USD', sym: '$', gN: 0, gAvg: 0, gCountries: 0, per: [] }); }
       // KV_KPP: measure the village's live Kaspa discounts (coupons = dual pricing in the wild)
       try {
         const { fetchCoupons } = require('./mailbox_kaspa_api');
@@ -310,8 +312,11 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
           {(() => {
             const STORY_D = 0.20; // Act 8 baseline: "priced significantly less in Kaspa"
             const n = kpp ? kpp.n : 0;
-            const cn = cmp ? cmp.n : 0; // your own same-item comparisons beat coupon % when present
-            const d = cn > 0 ? (cmp as any).avg : n > 0 ? (kpp as any).avg : STORY_D;
+            const cn = cmp ? cmp.n : 0; // your own same-item comparisons (your currency) beat coupon % when present
+            const gn = cmp ? cmp.gN : 0;
+            const d = cn > 0 ? (cmp as any).avg : gn > 0 ? (cmp as any).gAvg : n > 0 ? (kpp as any).avg : STORY_D;
+            const gmult = cmp && gn > 0 && cmp.gAvg < 1 ? 1 / (1 - cmp.gAvg) : 0;
+            const sym = cmp ? cmp.sym : '$';
             const mult = d < 1 ? 1 / (1 - d) : 1;
             const pct = (x: number) => Math.round(x * 100) + '%';
             return (
@@ -319,19 +324,24 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                 <Text style={{ color: C.indigo, fontWeight: 'bold', fontSize: 14 }}>🏛 KASPA PURCHASING POWER — hypothetical</Text>
                 <Text style={{ color: C.mut, fontSize: 10, marginTop: 4 }}>Theory from the KasVillage story (Act 8 dual pricing). Hypothetical — not advice.</Text>
                 <Text style={{ color: C.text, fontSize: 12, marginTop: 8 }}>
-                  {cn > 0
-                    ? 'Measured from your ' + cn + ' price check' + (cn === 1 ? '' : 's') + ' (village Kaspa price vs best Google Shopping price, same item) · average ' + (d >= 0 ? pct(d) + ' cheaper in Kaspa' : pct(-d) + ' dearer in Kaspa') + (cmp && cmp.top.length ? '\n' + cmp.top.map((c: any) => '• ' + String(c.name).slice(0, 28) + ': ' + c.kas + ' KAS (≈$' + Number(c.kUsd).toFixed(2) + ') vs $' + Number(c.dUsd).toFixed(2)).join('\n') : '') + (n > 0 ? '\nCoupons on the app average ' + pct((kpp as any).avg) + '.' : '')
+                  {cn > 0 || gn > 0
+                    ? (cn > 0
+                        ? 'NATIONAL (' + (cmp as any).ccy + '): ' + cn + ' price check' + (cn === 1 ? '' : 's') + ' (village Kaspa price vs best outside price, same item) · average ' + ((cmp as any).avg >= 0 ? pct((cmp as any).avg) + ' cheaper in Kaspa' : pct(-(cmp as any).avg) + ' dearer in Kaspa') + (cmp && cmp.top.length ? '\n' + cmp.top.map((c: any) => '• ' + String(c.name).slice(0, 28) + ': ' + c.kas + ' KAS (≈' + sym + Number(c.kLocal ?? c.kUsd).toFixed(2) + ') vs ' + sym + Number(c.dLocal ?? c.dUsd).toFixed(2)).join('\n') : '')
+                        : 'NATIONAL (' + (cmp as any).ccy + '): no checks in your currency yet.')
+                      + '\nGLOBAL: ' + gn + ' check' + (gn === 1 ? '' : 's') + ' in ' + (cmp as any).gCountries + ' currenc' + ((cmp as any).gCountries === 1 ? 'y' : 'ies') + ' · average ' + ((cmp as any).gAvg >= 0 ? pct((cmp as any).gAvg) + ' cheaper' : pct(-(cmp as any).gAvg) + ' dearer') + (gmult ? ' · PP ×' + gmult.toFixed(2) : '')
+                      + (cmp && cmp.per.length > 1 ? '\n' + cmp.per.slice(0, 6).map((p: any) => '  ' + p.ccy + ': ' + pct(p.avg) + ' (' + p.n + ')').join('\n') : '')
+                      + (n > 0 ? '\nCoupons on the app average ' + pct((kpp as any).avg) + '.' : '')
                     : n > 0
                     ? 'Measured live: ' + n + ' active Kaspa discount' + (n === 1 ? '' : 's') + ' on the app · village average ' + pct(d) + (kpp && (kpp.store || kpp.svc) ? ' (stores ' + pct((kpp as any).store) + ' · services ' + pct((kpp as any).svc) + ')' : '')
                     : 'No live dual-priced listings yet — using the story baseline of ' + pct(STORY_D) + '.'}
                 </Text>
                 <View style={{ backgroundColor: '#dde7cf', borderRadius: 6, padding: 8, marginTop: 8 }}>{/* KV_EARTH: light earthy green */}
                   <Text style={{ color: '#3f4d2e', fontSize: 11, fontFamily: 'monospace', lineHeight: 17 }}>
-                    {'D  = dollar price of an item\nK  = kaspa price × $/KAS   (same item)\nd  = (D − K) ÷ D           (Kaspa discount)\nd̄  = average d across live listings = ' + pct(d) + '\n\nPP = D ÷ K = 1 ÷ (1 − d̄) = ×' + mult.toFixed(2)}
+                    {'D  = outside price of an item (' + (cmp ? cmp.ccy : 'USD') + ')\nK  = kaspa price × ' + sym + '/KAS   (same item)\nd  = (D − K) ÷ D           (Kaspa discount)\nd̄  = average d = ' + pct(d) + '\n\nPP = D ÷ K = 1 ÷ (1 − d̄) = ×' + mult.toFixed(2) + '\n(a ratio, so it is the same in every currency)'}
                   </Text>
                 </View>
                 <Text style={{ color: C.green, fontSize: 13, marginTop: 6, fontWeight: 'bold' }}>
-                  $100 worth of Kaspa buys ≈ ${Math.round(100 * mult)} worth of goods.
+                  {sym}100 worth of Kaspa buys ≈ {sym}{Math.round(100 * mult)} worth of goods{cn > 0 ? ' (national)' : gn > 0 ? ' (global)' : ''}.
                 </Text>
                 {cn === 0 ? <Text style={{ color: C.mut, fontSize: 10, marginTop: 4 }}>Tip: tap 🔎 Compare prices on any village item, then enter the best price you found - your checks replace the estimate.</Text> : null}
 
