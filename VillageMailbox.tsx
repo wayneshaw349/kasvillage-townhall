@@ -276,7 +276,7 @@ function kvAgo(t: number): string {
   const h = Math.max(0, Math.round((Date.now() - t) / 3600000));
   return h < 1 ? 'NOW' : h < 48 ? h + 'H AGO' : Math.round(h / 24) + 'D AGO';
 }
-function KvBizEnvelope({ name, cat, stamp, colors, verified, verifiedLabel, postedAt, lines, info, action, onPress, children }: any) {
+function KvBizEnvelope({ name, cat, stamp, colors, verified, verifiedLabel, checking, postedAt, lines, info, action, onPress, children }: any) {
   const paper = kvMix(colors.bg, 0.9), acc = kvMix(colors.bg, 0.45);
   const Wrap: any = onPress ? TouchableOpacity : View;
   return (
@@ -296,8 +296,8 @@ function KvBizEnvelope({ name, cat, stamp, colors, verified, verifiedLabel, post
           </View>
         </View>
         {verified !== undefined ? (
-          <View style={{ position: 'absolute', left: 12, top: 52, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, backgroundColor: verified ? '#dcfce7' : '#fef3c7' }}>
-            <Text style={{ fontSize: 9, fontWeight: '900', color: verified ? '#15803d' : '#b45309' }}>{verified ? '✓ ' + (verifiedLabel || 'VERIFIED') : '⚠ UNVERIFIED'}</Text>
+          <View style={{ position: 'absolute', left: 12, top: 52, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, backgroundColor: checking ? '#e5e7eb' : verified ? '#dcfce7' : '#fef3c7' }}>
+            <Text style={{ fontSize: 9, fontWeight: '900', color: checking ? '#4b5563' : verified ? '#15803d' : '#b45309' }}>{checking ? '\u23F3 CHECKING\u2026' : verified ? '✓ ' + (verifiedLabel || 'VERIFIED') : '⚠ UNVERIFIED'}</Text>
           </View>
         ) : null}
         {/* stamp + postmark */}
@@ -665,7 +665,7 @@ function DAppCard({ item, onPress }: { item: DAppEntry; onPress: () => void }) {
   const col = kvEnvColors(item, item.name || item.id);
   return (
     <KvBizEnvelope name={item.name} cat={'DApp · ' + (item.category || item.board)} stamp={'\u{1F9E9}'} colors={col}
-      verified={!!(item.townhall && item.townhall.verified)} postedAt={item.createdAt}
+      verified={!!(item.townhall && item.townhall.verified)} checking={!!(item as any).checking} postedAt={item.createdAt}
       lines={[(item.description || item.name) + ' \u00B7 ' + (require('./kv_age').normAge((item as any).record && (item as any).record.d && (item as any).record.d.age) || 'unrated 17+'), (item.templateVerified ? 'SDK ✓ · ' : '') + 'sandboxed', item.board + ' board']}
       info={[((item as any).publisherXp != null ? '⭐ ' + (item as any).publisherXp + ' XP' : ''), (item.xpCommitment ? '⛓ pledge in place' : ''), '\u{1F552} ' + (kvAgo(item.createdAt) || 'new').toLowerCase()]}
       action={{ label: 'OPEN', onPress }} onPress={onPress} />
@@ -954,7 +954,7 @@ export default function VillageMailbox() {
 
       switch (section) {
         case 'dapps':
-          result = await fetchDApps(cursor);
+          result = await fetchDApps(cursor, (u: any) => setDapps((prev: any[]) => prev.map((x: any) => (x.id === u.id ? { ...x, ...u } : x)))); // KV_DAPP_FAST
           // KV_HONEST_LANE dapps: unattested dapps show with their Unverified
           // badge instead of being hidden. Attest still sets badge + board;
           // installs stay hash-pinned; directory rules gate entry.

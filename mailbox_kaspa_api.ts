@@ -319,15 +319,15 @@ async function fetchDAppAttest(dappAddress: string): Promise<any | null> {
   } catch { return null; }
 }
 
-export async function fetchDApps(_cursor?: string): Promise<FetchResult<DAppEntry>> {
+export async function fetchDApps(_cursor?: string, onVerified?: (e: DAppEntry) => void): Promise<FetchResult<DAppEntry>> { // KV_DAPP_FAST
   try {
     const dir = await rebuildDirectory('dapp', registryAddress('dapp', NET), NET);
     dir.sort(visSort as any);
-    const items: DAppEntry[] = await Promise.all(dir.map(async (e: any) => {
+    // KV_DAPP_FAST: with onVerified, entries come back at once as CHECKING (unverified until proven);
+    // the same attest check then runs in the background (4 at a time) and each result is pushed to onVerified.
+    const build = async (e: any, attest: any, checking: boolean): Promise<DAppEntry> => {
       const pledgeKas = Number(e.pledgeSompi) / 1e8;
       const pledgeBoard: Board = pledgeKas >= 2000 ? 'Elite' : pledgeKas >= 500 ? 'Main' : 'Incubator';
-      // On-chain attest decides verified status; codeHash must match the announce.
-      const attest = await fetchDAppAttest(e.storeAddress);
       const announcedCodeHash = e.record?.d?.codeHash || '';
       // Game rail: announce carries configHash of a data-only descriptor - hash IS the integrity check.
       const gameHash = e.record?.d?.configHash || '';
@@ -355,9 +355,25 @@ export async function fetchDApps(_cursor?: string): Promise<FetchResult<DAppEntr
         xpCommitment: Math.round(pledgeKas),
         gameHash,
         record: e.record, repostedBy: e.repostedBy || '', keepers: e.keepers || [], // KV_REPOST_ITEM
+        checking, // KV_DAPP_FAST: true = proof not checked yet (treated as unverified)
       } as any;
-    }));
-    await kvXpRank(items as any[], new Map((dir as any[]).map((e: any) => [e.storeAddress, e])));   // KV_RANK_XP
+    };
+    const byAddr = new Map((dir as any[]).map((e: any) => [e.storeAddress, e]));
+    if (!onVerified) {
+      const items: DAppEntry[] = await Promise.all(dir.map(async (e: any) => build(e, await fetchDAppAttest(e.storeAddress), false)));
+      await kvXpRank(items as any[], byAddr);   // KV_RANK_XP
+      return { items, hasMore: false, fromCache: false };
+    }
+    const items: DAppEntry[] = await Promise.all(dir.map((e: any) => build(e, null, true)));
+    await kvXpRank(items as any[], byAddr);   // KV_RANK_XP
+    const xpOf = new Map((items as any[]).map((it: any) => [it.id, it.publisherXp]));
+    (async () => {
+      const q = dir.slice(); const worker = async () => { for (let e = q.shift(); e; e = q.shift()) {
+        let at: any = null; try { at = await fetchDAppAttest(e.storeAddress); } catch {}
+        try { const it: any = await build(e, at, false); if (xpOf.get(it.id) != null) it.publisherXp = xpOf.get(it.id); onVerified(it); } catch {}
+      } };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+    })();
     return { items, hasMore: false, fromCache: false };
   } catch (e: any) {
     throw new MailboxError('dapp scan failed: ' + String(e?.message || e), 'SCAN');
