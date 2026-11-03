@@ -348,7 +348,7 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
       // the artifact - same bytes DOWNLOAD verified against HEAD.
       setLaunching(false);
       const RN = require('react-native');
-      RN.Alert.alert(
+      require('./kv_prompt').kvChoose( // KV_EC_DELETE: 4 buttons (Android Alert shows only 3)
         dapp.name,
         'Saved on this phone (verified vs HEAD ' + String(_cg.head).slice(0, 12) + '\u2026). Plays offline.',
         [
@@ -361,6 +361,21 @@ export const EntertainmentCenter: React.FC<{ navigation?: any; onClose?: () => v
                 if (!info.exists) { RN.Alert.alert('Not cached yet', 'Open the game once (PLAY) or re-download it in the Mailbox, then export.'); return; }
                 await RN.Share.share({ url: uri, title: (dapp.name || 'game') + '.html' });
               } catch (e: any) { RN.Alert.alert('Export failed', String(e?.message || e)); }
+            } },
+          { text: 'DELETE FROM PHONE', style: 'destructive', onPress: () => {
+              RN.Alert.alert('Delete ' + (dapp.name || 'this game') + '?', 'Removes it from this phone only. It stays on chain, so you can download it again from the Mailbox (while it is still posted). Nothing is spent.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: async () => {
+                  try {
+                    const AS = require('@react-native-async-storage/async-storage').default;
+                    const inst: any[] = JSON.parse((await AS.getItem('kv_installed_games')) || '[]');
+                    await AS.setItem('kv_installed_games', JSON.stringify(inst.filter((g: any) => !(g && (g.head === _cg.head)))));
+                    try { const FS = require('expo-file-system/legacy'); await FS.deleteAsync(FS.documentDirectory + 'kv_games/' + _cg.head + '.html', { idempotent: true }); } catch {}
+                    setDapps((prev) => prev.filter((d) => d.id !== dapp.id));
+                    RN.Alert.alert('Deleted', (dapp.name || 'Game') + ' was removed from this phone.');
+                  } catch (e: any) { RN.Alert.alert('Delete failed', String(e?.message || e)); }
+                } },
+              ]);
             } },
           { text: 'Cancel', style: 'cancel' },
         ],
