@@ -1152,6 +1152,13 @@ const KvChainGamePublish: React.FC = () => {
           const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
           const owner = { privateKeyHex: priv, pubkeyHex: pub, address: myAddr, network: require('./kv_net').KV_NET as any };
           let res: any = null;
+          try { // KV_DELIST_ALLHEADS: every head the Mailbox has seen for this game
+            const _AS0 = require('@react-native-async-storage/async-storage').default;
+            const _seen: any[] = JSON.parse((await _AS0.getItem('kv_game_registry_cache')) || '[]');
+            for (const it of _seen) { const q = it && it.quad; if (!q || !q.head || (q.game !== gameId && it.name !== gameId)) continue;
+              if (it.o === pub) { if (_heads.indexOf(q.head) < 0) { _heads.push(q.head); gadd('also delisting head ' + String(q.head).slice(0, 8) + ' (seen in Mailbox)'); } }
+              else gadd('NOTE: head ' + String(q.head).slice(0, 8) + ' was announced by a different key (' + String(it.o).slice(0, 10) + '\u2026) - only that key or a moderator can delist it'); }
+          } catch {}
           for (const _h of _heads) {
             res = await delistFromRegistry(owner, _h, 'game');
             try { const _AS2 = require('@react-native-async-storage/async-storage').default; const dRaw = await _AS2.getItem('kv_game_delist_cache'); const arr = dRaw ? JSON.parse(dRaw) : []; arr.push({ delist: true, head: _h, t: Date.now(), o: pub }); await _AS2.setItem('kv_game_delist_cache', JSON.stringify(arr)); gadd('local delist echo cached ' + _h.slice(0, 8)); } catch {}

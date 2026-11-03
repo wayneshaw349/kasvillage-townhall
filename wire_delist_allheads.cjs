@@ -1,0 +1,8 @@
+// wire_delist_allheads.cjs — KV_DELIST_ALLHEADS: delist every head this wallet announced for the game,
+// not just the local build's head (a re-publish / older build leaves a different head on the Mailbox).
+const fs = require('fs'); const F = 'Workspace.tsx'; let s = fs.readFileSync(F, 'utf8');
+if (s.includes('KV_DELIST_ALLHEADS')) { console.log('already wired'); process.exit(0); }
+const a = "          let res: any = null;\n          for (const _h of _heads) {\n            res = await delistFromRegistry(owner, _h, 'game');";
+if (s.split(a).length !== 2) throw new Error('anchor');
+s = s.replace(a, "          let res: any = null;\n          try { // KV_DELIST_ALLHEADS: every head the Mailbox has seen for this game\n            const _AS0 = require('@react-native-async-storage/async-storage').default;\n            const _seen: any[] = JSON.parse((await _AS0.getItem('kv_game_registry_cache')) || '[]');\n            for (const it of _seen) { const q = it && it.quad; if (!q || !q.head || (q.game !== gameId && it.name !== gameId)) continue;\n              if (it.o === pub) { if (_heads.indexOf(q.head) < 0) { _heads.push(q.head); gadd('also delisting head ' + String(q.head).slice(0, 8) + ' (seen in Mailbox)'); } }\n              else gadd('NOTE: head ' + String(q.head).slice(0, 8) + ' was announced by a different key (' + String(it.o).slice(0, 10) + '\\u2026) - only that key or a moderator can delist it'); }\n          } catch {}\n          for (const _h of _heads) {\n            res = await delistFromRegistry(owner, _h, 'game');");
+fs.writeFileSync(F, s); console.log('wired KV_DELIST_ALLHEADS');
