@@ -357,10 +357,9 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                   </View>
                 ) : null}
                 {(() => { // KV_PP_CROSS: Big-Mac style - the same village items priced outside in different countries (USD terms)
-                  const net = vidx && vidx.crossItems > 0 ? { c: vidx.cross, n: vidx.crossItems, src: 'village index' } : null;
-                  const mine = cmp && (cmp as any).cross && (cmp as any).cross.crossItems > 0 ? { c: (cmp as any).cross.cross, n: (cmp as any).cross.crossItems, src: 'your checks' } : null;
-                  const x = net || mine;
-                  if (!x) return <Text style={{ color: C.mut, fontSize: 10, marginTop: 6 }}>🍔 Cross-country view appears once the same village item is price-checked in two or more currencies.</Text>;
+                  // PRIVACY 2026-11-02: only this phone's own checks (never shared)
+                  const x = cmp && (cmp as any).cross && (cmp as any).cross.crossItems > 0 ? { c: (cmp as any).cross.cross, n: (cmp as any).cross.crossItems, src: 'your checks, this phone only' } : null;
+                  if (!x) return <Text style={{ color: C.mut, fontSize: 10, marginTop: 6 }}>🍔 Cross-country view appears once you price-check the same village item in two or more currencies. It stays on this phone.</Text>;
                   return (
                     <View style={{ backgroundColor: '#fef3c7', borderRadius: 6, padding: 8, marginTop: 8 }}>
                       <Text style={{ color: '#78350f', fontSize: 11, fontWeight: 'bold' }}>🍔 CROSS-COUNTRY (Big-Mac style · {x.src} · {x.n} shared item{x.n === 1 ? '' : 's'})</Text>

@@ -5,9 +5,9 @@
 // record on chain. The record carries ONLY { currency, discount (basis points),
 // category, time } - never the item name, store, amounts, wallet balance or place.
 //
-//   record : { k:'pp', v:1, o:<pubkey>, t, d:{ ccy:'GBP', bp:1800, cat:'food', ik:'<16 hex>', u:<USD cents> } }
-//   ik = hashed code of the village listing (same listing = same code in every country),
-//   u  = the best OUTSIDE price found, in US cents - used for the cross-country (Big-Mac style) view
+//   record : { k:'pp', v:1, o:<pubkey>, t:<day, rounded>, d:{ ccy:'GBP', bp:1800, cat:'food' } }
+//   PRIVACY 2026-11-02: no listing code and no outside price are shared; time is rounded to the UTC day.
+//   The Big-Mac style cross-country view is computed only from this phone's own checks.
 //   where  : registryAddress('pp-index')  (same rendezvous trick as the registries)
 //   cost   : REPOST_SOMPI (0.2 KAS) dust + fee - spam has a price
 //
@@ -99,10 +99,9 @@ export async function ppShare(ccy: string, d: number, cat: PpCat, ik?: string, u
   const { signRecord, buildPayloadHex } = require('./kaspa_payload');
   const { registryAddress, REPOST_SOMPI } = require('./payload_publish');
   const cat2: PpCat = (PP_CATS as readonly string[]).includes(cat) ? cat : 'other';
-  const dd: any = { ccy: c, bp, cat: cat2 };
-  const cents = Math.round(Number(usd || 0) * 100);
-  if (/^[0-9a-f]{16}$/.test(String(ik || '')) && cents > 0 && cents < 1e11) { dd.ik = ik; dd.u = cents; } // KV_PP_CROSS
-  const rec = signRecord({ v: 1, k: 'pp', t: Date.now(), o: owner.pubkeyHex, d: dd } as any, owner.privateKeyHex);
+  const dd: any = { ccy: c, bp, cat: cat2 }; // PRIVACY 2026-11-02: ik/usd are never shared (kept for the call signature only)
+  const day = Math.floor(Date.now() / 86400000) * 86400000; // rounded to the UTC day
+  const rec = signRecord({ v: 1, k: 'pp', t: day, o: owner.pubkeyHex, d: dd } as any, owner.privateKeyHex);
   const res = await require('./kaspa_rest_tx').sendKaspaViaRest({
     senderAddress: owner.address,
     recipientAddress: registryAddress('pp-index', owner.network),

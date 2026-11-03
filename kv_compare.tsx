@@ -115,11 +115,11 @@ export function KvCompareHost() {
     try {
       const PP = require('./kv_pp_index');
       const pref = await PP.ppSharePref();
-      const fire = () => PP.ppShare(ccy.code, dc, cat, PP.ppItemKey(ask.name, ask.kas), rate ? D * rate : 0).then((r: any) => { if (r?.error) console.warn('[PP] share failed:', r.error); else console.log('[PP] shared', r.txId); }).catch(() => {});
+      const fire = () => PP.ppShare(ccy.code, dc, cat).then((r: any) => { if (r?.error) console.warn('[PP] share failed:', r.error); else console.log('[PP] shared', r.txId); }).catch(() => {});
       if (pref === 'always') { fire(); Alert.alert('Saved', 'Added to your Stats and shared with the village index (' + ccy.code + ', ' + cat + ').'); return; }
       if (pref === 'ask') {
         Alert.alert('Share with the village index?',
-          'Helps everyone see Kaspa\'s real purchasing power. Shares ONLY: currency (' + ccy.code + '), the % difference, the category (' + cat + '), the best outside price in USD, and a hashed code of this village listing (so the same item can be compared between countries) - never the item name, store or your balance. Costs ~0.2 KAS. Counts if you have a 10+ KAS pledge or a settled trade.',
+          'Helps everyone see Kaspa\'s real purchasing power. Shares ONLY: currency (' + ccy.code + '), the % difference, the category (' + cat + ') and the day - never the item, store, price or your balance. PUBLIC AND PERMANENT: shared checks are stored on the Kaspa blockchain, linked to your wallet key, and cannot be deleted. You can stop sharing any time in this prompt (Never). Costs ~0.2 KAS. Counts if you have a 10+ KAS pledge or a settled trade.',
           [{ text: 'Never', onPress: () => PP.ppSetSharePref('never') },
            { text: 'Not now', style: 'cancel' },
            { text: 'Always share', onPress: () => { PP.ppSetSharePref('always'); fire(); } }]);
