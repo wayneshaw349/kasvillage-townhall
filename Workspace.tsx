@@ -1517,7 +1517,7 @@ const KvChainGamePublish: React.FC = () => {
         <TouchableOpacity key={id + '-ann'} disabled={!!gbusy} onPress={() => runAnnounceOnly(id)}
           style={{ backgroundColor: '#241f36', borderWidth: 1, borderColor: '#7c5cff', borderRadius: 8, padding: 10, marginBottom: 6 }}>
           <Text style={{ color: '#b9a6ff', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>
-            {gbusy === id ? 'WORKING…' : 'RE-LIST ' + id + ' (no re-upload, ~1 KAS)'}
+            {gbusy === id ? 'WORKING…' : 'LIST / RE-LIST ' + id + ' (no re-upload, ~1 KAS)\nNot in the Mailbox after publishing? Tap this.'}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => runGrant(id)} style={{ borderWidth: 1, borderColor: '#0891b2', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, marginRight: 6, alignItems: 'center' }}><Text style={{ color: '#0891b2', fontWeight: '700', fontSize: 11 }}>GRANT</Text></TouchableOpacity>
