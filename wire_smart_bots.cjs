@@ -223,7 +223,7 @@ rep("// ---- bots make offers on human blocks (v118) ----", LIB + "\n// ---- bot
 rep("var bar=Math.round(intr*(needy?0.76:0.98)*sellMul*dmS.sell);",
     "var __ask=window.KV_BOT_ASK?window.KV_BOT_ASK(tile,me,owner):null; var bar=__ask?__ask.ask:Math.round(intr*(needy?0.76:0.98)*sellMul*dmS.sell); // KV_SMART_BOTS", "bid hint bar");
 rep("var threshold=intr*(need?0.76:0.98)*sellMul*dmT.sell;",
-    "var __ak=window.KV_BOT_ASK?window.KV_BOT_ASK(tile,me,owner):null; var threshold=__ak?__ak.ask:intr*(need?0.76:0.98)*sellMul*dmT.sell; if(__ak&&__ak.why) dmT={sell:dmT.sell>1?dmT.sell:1.01,why:__ak.why}; // KV_SMART_BOTS", "bid decision");
+    "var __ak=window.KV_BOT_ASK?window.KV_BOT_ASK(tile,me,owner):null; var threshold=__ak?__ak.ask:intr*(need?0.76:0.98)*sellMul*dmT.sell; var __dm2=dmT.sell; if(__ak&&__ak.why) dmT={why:__ak.why, sell:(__dm2>1?__dm2:1.01)}; // KV_SMART_BOTS", "bid decision");
 rep("var threshold=base? Math.round(base*(need?0.8:1.0)) : v;",
     "var threshold=window.KV_BOT_ASK?window.KV_BOT_ASK(tile,r.s,owner).ask:(base? Math.round(base*(need?0.8:1.0)) : v); // KV_SMART_BOTS", "remote offer answer");
 // 6: swap button in the bid dialog

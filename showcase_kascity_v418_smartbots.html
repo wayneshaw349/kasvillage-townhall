@@ -12829,7 +12829,7 @@ var __ask=window.KV_BOT_ASK?window.KV_BOT_ASK(tile,me,owner):null; var bar=__ask
         }
         var need=(theirCash<380||theirMort>150);
         var dmT=window.KV_DIST_MULT?window.KV_DIST_MULT(tile,me,owner):{sell:1,why:""};
-var __ak=window.KV_BOT_ASK?window.KV_BOT_ASK(tile,me,owner):null; var threshold=__ak?__ak.ask:intr*(need?0.76:0.98)*sellMul*dmT.sell; if(__ak&&__ak.why) dmT={sell:dmT.sell>1?dmT.sell:1.01,why:__ak.why}; // KV_SMART_BOTS
+var __ak=window.KV_BOT_ASK?window.KV_BOT_ASK(tile,me,owner):null; var threshold=__ak?__ak.ask:intr*(need?0.76:0.98)*sellMul*dmT.sell; var __dm2=dmT.sell; if(__ak&&__ak.why) dmT={why:__ak.why, sell:(__dm2>1?__dm2:1.01)}; // KV_SMART_BOTS
         var accept=v>=threshold;
         var why = accept
           ? (need ? "needs the cash" : (label ? ("the "+label+" takes the profit") : "beats their valuation"))
