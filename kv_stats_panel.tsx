@@ -47,6 +47,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
   const [lastDerive, setLastDerive] = useState(''); // KV_KEY_FEEDBACK
   const [kpp, setKpp] = useState<{ n: number; avg: number; store: number; svc: number } | null>(null); // KV_KPP
   const [cmp, setCmp] = useState<{ n: number; avg: number; top: any[]; ccy: string; sym: string; gN: number; gAvg: number; gCountries: number; per: { ccy: string; n: number; avg: number }[] } | null>(null); // KV_COMPARE_PP + KV_FX: national + global
+  const [vidx, setVidx] = useState<any>(null); // KV_PP_INDEX: village-wide index (shared, signed, gated)
   const [circ, setCirc] = useState<{ pct: number; inKas: number; outKas: number; n: number } | null>(null); // KV_CIRC
   const [costs, setCosts] = useState<Costs>(NO_COSTS); // KV_PNL
   const [rev30, setRev30] = useState(0);
@@ -111,6 +112,7 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
         const pp = CM.comparePP(all, c.code);
         setCmp({ n: pp.national.n, avg: pp.national.avg, top: pp.national.top, ccy: c.code, sym: c.sym, gN: pp.global.n, gAvg: pp.global.avg, gCountries: pp.global.countries, per: pp.perCcy });
       } catch { setCmp({ n: 0, avg: 0, top: [], ccy: 'USD', sym: '$', gN: 0, gAvg: 0, gCountries: 0, per: [] }); }
+      try { require('./kv_pp_index').ppFetchIndex().then((v: any) => setVidx(v)).catch(() => {}); } catch {} // KV_PP_INDEX: network-wide, budgeted + cached
       // KV_KPP: measure the village's live Kaspa discounts (coupons = dual pricing in the wild)
       try {
         const { fetchCoupons } = require('./mailbox_kaspa_api');
@@ -343,7 +345,18 @@ export default function KvStatsPanel({ visible, onClose }: { visible: boolean; o
                 <Text style={{ color: C.green, fontSize: 13, marginTop: 6, fontWeight: 'bold' }}>
                   {sym}100 worth of Kaspa buys ≈ {sym}{Math.round(100 * mult)} worth of goods{cn > 0 ? ' (national)' : gn > 0 ? ' (global)' : ''}.
                 </Text>
-                {cn === 0 ? <Text style={{ color: C.mut, fontSize: 10, marginTop: 4 }}>Tip: tap 🔎 Compare prices on any village item, then enter the best price you found - your checks replace the estimate.</Text> : null}
+                {vidx && vidx.n > 0 ? (
+                  <View style={{ backgroundColor: '#eef2ff', borderRadius: 6, padding: 8, marginTop: 8 }}>
+                    <Text style={{ color: '#3730a3', fontSize: 11, fontWeight: 'bold' }}>🌍 VILLAGE INDEX (everyone's shared checks · advisory)</Text>
+                    <Text style={{ color: '#3730a3', fontSize: 11, marginTop: 3 }}>
+                      {vidx.n + ' check' + (vidx.n === 1 ? '' : 's') + ' · ' + vidx.posters + ' poster' + (vidx.posters === 1 ? '' : 's') + ' · ' + vidx.countries + ' currenc' + (vidx.countries === 1 ? 'y' : 'ies') + ' · ' + (vidx.avg >= 0 ? pct(vidx.avg) + ' cheaper in Kaspa' : pct(-vidx.avg) + ' dearer in Kaspa') + (vidx.avg < 1 ? ' · PP ×' + (1 / (1 - vidx.avg)).toFixed(2) : '')
+                        + (vidx.perCat && vidx.perCat.length ? '\n' + vidx.perCat.slice(0, 5).map((c: any) => c.cat + ' ' + pct(c.med) + ' (' + c.n + ')').join(' · ') : '')
+                        + (vidx.unverified ? '\n(' + vidx.unverified + ' more not yet verified this session)' : '')}
+                    </Text>
+                    <Text style={{ color: '#6366f1', fontSize: 9, marginTop: 3 }}>Signed records on chain, median per currency, counted only from posters with a 10+ KAS pledge or a settled trade. Computed on this phone.</Text>
+                  </View>
+                ) : null}
+                {cn === 0 ? <Text style={{ color: C.mut, fontSize: 10, marginTop: 4 }}>Tip: tap 🔎 Compare prices on any village item, then enter the best price you found - your checks replace the estimate (and can be shared with the village index).</Text> : null}
 
               </View>
             );

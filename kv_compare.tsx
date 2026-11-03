@@ -16,7 +16,7 @@ export const COMPARE_KEY = 'kv_price_compares';
 // ccy/pxPerKas/kLocal/dLocal are new (KV_FX). Old rows have only the usd fields and count as USD.
 export interface PriceCompare {
   name: string; kas: number; usdPerKas: number; kUsd: number; dUsd: number; d: number; ts: number;
-  ccy?: string; pxPerKas?: number; kLocal?: number; dLocal?: number;
+  ccy?: string; pxPerKas?: number; kLocal?: number; dLocal?: number; cat?: string;
 }
 export const compareCcy = (c: PriceCompare): string => (c.ccy ? String(c.ccy) : 'USD');
 
@@ -92,7 +92,8 @@ export function KvCompareHost() {
   const [ccy, setC] = useState<Ccy>(ccyOf('USD'));
   const [px, setPx] = useState(0);
   const [pick, setPick] = useState(false);
-  useEffect(() => { const fn = (a: Ask) => { setVal(''); setPick(false); setAsk(a); }; _listeners.add(fn); return () => { _listeners.delete(fn); }; }, []);
+  const [cat, setCat] = useState('other'); // KV_PP_INDEX: broad category, shared with the village index
+  useEffect(() => { const fn = (a: Ask) => { setVal(''); setPick(false); setCat('other'); setAsk(a); }; _listeners.add(fn); return () => { _listeners.delete(fn); }; }, []);
   useEffect(() => { if (!ask) return; (async () => { const c = await getCcy(); setC(c); setPx(0); setPx(await kasPriceIn(c.code)); })(); }, [ask]);
   if (!ask) return null;
   const kLocal = ask.kas * px;
@@ -104,9 +105,25 @@ export function KvCompareHost() {
     if (!valid) return;
     let usd = 0; try { usd = await kasPriceIn('USD'); } catch {}
     const rate = usd > 0 && px > 0 ? usd / px : 0; // local -> USD, from the two KAS prices (display only)
+    const dc = Math.max(-0.9, Math.min(0.9, d));
     await saveCompare({ name: ask.name, kas: ask.kas, usdPerKas: usd, kUsd: ask.kas * usd, dUsd: rate ? D * rate : 0,
-      d: Math.max(-0.9, Math.min(0.9, d)), ts: Date.now(), ccy: ccy.code, pxPerKas: px, kLocal, dLocal: D });
+      d: dc, ts: Date.now(), ccy: ccy.code, pxPerKas: px, kLocal, dLocal: D, cat });
     setAsk(null);
+    // KV_PP_INDEX: opt-in share - the record carries only currency + % + category
+    try {
+      const PP = require('./kv_pp_index');
+      const pref = await PP.ppSharePref();
+      const fire = () => PP.ppShare(ccy.code, dc, cat).then((r: any) => { if (r?.error) console.warn('[PP] share failed:', r.error); else console.log('[PP] shared', r.txId); }).catch(() => {});
+      if (pref === 'always') { fire(); Alert.alert('Saved', 'Added to your Stats and shared with the village index (' + ccy.code + ', ' + cat + ').'); return; }
+      if (pref === 'ask') {
+        Alert.alert('Share with the village index?',
+          'Helps everyone see Kaspa\'s real purchasing power. Shares ONLY: currency (' + ccy.code + '), the % difference, and the category (' + cat + ') - never the item, store or your balance. Costs ~0.2 KAS. Counts if you have a 10+ KAS pledge or a settled trade.',
+          [{ text: 'Never', onPress: () => PP.ppSetSharePref('never') },
+           { text: 'Not now', style: 'cancel' },
+           { text: 'Always share', onPress: () => { PP.ppSetSharePref('always'); fire(); } }]);
+        return;
+      }
+    } catch {}
     Alert.alert('Saved', 'Added to Kaspa purchasing power in Stats (' + ccy.code + ' and global).');
   };
   return (
@@ -132,6 +149,13 @@ export function KvCompareHost() {
         <TextInput value={val} onChangeText={setVal} placeholder={'Lowest price in ' + ccy.code + ', e.g. ' + (ccy.dec === 0 ? '12000' : '49.99')} placeholderTextColor="#9ca3af"
           keyboardType="decimal-pad" autoFocus
           style={{ borderWidth: 1, borderColor: '#d6d3d1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10, fontSize: 14, color: '#1c1917' }} />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+          {require('./kv_pp_index').PP_CATS.map((c: string) => (
+            <TouchableOpacity key={c} onPress={() => setCat(c)} style={{ borderWidth: 1, borderColor: cat === c ? '#059669' : '#d6d3d1', backgroundColor: cat === c ? '#ecfdf5' : '#fff', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4, marginRight: 6 }}>
+              <Text style={{ fontSize: 11, color: cat === c ? '#059669' : '#57534e', fontWeight: cat === c ? '800' : '500' }}>{c}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
         {valid ? (
           <Text style={{ fontSize: 12, marginTop: 8, fontWeight: '700', color: d >= 0 ? '#059669' : '#dc2626' }}>
             {(d >= 0 ? `Kaspa price is ${Math.round(d * 100)}% cheaper` : `Kaspa price is ${Math.round(-d * 100)}% more expensive`) + ' than ' + fmtMoney(D, ccy)} · PP ×{(1 / (1 - Math.max(-0.9, Math.min(0.9, d)))).toFixed(2)}
