@@ -73,6 +73,39 @@ export async function listMyPledges(): Promise<MyPledge[]> {
       await add('game:' + id, 'game', 'Game: ' + id, nonces, NOTE_GAME);
     }
   } catch {}
+  // KV_PLEDGE_CHAIN: every game this key ever announced is written at the game registry, so
+  // pressing My Pledges finds removed/forgotten games by itself - no typing. Only names signed
+  // by YOUR key are considered, and only addresses derived from YOUR key are scanned.
+  try {
+    const { registryAddress } = require('./payload_publish');
+    const { apiBase } = require('./kaspa_payload');
+    const reg = registryAddress('game', NET);
+    const r = await fetch(apiBase(NET) + '/addresses/' + encodeURIComponent(reg) + '/full-transactions?limit=200&resolve_previous_outpoints=no');
+    const txs: any[] = await r.json();
+    const meX = (() => { const h = o.pubkeyHex.toLowerCase(); return h.length === 66 ? h.slice(2) : h; })();
+    const names = new Set<string>();
+    for (const tx of (Array.isArray(txs) ? txs : [])) {
+      try {
+        const hx = String((tx && (tx.payload || tx.payload_hex)) || ''); if (!hx) continue;
+        let raw = ''; for (let i = 0; i < hx.length; i += 2) raw += String.fromCharCode(parseInt(hx.substr(i, 2), 16));
+        try { raw = decodeURIComponent(escape(raw)); } catch {}
+        const rec = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw);
+        if (!rec || rec.k !== 'registry' || !rec.d || !rec.d.name) continue;
+        const ox = String(rec.o || '').toLowerCase(); const x = ox.length === 66 ? ox.slice(2) : ox;
+        if (x !== meX) continue;
+        const nm = String(rec.d.name).trim().toLowerCase();
+        if (/^[a-z0-9-]{3,48}$/.test(nm)) names.add(nm);
+      } catch {}
+    }
+    const { nonceBaseFor } = require('./kv_build_chain');
+    for (const id of Array.from(names).slice(0, 12)) {
+      if (out.some((q) => q.key === 'game:' + id)) continue;
+      const base = nonceBaseFor(o.pubkeyHex, id);
+      const nonces: number[] = []; let s2 = 0n;
+      for (let i = 0; i < 90; i++) { const b = await balanceAt(priv, base + i); if (b > 0n) { s2 += b; nonces.push(base + i); } }
+      if (s2 > 0n) out.push({ key: 'game:' + id, kind: 'game', label: 'Game: ' + id + ' (found on chain)', nonces, sompi: s2, note: NOTE_GAME });
+    }
+  } catch {}
   return out;
 }
 

@@ -371,9 +371,16 @@ const MyPledgesCard: React.FC<{ hidden: boolean }> = ({ hidden }) => {
         <Text style={{ color: '#D4AF37', fontSize: 14 }}>⛓ My Pledges</Text>
         <Text style={{ color: '#888', fontSize: 12 }}>{open ? 'Hide' : 'Show'}</Text>
       </TouchableOpacity>
-      {open && (rows === null ? <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>Checking your pledge addresses…</Text>
+      {open && (rows === null ? <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>Checking your pledge addresses (and the game registry for anything you forgot)…</Text>
         : rows.length === 0 ? <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>No pledges in place.</Text>
-        : rows.map((p: any) => (
+        : (<>
+          <View style={{ backgroundColor: '#20331f', borderRadius: 8, padding: 8, marginTop: 8 }}>{/* KV_PLEDGE_TALLY */}
+            <Text style={{ color: '#10B981', fontSize: 13, fontWeight: '700' }}>
+              {'Parked total: ' + (hidden ? '••• KAS' : (rows.reduce((a: number, p: any) => a + Number(p.sompi), 0) / 1e8).toFixed(2) + ' KAS') + ' in ' + rows.length + ' pledge' + (rows.length === 1 ? '' : 's')}
+            </Text>
+            <Text style={{ color: '#8aa88a', fontSize: 10, marginTop: 2 }}>All of it is yours - staked at addresses only this wallet's key can spend. Reclaiming moves it back here, minus a small network fee.</Text>
+          </View>
+          {rows.map((p: any) => (
           <View key={p.key} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#2a2a2a', marginTop: 6 }}>
             <View style={{ flex: 1, paddingRight: 8 }}>
               <Text style={{ color: '#fff', fontSize: 13 }} numberOfLines={1}>{p.label}</Text>
@@ -383,7 +390,7 @@ const MyPledgesCard: React.FC<{ hidden: boolean }> = ({ hidden }) => {
               <Text style={{ color: '#fff', fontSize: 12 }}>{busy === p.key ? 'Sending…' : 'Reclaim'}</Text>
             </TouchableOpacity>
           </View>
-        )))}
+        ))}</>))}
       {open ? (
         <TouchableOpacity onPress={() => { // KV_PLEDGE_FIND
           require('./kv_prompt').kvPrompt('Find a removed game', 'Type the game name exactly as it was published (e.g. showcase-kascity-v417). Its parked coins are derived from your key + that name.', [
