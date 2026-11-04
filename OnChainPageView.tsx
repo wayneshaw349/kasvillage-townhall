@@ -369,12 +369,9 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
       if (_h && typeof _h.kvhaptic === 'string') {
         const _now = Date.now(); const _g: any = globalThis as any;
         if (_now - (_g.__kvHapAt || 0) >= 90) { _g.__kvHapAt = _now;
-          const H = require('expo-haptics'); const k = _h.kvhaptic;
-          if (k === 'success') H.notificationAsync(H.NotificationFeedbackType.Success);
-          else if (k === 'error') H.notificationAsync(H.NotificationFeedbackType.Error);
-          else if (k === 'heavy') H.impactAsync(H.ImpactFeedbackStyle.Heavy);
-          else if (k === 'medium') H.impactAsync(H.ImpactFeedbackStyle.Medium);
-          else H.impactAsync(H.ImpactFeedbackStyle.Light);
+          // kv_haptics: RN's built-in Vibration today; soft Taptic taps automatically once a build ships expo-haptics
+          const k = _h.kvhaptic; const { kvBuzz } = require('./kv_haptics');
+          kvBuzz(k === 'success' ? 'ok' : k === 'error' ? 'error' : 'tap');
         }
         return; } } catch {}
     // KV_GAME_INVITE: share an invite / paste a table code (games only)
