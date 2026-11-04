@@ -147,9 +147,12 @@ export async function reclaimPledge(p: MyPledge): Promise<number> {
         if (/already spent|mempool|orphan|no utxos/i.test(e) && retries < 8) { retries++; await sleep(6000); continue; } // KV_SWEEP_LAG: UTXO view trails mid-confirmation
         throw new Error(e + ' (after ' + (Number(moved) / 1e8) + ' KAS)');
       }
-      const after = await (async () => { await sleep(4000); return balanceAt(o.privateKeyHex, n); })();
+      // KV_SWEEP_SETTLE: the public indexer can lag well past 4s - poll up to 45s before concluding anything
+      let after = b;
+      for (let w = 0; w < 9; w++) { await sleep(5000); after = await balanceAt(o.privateKeyHex, n); if (after < b) break; }
       moved += b - after;
       if (after === 0n) break;
+      if (after === b) { console.log('[Reclaim] nonce', n, 'sweep submitted but not visible yet - the indexer is behind; it will show up'); break; }
     }
   }
   return Number(moved) / 1e8;
