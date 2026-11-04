@@ -985,6 +985,7 @@ const KvChainGamePublish: React.FC = () => {
     const _g: any = globalThis as any;
     if (!_g.__kvMyGamesLoaded) {
       _g.__kvMyGamesLoaded = 1;
+      require('@react-native-async-storage/async-storage').default.getItem('kv_shelf_hidden').then((v: any) => { try { (globalThis as any).__kvShelfHidden = JSON.parse(v || '{}'); setGamesTick((x: number) => x + 1); } catch {} });
       require('@react-native-async-storage/async-storage').default.getItem('kv_my_games').then((v: any) => {
         try {
           const m = JSON.parse(v || '{}'); const { TRUSTED_GAMES } = require('./game_chunks');
@@ -1022,6 +1023,22 @@ const KvChainGamePublish: React.FC = () => {
     } catch {}
   };
   const kvAgeOf = (id: string) => { const e: any = (GAMES as any)[id]; return require('./kv_age').normAge((e && e.age) || (((myMeta || {})[id] || {}).age)) || undefined; }; // KV_AGE_RATING
+  // KV_SHELF_RM: take a book off this phone's shelf. Chain copies are untouched; DELIST hides a listing.
+  const removeFromShelf = (id: string) => {
+    Alert.alert('Remove ' + id + ' from your shelf?',
+      'This only tidies this phone. Anything already published stays on chain, and if it is still listed, players still see it in the Mailbox - use DELIST for that. Re-publishing the same name brings the book back.',
+      [{ text: 'Cancel', style: 'cancel' },
+       { text: 'Remove', style: 'destructive', onPress: async () => {
+          try {
+            const AS = require('@react-native-async-storage/async-storage').default;
+            try { delete (GAMES as any)[id]; } catch {}
+            try { const v = await AS.getItem('kv_my_games'); const m = JSON.parse(v || '{}'); if (m[id] != null) { delete m[id]; await AS.setItem('kv_my_games', JSON.stringify(m)); } } catch {}
+            const _g: any = globalThis as any; _g.__kvShelfHidden = _g.__kvShelfHidden || {}; _g.__kvShelfHidden[id] = 1;
+            try { await AS.setItem('kv_shelf_hidden', JSON.stringify(_g.__kvShelfHidden)); } catch {}
+            setOpenBook(null); setGamesTick((x: number) => x + 1);
+          } catch {}
+       } }]);
+  };
   const kvTagsOf = (id: string) => { const e: any = (GAMES as any)[id]; const t = (e && e.tags) || (((myMeta || {})[id] || {}).tags); return Array.isArray(t) && t.length ? t.slice(0, 8) : undefined; };
   const kvBuildSaved = async (id: string) => {
     const _A = require('@react-native-async-storage/async-storage').default;
@@ -1067,6 +1084,7 @@ const KvChainGamePublish: React.FC = () => {
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
       const nonceBase = (prevE && prevE.nonceBase) || nonceBaseFor(pub, id);
       (GAMES as any)[id] = { bundle: b.bundle, head: b.head, nonceBase, url: src.url, local: src.url ? 0 : 1, tags: _tags, age: _age };
+      try { const _g: any = globalThis as any; if (_g.__kvShelfHidden && _g.__kvShelfHidden[id]) { delete _g.__kvShelfHidden[id]; require('@react-native-async-storage/async-storage').default.setItem('kv_shelf_hidden', JSON.stringify(_g.__kvShelfHidden)); } } catch {} // KV_SHELF_RM: republish unhides
       const { TRUSTED_GAMES } = require('./game_chunks'); (TRUSTED_GAMES as any)[id] = b.head;
       if (!src.url) { try { await require('@react-native-async-storage/async-storage').default.setItem('kv_my_game_html_' + id, html); } catch { gadd('note: could not keep a copy of the file - publish now, or pick it again later'); } }
       await kvMarkMeta(id, { tags: _tags, age: _age, url: src.url || null, local: src.url ? 0 : 1, head: b.head, nonceBase, manifest: b.bundle.manifest, savedAt: Date.now(), ...(prevE && prevE.head !== b.head ? { publishedAt: 0 } : {}) });
@@ -1472,7 +1490,7 @@ const KvChainGamePublish: React.FC = () => {
             {o.ribbon ? <View style={{ position: 'absolute', top: 0, right: 7, width: 7, height: 18, backgroundColor: o.ribbon, borderBottomLeftRadius: 2, borderBottomRightRadius: 2 }} /> : null}
           </TouchableOpacity>
         );
-        const mine = Object.entries(GAMES).filter(([gid, ge]: any) => _kvOwner || !!ge.url || !!ge.local);
+        const mine = Object.entries(GAMES).filter(([gid, ge]: any) => (_kvOwner || !!ge.url || !!ge.local) && !(((globalThis as any).__kvShelfHidden || {})[gid])); // KV_SHELF_RM
         return (
           <View style={{ marginBottom: 10, marginTop: 4 }}>
             <View style={{ backgroundColor: '#2a1a0e', borderRadius: 8, paddingTop: 12, borderWidth: 1, borderColor: '#4a2f17' }}>
@@ -1541,6 +1559,12 @@ const KvChainGamePublish: React.FC = () => {
           style={{ backgroundColor: '#2d1a1a', borderWidth: 1, borderColor: '#b14b4b', borderRadius: 8, padding: 10, marginBottom: 6 }}>
           <Text style={{ color: '#e08b8b', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>
             {'DELIST ' + id + ' (hide from store, ~1 KAS)'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity key={id + '-rm'} disabled={!!gbusy} onPress={() => removeFromShelf(id)}
+          style={{ borderWidth: 1, borderColor: '#78716c', borderRadius: 8, padding: 10, marginBottom: 6 }}>
+          <Text style={{ color: '#a8a29e', fontWeight: '800', fontFamily: 'monospace', fontSize: 12 }}>
+            {'\uD83D\uDDD1 REMOVE FROM SHELF (this phone only)'}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity key={id} disabled={!!gbusy} onPress={() => runPublish(id)}
