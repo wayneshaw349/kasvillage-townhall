@@ -364,6 +364,19 @@ export default function OnChainPageView(props: OnChainPageViewProps) {
 
   const onMessage = useCallback((event: any) => {
     try { const _d = JSON.parse(event?.nativeEvent?.data || '{}'); if (_d.kvlog !== undefined) { console.log('[GamePage]', _d.kvlog); return; } } catch {}
+    // KV_GAME_HAPTIC: pages/games ask for a tap; the Taptic Engine answers. Rate-limited, never money-path.
+    try { const _h = JSON.parse(event?.nativeEvent?.data || '{}');
+      if (_h && typeof _h.kvhaptic === 'string') {
+        const _now = Date.now(); const _g: any = globalThis as any;
+        if (_now - (_g.__kvHapAt || 0) >= 90) { _g.__kvHapAt = _now;
+          const H = require('expo-haptics'); const k = _h.kvhaptic;
+          if (k === 'success') H.notificationAsync(H.NotificationFeedbackType.Success);
+          else if (k === 'error') H.notificationAsync(H.NotificationFeedbackType.Error);
+          else if (k === 'heavy') H.impactAsync(H.ImpactFeedbackStyle.Heavy);
+          else if (k === 'medium') H.impactAsync(H.ImpactFeedbackStyle.Medium);
+          else H.impactAsync(H.ImpactFeedbackStyle.Light);
+        }
+        return; } } catch {}
     // KV_GAME_INVITE: share an invite / paste a table code (games only)
     try { const _g = JSON.parse(event?.nativeEvent?.data || '{}');
       if (_g && _g.kvshare && props.game) { const t = String(_g.kvshare.text || '').slice(0, 300); require('react-native').Share.share({ message: t }).catch(() => {}); return; }

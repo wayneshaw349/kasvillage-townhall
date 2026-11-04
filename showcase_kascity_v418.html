@@ -16204,6 +16204,7 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
     function play(ev){
       var s = ev.s, p = (ev.tile != null && tileXY(ev.tile)) || pieceXY(s) || { x: innerWidth / 2, y: innerHeight / 2 };
       var c = ac(); if (c && SND[ev.snd]) SND[ev.snd](c, c.currentTime);
+      try{ window.KV_HAPTIC && window.KV_HAPTIC({sold:"success",cash:"success",alarm:"heavy",served:"heavy",tax:"medium",car:"light",build:"light",water:"light",picket:"light"}[ev.snd]); }catch(e){}
       var bits = (SCENE[ev.scene] || SCENE.sold)(p, s) || []; bits.push(cap(ev.txt, s));
       setTimeout(function(){ bits.forEach(function(d){ try { d.remove(); } catch(e){} }); }, 2400);
     }
@@ -16273,7 +16274,7 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
       var K = KINDS.filter(function(x){ return x.k === kind; })[0] || KINDS[Math.floor(Math.random() * KINDS.length)];
       var p = where(s) || { x: innerWidth / 2, y: innerHeight / 2 };
       (window.__kvHidePiece = window.__kvHidePiece || {})[s] = Date.now() + 1500;        // the piece vanishes while it happens
-      var c = ac(); if (c && SFX[K.k]) SFX[K.k](c);
+      var c = ac(); if (c && SFX[K.k]) SFX[K.k](c); try{ window.KV_HAPTIC && window.KV_HAPTIC({bolt:"heavy",wind:"medium",sink:"heavy",slip:"light",chase:"medium"}[K.k]); }catch(e){}
       try { if (navigator.vibrate) navigator.vibrate([60, 40, 120]); } catch(e){}
       var bits = [];
       if (K.k === "bolt"){
@@ -16699,5 +16700,24 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
         big.style.setProperty("right","auto","important"); big.style.setProperty("bottom","auto","important"); }
     }
   },300);
+})();
+</script>
+<script>
+// ---- __KV_V418_HAPTICS: real taps on iPhone through the wallet bridge ----
+// Safari/WKWebView has no vibration API, so the game posts {kvhaptic} to KasVillage,
+// which fires the Taptic Engine (expo-haptics). In a plain browser it falls back to
+// navigator.vibrate (Android) or does nothing. Rate-limited so it never buzzes nonstop.
+(function(){
+  var last=0;
+  function hap(k){
+    if(!k) return; var now=Date.now(); if(now-last<120) return; last=now;
+    try{ if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage(JSON.stringify({kvhaptic:String(k)})); return; } }catch(e){}
+    try{ if(navigator.vibrate) navigator.vibrate(k==="heavy"||k==="error"?60:k==="success"?[30,40,30]:25); }catch(e){}
+  }
+  window.KV_HAPTIC=hap;
+  var prevS=window.KV_ON_SOUND;                                  // engine sounds (dice landing, rent, tax)
+  window.KV_ON_SOUND=function(id){ try{ if(prevS) prevS(id); }catch(e){} hap({__land:"medium",rent:"medium",tax:"medium"}[id]); };
+  var prevF=window.KV_SFX;                                       // deal stingers
+  if(typeof prevF==="function") window.KV_SFX=function(id){ try{ prevF.apply(this,arguments); }catch(e){} hap({ching:"success",dang:"error"}[id]); };
 })();
 </script>
