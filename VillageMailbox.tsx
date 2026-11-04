@@ -469,7 +469,7 @@ const errorStyles = StyleSheet.create({
 // ============================================================================
 // EMPTY STATE
 // ============================================================================
-function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, reposting, repostProg, onTipKeeper }: any) {
+function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, reposting, repostProg, onTipKeeper, onRemove }: any) {
   const R = require('react');
   const [xp, setXp] = R.useState(null as number | null);
   const [tr, setTr] = R.useState(null as any);
@@ -524,6 +524,13 @@ function GameRegistryCard({ item, onInstall, installing, onTip, onRepost, repost
       ) : null}
       {item.warn ? (
         <Text style={{ color: '#dc2626', fontSize: 10, fontWeight: '700', marginTop: 2 }}>⚠ DIFFERENT PUBLISHER than first seen</Text>
+      ) : null}
+      {/* KV_RECV_RM: a board someone sent you can be thrown away (this phone only) */}
+      {item.received && onRemove ? (
+        <TouchableOpacity onPress={() => { setInfoOpen(false); onRemove(item); }}
+          style={{ marginTop: 6, borderWidth: 1, borderColor: '#b91c1c', borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}>
+          <Text style={{ color: '#b91c1c', fontWeight: '700', fontSize: 11 }}>{'\uD83D\uDDD1 Remove this envelope (this phone)'}</Text>
+        </TouchableOpacity>
       ) : null}
       {/* KV_GAME_REPOST: keeper button + freshness */}
       {onRepost && item.quad ? (() => {
@@ -1658,9 +1665,39 @@ export default function VillageMailbox() {
   };
 
   // Filter by query
-  const filteredData = useMemo(() => { // KV_SEARCH_V2: any word order, ranked, typo-tolerant
+  // KV_RECV_RM: throw away a received board envelope - local only; the sender's chain record stays.
+  const removeReceivedBoard = (item: any) => {
+    const h = String((item && item.quad && item.quad.head) || '');
+    if (!h) return;
+    Alert.alert('Remove this envelope?', 'It only disappears from this phone. If it was ever listed on chain, that record stays.',
+      [{ text: 'Cancel', style: 'cancel' },
+       { text: 'Remove', style: 'destructive', onPress: async () => {
+          try {
+            const AS = require('@react-native-async-storage/async-storage').default;
+            const recv: any[] = JSON.parse((await AS.getItem('kv_received_boards')) || '[]');
+            await AS.setItem('kv_received_boards', JSON.stringify(recv.filter((rb: any) => String(rb && rb.quad && rb.quad.head) !== h)));
+          } catch {}
+          try { setGames((gs: any[]) => (gs || []).filter((g: any) => !(g && g.received && String(g.quad && g.quad.head) === h))); } catch {}
+       } }]);
+  };
+  // KV_STALE_FOLD: a game envelope whose ~30h chain clock ran out (and no keeper refreshed it)
+  // is folded away by default - the chain itself already stopped serving it. 'show expired' unfolds.
+  const [showStale, setShowStale] = useState(false);
+  const kvIsStale = (it: any) => section === 'games' && !it.received &&
+    (Date.now() - Math.max(Number(it.t || 0), Number(it.keptAt || 0))) > 34 * 3600000;
+  const filteredAll = useMemo(() => { // KV_SEARCH_V2: any word order, ranked, typo-tolerant
     try { return require('./kv_search').searchItems(getCurrentData() || [], dq, section); } catch { return []; }
   }, [section, dapps, storefronts, coupons, academics, services, games, dq]);
+  const staleCount = useMemo(() => (section === 'games' ? (filteredAll as any[]).filter(kvIsStale).length : 0), [filteredAll, section]);
+  const filteredData = useMemo(() => (showStale ? filteredAll : (filteredAll as any[]).filter((it: any) => !kvIsStale(it))), [filteredAll, showStale, section]);
+  const kvStaleToggle = staleCount > 0 ? (
+    <TouchableOpacity onPress={() => setShowStale(!showStale)}
+      style={{ alignSelf: 'center', backgroundColor: showStale ? '#fef3c7' : '#f5f5f4', borderWidth: 1, borderColor: '#d6d3d1', borderRadius: rs.s(14), paddingVertical: rs.s(5), paddingHorizontal: rs.s(12), marginBottom: rs.s(8) }}>
+      <Text style={{ fontSize: rs.font(11), fontWeight: '700', color: '#57534e' }}>
+        {showStale ? ('hide ' + staleCount + ' expired') : ('\uD83D\uDCE6 ' + staleCount + ' expired envelope' + (staleCount === 1 ? '' : 's') + ' hidden \u00b7 show')}
+      </Text>
+    </TouchableOpacity>
+  ) : null;
 
   // Render item
   const renderItem = ({ item, index }: { item: any; index: number }) => {
@@ -1742,7 +1779,7 @@ export default function VillageMailbox() {
       case 'coupons': return <CouponCard item={item} onPress={onPress} />;
       case 'academics': return <AcademicCard item={item} onPress={onPress} />;
       case 'services': return <ServiceCard item={item} onPress={onPress} />;
-      case 'games': return <GameRegistryCard item={item} onInstall={installGame} installing={installingGame === (item.quad && item.quad.head)} onTip={tipDev} onRepost={runRepostGame} onTipKeeper={tipGameKeeper} reposting={repostingGame === (item.quad && item.quad.head)} repostProg={repostGameProg} />;
+      case 'games': return <GameRegistryCard item={item} onRemove={removeReceivedBoard} onInstall={installGame} installing={installingGame === (item.quad && item.quad.head)} onTip={tipDev} onRepost={runRepostGame} onTipKeeper={tipGameKeeper} reposting={repostingGame === (item.quad && item.quad.head)} repostProg={repostGameProg} />;
     }
   };
 
@@ -1843,7 +1880,7 @@ export default function VillageMailbox() {
         ) : loading && filteredData.length === 0 ? (
           <SkeletonList count={4} />
         ) : filteredData.length === 0 ? (
-          <EmptyState section={section} />
+          <View>{kvStaleToggle}<EmptyState section={section} /></View>
         ) : (
           <FlatList
             data={filteredData.slice(0, shown)}
@@ -1854,6 +1891,7 @@ export default function VillageMailbox() {
             removeClippedSubviews
             renderItem={renderItem}
             numColumns={1} /* KV_ENVELOPE_CARDS: one envelope per row */
+            ListHeaderComponent={kvStaleToggle}
             key={'list'}
             columnWrapperStyle={undefined}
             contentContainerStyle={mainStyles.list}
