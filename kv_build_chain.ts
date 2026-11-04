@@ -11,7 +11,21 @@ const blen = (s: string) => utf8ToBytes(s).length;
 
 export interface ChainBuild { ok: boolean; issues: string[]; bundle?: any; head?: string; htmlBytes?: number; chunks?: number; estKas?: number }
 
+// KV_BUILD_PROGRESS: one implementation; the sync and async entry points both run these steps.
+export type BuildStep = { p: string; d: number; t: number };
 export function buildChainBundle(srcHtml: string, game: string): ChainBuild {
+  const g = buildSteps(srcHtml, game); let r = g.next(); while (!r.done) r = g.next(); return r.value;
+}
+export async function buildChainBundleAsync(srcHtml: string, game: string, onStep?: (s: BuildStep) => void): Promise<ChainBuild> {
+  const g = buildSteps(srcHtml, game); let r = g.next(); let last = 0;
+  while (!r.done) {
+    const now = Date.now();
+    if (now - last > 120) { last = now; try { onStep && onStep(r.value); } catch {} await new Promise((res) => setTimeout(res, 16)); } // let the screen repaint
+    r = g.next();
+  }
+  return r.value;
+}
+function* buildSteps(srcHtml: string, game: string): Generator<BuildStep, ChainBuild, void> {
   const issues: string[] = [];
   if (!/^[a-z0-9-]{3,48}$/.test(game)) return { ok: false, issues: ['game id must be 3-48 chars of a-z 0-9 -'] };
   const srcSha = shaHex(srcHtml);
@@ -26,6 +40,8 @@ export function buildChainBundle(srcHtml: string, game: string): ChainBuild {
 
   // fragments (same algorithm as make_chain.cjs)
   const { htmlToChunkData, scanHtmlForPublish } = require('./html_chunks');
+  const _estN = Math.max(1, Math.ceil(blen(html) / (FRAG_MAX * 0.97)));
+  yield { p: 'packing', d: 0, t: _estN };
   const frags: any[] = [];
   for (let pos = 0, prev = ZERO; pos < html.length; ) {
     let end = Math.min(html.length, pos + FRAG_MAX);
@@ -35,6 +51,7 @@ export function buildChainBundle(srcHtml: string, game: string): ChainBuild {
     const text = html.slice(pos, end), fh = shaHex(text), link = shaHex(prev + fh);
     const nChunks = htmlToChunkData(text).chunks.length;
     frags.push({ i: frags.length, h: fh, prev, link, bytes: blen(text), chunks: nChunks, text });
+    yield { p: 'packing', d: Math.min(frags.length, _estN), t: _estN };
     prev = link; pos = end;
   }
   if (!frags.length) return { ok: false, issues: ['empty page'] };
@@ -45,8 +62,10 @@ export function buildChainBundle(srcHtml: string, game: string): ChainBuild {
   if (slot + 1 > 80) issues.push('too many address slots (' + (slot + 1) + ') - game too large');
 
   // wallet scans: full page with the game cap, every fragment on its own, visible text through the content filter
+  yield { p: 'safety check: whole page', d: 0, t: frags.length };
   try { const { scanGameForPublish } = require('./game_chunks'); const g = scanGameForPublish(html); if (!g.ok) for (const x of g.issues) issues.push('page: ' + x.code + (x.detail ? ' ' + String(x.detail).slice(0, 60) : '')); } catch (e: any) { issues.push('page scan error: ' + String(e && e.message || e)); }
-  for (const f of frags) { try { const r = scanHtmlForPublish(f.text); for (const x of (r.issues || [])) issues.push('fragment ' + f.i + ': ' + x.code); } catch {} }
+  for (const f of frags) { yield { p: 'safety check', d: f.i + 1, t: frags.length }; try { const r = scanHtmlForPublish(f.text); for (const x of (r.issues || [])) issues.push('fragment ' + f.i + ': ' + x.code); } catch {} }
+  yield { p: 'content check', d: frags.length, t: frags.length };
   try {
     const cf = require('./content_filter'); const scan = cf.scanObjectStrict || cf.scanObject;
     // KV_ENTITY_DECODE: entity-decoded, tags stripped with AND without spaces ("s<b></b>eed phrase")
@@ -65,6 +84,7 @@ export function buildChainBundle(srcHtml: string, game: string): ChainBuild {
     slots: slot + 1, frags: frags.map((f) => ({ i: f.i, h: f.h, link: f.link, bytes: f.bytes, chunks: f.chunks, slot: f.slot })),
     addresses: new Array(slot + 1).fill(null), music: null,
   };
+  yield { p: 'verifying the chain', d: frags.length, t: frags.length };
   // solve the puzzle exactly as the wallet will
   let pl = ZERO, joined = '';
   for (const fr of manifest.frags) { const t = frags[fr.i].text; if (shaHex(t) !== fr.h || shaHex(pl + fr.h) !== fr.link) { issues.push('chain broken at ' + fr.i); break; } pl = fr.link; joined += t; }

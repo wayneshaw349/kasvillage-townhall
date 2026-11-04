@@ -1037,9 +1037,15 @@ const KvChainGamePublish: React.FC = () => {
     if (prevE && !prevE.url && !prevE.local) { Alert.alert('Name taken', '"' + id + '" is a built-in game. Pick another name.'); return; }
     setGbusy(id); setGlog([]);
     try {
-      gadd('checking ' + id + ' (' + Math.round(html.length / 1024) + ' KB)');
-      const { buildChainBundle, nonceBaseFor } = require('./kv_build_chain');
-      const b: any = buildChainBundle(html, id);
+      gadd('checking ' + id + ' (' + Math.round(html.length / 1024) + ' KB) - this can take a minute for big games');
+      const { buildChainBundleAsync, nonceBaseFor } = require('./kv_build_chain');
+      await new Promise((r) => setTimeout(r, 30)); // KV_BUILD_PROGRESS: show the line before the heavy work starts
+      let _ph = '';
+      const b: any = await buildChainBundleAsync(html, id, (st: any) => {
+        setGprog({ done: st.d, total: st.t, label: st.p });
+        const ph = st.p === 'packing' ? 'packing into fragments' : st.p; if (ph !== _ph) { _ph = ph; gadd('\u2026 ' + ph); }
+      });
+      setGprog(null);
       const _tags: string[] = require('./kv_dev_publish').tagsFromHtml(html); // KV_TAGS
       const _KA = require('./kv_age'); // KV_AGE_RATING (Apple 4.7): rating rides the signed announce
       const _age = _KA.ageFromHtml(html) || (prevE && _KA.normAge(prevE.age)) || (await _KA.askGameAge(id));
@@ -1099,7 +1105,9 @@ const KvChainGamePublish: React.FC = () => {
   };
   const kvFromClipboard = async () => {
     try {
+      setGlog([]); gadd('reading the clipboard\u2026'); // KV_BUILD_PROGRESS
       const t = await Clipboard.getStringAsync();
+      if (t) gadd('read ' + Math.round(t.length / 1024) + ' KB');
       if (!t) { Alert.alert('Clipboard is empty', 'Open your .html in a text editor, select all, copy, then tap this again.'); return; }
       kvIngest(t, { name: 'my-game' });
     } catch (e: any) { Alert.alert('Clipboard failed', String((e && e.message) || e)); }
@@ -1110,8 +1118,9 @@ const KvChainGamePublish: React.FC = () => {
       { text: 'Fetch', onPress: async (u: string) => {
         const url = String(u || '').trim();
         if (!/^https:\/\/\S+$/i.test(url)) { Alert.alert('Bad link', 'Use a full https:// link to the .html file.'); return; }
-        try { const r = await fetch(url); if (!r.ok) throw new Error('could not fetch the page (' + r.status + ')'); kvIngest(await r.text(), { url }); }
-        catch (e: any) { Alert.alert('Fetch failed', String((e && e.message) || e)); }
+        setGlog([]); gadd('downloading ' + url.slice(0, 80) + '\u2026'); setGbusy('link'); // KV_BUILD_PROGRESS
+        try { const r = await fetch(url); if (!r.ok) throw new Error('could not fetch the page (' + r.status + ')'); const _t = await r.text(); gadd('downloaded ' + Math.round(_t.length / 1024) + ' KB'); setGbusy(''); kvIngest(_t, { url }); }
+        catch (e: any) { setGbusy(''); gadd('download failed: ' + String((e && e.message) || e)); Alert.alert('Fetch failed', String((e && e.message) || e)); }
       } },
     ], 'plain-text', 'https://');
   };
@@ -1548,7 +1557,7 @@ const KvChainGamePublish: React.FC = () => {
           <View style={{ height: 10, backgroundColor: '#2a2118', borderRadius: 5, overflow: 'hidden' }}>
             <View style={{ width: (Math.round(100 * gprog.done / gprog.total) + '%') as any, height: 10, backgroundColor: '#4ade80' }} />
           </View>
-          <Text style={{ color: '#9a8f78', fontSize: 10, fontFamily: 'monospace', marginTop: 3 }}>{gprog.done >= gprog.total ? 'uploaded - verifying and listing…' : 'uploading ' + gprog.done + '/' + gprog.total + ' · keep this screen open'}</Text>
+          <Text style={{ color: '#9a8f78', fontSize: 10, fontFamily: 'monospace', marginTop: 3 }}>{gprog.label ? gprog.label + ' ' + gprog.done + '/' + gprog.total + ' \u00b7 wallet is working' : gprog.done >= gprog.total ? 'uploaded - verifying and listing…' : 'uploading ' + gprog.done + '/' + gprog.total + ' · keep this screen open'}</Text>
         </View>
       ) : null}
       <TouchableOpacity onPress={() => Clipboard.setStringAsync(glog.join(String.fromCharCode(10)))}
