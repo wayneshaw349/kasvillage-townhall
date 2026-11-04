@@ -164,7 +164,7 @@ export async function publishHtmlChunks(
   owner: OwnerKeys,
   storeAddress: string,
   html: string,
-  opts?: { skipScan?: boolean },
+  opts?: { skipScan?: boolean; onChunk?: (done: number, total: number) => void },  // KV_PUB_HEARTBEAT
 ): Promise<{ success: boolean; txids: string[]; totalChunks: number; hash: string; issues?: HtmlScanIssue[]; error?: string }> {
   if (!opts?.skipScan) {
     const scan = scanHtmlForPublish(html);
@@ -174,6 +174,7 @@ export async function publishHtmlChunks(
   }
   const { chunks, hash } = htmlToChunkData(html);
   const txids: string[] = [];
+  try { opts?.onChunk?.(0, chunks.length); } catch {}
   try {
     for (let i = 0; i < chunks.length; i++) {
       const rec: KvRecord = signRecord({
@@ -193,6 +194,7 @@ export async function publishHtmlChunks(
         return { success: false, txids, totalChunks: chunks.length, hash, error: 'chunk ' + i + ' failed: ' + (res && res.error) };
       }
       txids.push(res.txId);
+      try { opts?.onChunk?.(i + 1, chunks.length); } catch {}
       console.log('[HtmlChunks] sent', (i + 1) + '/' + chunks.length, res.txId.slice(0, 16));
     }
     return { success: true, txids, totalChunks: chunks.length, hash };

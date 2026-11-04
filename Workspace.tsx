@@ -1357,10 +1357,11 @@ const KvChainGamePublish: React.FC = () => {
           try { const AS = require('@react-native-async-storage/async-storage').default; await AS.setItem('kv_pub_anchor_' + gameId, publishAnchor); } catch {}
         }
       } catch {}
-      gadd(entry.bundle.frags.length + ' fragments -> publishing (keep this screen open)…');
+      gadd(entry.bundle.frags.length + ' fragments -> publishing (keep this screen open)… each fragment is a few chained txs – the bar moves with every tx');
       const t0 = Date.now();
       const res = await publishGamePuzzle(owner, m, entry.bundle.frags, slotAddresses, manifestAddress,
-        (done: number, total: number) => { setGprog({ done, total }); gadd('fragment ' + done + '/' + total + ' (' + Math.round((Date.now() - t0) / 1000) + 's)'); });
+        (done: number, total: number) => { setGprog({ done, total }); gadd('fragment ' + done + '/' + total + ' (' + Math.round((Date.now() - t0) / 1000) + 's)'); },
+        (fi: number, c: number, ct: number) => setGprog({ done: fi, total: entry.bundle.frags.length, label: '\u26d3 fragment ' + (fi + 1) + ' \u00b7 chunk ' + c + '/' + ct + ' \u00b7' })); // KV_PUB_HEARTBEAT
       if (!res.success) { gadd('PUBLISH FAILED: ' + res.error); setGbusy(''); return; }
       gadd('manifest published, hash ' + res.manifestHash);
       kvMarkMeta(gameId, { publishedAt: Date.now() });

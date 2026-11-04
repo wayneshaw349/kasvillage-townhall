@@ -67,6 +67,7 @@ export function verifyChain(m: GameManifest): { head: string | null; error?: str
 export async function publishGamePuzzle(
   owner: OwnerKeys, manifest: GameManifest, frags: FragFile[], slotAddresses: string[], manifestAddress: string,
   onProgress?: (fragDone: number, fragTotal: number) => void,
+  onChunk?: (fragIdx: number, done: number, total: number) => void,  // KV_PUB_HEARTBEAT: every chunk tx moves the bar
 ): Promise<{ success: boolean; manifestHash?: string; error?: string }> {
   if (verifyChain(manifest).head !== manifest.head) return { success: false, error: 'manifest chain invalid' };
   const slots = Math.max(...manifest.frags.map((f) => f.slot)) + 1;
@@ -74,7 +75,7 @@ export async function publishGamePuzzle(
   for (const f of frags) {
     const ref = manifest.frags[f.i];
     if (!ref || hex(f.text) !== ref.h) return { success: false, error: 'fragment ' + f.i + ' does not match manifest' };
-    const res = await publishHtmlChunks(owner, slotAddresses[ref.slot], f.text);   // existing path, scan ON
+    const res = await publishHtmlChunks(owner, slotAddresses[ref.slot], f.text, { onChunk: (c, ct) => { try { onChunk?.(f.i, c, ct); } catch {} } });   // existing path, scan ON
     if (!res.success || res.hash !== ref.h) return { success: false, error: 'fragment ' + f.i + ': ' + (res.error || 'hash mismatch') };
     onProgress?.(f.i + 1, frags.length);
   }
