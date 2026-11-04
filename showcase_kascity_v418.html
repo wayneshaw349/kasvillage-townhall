@@ -9021,7 +9021,7 @@ var lastRev=0; setInterval(function(){ var f=(window.KV_FLAGS&&window.KV_FLAGS()
         var b=document.createElement("button");
         b.style.cssText="margin-top:10px;padding:9px 26px;background:#2f4a2f;color:#cfe6c4;border:1px solid #4fd98a;border-radius:6px;font:900 14px monospace;cursor:pointer;";
         b.textContent="ROLL"; box.appendChild(b);
-        b.onclick=function(e){ e.stopPropagation(); rolls[s]=throwFor(s); if(window.KV_MOVE) window.KV_MOVE(s,"first",rolls[s][0]+rolls[s][1]); next(); };
+        b.onclick=function(e){ e.stopPropagation(); try{ window.KV_HAPTIC && window.KV_HAPTIC("light"); }catch(x){} rolls[s]=throwFor(s); if(window.KV_MOVE) window.KV_MOVE(s,"first",rolls[s][0]+rolls[s][1]); next(); };
       } else {
         // __KV_V201: the guest does not throw — it takes the host's value from the relay
         if(relay() && !window.KV_MP2.owns(s)){   // __KV_V202: not my seat -> its owner throws, I read
@@ -15685,7 +15685,7 @@ catch (e) { console.error('kascity47 boot: ' + (e && e.message)); }
     for(var i=0;i<ds.length;i++){ var d=ds[i]; if(/\broll\b/i.test(d.textContent||"") && d.offsetParent){ return d; } }
     return null;
   }
-  var last=0; var fire=function(e){ if(e){ try{ e.preventDefault(); e.stopPropagation(); }catch(x){} } if(Date.now()-last<600) return; last=Date.now(); big.style.display="none"; setTimeout(function(){ try{ var d=rollChoice(); if(d) d.click(); }catch(x){} }, 30); };
+  var last=0; var fire=function(e){ if(e){ try{ e.preventDefault(); e.stopPropagation(); }catch(x){} } if(Date.now()-last<600) return; last=Date.now(); try{ window.KV_HAPTIC && window.KV_HAPTIC("light"); }catch(x){} big.style.display="none"; setTimeout(function(){ try{ var d=rollChoice(); if(d) d.click(); }catch(x){} }, 30); };
   big.addEventListener("touchend",fire,{passive:false}); big.addEventListener("pointerup",fire); big.addEventListener("click",fire);
   setInterval(function(){ var d=rollChoice(); big.style.display=d?"block":"none"; }, 300);
 })();
