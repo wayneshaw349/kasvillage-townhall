@@ -300,6 +300,8 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({ onClose 
 
       {/* Transaction List */}
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        {/* KV_MONEY_AUDIT: the running tally answers "where did it all go" right where people look */}
+        {(() => { const C = require('./kv_money_audit_card').default; return <C />; })()}
         {loading && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.amber} />
