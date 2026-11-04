@@ -20,7 +20,7 @@ export async function buildChainBundleAsync(srcHtml: string, game: string, onSte
   const g = buildSteps(srcHtml, game); let r = g.next(); let last = 0;
   while (!r.done) {
     const now = Date.now();
-    if (now - last > 120) { last = now; try { onStep && onStep(r.value); } catch {} await new Promise((res) => setTimeout(res, 16)); } // let the screen repaint
+    if (now - last > 250) { last = now; try { onStep && onStep(r.value); } catch {} await new Promise((res) => setTimeout(res, 0)); } // yield just long enough for the screen to repaint
     r = g.next();
   }
   return r.value;
