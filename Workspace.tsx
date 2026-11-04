@@ -1091,14 +1091,14 @@ const KvChainGamePublish: React.FC = () => {
       await kvMarkMeta(id, { tags: _tags, age: _age, url: src.url || null, local: src.url ? 0 : 1, head: b.head, nonceBase, manifest: b.bundle.manifest, savedAt: Date.now(), ...(prevE && prevE.head !== b.head ? { publishedAt: 0 } : {}) });
       setGamesTick((x: number) => x + 1);
       setGbusy('');
-      gadd('READY \u2713 nothing spent yet - pick Test run or Publish in the pop-up (or tap the ' + id.toUpperCase() + ' book on the shelf any time)');
+      require('./kv_haptics').kvBuzz('ok'); gadd('READY \u2713 nothing spent yet - pick Test run or Publish in the pop-up (or tap the ' + id.toUpperCase() + ' book on the shelf any time)');
       const joined = b.bundle.frags.map((f: any) => f.text).join('');
       Alert.alert('Passed every check: ' + id, Math.round(b.htmlBytes / 1024) + ' KB · about ' + b.estKas + ' KAS to put on chain (parked in your own addresses), plus ~1 KAS to list.\n\nTest-run it first: it plays in the same locked player your players get.', [
         { text: 'Later', style: 'cancel' },
         { text: 'Test run', onPress: () => setPreview({ id, html: joined }) },
         { text: unlisted ? 'Publish (unlisted)' : 'Publish & List', onPress: () => runPublish(id) },
       ]);
-    } catch (e: any) { gadd('ERROR: ' + String((e && e.message) || e)); setGbusy(''); Alert.alert('Could not prepare the game', String((e && e.message) || e)); }
+    } catch (e: any) { require('./kv_haptics').kvBuzz('error'); gadd('ERROR: ' + String((e && e.message) || e)); setGbusy(''); Alert.alert('Could not prepare the game', String((e && e.message) || e)); }
   };
   const kvIngest = (html: string, src: { url?: string; name?: string }) => {
     const D = require('./kv_dev_publish');
@@ -1364,12 +1364,12 @@ const KvChainGamePublish: React.FC = () => {
       const res = await publishGamePuzzle(owner, m, entry.bundle.frags, slotAddresses, manifestAddress,
         (done: number, total: number) => { setGprog({ done, total }); gadd('fragment ' + done + '/' + total + ' (' + Math.round((Date.now() - t0) / 1000) + 's)'); },
         (fi: number, c: number, ct: number) => setGprog({ done: fi, total: entry.bundle.frags.length, label: '\u26d3 fragment ' + (fi + 1) + ' \u00b7 chunk ' + c + '/' + ct + ' \u00b7' })); // KV_PUB_HEARTBEAT
-      if (!res.success) { gadd('PUBLISH FAILED: ' + res.error); setGbusy(''); return; }
+      if (!res.success) { require('./kv_haptics').kvBuzz('error'); gadd('PUBLISH FAILED: ' + res.error); setGbusy(''); return; }
       gadd('manifest published, hash ' + res.manifestHash);
       kvMarkMeta(gameId, { publishedAt: Date.now() });
       gadd('verifying: solving the puzzle back from chain…');
       const back = await fetchGamePuzzle(manifestAddress, res.manifestHash, m.head, owner.network);
-      gadd(back.html ? 'ROUND-TRIP OK (' + back.html.length + ' bytes)' : 'ROUND-TRIP FAILED: ' + back.error);
+      require('./kv_haptics').kvBuzz(back.html ? 'done' : 'error'); gadd(back.html ? 'ROUND-TRIP OK (' + back.html.length + ' bytes)' : 'ROUND-TRIP FAILED: ' + back.error);
       let daaSpan: { daa_from?: number; daa_to?: number } = {};
       try {
         let lo = Number.MAX_SAFE_INTEGER, hi = 0, pl = 0;
