@@ -25,6 +25,17 @@ async function balanceAt(priv: string, nonce: number): Promise<bigint> {
   try { return BigInt(await getPledgeSompi(deriveStoreKeys(priv, nonce, NET).address, NET)); } catch { return 0n; }
 }
 
+// KV_PLEDGE_FAST: check many derived addresses at once - a one-by-one scan took minutes.
+async function balancesAt(priv: string, nonces: number[]): Promise<bigint[]> {
+  const out: bigint[] = new Array(nonces.length).fill(0n);
+  let i = 0;
+  const workers = Array.from({ length: Math.min(12, nonces.length) }, async () => {
+    for (;;) { const k = i++; if (k >= nonces.length) return; out[k] = await balanceAt(priv, nonces[k]); }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 const NOTE_DELIST = 'Reclaiming takes this listing out of the Mailbox (pledge 0 = delisted).';
 const NOTE_GAME = 'The game stays listed and playable, but loses its pledge rank and keepers can no longer refresh it.';
 
@@ -36,8 +47,10 @@ export async function findGamePledges(id: string): Promise<MyPledge | null> {
   if (!/^[a-z0-9-]{3,48}$/.test(clean)) throw new Error('that is not a game name (a-z, 0-9, dashes)');
   const { nonceBaseFor } = require('./kv_build_chain');
   const base = nonceBaseFor(o.pubkeyHex, clean);
+  const all = Array.from({ length: 90 }, (_, i) => base + i);
+  const bals = await balancesAt(priv, all);
   const nonces: number[] = []; let s = 0n;
-  for (let i = 0; i < 90; i++) { const n = base + i; const b = await balanceAt(priv, n); if (b > 0n) { s += b; nonces.push(n); } }
+  bals.forEach((b, i) => { if (b > 0n) { s += b; nonces.push(all[i]); } });
   if (s === 0n) return null;
   return { key: 'game:' + clean, kind: 'game', label: 'Game: ' + clean + ' (recovered)', nonces, sompi: s, note: NOTE_GAME };
 }
@@ -46,8 +59,10 @@ export async function listMyPledges(): Promise<MyPledge[]> {
   const o = await owner(); const priv = o.privateKeyHex;
   const out: MyPledge[] = [];
   const add = async (key: string, kind: PledgeKind, label: string, nonces: number[], note: string) => {
-    let s = 0n; for (const n of nonces) s += await balanceAt(priv, n);
-    if (s > 0n) out.push({ key, kind, label, nonces, sompi: s, note });
+    const bals = await balancesAt(priv, nonces);
+    let s = 0n; const keep: number[] = [];
+    bals.forEach((b, i) => { if (b > 0n) { s += b; keep.push(nonces[i]); } });
+    if (s > 0n) out.push({ key, kind, label, nonces: keep, sompi: s, note });
   };
   await add('store', 'store', 'Store / Service listing', [0], NOTE_DELIST);
   await add('dapp', 'dapp', 'DApp listing', [1], NOTE_DELIST);
@@ -80,7 +95,8 @@ export async function listMyPledges(): Promise<MyPledge[]> {
     const { registryAddress } = require('./payload_publish');
     const { apiBase } = require('./kaspa_payload');
     const reg = registryAddress('game', NET);
-    const r = await fetch(apiBase(NET) + '/addresses/' + encodeURIComponent(reg) + '/full-transactions?limit=200&resolve_previous_outpoints=no');
+    const ctl = new AbortController(); const _t = setTimeout(() => ctl.abort(), 15000); // the registry read must never hang the screen
+    const r = await fetch(apiBase(NET) + '/addresses/' + encodeURIComponent(reg) + '/full-transactions?limit=200&resolve_previous_outpoints=no', { signal: ctl.signal }).finally(() => clearTimeout(_t));
     const txs: any[] = await r.json();
     const meX = (() => { const h = o.pubkeyHex.toLowerCase(); return h.length === 66 ? h.slice(2) : h; })();
     const names = new Set<string>();
@@ -101,8 +117,10 @@ export async function listMyPledges(): Promise<MyPledge[]> {
     for (const id of Array.from(names).slice(0, 12)) {
       if (out.some((q) => q.key === 'game:' + id)) continue;
       const base = nonceBaseFor(o.pubkeyHex, id);
+      const all2 = Array.from({ length: 90 }, (_, i) => base + i);
+      const bals2 = await balancesAt(priv, all2);
       const nonces: number[] = []; let s2 = 0n;
-      for (let i = 0; i < 90; i++) { const b = await balanceAt(priv, base + i); if (b > 0n) { s2 += b; nonces.push(base + i); } }
+      bals2.forEach((b, i) => { if (b > 0n) { s2 += b; nonces.push(all2[i]); } });
       if (s2 > 0n) out.push({ key: 'game:' + id, kind: 'game', label: 'Game: ' + id + ' (found on chain)', nonces, sompi: s2, note: NOTE_GAME });
     }
   } catch {}

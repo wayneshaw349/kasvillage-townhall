@@ -405,7 +405,7 @@ const MyPledgesCard: React.FC<{ hidden: boolean }> = ({ hidden }) => {
             } },
           ], 'plain-text', ''); }}
           style={{ marginTop: 8, borderWidth: 1, borderColor: '#D4AF37', borderRadius: 8, paddingVertical: 7, alignItems: 'center' }}>
-          <Text style={{ color: '#D4AF37', fontSize: 12 }}>\uD83D\uDD0D Find a removed game\u2019s coins</Text>
+          <Text style={{ color: '#D4AF37', fontSize: 12 }}>{'\uD83D\uDD0D Find a removed game\u2019s coins'}</Text>
         </TouchableOpacity>
       ) : null}
     </View>
