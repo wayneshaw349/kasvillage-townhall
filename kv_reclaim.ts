@@ -136,6 +136,7 @@ export async function reclaimPledge(p: MyPledge): Promise<number> {
   const { withdrawPledge } = require('./payload_publish');
   let moved = 0n;
   for (const n of p.nonces) {
+    console.log('[Reclaim] sweeping nonce', n);
     let retries = 0;
     for (let batch = 0; batch < 25; batch++) {
       const b = await balanceAt(o.privateKeyHex, n); if (b === 0n) break;

@@ -355,7 +355,8 @@ const MyPledgesCard: React.FC<{ hidden: boolean }> = ({ hidden }) => {
       { text: 'Reclaim', style: 'destructive', onPress: async () => {
         try {
           const ok = await LocalAuthentication.authenticateAsync({ promptMessage: 'Reclaim pledge' });
-          if (!ok.success) return;
+          if (!ok.success) { Alert.alert('Could not confirm it is you', 'Face ID said: ' + String((ok as any).error || 'cancelled') + '. Nothing was moved - tap Reclaim to try again.'); return; } // KV_RECLAIM_LOUD
+          console.log('[Reclaim] starting', p.key, '-', p.nonces.length, 'addresses,', (Number(p.sompi) / 1e8).toFixed(2), 'KAS');
           setBusy(p.key);
           const kas = await require('./kv_reclaim').reclaimPledge(p);
           Alert.alert('Reclaimed', (hidden ? '' : kas.toFixed(2) + ' KAS ') + 'sent back to your wallet.');
