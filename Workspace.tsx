@@ -1079,6 +1079,7 @@ const KvChainGamePublish: React.FC = () => {
         return;
       }
       gadd('passed every check | ' + b.bundle.frags.length + ' fragments | ' + b.chunks + ' chunks (~' + b.estKas + ' KAS)');
+      gadd('\u2026 unlocking wallet keys');  // KV_CHECK_TAIL: narrate the quiet stretch before the pop-up
       const { _kvResolvePrivHex } = require('./proposal_share');
       const priv = await _kvResolvePrivHex(); if (!priv) throw new Error('wallet keys unavailable');
       const pub = bytesToHex(secp256k1.getPublicKey(hexToBytes(priv), true));
@@ -1086,10 +1087,11 @@ const KvChainGamePublish: React.FC = () => {
       (GAMES as any)[id] = { bundle: b.bundle, head: b.head, nonceBase, url: src.url, local: src.url ? 0 : 1, tags: _tags, age: _age };
       try { const _g: any = globalThis as any; if (_g.__kvShelfHidden && _g.__kvShelfHidden[id]) { delete _g.__kvShelfHidden[id]; require('@react-native-async-storage/async-storage').default.setItem('kv_shelf_hidden', JSON.stringify(_g.__kvShelfHidden)); } } catch {} // KV_SHELF_RM: republish unhides
       const { TRUSTED_GAMES } = require('./game_chunks'); (TRUSTED_GAMES as any)[id] = b.head;
-      if (!src.url) { try { await require('@react-native-async-storage/async-storage').default.setItem('kv_my_game_html_' + id, html); } catch { gadd('note: could not keep a copy of the file - publish now, or pick it again later'); } }
+      if (!src.url) { gadd('\u2026 saving your copy on this phone (' + Math.round(html.length / 1024) + ' KB)'); try { await require('@react-native-async-storage/async-storage').default.setItem('kv_my_game_html_' + id, html); } catch { gadd('note: could not keep a copy of the file - publish now, or pick it again later'); } }
       await kvMarkMeta(id, { tags: _tags, age: _age, url: src.url || null, local: src.url ? 0 : 1, head: b.head, nonceBase, manifest: b.bundle.manifest, savedAt: Date.now(), ...(prevE && prevE.head !== b.head ? { publishedAt: 0 } : {}) });
       setGamesTick((x: number) => x + 1);
       setGbusy('');
+      gadd('READY \u2713 nothing spent yet - pick Test run or Publish in the pop-up (or tap the ' + id.toUpperCase() + ' book on the shelf any time)');
       const joined = b.bundle.frags.map((f: any) => f.text).join('');
       Alert.alert('Passed every check: ' + id, Math.round(b.htmlBytes / 1024) + ' KB · about ' + b.estKas + ' KAS to put on chain (parked in your own addresses), plus ~1 KAS to list.\n\nTest-run it first: it plays in the same locked player your players get.', [
         { text: 'Later', style: 'cancel' },
