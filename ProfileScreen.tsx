@@ -384,6 +384,23 @@ const MyPledgesCard: React.FC<{ hidden: boolean }> = ({ hidden }) => {
             </TouchableOpacity>
           </View>
         )))}
+      {open ? (
+        <TouchableOpacity onPress={() => { // KV_PLEDGE_FIND
+          require('./kv_prompt').kvPrompt('Find a removed game', 'Type the game name exactly as it was published (e.g. showcase-kascity-v417). Its parked coins are derived from your key + that name.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Scan', onPress: async (t: string) => {
+              try {
+                const p = await require('./kv_reclaim').findGamePledges(String(t || ''));
+                if (!p) { Alert.alert('Nothing there', 'No coins at that name\u2019s addresses. Check the exact spelling (dashes matter), or it was already reclaimed.'); return; }
+                setRows((r: any[] | null) => { const rs = (r || []).filter((x: any) => x.key !== p.key); return [...rs, p]; });
+                Alert.alert('Found ' + (Number(p.sompi) / 1e8).toFixed(2) + ' KAS', 'Listed below - press Reclaim to sweep it back.');
+              } catch (e: any) { Alert.alert('Scan failed', String(e?.message || e)); }
+            } },
+          ], 'plain-text', ''); }}
+          style={{ marginTop: 8, borderWidth: 1, borderColor: '#D4AF37', borderRadius: 8, paddingVertical: 7, alignItems: 'center' }}>
+          <Text style={{ color: '#D4AF37', fontSize: 12 }}>\uD83D\uDD0D Find a removed game\u2019s coins</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 };

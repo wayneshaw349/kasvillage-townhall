@@ -1031,6 +1031,12 @@ const KvChainGamePublish: React.FC = () => {
        { text: 'Remove', style: 'destructive', onPress: async () => {
           try {
             const AS = require('@react-native-async-storage/async-storage').default;
+            try { // KV_PLEDGE_TOMBSTONE: keep the nonces so My Pledges still finds the parked coins
+              const g: any = (GAMES as any)[id] || {};
+              if (Number(g.nonceBase) >= 0) { const tb = JSON.parse((await AS.getItem('kv_pledge_tombstones')) || '{}');
+                tb[id] = { nonceBase: g.nonceBase, bundle: { manifest: (g.bundle && g.bundle.manifest) || g.manifest || {} } };
+                await AS.setItem('kv_pledge_tombstones', JSON.stringify(tb)); }
+            } catch {}
             try { delete (GAMES as any)[id]; } catch {}
             try { const v = await AS.getItem('kv_my_games'); const m = JSON.parse(v || '{}'); if (m[id] != null) { delete m[id]; await AS.setItem('kv_my_games', JSON.stringify(m)); } } catch {}
             const _g: any = globalThis as any; _g.__kvShelfHidden = _g.__kvShelfHidden || {}; _g.__kvShelfHidden[id] = 1;

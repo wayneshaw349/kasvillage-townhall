@@ -28,6 +28,20 @@ async function balanceAt(priv: string, nonce: number): Promise<bigint> {
 const NOTE_DELIST = 'Reclaiming takes this listing out of the Mailbox (pledge 0 = delisted).';
 const NOTE_GAME = 'The game stays listed and playable, but loses its pledge rank and keepers can no longer refresh it.';
 
+// KV_PLEDGE_FIND: recover the parked coins of a game whose book is gone. The addresses are
+// derived from your key + the game's exact name, so the name is enough - scans ~90 slots.
+export async function findGamePledges(id: string): Promise<MyPledge | null> {
+  const o = await owner(); const priv = o.privateKeyHex;
+  const clean = String(id || '').trim().toLowerCase();
+  if (!/^[a-z0-9-]{3,48}$/.test(clean)) throw new Error('that is not a game name (a-z, 0-9, dashes)');
+  const { nonceBaseFor } = require('./kv_build_chain');
+  const base = nonceBaseFor(o.pubkeyHex, clean);
+  const nonces: number[] = []; let s = 0n;
+  for (let i = 0; i < 90; i++) { const n = base + i; const b = await balanceAt(priv, n); if (b > 0n) { s += b; nonces.push(n); } }
+  if (s === 0n) return null;
+  return { key: 'game:' + clean, kind: 'game', label: 'Game: ' + clean + ' (recovered)', nonces, sompi: s, note: NOTE_GAME };
+}
+
 export async function listMyPledges(): Promise<MyPledge[]> {
   const o = await owner(); const priv = o.privateKeyHex;
   const out: MyPledge[] = [];
@@ -49,6 +63,8 @@ export async function listMyPledges(): Promise<MyPledge[]> {
     const games: Record<string, any> = {};
     try { Object.assign(games, require('./games_to_publish')); } catch {}
     try { Object.assign(games, JSON.parse((await AsyncStorage.getItem('kv_my_games')) || '{}')); } catch {}
+    // KV_PLEDGE_TOMBSTONE: books removed from the shelf still get their coins listed
+    try { const tb = JSON.parse((await AsyncStorage.getItem('kv_pledge_tombstones')) || '{}'); for (const id of Object.keys(tb)) if (!games[id]) games[id] = tb[id]; } catch {}
     for (const id of Object.keys(games)) {
       const g = games[id]; const base = Number(g && g.nonceBase); if (!(base >= 0)) continue;
       const frags = (g.bundle && g.bundle.manifest && g.bundle.manifest.frags) || (g.manifest && g.manifest.frags) || [];
