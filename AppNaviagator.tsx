@@ -788,6 +788,11 @@ export const AppNavigator: React.FC = () => {
   // BOOT: check if wallet / identity exists
   // ------------------------------------------------------------------
   useEffect(() => {
+    // KV_AUDIO_MIX: game sounds layer OVER the person's own music (Apple Music, Spotify)
+    // instead of pausing it. Guarded: builds without the expo-audio native module just skip it.
+    try { const { setAudioModeAsync } = require('expo-audio');
+      setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'mixWithOthers', interruptionModeAndroid: 'duckOthers', shouldPlayInBackground: false }).catch(() => {});
+    } catch {}
     const stopPriceFeed = startPriceFeed();
 
     (async () => {
