@@ -790,9 +790,13 @@ export const AppNavigator: React.FC = () => {
   useEffect(() => {
     // KV_AUDIO_MIX: game sounds layer OVER the person's own music (Apple Music, Spotify)
     // instead of pausing it. Guarded: builds without the expo-audio native module just skip it.
-    try { const { setAudioModeAsync } = require('expo-audio');
-      setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'mixWithOthers', interruptionModeAndroid: 'duckOthers', shouldPlayInBackground: false }).catch(() => {});
-    } catch {}
+    try {
+      const _ea = require('expo-audio');
+      console.log('[AudioMix] expo-audio module:', !!_ea, '- setAudioModeAsync:', typeof _ea.setAudioModeAsync);
+      _ea.setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'mixWithOthers', interruptionModeAndroid: 'duckOthers', shouldPlayInBackground: false })
+        .then(() => console.log('[AudioMix] session set: mixWithOthers OK'))
+        .catch((e: any) => console.log('[AudioMix] setAudioModeAsync FAILED:', String(e?.message || e)));
+    } catch (e: any) { console.log('[AudioMix] expo-audio require FAILED (native module not in this build):', String(e?.message || e)); }
     const stopPriceFeed = startPriceFeed();
 
     (async () => {
