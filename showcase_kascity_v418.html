@@ -13248,17 +13248,52 @@ window.KV_DIST_MULT=function(tile,buyer,seller){
       if(c<0 && -c>cashOf(owner)){ if(window.KV_LOG) window.KV_LOG("P"+owner+" can't pay "+(-c),"#ff6a4a"); return; }
       var nA=(N[give]&&N[give].n)||give, nB=(N[take]&&N[take].n)||take;
       if(window.KV_LOG) window.KV_LOG("P"+me+"  offers  "+nA+(c>0?" + "+c:(c<0?" (asks "+(-c)+")":""))+"  for "+nB, COL[me]);
+      // ---- KV_SWAP_TALK: the bot visibly thinks, then answers with its reasoning ----
+      var think=document.createElement("div"); think.setAttribute("data-kvmodal","1");
+      think.style.cssText="position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);z-index:79;background:#14100c;border:2px solid "+COL[owner]+";border-radius:12px;padding:12px 22px;font:12px monospace;color:#f4e4c1;text-align:center;";
+      think.innerHTML="<b style='color:"+COL[owner]+"'>P"+owner+"</b> is weighing your offer<span id='kvswdots'>.</span>";
+      document.body.appendChild(think);
+      var dn=0, dv=setInterval(function(){ dn=(dn+1)%4; var el=document.getElementById("kvswdots"); if(el) el.textContent=".".repeat(dn+1); },280);
+      function verdict(ok,title,sub,hap){
+        clearInterval(dv); think.remove();
+        if(window.KV_DEAL) window.KV_DEAL(ok,title,sub);
+        if(window.KV_HAPTIC) window.KV_HAPTIC(hap||(ok?"success":"error"));
+      }
+      function counterModal(cv){
+        clearInterval(dv); think.remove();
+        if(window.KV_HAPTIC) window.KV_HAPTIC("medium");
+        var o2=document.createElement("div"); o2.setAttribute("data-kvmodal","1");
+        o2.style.cssText="position:fixed;inset:0;z-index:79;background:rgba(10,8,6,.6);display:flex;align-items:center;justify-content:center;";
+        var b2=document.createElement("div");
+        b2.style.cssText="background:#14100c;border:2px solid "+COL[owner]+";border-radius:12px;padding:16px 20px;font:12px/1.7 monospace;color:#f4e4c1;min-width:300px;max-width:92vw;text-align:center;";
+        b2.innerHTML="<div style='color:"+COL[owner]+";font-weight:700;letter-spacing:1px'>P"+owner+" COUNTERS</div>"
+          +"<div style='margin:8px 0'>"+nA+" \u21c4 "+nB+"<br>if you <b style='color:#f0c860'>"+(cv>=0?"add "+cv:"take "+(-cv))+"</b></div>"
+          +(ev.why?"<div style='opacity:.65;font-size:11px'>their thinking: "+ev.why+"</div>":"");
+        var r2=document.createElement("div"); r2.style.cssText="display:flex;gap:8px;margin-top:10px;";
+        var acc=document.createElement("button"); acc.textContent="Accept";
+        acc.style.cssText="flex:1;padding:8px;background:#1d3a24;color:#9cd87c;border:1px solid #4fd98a;border-radius:5px;font:12px monospace;";
+        var dec=document.createElement("button"); dec.textContent="Decline";
+        dec.style.cssText="flex:1;padding:8px;background:#2a2118;color:#f4e4c1;border:1px solid #5a4a3a;border-radius:5px;font:12px monospace;";
+        acc.onclick=function(){ o2.remove();
+          if(cv>0 && cv>cashOf(me)){ if(window.KV_LOG) window.KV_LOG("can't afford the counter","#ff6a4a"); if(window.KV_DEAL) window.KV_DEAL(false,"CAN'T AFFORD IT","the counter needs "+cv); return; }
+          if(window.KV_LOG) window.KV_LOG("you ACCEPT P"+owner+"'s counter", COL[me]);
+          window.KV_SWAP_RUN(give,take,me,owner,cv); };
+        dec.onclick=function(){ o2.remove(); if(window.KV_LOG) window.KV_LOG("you DECLINE the counter","#e0a040"); if(window.KV_HAPTIC) window.KV_HAPTIC("light"); };
+        r2.appendChild(acc); r2.appendChild(dec); b2.appendChild(r2); o2.appendChild(b2); document.body.appendChild(o2);
+      }
       setTimeout(function(){
-        if(ev.ok){ if(window.KV_LOG) window.KV_LOG("P"+owner+"  ACCEPTS the swap"+(ev.why?"  \u2014 "+ev.why:""), COL[owner]); window.KV_SWAP_RUN(give,take,me,owner,c); return; }
+        if(ev.ok){
+          if(window.KV_LOG) window.KV_LOG("P"+owner+"  ACCEPTS the swap"+(ev.why?"  \u2014 "+ev.why:""), COL[owner]);
+          verdict(true,"SWAP ACCEPTED","P"+owner+(ev.why?" \u00b7 "+ev.why:" \u00b7 a fair trade"));
+          window.KV_SWAP_RUN(give,take,me,owner,c); return;
+        }
         if(ev.gap<=Math.max(40,ev.ask*0.25)){
-          var cv=Math.ceil((c+ev.gap)/5)*5;
-          if(window.KV_LOG) window.KV_LOG("P"+owner+"  COUNTERS - swap if you "+(cv>=0?"add "+cv:"ask only "+(-cv)), COL[owner]);
-          var ok=window.confirm("P"+owner+" counters: swap "+nA+" for "+nB+" if you "+(cv>=0?"add "+cv:"take "+(-cv))+".  Accept?");
-          if(ok){ if(cv>0 && cv>cashOf(me)){ if(window.KV_LOG) window.KV_LOG("can't afford the counter","#ff6a4a"); return; } window.KV_SWAP_RUN(give,take,me,owner,cv); }
-          return;
+          if(window.KV_LOG) window.KV_LOG("P"+owner+"  COUNTERS - swap if you "+((c+ev.gap)>=0?"add":"ask only")+" ~"+Math.abs(c+ev.gap), COL[owner]);
+          counterModal(Math.ceil((c+ev.gap)/5)*5); return;
         }
         if(window.KV_LOG) window.KV_LOG("P"+owner+"  REFUSES the swap \u2014 wants about "+ev.gap+" more"+(ev.why?" \u00b7 "+ev.why:""), COL[owner]);
-      }, 700);
+        verdict(false,"SWAP REFUSED","P"+owner+" wants ~"+ev.gap+" more"+(ev.why?" \u00b7 "+ev.why:""));
+      }, 900+Math.floor(Math.random()*900));
     };
     row.appendChild(send); row.appendChild(cancel);
     box.appendChild(sel); box.appendChild(lab); box.appendChild(sl); box.appendChild(hint); box.appendChild(row);
