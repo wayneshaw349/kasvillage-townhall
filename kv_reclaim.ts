@@ -77,13 +77,20 @@ export async function findGamePledges(id: string): Promise<MyPledge | null> {
   bals.forEach((b, i) => { if (b > 0n) { s += b; nonces.push(all[i]); } });
   if (s === 0n) return null;
   try { const known: any = JSON.parse((await AsyncStorage.getItem('kv_known_pledges')) || '{}');
-    known['game:' + clean] = { kind: 'game', label: 'Game: ' + clean + ' (recovered)', nonces, note: NOTE_GAME };
+    known['game:' + clean] = { kind: 'game', label: 'Game: ' + clean + ' (recovered)', nonces, note: NOTE_GAME, sompi: String(s), at: Date.now() };
     await AsyncStorage.setItem('kv_known_pledges', JSON.stringify(known)); } catch {}
   return { key: 'game:' + clean, kind: 'game', label: 'Game: ' + clean + ' (recovered)', nonces, sompi: s, note: NOTE_GAME };
 }
 
 let _plCache: { at: number; out: MyPledge[] } | null = null; // KV_PLEDGE_CACHE: reopening the screen must not re-hammer the API
 export function forgetPledgeCache() { _plCache = null; }
+// KV_PLEDGE_LEDGER: the remembered stakes, straight from this phone - zero network reads.
+export async function listKnownPledges(): Promise<Array<{ key: string; kind: PledgeKind; label: string; nonces: number[]; sompi: bigint; note: string; at: number }>> {
+  try {
+    const known = JSON.parse((await AsyncStorage.getItem('kv_known_pledges')) || '{}');
+    return Object.keys(known).map((key) => { const k = known[key] || {}; return { key, kind: k.kind || 'game', label: k.label || key, nonces: (k.nonces || []).map(Number), sompi: BigInt(k.sompi || 0), note: k.note || '', at: Number(k.at || 0) }; });
+  } catch { return []; }
+}
 export async function listMyPledges(): Promise<MyPledge[]> {
   if (_plCache && Date.now() - _plCache.at < 10 * 60000) return _plCache.out;
   const o = await owner(); const priv = o.privateKeyHex;
@@ -131,7 +138,7 @@ export async function listMyPledges(): Promise<MyPledge[]> {
   } catch {}
   try { // remember everything currently standing
     const known: any = JSON.parse((await AsyncStorage.getItem('kv_known_pledges')) || '{}');
-    for (const q of out) known[q.key] = { kind: q.kind, label: q.label, nonces: q.nonces, note: q.note };
+    for (const q of out) known[q.key] = { kind: q.kind, label: q.label, nonces: q.nonces, note: q.note, sompi: String(q.sompi), at: Date.now() };
     await AsyncStorage.setItem('kv_known_pledges', JSON.stringify(known));
   } catch {}
   _plCache = { at: Date.now(), out };
