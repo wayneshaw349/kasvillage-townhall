@@ -25,6 +25,23 @@ async function balanceAt(priv: string, nonce: number): Promise<bigint> {
   try { return BigInt(await getPledgeSompi(deriveStoreKeys(priv, nonce, NET).address, NET)); } catch { return 0n; }
 }
 
+// KV_BALANCE_STRICT: a failed lookup must never read as "empty" - that made Reclaim report
+// 0.00 on flaky connections while the coins sat untouched. Retries, then throws.
+async function balanceAtStrict(priv: string, nonce: number): Promise<bigint> {
+  const { deriveStoreKeys } = require('./payload_publish');
+  const { getPledgeSompi } = require('./kaspa_payload');
+  const addr = deriveStoreKeys(priv, nonce, NET).address;
+  let lastErr: any = null;
+  for (let t = 0; t < 3; t++) {
+    try {
+      const v = await getPledgeSompi(addr, NET);
+      if (v === null || v === undefined) throw new Error('empty response');
+      return BigInt(v);
+    } catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 1500)); }
+  }
+  throw new Error('could not read the chain for this address (check your connection): ' + String((lastErr && lastErr.message) || lastErr));
+}
+
 // KV_PLEDGE_FAST: check many derived addresses at once - a one-by-one scan took minutes.
 async function balancesAt(priv: string, nonces: number[]): Promise<bigint[]> {
   const out: bigint[] = new Array(nonces.length).fill(0n);
@@ -139,7 +156,8 @@ export async function reclaimPledge(p: MyPledge): Promise<number> {
     console.log('[Reclaim] sweeping nonce', n);
     let retries = 0;
     for (let batch = 0; batch < 25; batch++) {
-      const b = await balanceAt(o.privateKeyHex, n); if (b === 0n) break;
+      const b = await balanceAtStrict(o.privateKeyHex, n); if (b === 0n) { console.log('[Reclaim] nonce', n, 'is empty - confirmed by the chain'); break; }
+      console.log('[Reclaim] nonce', n, 'holds', (Number(b) / 1e8).toFixed(2), 'KAS - sweeping');
       const r: any = await withdrawPledge(o, n);
       if (r === null) break; // already 0
       if (r && r.success === false) {
@@ -149,7 +167,7 @@ export async function reclaimPledge(p: MyPledge): Promise<number> {
       }
       // KV_SWEEP_SETTLE: the public indexer can lag well past 4s - poll up to 45s before concluding anything
       let after = b;
-      for (let w = 0; w < 9; w++) { await sleep(5000); after = await balanceAt(o.privateKeyHex, n); if (after < b) break; }
+      for (let w = 0; w < 9; w++) { await sleep(5000); try { after = await balanceAtStrict(o.privateKeyHex, n); } catch { continue; } if (after < b) break; }
       moved += b - after;
       if (after === 0n) break;
       if (after === b) { console.log('[Reclaim] nonce', n, 'sweep submitted but not visible yet - the indexer is behind; it will show up'); break; }
