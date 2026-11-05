@@ -1339,7 +1339,9 @@ const KvChainGamePublish: React.FC = () => {
           for (const _f of (entry.bundle.frags || [])) _chunks += estimateHtmlPublishCost(String(_f.text || '')).chunks;
           _chunks += estimateHtmlPublishCost(JSON.stringify(entry.bundle.manifest || {})).chunks + 2;  // manifest (+ address list)
           const _lockKas = _chunks * 0.2;
-          const _needKas = _lockKas + _chunks * 0.003 + 1;                                            // fees + 1 KAS headroom
+          // KV_FEE_REAL: mainnet charges ~0.05 KAS per payload tx (mass), not 0.003 - the old
+          // estimate let a publish start that could not finish (died at fragment 72/74).
+          const _needKas = _lockKas + _chunks * 0.06 + 2;                                             // real fees + headroom
           gadd('cost: ' + _chunks + ' chunks x 0.2 = ' + _lockKas.toFixed(1) + ' KAS locked (yours, reclaimable in My Pledges) + ~' + (_needKas - _lockKas).toFixed(1) + ' KAS fees/headroom');
           if (Number(tot) / 1e8 < _needKas) {
             gadd('NOT ENOUGH KAS: need about ' + _needKas.toFixed(1) + ', wallet has ' + (Number(tot) / 1e8).toFixed(2) + '. Nothing was sent - top up and try again.');
