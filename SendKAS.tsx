@@ -551,9 +551,9 @@ export const SendKAS: React.FC<SendKASProps> = ({
                     </TouchableOpacity>
                   ) : null}
                   {onOpenCashNote ? (
-                    <TouchableOpacity style={styles.sendToChip} onPress={() => Alert.alert('Cash note (TRANSFERABLE)', 'Turns this amount into a paper note anyone can spend, like cash. Hand it to the person you are paying; they scan it and choose where it goes.', [
-                      { text: 'Cancel', style: 'cancel' }, { text: 'Make note', onPress: () => onOpenCashNote('make', String(amountKas || '').trim()) }])}>
-                      <Text style={styles.sendToChipText}>Cash note</Text>
+                    <TouchableOpacity style={styles.sendToChip} onPress={() => Alert.alert('Paper Kaspa', 'Puts this amount on a printable QR. Whoever holds the paper can claim the coins - hand it to the person you are paying; they scan it and choose where it goes.', [
+                      { text: 'Cancel', style: 'cancel' }, { text: 'Put it on paper', onPress: () => onOpenCashNote('make', String(amountKas || '').trim()) }])}>
+                      <Text style={styles.sendToChipText}>Paper Kaspa</Text>
                     </TouchableOpacity>
                   ) : null}
                 </View>

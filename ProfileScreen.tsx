@@ -862,8 +862,8 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
             onPress={() => onNavigateCashNote?.()}
           >
             <View style={{ flex: 1 }}>
-              <Text style={styles.seedExportText}>💵 Cash Note (TRANSFERABLE)</Text>
-              <Text style={styles.seedExportSub}>Paper KAS anyone can spend, like cash - for gifts and paying in person. Also: redeem a note someone gave you.</Text>
+              <Text style={styles.seedExportText}>{'\uD83D\uDCC4 Paper Kaspa'}</Text>
+              <Text style={styles.seedExportSub}>KAS on a printable QR - whoever holds the paper can claim it. For gifts and paying in person. Also: redeem paper someone handed you.</Text>
             </View>
           </TouchableOpacity>
           <TouchableOpacity
