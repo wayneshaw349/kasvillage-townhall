@@ -54,7 +54,7 @@ async function balancesAt(priv: string, nonces: number[]): Promise<bigint[]> {
   const out: bigint[] = new Array(nonces.length).fill(0n);
   let i = 0;
   const workers = Array.from({ length: Math.min(6, nonces.length) }, async () => {
-    for (;;) { const k = i++; if (k >= nonces.length) return; out[k] = await balanceAt(priv, nonces[k]); await new Promise((r) => setTimeout(r, 120)); } // KV_API_GENTLE: stay under the public API's rate limit
+    for (;;) { const k = i++; if (k >= nonces.length) return; out[k] = await balanceAtStrict(priv, nonces[k]); await new Promise((r) => setTimeout(r, 120)); } // KV_API_GENTLE + strict: a 429 waits or errors, never reads as "no pledge" 
   });
   await Promise.all(workers);
   return out;

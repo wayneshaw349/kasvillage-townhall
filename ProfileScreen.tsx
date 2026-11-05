@@ -346,7 +346,8 @@ const MyPledgesCard: React.FC<{ hidden: boolean }> = ({ hidden }) => {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<any[] | null>(null);
   const [busy, setBusy] = useState('');
-  const load = async () => { setRows(null); try { setRows(await require('./kv_reclaim').listMyPledges()); } catch (e: any) { setRows([]); Alert.alert('Pledges', String(e?.message || e)); } };
+  const [plErr, setPlErr] = useState(''); // KV_PLEDGE_ERR
+  const load = async () => { setRows(null); setPlErr(''); try { setRows(await require('./kv_reclaim').listMyPledges()); } catch (e: any) { setPlErr(String(e?.message || e)); setRows([]); } };
   useEffect(() => { if (open && rows === null) load(); }, [open]);
   const go = (p: any) => {
     const amt = (Number(p.sompi) / 1e8).toFixed(2);
@@ -375,8 +376,14 @@ const MyPledgesCard: React.FC<{ hidden: boolean }> = ({ hidden }) => {
         <Text style={{ color: '#D4AF37', fontSize: 14 }}>⛓ My Pledges</Text>
         <Text style={{ color: '#888', fontSize: 12 }}>{open ? 'Hide' : 'Show'}</Text>
       </TouchableOpacity>
-      {open && (rows === null ? <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>Checking your pledge addresses (and the game registry for anything you forgot)…</Text>
-        : rows.length === 0 ? <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>No pledges in place.</Text>
+      {open && (rows === null ? <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>Checking your pledge addresses…</Text>
+        : plErr ? (<View style={{ marginTop: 8 }}>
+            <Text style={{ color: '#e06c5a', fontSize: 12 }}>{'Could not read the chain (rate-limited or offline). Your pledges are untouched - nothing reads as gone when the network fails.\n' + plErr}</Text>
+            <TouchableOpacity onPress={load} style={{ marginTop: 8, borderWidth: 1, borderColor: '#D4AF37', borderRadius: 8, paddingVertical: 7, alignItems: 'center' }}>
+              <Text style={{ color: '#D4AF37', fontSize: 12 }}>Try again</Text>
+            </TouchableOpacity>
+          </View>)
+        : rows.length === 0 ? <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>No pledges in place (confirmed by the chain).</Text>
         : (<>
           <View style={{ backgroundColor: '#20331f', borderRadius: 8, padding: 8, marginTop: 8 }}>{/* KV_PLEDGE_TALLY */}
             <Text style={{ color: '#10B981', fontSize: 13, fontWeight: '700' }}>
