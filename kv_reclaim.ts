@@ -32,14 +32,21 @@ async function balanceAtStrict(priv: string, nonce: number): Promise<bigint> {
   const { getPledgeSompi } = require('./kaspa_payload');
   const addr = deriveStoreKeys(priv, nonce, NET).address;
   let lastErr: any = null;
-  for (let t = 0; t < 3; t++) {
+  for (let t = 0; t < 6; t++) {
     try {
       const v = await getPledgeSompi(addr, NET);
       if (v === null || v === undefined) throw new Error('empty response');
       return BigInt(v);
-    } catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 1500)); }
+    } catch (e: any) {
+      lastErr = e;
+      const rate = /429/.test(String(e && e.message)); // KV_API_429: rate-limited, not broken - back off and it clears
+      if (rate) console.log('[Reclaim] API says slow down (429) - waiting before retrying');
+      await new Promise((r) => setTimeout(r, rate ? 8000 + t * 7000 : 1500));
+    }
   }
-  throw new Error('could not read the chain for this address (check your connection): ' + String((lastErr && lastErr.message) || lastErr));
+  throw new Error(/429/.test(String(lastErr && lastErr.message))
+    ? 'the public API is rate-limiting this phone right now. Nothing is wrong with your coins - wait 2-3 minutes with the app idle, then tap Reclaim again.'
+    : 'could not read the chain for this address (check your connection): ' + String((lastErr && lastErr.message) || lastErr));
 }
 
 // KV_PLEDGE_FAST: check many derived addresses at once - a one-by-one scan took minutes.
