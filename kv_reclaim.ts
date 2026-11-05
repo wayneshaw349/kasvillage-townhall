@@ -53,8 +53,8 @@ async function balanceAtStrict(priv: string, nonce: number): Promise<bigint> {
 async function balancesAt(priv: string, nonces: number[]): Promise<bigint[]> {
   const out: bigint[] = new Array(nonces.length).fill(0n);
   let i = 0;
-  const workers = Array.from({ length: Math.min(12, nonces.length) }, async () => {
-    for (;;) { const k = i++; if (k >= nonces.length) return; out[k] = await balanceAt(priv, nonces[k]); }
+  const workers = Array.from({ length: Math.min(6, nonces.length) }, async () => {
+    for (;;) { const k = i++; if (k >= nonces.length) return; out[k] = await balanceAt(priv, nonces[k]); await new Promise((r) => setTimeout(r, 120)); } // KV_API_GENTLE: stay under the public API's rate limit
   });
   await Promise.all(workers);
   return out;
@@ -79,7 +79,10 @@ export async function findGamePledges(id: string): Promise<MyPledge | null> {
   return { key: 'game:' + clean, kind: 'game', label: 'Game: ' + clean + ' (recovered)', nonces, sompi: s, note: NOTE_GAME };
 }
 
+let _plCache: { at: number; out: MyPledge[] } | null = null; // KV_PLEDGE_CACHE: reopening the screen must not re-hammer the API
+export function forgetPledgeCache() { _plCache = null; }
 export async function listMyPledges(): Promise<MyPledge[]> {
+  if (_plCache && Date.now() - _plCache.at < 10 * 60000) return _plCache.out;
   const o = await owner(); const priv = o.privateKeyHex;
   const out: MyPledge[] = [];
   const add = async (key: string, kind: PledgeKind, label: string, nonces: number[], note: string) => {
@@ -148,6 +151,7 @@ export async function listMyPledges(): Promise<MyPledge[]> {
       if (s2 > 0n) out.push({ key: 'game:' + id, kind: 'game', label: 'Game: ' + id + ' (found on chain)', nonces, sompi: s2, note: NOTE_GAME });
     }
   } catch {}
+  _plCache = { at: Date.now(), out };
   return out;
 }
 

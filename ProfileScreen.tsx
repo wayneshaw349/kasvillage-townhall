@@ -359,6 +359,7 @@ const MyPledgesCard: React.FC<{ hidden: boolean }> = ({ hidden }) => {
           console.log('[Reclaim] starting', p.key, '-', p.nonces.length, 'addresses,', (Number(p.sompi) / 1e8).toFixed(2), 'KAS');
           setBusy(p.key);
           const kas = await require('./kv_reclaim').reclaimPledge(p);
+          try { require('./kv_reclaim').forgetPledgeCache(); } catch {}
           Alert.alert(kas > 0 ? 'Reclaimed' : 'Sweeps submitted',
             kas > 0 ? ((hidden ? '' : kas.toFixed(2) + ' KAS ') + 'sent back to your wallet.')
               : 'The network accepted the sweeps but the ledger is still catching up. Give it a few minutes, then reopen My Pledges - the balance updates as they confirm.');
