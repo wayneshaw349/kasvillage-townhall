@@ -76,6 +76,9 @@ export async function findGamePledges(id: string): Promise<MyPledge | null> {
   const nonces: number[] = []; let s = 0n;
   bals.forEach((b, i) => { if (b > 0n) { s += b; nonces.push(all[i]); } });
   if (s === 0n) return null;
+  try { const known: any = JSON.parse((await AsyncStorage.getItem('kv_known_pledges')) || '{}');
+    known['game:' + clean] = { kind: 'game', label: 'Game: ' + clean + ' (recovered)', nonces, note: NOTE_GAME };
+    await AsyncStorage.setItem('kv_known_pledges', JSON.stringify(known)); } catch {}
   return { key: 'game:' + clean, kind: 'game', label: 'Game: ' + clean + ' (recovered)', nonces, sompi: s, note: NOTE_GAME };
 }
 
@@ -115,41 +118,21 @@ export async function listMyPledges(): Promise<MyPledge[]> {
       await add('game:' + id, 'game', 'Game: ' + id, nonces, NOTE_GAME);
     }
   } catch {}
-  // KV_PLEDGE_CHAIN: every game this key ever announced is written at the game registry, so
-  // pressing My Pledges finds removed/forgotten games by itself - no typing. Only names signed
-  // by YOUR key are considered, and only addresses derived from YOUR key are scanned.
+  // KV_PLEDGE_KNOWN: persistence instead of rescanning. Any pledge ever seen (listed here or
+  // found by name) is remembered on this phone and re-checked by its exact addresses only -
+  // a handful of reads, no registry sweep. A reclaim that empties it deletes the memory.
   try {
-    const { registryAddress } = require('./payload_publish');
-    const { apiBase } = require('./kaspa_payload');
-    const reg = registryAddress('game', NET);
-    const ctl = new AbortController(); const _t = setTimeout(() => ctl.abort(), 15000); // the registry read must never hang the screen
-    const r = await fetch(apiBase(NET) + '/addresses/' + encodeURIComponent(reg) + '/full-transactions?limit=200&resolve_previous_outpoints=no', { signal: ctl.signal }).finally(() => clearTimeout(_t));
-    const txs: any[] = await r.json();
-    const meX = (() => { const h = o.pubkeyHex.toLowerCase(); return h.length === 66 ? h.slice(2) : h; })();
-    const names = new Set<string>();
-    for (const tx of (Array.isArray(txs) ? txs : [])) {
-      try {
-        const hx = String((tx && (tx.payload || tx.payload_hex)) || ''); if (!hx) continue;
-        let raw = ''; for (let i = 0; i < hx.length; i += 2) raw += String.fromCharCode(parseInt(hx.substr(i, 2), 16));
-        try { raw = decodeURIComponent(escape(raw)); } catch {}
-        const rec = JSON.parse(raw.startsWith('KVP1') ? raw.slice(4) : raw);
-        if (!rec || rec.k !== 'registry' || !rec.d || !rec.d.name) continue;
-        const ox = String(rec.o || '').toLowerCase(); const x = ox.length === 66 ? ox.slice(2) : ox;
-        if (x !== meX) continue;
-        const nm = String(rec.d.name).trim().toLowerCase();
-        if (/^[a-z0-9-]{3,48}$/.test(nm)) names.add(nm);
-      } catch {}
+    const known = JSON.parse((await AsyncStorage.getItem('kv_known_pledges')) || '{}');
+    for (const key of Object.keys(known)) {
+      if (out.some((q) => q.key === key)) continue;
+      const k = known[key] || {};
+      if (Array.isArray(k.nonces) && k.nonces.length) await add(key, k.kind || 'game', k.label || key, k.nonces.map(Number), k.note || NOTE_GAME);
     }
-    const { nonceBaseFor } = require('./kv_build_chain');
-    for (const id of Array.from(names).slice(0, 12)) {
-      if (out.some((q) => q.key === 'game:' + id)) continue;
-      const base = nonceBaseFor(o.pubkeyHex, id);
-      const all2 = Array.from({ length: 90 }, (_, i) => base + i);
-      const bals2 = await balancesAt(priv, all2);
-      const nonces: number[] = []; let s2 = 0n;
-      bals2.forEach((b, i) => { if (b > 0n) { s2 += b; nonces.push(all2[i]); } });
-      if (s2 > 0n) out.push({ key: 'game:' + id, kind: 'game', label: 'Game: ' + id + ' (found on chain)', nonces, sompi: s2, note: NOTE_GAME });
-    }
+  } catch {}
+  try { // remember everything currently standing
+    const known: any = JSON.parse((await AsyncStorage.getItem('kv_known_pledges')) || '{}');
+    for (const q of out) known[q.key] = { kind: q.kind, label: q.label, nonces: q.nonces, note: q.note };
+    await AsyncStorage.setItem('kv_known_pledges', JSON.stringify(known));
   } catch {}
   _plCache = { at: Date.now(), out };
   return out;
@@ -162,7 +145,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function reclaimPledge(p: MyPledge): Promise<number> {
   const o = await owner();
   const { withdrawPledge } = require('./payload_publish');
-  let moved = 0n;
+  let moved = 0n; let left = 0n;
   for (const n of p.nonces) {
     console.log('[Reclaim] sweeping nonce', n);
     let retries = 0;
@@ -181,8 +164,15 @@ export async function reclaimPledge(p: MyPledge): Promise<number> {
       for (let w = 0; w < 9; w++) { await sleep(5000); try { after = await balanceAtStrict(o.privateKeyHex, n); } catch { continue; } if (after < b) break; }
       moved += b - after;
       if (after === 0n) break;
-      if (after === b) { console.log('[Reclaim] nonce', n, 'sweep submitted but not visible yet - the indexer is behind; it will show up'); break; }
+      if (after === b) { console.log('[Reclaim] nonce', n, 'sweep submitted but not visible yet - the indexer is behind; it will show up'); left += after; break; }
+      left += after;
     }
+  }
+  if (left === 0n) { // emptied: the pledge memory deletes itself
+    try { const known: any = JSON.parse((await AsyncStorage.getItem('kv_known_pledges')) || '{}');
+      if (known[p.key]) { delete known[p.key]; await AsyncStorage.setItem('kv_known_pledges', JSON.stringify(known)); } } catch {}
+    try { if (p.key.startsWith('game:')) { const tb: any = JSON.parse((await AsyncStorage.getItem('kv_pledge_tombstones')) || '{}');
+      const id = p.key.slice(5); if (tb[id]) { delete tb[id]; await AsyncStorage.setItem('kv_pledge_tombstones', JSON.stringify(tb)); } } } catch {}
   }
   return Number(moved) / 1e8;
 }
