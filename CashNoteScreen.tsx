@@ -65,7 +65,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
       { text: 'Cancel', style: 'cancel', onPress: () => r(false) }, { text: 'Make note', onPress: () => r(true) }]));
     if (!ok) return;
     setBusy(true); const r = await CN.cnCreate(s).catch((e: any) => ({ error: String(e?.message || e) })); setBusy(false);
-    if (r.error) { Alert.alert('Paper Kaspa', r.error); await reload(); return; }
+    if (r.error) { Alert.alert('Paper wallet', r.error); await reload(); return; }
     setMode('wait');
   };
 
@@ -109,7 +109,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
         setSlipHtml(null); setMode('home'); await reload(); return;
       }
       const i = await CN.cnInspect(data);
-      if (i.error || i.sompi === undefined) { Alert.alert('Paper Kaspa', i.error || 'Not valid'); return; }
+      if (i.error || i.sompi === undefined) { Alert.alert('Paper wallet', i.error || 'Not valid'); return; }
       setNote({ raw: data, sompi: i.sompi, printedSompi: i.printedSompi, matches: i.matches, checkedAt: i.checkedAt }); setToAddr(await require('./kv_savings_qr').sqHotAddress()); setMode('redeemTo');
     } finally { setTimeout(() => { scanLock.current = false; }, 1500); }
   };
@@ -163,7 +163,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
 
   if (mode === 'make') return (
     <ScrollView contentContainerStyle={st.c}>
-      <Text style={st.t}>Make paper Kaspa</Text>
+      <Text style={st.t}>Make a paper wallet</Text>
       <Text style={st.b}>KAS on paper. Whoever holds the paper scans it and chooses where the KAS goes - hand it over like you would hand over anything physical. Paid from your hot wallet. Until you tap Finish you can reclaim it.</Text>
       <Text style={st.l}>Amount (KAS)</Text>
       <TextInput style={st.in} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="e.g. 20" placeholderTextColor="#78716C" />
@@ -185,7 +185,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
 
   if (mode === 'finish' || mode === 'redeem') return (
     <ScrollView contentContainerStyle={st.c}>
-      <Text style={st.t}>{mode === 'finish' ? 'Scan the printed page' : 'Check or redeem paper Kaspa'}</Text>
+      <Text style={st.t}>{mode === 'finish' ? 'Scan the printed page' : 'Check or sweep a paper wallet'}</Text>
       <Text style={st.b}>{mode === 'finish' ? 'Scan the printed page to prove it prints readably. Then the key is removed from this phone.' : 'Scan KasVillage paper Kaspa. First you see a check against the blockchain (real KAS on it, printed amount, not redeemed). Nothing moves until you tap Redeem.'}</Text>
       {camera}
       <TouchableOpacity style={st.sec} onPress={() => setMode(mode === 'finish' ? 'slip' : 'home')}><Text style={st.secT}>Back</Text></TouchableOpacity>
@@ -194,7 +194,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
 
   if (mode === 'redeemTo' && note) return (
     <ScrollView contentContainerStyle={st.c}>
-      <Text style={st.t}>Paper check</Text>
+      <Text style={st.t}>Paper wallet check</Text>
       <Text style={st.s}>Advisory: checked against api.kaspa.org just now{note.checkedAt ? ' (' + new Date(note.checkedAt).toLocaleTimeString() + ')' : ''}, two lookups agreeing. It can change the moment another copy is spent.</Text>
       {/* KV_CASH_NOTE precheck: the chain decides what the note is worth, not the printed number */}
       <View style={[st.card, { borderColor: note.matches === false ? '#EF4444' : '#86EFAC' }]}>
@@ -204,7 +204,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
             : <Text style={[st.cardH, { color: '#EF4444', marginTop: 4 }]}>✗ Printed {fmt(note.printedSompi)} KAS but only {fmt(note.sompi)} KAS is on it - do not accept it at face value</Text>
         ) : <Text style={[st.s, { marginTop: 4 }]}>Older paper: no printed amount inside the QR. Go by the on-chain value above.</Text>}
         <Text style={[st.cardH, { color: '#86EFAC', marginTop: 4 }]}>✓ Not redeemed as of this check</Text>
-        <Text style={[st.s, { marginTop: 6 }]}>Until YOU redeem it, anyone else holding a copy (including whoever gave it to you) could still spend it first. Accepting paper Kaspa? Redeem it now.</Text>
+        <Text style={[st.s, { marginTop: 6 }]}>Until YOU sweep it, anyone else holding a copy (including whoever gave it to you) could still spend it first. Given one as a gift or payment? Sweep it into your own wallet now.</Text>
       </View>
       <Text style={st.l}>Send it to</Text>
       <TextInput style={st.in} value={toAddr} onChangeText={setToAddr} autoCapitalize="none" autoCorrect={false} placeholder="kaspa:..." placeholderTextColor="#78716C" />
@@ -217,7 +217,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
   const out = rows.filter((r) => r.status !== 'redeemed');
   return (
     <ScrollView contentContainerStyle={st.c}>
-      <Text style={st.t}>Paper Kaspa</Text>
+      <Text style={st.t}>Paper wallets</Text>
       <Text style={st.b}>TRANSFERABLE paper KAS: whoever holds the note can spend it to any address. For gifts and paying people in person - not for your own savings.</Text>
       {session ? (
         <View style={st.card}>
@@ -270,8 +270,8 @@ function KvCapLine() {
   React.useEffect(() => { let live = true; require('./kv_cash_note').cnMaxSompi().then((c: any) => {
     if (!live) return;
     const cap = require('./kv_cash_note').CN_CAP_USD;
-    if (c.max !== null) setT('Limit: $' + cap + ' per note (about ' + (Number(c.max) / 1e8).toFixed(2) + ' KAS' + (c.stale ? ', last known price' : '') + ')');
-    else if (require('./kv_savings_qr').sqActiveNet() === 'mainnet') setT('Limit: $' + cap + ' per note (price unavailable - connect to the internet to make a note)');
+    if (c.max !== null) setT('Limit: $' + cap + ' per sheet (about ' + (Number(c.max) / 1e8).toFixed(2) + ' KAS' + (c.stale ? ', last known price' : '') + ')');
+    else if (require('./kv_savings_qr').sqActiveNet() === 'mainnet') setT('Limit: $' + cap + ' per sheet (price unavailable - connect to the internet to make a note)');
   }).catch(() => {}); return () => { live = false; }; }, []);
   return t ? <Text style={{ color: '#a8a29e', fontSize: 12, marginTop: 4, marginBottom: 8 }}>{t}</Text> : null;
 }

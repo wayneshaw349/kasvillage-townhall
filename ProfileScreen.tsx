@@ -870,8 +870,8 @@ export const ProfileScreen: React.FC<{ navigation?: any; onNavigatePhoneProof?: 
             onPress={() => onNavigateCashNote?.()}
           >
             <View style={{ flex: 1 }}>
-              <Text style={styles.seedExportText}>{'\uD83D\uDCC4 Paper Kaspa'}</Text>
-              <Text style={styles.seedExportSub}>KAS on a printable QR - whoever holds the paper can claim it. For gifts and paying in person. Also: redeem paper someone handed you.</Text>
+              <Text style={styles.seedExportText}>{'\uD83D\uDCC4 Paper Wallet'}</Text>
+              <Text style={styles.seedExportSub}>Print KAS to paper - for savings, backup or gifts. Whoever holds the paper can sweep it. Also: check or sweep a paper wallet someone gave you.</Text>
             </View>
           </TouchableOpacity>
           <TouchableOpacity
