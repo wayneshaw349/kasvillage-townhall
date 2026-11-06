@@ -79,7 +79,7 @@ export function noteSvg(o: {
         '<text x="388" y="366" font-size="11.5">1 KAS = $' + esc(o.usdPerKas.toFixed(4)) + ' · dollar value changes, KAS amount does not</text>' : '') +
     '</g>' +
     (o.bearer ? '<g transform="rotate(-8 165 ' + (H - 150) + ')"><rect x="44" y="' + (H - 176) + '" width="246" height="44" rx="5" fill="' + p.paper + '" stroke="' + p.ink + '" stroke-width="4"/>' +
-      '<text x="167" y="' + (H - 143) + '" text-anchor="middle" textLength="222" lengthAdjust="spacingAndGlyphs" font-family="Helvetica, Arial, sans-serif" font-size="25" font-weight="900" letter-spacing="2" fill="' + p.ink + '">TRANSFERABLE</text></g>' : '') +
+      '<text x="167" y="' + (H - 143) + '" text-anchor="middle" textLength="222" lengthAdjust="spacingAndGlyphs" font-family="Helvetica, Arial, sans-serif" font-size="25" font-weight="900" letter-spacing="2" fill="' + p.ink + '">PAPER WALLET</text></g>' : '') +
     (!o.bearer && o.copy ? '<g transform="rotate(-8 128 ' + (H - 146) + ')"><rect x="54" y="' + (H - 166) + '" width="' + (o.copy === 'ORIGINAL' ? 132 : 162) + '" height="30" rx="4" fill="none" stroke="' + p.accent + '" stroke-width="2.5"/>' +
       '<text x="' + (o.copy === 'ORIGINAL' ? 120 : 135) + '" y="' + (H - 145) + '" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" letter-spacing="2" fill="' + p.accent + '">' + o.copy + '</text></g>' : '') +
     '<text x="60" y="' + (H - 104) + '" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="' + p.ink + '">' + esc(o.idx + ' of ' + o.total + ' · ' + o.net) + '</text>' +
@@ -128,6 +128,6 @@ export function bearerNotePages(o: { qr: string; kas: number; usdPerKas: number;
   const screen = '<html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/><style>html,body{margin:0;height:100%;background:#fff;overflow:hidden}' +
     '.n{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}.n svg{width:94vh;max-width:none;height:auto;transform:rotate(90deg);flex:none}' +
     '@media (orientation:landscape){.n svg{width:94vw;transform:none}}</style></head><body><div class="n">' + svg + '</div></body></html>';
-  const print = '<html><head><style>body{margin:0.3in;font-family:Helvetica,Arial,sans-serif}.n svg{display:block}</style></head><body><div class="n">' + svg + '</div><p style="font-size:10px">TRANSFERABLE bearer note: anyone holding this QR can spend it. Treat it like cash.</p></body></html>';
+  const print = '<html><head><style>body{margin:0.3in;font-family:Helvetica,Arial,sans-serif}.n svg{display:block}</style></head><body><div class="n">' + svg + '</div><p style="font-size:10px">Paper wallet: anyone holding this QR can sweep it. Store it safely.</p></body></html>';
   return { screen, print };
 }
