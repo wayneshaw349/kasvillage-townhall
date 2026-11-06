@@ -1,5 +1,5 @@
 // ============================================================================
-// CashNoteScreen.tsx — KV_CASH_NOTE: make, print and redeem TRANSFERABLE bearer notes
+// CashNoteScreen.tsx — KV_CASH_NOTE: make, print, check and sweep paper wallets
 // ============================================================================
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
@@ -61,7 +61,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
   const makeInner = async () => {
     const s = kasToSompi(amount);
     if (s === null || s < CN.CN_MIN_SOMPI) { Alert.alert('Amount', 'Enter at least 0.1 KAS.'); return; }
-    const ok = await new Promise<boolean>((r) => Alert.alert('Make a TRANSFERABLE note?', 'Anyone who holds or photographs this QR can take the money, like cash. Only hand it to the person you are paying.', [
+    const ok = await new Promise<boolean>((r) => Alert.alert('Put KAS on paper?', 'Anyone who holds or photographs this QR can sweep the money. Store it safely, and only hand it to someone you mean to give it to.', [
       { text: 'Cancel', style: 'cancel', onPress: () => r(false) }, { text: 'Make note', onPress: () => r(true) }]));
     if (!ok) return;
     setBusy(true); const r = await CN.cnCreate(s).catch((e: any) => ({ error: String(e?.message || e) })); setBusy(false);
@@ -146,7 +146,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
           onShouldStartLoadWithRequest={(r: any) => r.url === 'about:blank'} style={{ flex: 1, backgroundColor: '#FFFFFF' }} /> : null}
         {slipUi ? (
           <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(28,25,23,0.94)', padding: 16, paddingBottom: 30 }}>
-            <Text style={[st.b, { marginBottom: 6 }]}>TRANSFERABLE note. Print it, or tap "Hide buttons" and screenshot it (print from Photos, then delete the screenshot - a screenshot is spendable too).</Text>
+            <Text style={[st.b, { marginBottom: 6 }]}>Print it, or tap "Hide buttons" and screenshot it (print from Photos, then delete the screenshot - a screenshot is spendable too).</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity style={[st.sec, { flex: 1 }]} onPress={printNote}><Text style={st.secT}>Print</Text></TouchableOpacity>
               <TouchableOpacity style={[st.pri, { flex: 1 }]} onPress={() => setSlipUi(false)}><Text style={st.priT}>Hide buttons</Text></TouchableOpacity>
@@ -218,7 +218,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
   return (
     <ScrollView contentContainerStyle={st.c}>
       <Text style={st.t}>Paper wallets</Text>
-      <Text style={st.b}>TRANSFERABLE paper KAS: whoever holds the note can spend it to any address. For gifts and paying people in person - not for your own savings.</Text>
+      <Text style={st.b}>KAS printed on paper. Whoever holds the paper can sweep it, so store it like something valuable - good for savings kept offline, a backup, or a gift you hand over.</Text>
       {session ? (
         <View style={st.card}>
           <Text style={st.cardH}>Note in progress ({fmt(session.sompi)} KAS){session.stage === 'returning' ? ' - reclaiming' : ''}</Text>
@@ -230,8 +230,8 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
           </>)}
         </View>
       ) : <TouchableOpacity style={st.pri} onPress={() => setMode('make')}><Text style={st.priT}>Make a paper wallet</Text></TouchableOpacity>}
-      <TouchableOpacity style={st.pri} onPress={() => setMode('redeem')}><Text style={st.priT}>Check / redeem a note</Text></TouchableOpacity>
-      <TouchableOpacity style={[st.sec, busy && { opacity: 0.5 }]} disabled={busy} onPress={checkOld}><Text style={st.secT}>Check old deposits</Text></TouchableOpacity>
+      <TouchableOpacity style={st.pri} onPress={() => setMode('redeem')}><Text style={st.priT}>Check / sweep a paper wallet</Text></TouchableOpacity>
+      <TouchableOpacity style={[st.sec, busy && { opacity: 0.5 }]} disabled={busy} onPress={checkOld}><Text style={st.secT}>Check my older sheets</Text></TouchableOpacity>
       {rows.length ? <Text style={[st.s, { marginTop: 14 }]}>Notes you made: {out.length} not yet redeemed</Text> : null}
       {rows.slice().reverse().map((r) => (
         <View key={r.addr} style={st.row}>
