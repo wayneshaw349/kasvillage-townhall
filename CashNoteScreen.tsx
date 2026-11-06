@@ -186,7 +186,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
   if (mode === 'finish' || mode === 'redeem') return (
     <ScrollView contentContainerStyle={st.c}>
       <Text style={st.t}>{mode === 'finish' ? 'Scan the printed page' : 'Check or sweep a paper wallet'}</Text>
-      <Text style={st.b}>{mode === 'finish' ? 'Scan the printed page to prove it prints readably. Then the key is removed from this phone.' : 'Scan KasVillage paper Kaspa. First you see a check against the blockchain (real KAS on it, printed amount, not redeemed). Nothing moves until you tap Redeem.'}</Text>
+      <Text style={st.b}>{mode === 'finish' ? 'Scan the printed page to prove it prints readably. Then the key is removed from this phone.' : 'Scan a KasVillage paper wallet. First you see a check against the blockchain (real KAS on it, printed amount, not redeemed). Nothing moves until you tap Redeem.'}</Text>
       {camera}
       <TouchableOpacity style={st.sec} onPress={() => setMode(mode === 'finish' ? 'slip' : 'home')}><Text style={st.secT}>Back</Text></TouchableOpacity>
     </ScrollView>
@@ -229,7 +229,7 @@ export const CashNoteScreen: React.FC<{ onClose: () => void; initialMode?: 'home
             <TouchableOpacity style={st.sec} onPress={reclaim}><Text style={st.secT}>Reclaim to hot wallet</Text></TouchableOpacity>
           </>)}
         </View>
-      ) : <TouchableOpacity style={st.pri} onPress={() => setMode('make')}><Text style={st.priT}>Make paper Kaspa</Text></TouchableOpacity>}
+      ) : <TouchableOpacity style={st.pri} onPress={() => setMode('make')}><Text style={st.priT}>Make a paper wallet</Text></TouchableOpacity>}
       <TouchableOpacity style={st.pri} onPress={() => setMode('redeem')}><Text style={st.priT}>Check / redeem a note</Text></TouchableOpacity>
       <TouchableOpacity style={[st.sec, busy && { opacity: 0.5 }]} disabled={busy} onPress={checkOld}><Text style={st.secT}>Check old deposits</Text></TouchableOpacity>
       {rows.length ? <Text style={[st.s, { marginTop: 14 }]}>Notes you made: {out.length} not yet redeemed</Text> : null}
