@@ -22,7 +22,7 @@ jobs:
           context: .
           push: true
           # keep this in step with relay_version in src/townhall_verification_complete.rs
-          tags: wayneshaw349/kasvillage-townhall:latest,wayneshaw349/kasvillage-townhall:v85
+          tags: wayneshaw349/kasvillage-townhall:latest,wayneshaw349/kasvillage-townhall:v86
           
           no-cache: true
 

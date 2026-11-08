@@ -945,12 +945,30 @@ pub fn validate_content_text(text: &str) -> Result<(), &'static str> {
         "17 sal sonyeo",
         "17 sal sonyeon"
     ];
+    let plain = text.to_lowercase(); // also match un-leeted text, so "rape!" is not read as "rapei"
     for phrase in blocked {
-        if lower.contains(phrase) {
+        if kv_phrase_hit(&lower, phrase) || kv_phrase_hit(&plain, phrase) {
             return Err("Content rejected: prohibited phrase detected");
         }
     }
     Ok(())
+}
+
+// KV_WHOLEWORD: phrase must sit on word boundaries; only plain inflections may follow.
+pub fn kv_phrase_hit(text: &str, phrase: &str) -> bool {
+    const SUFFIXES: [&str; 11] = ["", "s", "es", "d", "ed", "ing", "er", "ers", "ist", "ists", "ism"];
+    let mut from = 0usize;
+    while let Some(rel) = text[from..].find(phrase) {
+        let i = from + rel;
+        let before_ok = text[..i].chars().next_back().map_or(true, |c| !c.is_alphanumeric());
+        if before_ok {
+            let j = i + phrase.len();
+            let tail: String = text[j..].chars().take_while(|c| c.is_alphanumeric()).collect();
+            if SUFFIXES.contains(&tail.as_str()) { return true; }
+        }
+        from = i + text[i..].chars().next().map_or(1, |c| c.len_utf8());
+    }
+    false
 }
 // ============================================================================
 // NORMALIZATION - defeats zero-width, confusable, fullwidth, leet bypasses
