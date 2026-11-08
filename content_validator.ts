@@ -247,6 +247,23 @@ export function validateContentText(text: string): string | null {
     '14 sal sonyeo','14 sal sonyeon','15 sal sonyeo','15 sal sonyeon',
     '16 sal sonyeo','16 sal sonyeon','17 sal sonyeo','17 sal sonyeon',
   ];
-  for (const phrase of blocked) { if (lower.includes(phrase)) return 'Content rejected: prohibited phrase detected'; }
+  for (const phrase of blocked) { if (kvPhraseHit(lower, phrase)) return 'Content rejected: prohibited phrase detected'; }
   return null;
+}
+
+// KV_WHOLEWORD: phrase must sit on word boundaries; only plain inflections may follow.
+const KV_SUFFIX = /^(s|es|d|ed|ing|er|ers|ist|ists|ism)?$/;
+function kvIsWordChar(ch: string): boolean { return /[\p{L}\p{N}]/u.test(ch); }
+export function kvPhraseHit(text: string, phrase: string): boolean {
+  let from = 0;
+  for (;;) {
+    const i = text.indexOf(phrase, from);
+    if (i < 0) return false;
+    if (i === 0 || !kvIsWordChar(text[i - 1])) {
+      const j = i + phrase.length; let k = j;
+      while (k < text.length && kvIsWordChar(text[k])) k++;
+      if (KV_SUFFIX.test(text.slice(j, k))) return true;
+    }
+    from = i + 1;
+  }
 }
